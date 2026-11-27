@@ -13,10 +13,10 @@ export function maskSecretsArticleDerivedDerivations(value: ArticleDerivedDeriva
   return {
     article: maskSecretsArticle(value.article),
     field: value.field,
-    sourceHash: value.sourceHash !== undefined ? value.sourceHash : null,
-    settledHash: value.settledHash !== undefined ? value.settledHash : null,
+    sourceHash: value.sourceHash,
+    settledHash: value.settledHash,
     model: value.model !== undefined ? value.model : null,
-    confidence: value.confidence !== undefined ? value.confidence : null,
+    confidence: value.confidence,
     settledAt: value.settledAt,
     settledBy: value.settledBy !== undefined ? value.settledBy : null,
     overriddenBy: value.overriddenBy !== undefined ? value.overriddenBy : null,

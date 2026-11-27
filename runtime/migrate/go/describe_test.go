@@ -76,6 +76,8 @@ func TestDescribeOnPostgres(t *testing.T) {
 		Statements: []migrate.DescribeStatement{
 			{ID: "q/0", SQL: "SELECT id, name, amount, kept, SUM(amount) AS total FROM line WHERE name = $1 AND id = ANY($2::uuid[]) GROUP BY id"},
 			{ID: "q/1", SQL: "SELECT amout FROM line"},
+			// The types and columns of q/0 again, which Describe reads once.
+			{ID: "q/2", SQL: "SELECT id, name, amount, kept, SUM(amount) AS total FROM line WHERE name = $1 AND id = ANY($2::uuid[]) GROUP BY id"},
 		},
 	}
 	before := testdb.Strings(t, url, "SELECT datname FROM pg_database WHERE datname LIKE 'superschematic_describe_%'")
@@ -83,7 +85,7 @@ func TestDescribeOnPostgres(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Statements) != 2 {
+	if len(result.Statements) != 3 {
 		t.Fatalf("result = %+v", result)
 	}
 	q := result.Statements[0]
@@ -99,6 +101,9 @@ func TestDescribeOnPostgres(t *testing.T) {
 	}
 	if !reflect.DeepEqual(q.Columns, want) {
 		t.Fatalf("columns = %+v, want %+v", q.Columns, want)
+	}
+	if again := result.Statements[2]; !reflect.DeepEqual(again.Params, q.Params) || !reflect.DeepEqual(again.Columns, want) {
+		t.Fatalf("a statement over the same types and columns = %+v", again)
 	}
 	if bad := result.Statements[1]; !strings.Contains(bad.Error, `column "amout" does not exist`) || bad.Columns != nil {
 		t.Fatalf("a refused statement = %+v", bad)

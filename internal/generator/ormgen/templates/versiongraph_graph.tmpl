@@ -477,14 +477,12 @@ func (g *{{ .Name }}Graph) History(ctx context.Context, ref {{ .UUIDGoType }}) (
 		if err != nil {
 			return err
 		}
-		for _, c := range commits {
-			commit, err := g.commitRow(ctx, tx, c.ID)
-			if err != nil {
-				return err
-			}
-			result = append(result, commit)
+		ids := make([]string, len(commits))
+		for i, c := range commits {
+			ids[i] = c.ID
 		}
-		return nil
+		result, err = g.commitRows(ctx, tx, ids)
+		return err
 	})
 	return result, err
 }
@@ -502,12 +500,16 @@ func (g *{{ .Name }}Graph) EntityHistory(ctx context.Context, root {{ .UUIDGoTyp
 		if err != nil {
 			return err
 		}
-		for _, change := range changes {
-			commit, err := g.commitRow(ctx, tx, change.Commit.ID)
-			if err != nil {
-				return err
-			}
-			result = append(result, {{ .Name }}EntityChange{Commit: commit, Operation: types.{{ .Name }}PatchOperation(change.Operation)})
+		ids := make([]string, len(changes))
+		for i, change := range changes {
+			ids[i] = change.Commit.ID
+		}
+		commits, err := g.commitRows(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
+		for i, change := range changes {
+			result = append(result, {{ .Name }}EntityChange{Commit: commits[i], Operation: types.{{ .Name }}PatchOperation(change.Operation)})
 		}
 		return nil
 	})
@@ -574,6 +576,36 @@ func (g *{{ .Name }}Graph) commitRow(ctx context.Context, tx pgx.Tx, id string) 
 		return nil, err
 	}
 	return (&{{ .CommitType }}Repository{tx: tx, txDB: g.db}).GetOne(ctx, commitID, nil)
+}
+
+// commitRows reads the commit rows of ids, as commitRow does each, in the
+// order of ids, with one GetManyByIDs: ErrNotFound when a commit has no
+// row.
+func (g *{{ .Name }}Graph) commitRows(ctx context.Context, tx pgx.Tx, ids []string) ([]*types.{{ .CommitType }}, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	keys := make([]{{ .UUIDGoType }}, len(ids))
+	for i, id := range ids {
+		key, err := parseGraphID(id)
+		if err != nil {
+			return nil, err
+		}
+		keys[i] = key
+	}
+	rows, err := (&{{ .CommitType }}Repository{tx: tx, txDB: g.db}).GetManyByIDs(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*types.{{ .CommitType }}, len(keys))
+	for i, key := range keys {
+		row, ok := rows[key]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // commitResult reads the typed ref and, unless none was written, the typed

@@ -303,8 +303,8 @@ side the generators use.
 `@feedKey` marks a field as part of the key acme's supplier feed matches
 incoming rows on; several on one type form a composite key. It is the
 shape of a distribution's per-field directive: a flag the core IR has no
-field for. The core keeps no such flags of its own (`docs/DECISIONS.md`,
-D18); a distribution declares each one this way. The spec has no `Args`,
+field for. The core keeps no such flags of its own
+(D18); a distribution declares each one this way. The spec has no `Args`,
 so the decorator takes no argument:
 
 ```ts
@@ -427,7 +427,7 @@ The loader hydrates the upload metadata onto the scalar, then checks the
 bound: it must be positive and name a single file-upload scalar. The smoke
 reads both from the IR. `shop-catalog` renders no Go API, so no generated
 code references the upload helpers a Go API with a multipart field needs
-from the scalar package (`docs/DECISIONS.md`, D4).
+from the scalar package (D4).
 
 ## A document
 

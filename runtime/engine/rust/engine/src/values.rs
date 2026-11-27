@@ -82,6 +82,11 @@ pub const DEFAULT_VALUE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 /// How many hashes a sweep reads from a driver at a time.
 const SWEEP_PAGE: usize = 500;
 
+/// How many hashes one statement names (an `IN` list, a `VALUES` list or a
+/// multi-row INSERT's rows): far below SQLite's and Postgres' limits on a
+/// statement's parameters.
+const HASH_BATCH: usize = 500;
+
 /// A failure of a deployment's value driver.
 pub type DriverError = Box<dyn std::error::Error + Send + Sync>;
 
@@ -480,7 +485,7 @@ impl ValueStore {
         hashes: &BTreeSet<String>,
     ) -> Result<()> {
         let key = holder_key(holder);
-        let held: Vec<String> = tx
+        let held: BTreeSet<String> = tx
             .all(
                 Sql::per(
                     "SELECT hash FROM engine_payload_holders INDEXED BY engine_payload_holders_holder WHERE namespace = ? AND schema = ? AND holder = ? AND id = ? AND key = ?",
@@ -491,26 +496,36 @@ impl ValueStore {
             .iter()
             .map(|row| row.text("hash").map(str::to_owned))
             .collect::<Result<_, _>>()?;
-        for hash in hashes {
-            if !held.contains(hash) {
-                lock_value(tx, hash, false)?;
-                let mut params = vec![SqlValue::from(hash.as_str())];
-                params.extend(key.iter().cloned());
-                tx.run(
-                    "INSERT INTO engine_payload_holders (hash, namespace, schema, holder, id, key) VALUES (?, ?, ?, ?, ?, ?)",
-                    &params,
-                )?;
-            }
+        // The new hashes' shared locks, one at a time in hash order as
+        // collect takes the exclusive ones, so the two never wait on each
+        // other in a cycle; then their rows in one INSERT per HASH_BATCH.
+        let added: Vec<&String> = hashes.difference(&held).collect();
+        for hash in &added {
+            lock_value(tx, hash, false)?;
         }
-        let dropped: Vec<String> = held
-            .into_iter()
-            .filter(|hash| !hashes.contains(hash))
-            .collect();
-        for hash in &dropped {
-            let mut params = vec![SqlValue::from(hash.as_str())];
-            params.extend(key.iter().cloned());
+        for chunk in added.chunks(HASH_BATCH) {
+            let mut params = Vec::with_capacity(chunk.len() * 6);
+            for hash in chunk {
+                params.push(SqlValue::from(hash.as_str()));
+                params.extend(key.iter().cloned());
+            }
             tx.run(
-                "DELETE FROM engine_payload_holders WHERE hash = ? AND namespace = ? AND schema = ? AND holder = ? AND id = ? AND key = ?",
+                format!(
+                    "INSERT INTO engine_payload_holders (hash, namespace, schema, holder, id, key) VALUES {}",
+                    vec!["(?, ?, ?, ?, ?, ?)"; chunk.len()].join(", ")
+                ),
+                &params,
+            )?;
+        }
+        let dropped: Vec<String> = held.difference(hashes).cloned().collect();
+        for chunk in dropped.chunks(HASH_BATCH) {
+            let mut params = key.to_vec();
+            params.extend(chunk.iter().map(|hash| SqlValue::from(hash.as_str())));
+            tx.run(
+                format!(
+                    "DELETE FROM engine_payload_holders WHERE namespace = ? AND schema = ? AND holder = ? AND id = ? AND key = ? AND hash IN ({})",
+                    placeholders(chunk.len())
+                ),
                 &params,
             )?;
         }
@@ -670,21 +685,25 @@ impl ValueStore {
 
     // collect removes each value no holder references any more: in the
     // write's transaction for engine_payloads, after it for a driver.
+    // The exclusive locks are taken one at a time in hash order, as hold
+    // takes the shared ones, so two writers never wait on each other in a
+    // cycle; each is taken before the check that its value is unheld, and
+    // the check and the removal are one statement each per HASH_BATCH.
     fn collect(&self, tx: &Tx<'_>, hashes: Vec<String>) -> Result<()> {
-        for hash in hashes.into_iter().collect::<BTreeSet<_>>() {
-            if self.driver.is_some() {
-                self.note(&hash);
-                continue;
+        let hashes: BTreeSet<String> = hashes.into_iter().collect();
+        if self.driver.is_some() {
+            for hash in &hashes {
+                self.note(hash);
             }
-            lock_value(tx, &hash, true)?;
-            if held(tx, &hash)? {
-                continue;
-            }
-            tx.run(
-                "DELETE FROM engine_payloads WHERE hash = ?",
-                &[SqlValue::from(hash.as_str())],
-            )?;
-            self.cache().delete(&hash);
+            return Ok(());
+        }
+        for hash in &hashes {
+            lock_value(tx, hash, true)?;
+        }
+        let unheld = unheld(tx, &hashes)?;
+        remove_payloads(tx, &unheld)?;
+        for hash in &unheld {
+            self.cache().delete(hash);
         }
         Ok(())
     }
@@ -719,27 +738,16 @@ impl ValueStore {
         let Some(pending) = pending else {
             return;
         };
-        let unheld: Result<Vec<String>> = db.read(|tx| {
-            let mut unheld = Vec::new();
-            for hash in &pending {
-                if !held(tx, hash)? {
-                    unheld.push(hash.clone());
-                }
-            }
-            Ok(unheld)
-        });
-        let Ok(unheld) = unheld else {
+        let Ok(candidates) = db.read(|tx| unheld(tx, &pending)) else {
             return;
         };
-        if unheld.is_empty() {
+        if candidates.is_empty() {
             return;
         }
         let _ = db.write(Lock::Catalog, |tx| {
-            for hash in &unheld {
-                if !held(tx, hash)? {
-                    driver.remove(hash).map_err(driver_error)?;
-                    self.cache().delete(hash);
-                }
+            for hash in &unheld(tx, &candidates)? {
+                driver.remove(hash).map_err(driver_error)?;
+                self.cache().delete(hash);
             }
             Ok::<_, Error>(())
         });
@@ -778,25 +786,23 @@ impl ValueStore {
                     })?
                     .map_err(driver_error)?,
             };
+            // Under the catalog's lock, which every writer that might be
+            // about to hold one of them waits on: the page's unheld hashes
+            // in one statement, and engine_payloads' rows in one more.
             removed += db.write(Lock::Catalog, |tx| {
-                let mut removed = 0;
-                for hash in &hashes {
-                    if held(tx, hash)? {
-                        continue;
-                    }
-                    match &self.driver {
-                        None => {
-                            tx.run(
-                                "DELETE FROM engine_payloads WHERE hash = ?",
-                                &[SqlValue::from(hash.as_str())],
-                            )?;
+                let unheld = unheld(tx, &hashes.iter().cloned().collect())?;
+                match &self.driver {
+                    None => remove_payloads(tx, &unheld)?,
+                    Some(driver) => {
+                        for hash in &unheld {
+                            driver.remove(hash).map_err(driver_error)?;
                         }
-                        Some(driver) => driver.remove(hash).map_err(driver_error)?,
                     }
-                    self.cache().delete(hash);
-                    removed += 1;
                 }
-                Ok::<_, Error>(removed)
+                for hash in &unheld {
+                    self.cache().delete(hash);
+                }
+                Ok::<_, Error>(unheld.len() as u64)
             })?;
             if hashes.len() < SWEEP_PAGE {
                 return Ok(SweepResult { removed });
@@ -816,14 +822,54 @@ fn holder_key(holder: &ValueHolder<'_>) -> [SqlValue; 5] {
     ]
 }
 
-// held reports whether any holder references a value.
-fn held(tx: &Tx<'_>, hash: &str) -> Result<bool> {
-    Ok(tx
-        .get(
-            "SELECT 1 AS held FROM engine_payload_holders WHERE hash = ? LIMIT 1",
-            &[SqlValue::from(hash)],
-        )?
-        .is_some())
+// unheld is those of the hashes no holder references, one statement per
+// HASH_BATCH of them. The hashes come in as a VALUES list (its column is
+// column1 on both databases), so a hash no row of engine_payloads has, a
+// driver's, is checked too, and NOT EXISTS stops at a value's first holder.
+fn unheld(tx: &Tx<'_>, hashes: &BTreeSet<String>) -> Result<BTreeSet<String>> {
+    let hashes: Vec<&String> = hashes.iter().collect();
+    let mut out = BTreeSet::new();
+    for chunk in hashes.chunks(HASH_BATCH) {
+        let rows = tx.all(
+            format!(
+                "SELECT v.column1 AS hash FROM (VALUES {}) AS v
+                 WHERE NOT EXISTS (SELECT 1 FROM engine_payload_holders h WHERE h.hash = v.column1)",
+                vec!["(?)"; chunk.len()].join(", ")
+            ),
+            &chunk
+                .iter()
+                .map(|hash| SqlValue::from(hash.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+        for row in rows {
+            out.insert(row.text("hash")?.to_owned());
+        }
+    }
+    Ok(out)
+}
+
+// remove_payloads deletes the hashes' rows of engine_payloads, one
+// statement per HASH_BATCH of them.
+fn remove_payloads(tx: &Tx<'_>, hashes: &BTreeSet<String>) -> Result<()> {
+    let hashes: Vec<&String> = hashes.iter().collect();
+    for chunk in hashes.chunks(HASH_BATCH) {
+        tx.run(
+            format!(
+                "DELETE FROM engine_payloads WHERE hash IN ({})",
+                placeholders(chunk.len())
+            ),
+            &chunk
+                .iter()
+                .map(|hash| SqlValue::from(hash.as_str()))
+                .collect::<Vec<_>>(),
+        )?;
+    }
+    Ok(())
+}
+
+// `?, ?, ?` for `count` values of an `IN` list.
+fn placeholders(count: usize) -> String {
+    vec!["?"; count].join(", ")
 }
 
 // lock_value takes a value's advisory lock on Postgres, shared to hold the

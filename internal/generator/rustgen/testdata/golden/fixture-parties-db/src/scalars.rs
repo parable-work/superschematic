@@ -6,6 +6,9 @@ pub type ContactEmail = String;
 /// Lowercase hexadecimal SHA-256 digest
 pub type CryptoSHA256 = String;
 
+/// File size in bytes (non-negative, BIGINT-backed)
+pub type FileSizeBytes = i64;
+
 /// Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
 pub type GenericInt64 = i64;
 
@@ -20,3 +23,12 @@ pub type IdentityUUID = superscalar::Uuid;
 
 /// ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
 pub type TemporalDateTime = superscalar::DateTime;
+
+/// RFC 5545 recurrence rule, without DTSTART
+pub type TemporalRecurrenceRule = String;
+
+/// Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.
+pub type TemporalTime = String;
+
+/// IANA tz database name: UTC, GMT, or two or more '/'-separated segments of ASCII letters, digits, '_', '-', and '+', each starting with a letter (e.g., America/New_York, America/Port-au-Prince, Etc/GMT+5). Checks the name's shape, not that a tz release lists it.
+pub type TemporalTimeZone = String;

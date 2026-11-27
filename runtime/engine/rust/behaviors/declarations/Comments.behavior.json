@@ -197,7 +197,7 @@
         {
           "name": "body",
           "description": "The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted.",
-          "type": "string"
+          "type": "Text.Markdown"
         },
         {
           "name": "blocks",
@@ -452,7 +452,7 @@
         {
           "name": "body",
           "description": "The body before the edit.",
-          "type": "string"
+          "type": "Text.Markdown"
         },
         {
           "name": "blocks",

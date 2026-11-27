@@ -51,7 +51,7 @@ func newNewServiceCmd(a *app) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "service <name> --kind DB|API|General|Bucket|Site|MemoryStore|Tasks",
 		Short: "Write a service: its config, package files and a starter schema, then build it once",
-		Long: `service writes services/<name>/ under a schemas root (docs/DECISIONS.md, D71):
+		Long: `service writes services/<name>/ under a schemas root (D71):
 
   schema.config.ts     defineConfig with the name, the kind and an outputs
                        block that loads

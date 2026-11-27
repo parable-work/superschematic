@@ -475,4 +475,5 @@ Tasks service never runs it, so a build changes for no one else.
 - A resolver that follows a tsconfig's project references or applies a
   `.dockerignore`'s exclusions. Both leave a set wider, never narrower.
 
-`docs/DECISIONS.md` lists these under D203.
+[D203](https://github.com/parable-work/superschematic/issues/692) lists
+these under Left.

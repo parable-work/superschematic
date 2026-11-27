@@ -407,12 +407,12 @@ type sqliteColumn struct {
 // sqliteStatements are a table's statements on SQLite (sqlutil). updatedAt
 // is filled already: the database's clock, it takes no argument.
 type sqliteStatements struct {
-	columns, qualifiedColumns, getOne, getMany, liveWhere, live, liveCondition        string
-	findOne, findMany, count, page, pageAfterKey, pageAfter, pageAfterNulls           string
-	pageOrder, pageOrderNulls, pageTiebreak, pageKeyExists                            string
-	insert, update, versionFence, returning, updateMany, updatedAt, updatedBy, upsert string
-	softDelete, softDeleteIfVersion, softDeleteMany, delete, deleteIfVersion          string
-	deleteMany, version                                                               string
+	columns, qualifiedColumns, getOne, getMany, liveWhere, live, liveCondition            string
+	findOne, findMany, count, page, pageAfterKey, pageAfter, pageAfterNulls               string
+	pageOrder, pageOrderNulls, pageTiebreak, pageKeyExists                                string
+	insert, insertMany, update, versionFence, returning, updateMany, updatedAt, updatedBy string
+	upsert, softDelete, softDeleteIfVersion, softDeleteMany, delete, deleteIfVersion      string
+	deleteMany, version                                                                   string
 }
 
 // sqliteUniqueKey is a key an upsert is keyed by on SQLite.
@@ -941,6 +941,71 @@ func (t *sqliteTable) insert(ctx context.Context, q sqliteQuerier, record sqlite
 		return nil, t.reference(ctx, q, err, columns, values)
 	}
 	return written, nil
+}
+
+// insertMany writes the rows records hold and answers them as written, in
+// order: a statement per run of consecutive records that write the same
+// columns, of at most batch records, since a VALUES list on SQLite takes
+// no DEFAULT. The rows go in in the records' order, so the keys and stamps
+// the database gives them follow it, and each statement's returned rows
+// are its records' in the order of its VALUES.
+func (t *sqliteTable) insertMany(ctx context.Context, q sqliteQuerier, records []sqliteRecord, batch int) ([]sqliteRecord, error) {
+	out := make([]sqliteRecord, 0, len(records))
+	rows := make([]sqliteManyRow, len(records))
+	for i, record := range records {
+		columns, values, err := t.cellsOf(record)
+		if err != nil {
+			return nil, err
+		}
+		rows[i] = sqliteManyRow{columns: columns, values: values}
+	}
+	for start := 0; start < len(rows); {
+		name := strings.Join(rows[start].columns, ",")
+		end := start + 1
+		for end < len(rows) && end-start < batch && strings.Join(rows[end].columns, ",") == name {
+			end++
+		}
+		if len(rows[start].columns) == 0 {
+			// A row that sets no column is DEFAULT VALUES, a row at a time.
+			for i := start; i < end; i++ {
+				written, err := t.insert(ctx, q, records[i])
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, written)
+			}
+			start = end
+			continue
+		}
+		var args []any
+		tuples := make([]string, 0, end-start)
+		for i := start; i < end; i++ {
+			placeholders := make([]string, len(rows[i].values))
+			for j, value := range rows[i].values {
+				args = append(args, value)
+				placeholders[j] = "?" + strconv.Itoa(len(args))
+			}
+			tuples = append(tuples, "("+strings.Join(placeholders, ", ")+")")
+		}
+		query := fmt.Sprintf(t.st.insertMany, strings.Join(rows[start].columns, ", "), strings.Join(tuples, ", "), t.st.columns)
+		written, err := t.query(ctx, q, query, args...)
+		if err != nil {
+			for i := start; i < end; i++ {
+				err = t.reference(ctx, q, err, rows[i].columns, rows[i].values)
+				var refused *pgconn.PgError
+				if !errors.As(err, &refused) || refused.Detail != "" {
+					break
+				}
+			}
+			return nil, err
+		}
+		if len(written) != end-start {
+			return nil, fmt.Errorf("orm: CreateMany of %s wrote %d rows of %d", t.typeName, len(written), end-start)
+		}
+		out = append(out, written...)
+		start = end
+	}
+	return out, nil
 }
 
 // where is the WHERE of conditions, and the live rows alone unless

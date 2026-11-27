@@ -12,6 +12,8 @@ import { load as loadYaml } from 'js-yaml';
 import { ParseError } from '../errors';
 import type { ProblemSchedulesSchedules, JSDate, Problem } from '../../types';
 
+import { validateTemporalTimeZoneRequired, validateTemporalTimeZone } from '../scalars/temporal_time_zone';
+
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
 
 import { validateGenericInt64Required, validateGenericInt64 } from '../scalars/generic_int64';
@@ -66,7 +68,12 @@ export function validateProblemSchedulesSchedules(value: ProblemSchedulesSchedul
 
   expectString(errors, "spec", value.spec);
 
-  expectString(errors, "timeZone", value.timeZone);
+  if (value.timeZone !== null && value.timeZone !== undefined) {
+    const [valid, fieldErrors] = validateTemporalTimeZone(value.timeZone);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "timeZone", fieldErrors);
+    }
+  }
 
   expectString(errors, "state", value.state);
 

@@ -1,5 +1,5 @@
 // Package bundles expands the bundles a table implements into their parts
-// (D103 in docs/DECISIONS.md, step 5). A bundle defines no rules: it
+// (step 5 of D103, #587). A bundle defines no rules: it
 // presets the wiring of existing behaviors and exposes only the settings
 // that vary, and the loader adds its parts to the table as the table's own
 // uses would be, so the verification pass, the behaviors' core and every

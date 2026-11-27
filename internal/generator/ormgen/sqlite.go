@@ -62,7 +62,7 @@ type SQLiteTable struct {
 
 	// Key is the index of the primary key's column, and DefaultLimit the
 	// rows a page holds unless told. BatchRows is the most rows one
-	// statement of UpsertMany writes on SQLite, as many as bind
+	// statement of UpsertMany or CreateMany writes on SQLite, as many as bind
 	// sqlutil.SQLiteMaxParameters (TableModel.BatchRowsOf, D89).
 	Key          int
 	DefaultLimit int

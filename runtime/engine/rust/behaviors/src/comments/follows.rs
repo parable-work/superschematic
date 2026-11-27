@@ -7,7 +7,7 @@
 //! `listMessages`' `readUpTo`; and what `edit`, `deleteMessage`, `purge`
 //! and the instance's delete do to the deliveries and follows.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use serde_json::Value;
 
@@ -244,53 +244,87 @@ pub(super) fn read_up_to<C>(
     }
 }
 
-// insert_delivery inserts a pending delivery of the message to the
-// subject, due now.
-fn insert_delivery(
-    cx: Cx<'_, '_>,
-    message: i64,
-    subject: &str,
-    mention: bool,
-    reply: bool,
-) -> Result<()> {
+// How many rows one multi-row INSERT writes, and how many subjects one
+// `IN` list names: far below SQLite's (32766) and Postgres' (65535) limits
+// on a statement's parameters.
+const BATCH: usize = 500;
+
+// insert_deliveries inserts a pending delivery of the message to each
+// subject with its reasons (mention, reply), due now, in the order given:
+// one multi-row INSERT per BATCH of them.
+fn insert_deliveries(cx: Cx<'_, '_>, message: i64, rows: &[(&str, bool, bool)]) -> Result<()> {
     let table = cx.sql().table(DELIVERIES)?;
     let now = cx.now();
-    cx.sql().run(
-        format!(
-            "INSERT INTO {table} (namespace, schema, id, message, subject, mention, reply, state, due_at, token, claimed_by, attempts, error, created_at, settled_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, 0, NULL, ?, NULL)"
-        ),
-        &keyed(
-            cx,
-            [
-                SqlValue::Integer(message),
-                SqlValue::from(subject),
-                SqlValue::Integer(i64::from(mention)),
-                SqlValue::Integer(i64::from(reply)),
-                SqlValue::Integer(now),
-                SqlValue::Integer(now),
-            ],
-        ),
-    )?;
+    for chunk in rows.chunks(BATCH) {
+        let tuples =
+            vec!["(?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL, 0, NULL, ?, NULL)"; chunk.len()]
+                .join(", ");
+        let mut params = Vec::with_capacity(chunk.len() * 9);
+        for &(subject, mention, reply) in chunk {
+            params.extend(keyed(
+                cx,
+                [
+                    SqlValue::Integer(message),
+                    SqlValue::from(subject),
+                    SqlValue::Integer(i64::from(mention)),
+                    SqlValue::Integer(i64::from(reply)),
+                    SqlValue::Integer(now),
+                    SqlValue::Integer(now),
+                ],
+            ));
+        }
+        cx.sql().run(
+            format!(
+                "INSERT INTO {table} (namespace, schema, id, message, subject, mention, reply, state, due_at, token, claimed_by, attempts, error, created_at, settled_at)
+                 VALUES {tuples}"
+            ),
+            &params,
+        )?;
+    }
     Ok(())
 }
 
-// follow_on_mention is a mention's follow of the thread: absent, inserted
-// following at `watermark`; not following, following again with its marker
-// moved up to `watermark`; following, left.
-fn follow_on_mention(cx: Cx<'_, '_>, thread: i64, subject: &str, watermark: i64) -> Result<()> {
-    match follow_row(cx, thread, subject)? {
-        None => write_follow(cx, false, thread, subject, true, watermark),
-        Some(row) if !row.followed => write_follow(
-            cx,
-            true,
-            thread,
-            subject,
-            true,
-            row.read_up_to.max(watermark),
-        ),
-        Some(_) => Ok(()),
+// follow_on_mentions is each mentioned subject's follow of the thread, one
+// upsert per BATCH of them: absent, inserted following at `watermark`; not
+// following, following again with its marker moved up to `watermark`;
+// following, left (the upsert's WHERE). The subjects are distinct, as
+// Postgres' ON CONFLICT DO UPDATE asks of one statement's rows.
+fn follow_on_mentions(
+    cx: Cx<'_, '_>,
+    thread: i64,
+    subjects: &[&str],
+    watermark: i64,
+) -> Result<()> {
+    let table = cx.sql().table(FOLLOWS)?;
+    let now = cx.now();
+    for chunk in subjects.chunks(BATCH) {
+        let tuples = vec!["(?, ?, ?, ?, ?, 1, ?, ?)"; chunk.len()].join(", ");
+        let mut params = Vec::with_capacity(chunk.len() * 7);
+        for &subject in chunk {
+            params.extend(keyed(
+                cx,
+                [
+                    SqlValue::Integer(thread),
+                    SqlValue::from(subject),
+                    SqlValue::Integer(watermark),
+                    SqlValue::Integer(now),
+                ],
+            ));
+        }
+        cx.sql().run(
+            format!(
+                "INSERT INTO {table} (namespace, schema, id, thread, subject, followed, read_up_to, updated_at)
+                 VALUES {tuples}
+                 ON CONFLICT (namespace, schema, id, thread, subject) DO UPDATE SET followed = 1,
+                   read_up_to = CASE WHEN {table}.read_up_to > excluded.read_up_to
+                                THEN {table}.read_up_to ELSE excluded.read_up_to END,
+                   updated_at = excluded.updated_at
+                 WHERE {table}.followed = 0"
+            ),
+            &params,
+        )?;
     }
+    Ok(())
 }
 
 // The thread a message is in: its thread, or itself when top-level.
@@ -356,9 +390,11 @@ pub(super) fn came_to_stand(
     if let Some(subject) = for_subject {
         recipients.remove(subject);
     }
-    for (subject, (mention, reply)) in &recipients {
-        insert_delivery(cx, id, subject, *mention, *reply)?;
-    }
+    let rows: Vec<(&str, bool, bool)> = recipients
+        .iter()
+        .map(|(subject, (mention, reply))| (*subject, *mention, *reply))
+        .collect();
+    insert_deliveries(cx, id, &rows)?;
     // 4: the author follows, and reads up to its own message; the
     // mentioned follow.
     let followed = thread_of(id, thread);
@@ -369,21 +405,18 @@ pub(super) fn came_to_stand(
     if thread.is_none() {
         move_conversation_marker(cx, author, stand)?;
     }
-    let watermark = mention_watermark(thread, stand);
     // The subject it was written for follows as a mentioned one does, its
     // markers left: it did not write the message, so it has not read it.
+    let mut following: Vec<&str> = Vec::new();
     if let Some(subject) = for_subject {
         if subject != author && !subject.starts_with(ROLE) {
-            follow_on_mention(cx, followed, subject, watermark)?;
+            following.push(subject);
         }
     }
-    for subject in &mentioned {
-        if subject != author && Some(subject.as_str()) != for_subject && !subject.starts_with(ROLE)
-        {
-            follow_on_mention(cx, followed, subject, watermark)?;
-        }
-    }
-    Ok(())
+    following.extend(mentioned.iter().map(String::as_str).filter(|&subject| {
+        subject != author && Some(subject) != for_subject && !subject.starts_with(ROLE)
+    }));
+    follow_on_mentions(cx, followed, &following, mention_watermark(thread, stand))
 }
 
 // A delivery's state and reasons, as an edit reads them.
@@ -392,94 +425,169 @@ struct Delivery {
     reply: bool,
 }
 
-fn delivery(cx: Cx<'_, '_>, message: i64, subject: &str) -> Result<Option<Delivery>> {
+// deliveries_of reads the message's deliveries to the subjects, by subject,
+// one `IN` list per BATCH of them.
+fn deliveries_of(
+    cx: Cx<'_, '_>,
+    message: i64,
+    subjects: &[&str],
+) -> Result<HashMap<String, Delivery>> {
     let table = cx.sql().table(DELIVERIES)?;
-    cx.sql()
-        .get(
+    let mut out = HashMap::new();
+    for chunk in subjects.chunks(BATCH) {
+        let rows = cx.sql().all(
             format!(
-                "SELECT state, reply FROM {table}
-                 WHERE namespace = ? AND schema = ? AND id = ? AND message = ? AND subject = ?"
+                "SELECT subject, state, reply FROM {table}
+                 WHERE namespace = ? AND schema = ? AND id = ? AND message = ? AND subject IN ({})",
+                placeholders(chunk.len())
             ),
-            &keyed(cx, [SqlValue::Integer(message), SqlValue::from(subject)]),
-        )?
-        .map(|row| {
-            Ok(Delivery {
-                state: row.text("state")?.to_owned(),
-                reply: row.i64("reply")? != 0,
-            })
-        })
-        .transpose()
+            &keyed(
+                cx,
+                std::iter::once(SqlValue::Integer(message))
+                    .chain(chunk.iter().map(|&subject| SqlValue::from(subject))),
+            ),
+        )?;
+        for row in rows {
+            out.insert(
+                row.text("subject")?.to_owned(),
+                Delivery {
+                    state: row.text("state")?.to_owned(),
+                    reply: row.i64("reply")? != 0,
+                },
+            );
+        }
+    }
+    Ok(out)
+}
+
+// on_deliveries runs `statement` (an UPDATE ... SET or a DELETE FROM the
+// deliveries, its own parameters `set`) on the message's deliveries to the
+// subjects, one `IN` list per BATCH of them.
+fn on_deliveries(
+    cx: Cx<'_, '_>,
+    statement: &str,
+    set: &[SqlValue],
+    message: i64,
+    subjects: &[&str],
+) -> Result<()> {
+    for chunk in subjects.chunks(BATCH) {
+        let mut params = set.to_vec();
+        params.extend(keyed(
+            cx,
+            std::iter::once(SqlValue::Integer(message))
+                .chain(chunk.iter().map(|&subject| SqlValue::from(subject))),
+        ));
+        cx.sql().run(
+            format!(
+                "{statement} WHERE namespace = ? AND schema = ? AND id = ? AND message = ? AND subject IN ({})",
+                placeholders(chunk.len())
+            ),
+            &params,
+        )?;
+    }
+    Ok(())
 }
 
 /// What an edit that gives `mentions` writes, after its own writes: a
 /// delivery and a follow for each subject it adds but the author, and the
 /// pending or failed delivery of each it removes loses its mention
-/// ("Batch 1 and 2 operations, amended").
+/// ("Batch 1 and 2 operations, amended"). The deliveries of both are read
+/// in one statement and each kind of write is one statement over its
+/// subjects; each subject is a row of its own, so the order of the writes
+/// does not matter.
 pub(super) fn edited_mentions(cx: Cx<'_, '_>, before: &Message, mentions: &Value) -> Result<()> {
     let was = subjects(Some(&before.mentions));
     let now = subjects(Some(mentions));
     let table = cx.sql().table(DELIVERIES)?;
-    let key_of = |subject: &str| keyed(cx, [SqlValue::Integer(before.id), SqlValue::from(subject)]);
-    for subject in now.iter().filter(|subject| !was.contains(subject)) {
-        if *subject == before.author || before.for_subject.as_deref() == Some(subject.as_str()) {
-            continue;
-        }
-        match delivery(cx, before.id, subject)? {
-            None => insert_delivery(cx, before.id, subject, true, false)?,
-            Some(row) if row.state == "sent" || row.state == "dropped" => {
-                let mut params = vec![SqlValue::Integer(cx.now()), SqlValue::Integer(cx.now())];
-                params.extend(key_of(subject));
-                cx.sql().run(
-                    format!(
-                        "UPDATE {table} SET mention = 1, state = 'pending', due_at = ?, created_at = ?, attempts = 0,
-                                token = NULL, claimed_by = NULL, error = NULL, settled_at = NULL
-                         WHERE namespace = ? AND schema = ? AND id = ? AND message = ? AND subject = ?"
-                    ),
-                    &params,
-                )?;
-            }
-            Some(_) => {
-                cx.sql().run(
-                    format!(
-                        "UPDATE {table} SET mention = 1
-                         WHERE namespace = ? AND schema = ? AND id = ? AND message = ? AND subject = ?"
-                    ),
-                    &key_of(subject),
-                )?;
-            }
-        }
-        if let Some(stand) = before.stand {
-            if !subject.starts_with(ROLE) {
-                follow_on_mention(
-                    cx,
-                    thread_of(before.id, before.thread),
-                    subject,
-                    mention_watermark(before.thread, stand),
-                )?;
-            }
+    let added: Vec<&str> = now
+        .iter()
+        .map(String::as_str)
+        .filter(|&subject| !was.iter().any(|seen| seen == subject))
+        .filter(|&subject| {
+            subject != before.author && before.for_subject.as_deref() != Some(subject)
+        })
+        .collect();
+    let dropped: Vec<&str> = was
+        .iter()
+        .map(String::as_str)
+        .filter(|&subject| !now.iter().any(|kept| kept == subject))
+        .collect();
+    let rows = deliveries_of(cx, before.id, &[added.as_slice(), &dropped].concat())?;
+
+    // An added subject: no delivery, one inserted; a sent or dropped one,
+    // pending again; any other, a mention too.
+    let mut fresh: Vec<(&str, bool, bool)> = Vec::new();
+    let mut renewed: Vec<&str> = Vec::new();
+    let mut marked: Vec<&str> = Vec::new();
+    for &subject in &added {
+        match rows.get(subject) {
+            None => fresh.push((subject, true, false)),
+            Some(row) if row.state == "sent" || row.state == "dropped" => renewed.push(subject),
+            Some(_) => marked.push(subject),
         }
     }
-    for subject in was.iter().filter(|subject| !now.contains(subject)) {
-        let Some(row) = delivery(cx, before.id, subject)? else {
-            continue;
-        };
-        if row.state != "pending" && row.state != "failed" {
-            continue;
-        }
-        let statement = if row.reply {
-            format!(
-                "UPDATE {table} SET mention = 0
-                 WHERE namespace = ? AND schema = ? AND id = ? AND message = ? AND subject = ?"
-            )
-        } else {
-            format!(
-                "DELETE FROM {table}
-                 WHERE namespace = ? AND schema = ? AND id = ? AND message = ? AND subject = ?"
-            )
-        };
-        cx.sql().run(statement, &key_of(subject))?;
+    insert_deliveries(cx, before.id, &fresh)?;
+    on_deliveries(
+        cx,
+        &format!(
+            "UPDATE {table} SET mention = 1, state = 'pending', due_at = ?, created_at = ?, attempts = 0,
+                    token = NULL, claimed_by = NULL, error = NULL, settled_at = NULL"
+        ),
+        &[SqlValue::Integer(cx.now()), SqlValue::Integer(cx.now())],
+        before.id,
+        &renewed,
+    )?;
+    on_deliveries(
+        cx,
+        &format!("UPDATE {table} SET mention = 1"),
+        &[],
+        before.id,
+        &marked,
+    )?;
+    if let Some(stand) = before.stand {
+        let following: Vec<&str> = added
+            .iter()
+            .copied()
+            .filter(|subject| !subject.starts_with(ROLE))
+            .collect();
+        follow_on_mentions(
+            cx,
+            thread_of(before.id, before.thread),
+            &following,
+            mention_watermark(before.thread, stand),
+        )?;
     }
-    Ok(())
+
+    // A removed subject's pending or failed delivery: kept without its
+    // mention when it is a reply too, removed when not.
+    let mut unmentioned: Vec<&str> = Vec::new();
+    let mut removed: Vec<&str> = Vec::new();
+    for &subject in &dropped {
+        match rows.get(subject) {
+            Some(row) if row.state == "pending" || row.state == "failed" => {
+                if row.reply {
+                    unmentioned.push(subject);
+                } else {
+                    removed.push(subject);
+                }
+            }
+            _ => {}
+        }
+    }
+    on_deliveries(
+        cx,
+        &format!("UPDATE {table} SET mention = 0"),
+        &[],
+        before.id,
+        &unmentioned,
+    )?;
+    on_deliveries(
+        cx,
+        &format!("DELETE FROM {table}"),
+        &[],
+        before.id,
+        &removed,
+    )
 }
 
 /// Deletes the messages' deliveries but the claimed ones, which stay for

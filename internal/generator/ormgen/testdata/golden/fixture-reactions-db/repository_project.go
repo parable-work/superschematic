@@ -458,10 +458,12 @@ func (r *ProjectRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple Project records by their IDs in a single query
+// GetManyByIDs retrieves multiple Project records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *ProjectRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Project, error) {
+	resultMap := make(map[types.IdentityUUID]*types.Project, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.Project{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -473,7 +475,22 @@ func (r *ProjectRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *ProjectRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.Project, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -544,7 +561,6 @@ func (r *ProjectRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 

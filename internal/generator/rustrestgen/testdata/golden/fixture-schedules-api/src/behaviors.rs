@@ -125,7 +125,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "timeZone",
                   "field": "timeZone",
                   "column": "time_zone",
-                  "type": "string"
+                  "type": "Temporal.TimeZone"
                 },
                 {
                   "name": "state",

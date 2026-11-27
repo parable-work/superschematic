@@ -149,7 +149,7 @@ public packages at the module root:
 | `schemadeps` | The dependency graph of the generated packages, which `build-all` writes to `<dist>/.deps.json` and, with `[deps] copy`, to a path a repository commits. Every package names the service that produced it. `Read`, `Closure`, `WriteFileAtomic` and `SyncCopy` (check or refresh the committed copy) are what an extension's command over the graph needs (section 3.8) |
 
 `registry` and `loader` are alias packages rather than the implementation;
-D2 in `docs/DECISIONS.md` records why. Every identifier in them is an alias
+D2 records why. Every identifier in them is an alias
 or a one-line forward, so the two layers cannot drift.
 
 ### 3.2 Assembly
@@ -327,7 +327,7 @@ TypeScript walker does not.
 Core decorators write typed IR fields. Extension decorators write the
 node's `Extensions[<extension name>]` slot (section 4). A directive that
 only one distribution reads is an extension decorator, not a typed field:
-D18 in `docs/DECISIONS.md` removed twelve such fields from the core IR on
+D18 removed twelve such fields from the core IR on
 that rule. A spec with no `Args` takes no argument, as acme's `@feedKey`
 does, and the data forms write its value as `true`. A spec with a nil
 `Apply` is a marker the frontend interprets itself; only the core registers
@@ -810,8 +810,8 @@ does not include the augmentation fails the load at the key.
 
 A behavior is code that adds fields, operations, checks and storage to a
 type when an engine runs the schema: a state machine, dependency edges
-between instances, a rating. A type composes several. D16 in
-`docs/DECISIONS.md` is the design; this section is what the compiler does
+between instances, a rating. A type composes several. D16 is
+the design; this section is what the compiler does
 with them. It declares, carries and checks behaviors; it runs none.
 
 ```go
@@ -1584,8 +1584,7 @@ section 11.3) and a Tasks schema are two models, and they are not
 merged. A stack's workflow says how one forge deploys one stack. A task
 says what work a commit needs, for any forge. They meet when a deploy
 uses an image a task produced. A CI renderer that writes a workflow
-from a Tasks schema would join them; it is not built (D203 in
-`docs/DECISIONS.md`).
+from a Tasks schema would join them; it is not built (D203, #692).
 
 ## 4. The open IR
 
@@ -2064,8 +2063,8 @@ service passes to `buildRouter`: an `Authenticator` that establishes the
 caller, and optionally a `PermissionMatcher` that replaces the default
 dotted-path coverage rule. A deployment's identity model, token format and
 service-to-service verification live in its own TypeScript package next to
-its provider, which supplies those two functions. D15 in
-`docs/DECISIONS.md` records the split.
+its provider, which supplies those two functions. D15
+records the split.
 
 ## 9. What the core registers
 
@@ -2089,7 +2088,7 @@ its provider, which supplies those two functions. D15 in
 
 The core stays provider-neutral (`CONTRIBUTING.md`, "The core stays
 provider-neutral"). A surface that only one deployment needs belongs in an
-extension. D10 in `docs/DECISIONS.md` applies that rule to features that
+extension. D10 applies that rule to features that
 have a generic mechanism and distribution-specific names or policy: names
 go in the naming file, rules in the extension.
 
@@ -2258,7 +2257,7 @@ a candidate for a change with its own test.
 | `ir/runtime_providers.go`, `internal/registry/core_providers.go`, `internal/loader/providers.go`, `internal/stack/providers.go` | the runtime interfaces' contracts, `@providers` and `RegisterRuntimeFeature`, the provider packages' manifests and slots, the stack's provider and coverage checks (section 13) |
 | `runtime/http/typescript/src/providers/` | the runtime interfaces in TypeScript, `defineProvider`, `providersFrom`, credential injections (section 13) |
 | `examples/runtime-providers/` | six provider packages and an app whose environments choose them (section 13) |
-| `docs/DECISIONS.md` at commit e8e685a51 | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13, D15, D16); the file at main holds only what is not built |
+| [the decisions at commit e8e685a51](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md) | the decisions this design rests on (D1, D2, D3, D4, D6, D10, D11, D13, D15, D16); later decisions are GitHub issues labeled `decision` |
 
 ## 13. Runtime extension points
 

@@ -7,10 +7,14 @@ import {
   addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
-import { expectBoolean, expectNumber, expectString } from '../primitives';
+import { expectBoolean, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import { ParseError } from '../errors';
 import type { TicketDerivedDerivations, JSDate, Ticket } from '../../types';
+
+import { validateCryptoSHA256Required, validateCryptoSHA256 } from '../scalars/crypto_sha256';
+
+import { validateGenericProbabilityRequired, validateGenericProbability } from '../scalars/generic_probability';
 
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
 
@@ -64,13 +68,28 @@ export function validateTicketDerivedDerivations(value: TicketDerivedDerivations
 
   expectString(errors, "field", value.field);
 
-  expectString(errors, "sourceHash", value.sourceHash);
+  if (value.sourceHash !== null && value.sourceHash !== undefined) {
+    const [valid, fieldErrors] = validateCryptoSHA256(value.sourceHash);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "sourceHash", fieldErrors);
+    }
+  }
 
-  expectString(errors, "settledHash", value.settledHash);
+  if (value.settledHash !== null && value.settledHash !== undefined) {
+    const [valid, fieldErrors] = validateCryptoSHA256(value.settledHash);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "settledHash", fieldErrors);
+    }
+  }
 
   expectString(errors, "model", value.model);
 
-  expectNumber(errors, "confidence", value.confidence);
+  if (value.confidence !== null && value.confidence !== undefined) {
+    const [valid, fieldErrors] = validateGenericProbability(value.confidence);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "confidence", fieldErrors);
+    }
+  }
 
   if (value.settledAt !== null && value.settledAt !== undefined) {
     const [valid, fieldErrors] = validateTemporalDateTime(value.settledAt);

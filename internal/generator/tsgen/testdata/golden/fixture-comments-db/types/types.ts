@@ -6,6 +6,7 @@ import type {
   GenericJSON,
   IdentityUUID,
   TemporalDateTime,
+  TextMarkdown,
 } from './scalars';
 
 /**
@@ -96,7 +97,7 @@ export interface ReviewCommentsEdits {
   /** The edit's number on the message, from 1. */
   number?: GenericInt64 | null;
   /** The body before the edit. */
-  body?: string | null;
+  body?: TextMarkdown | null;
   /** The blocks before the edit. */
   blocks?: GenericJSON | null;
   /** The mentions before the edit. */
@@ -148,7 +149,7 @@ export interface ReviewCommentsMessages {
   /** composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted. */
   state?: string | null;
   /** The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted. */
-  body?: string | null;
+  body?: TextMarkdown | null;
   /** The blocks as posted or last edited, in order. */
   blocks?: GenericJSON | null;
   /** The subjects it mentions, as posted or last edited, in order. */
@@ -303,7 +304,7 @@ export interface TicketCommentsEdits {
   /** The edit's number on the message, from 1. */
   number?: GenericInt64 | null;
   /** The body before the edit. */
-  body?: string | null;
+  body?: TextMarkdown | null;
   /** The blocks before the edit. */
   blocks?: GenericJSON | null;
   /** The mentions before the edit. */
@@ -355,7 +356,7 @@ export interface TicketCommentsMessages {
   /** composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted. */
   state?: string | null;
   /** The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted. */
-  body?: string | null;
+  body?: TextMarkdown | null;
   /** The blocks as posted or last edited, in order. */
   blocks?: GenericJSON | null;
   /** The subjects it mentions, as posted or last edited, in order. */

@@ -87,7 +87,7 @@ pub struct FileReleased {
     pub object_key: String,
     /// The SHA-256 of its bytes.
     #[serde(default, rename = "contentHash", skip_serializing_if = "Option::is_none")]
-    pub content_hash: Option<String>,
+    pub content_hash: Option<CryptoSHA256>,
     /// Why: detached, a file row deleted; expired, an upload never completed.
     pub reason: String,
 }
@@ -254,7 +254,7 @@ pub struct SearchIndex {
     pub agents: String,
     /// The SHA-256 of the text its embedding is of; null until embedded.
     #[serde(default, rename = "textHash", skip_serializing_if = "Option::is_none")]
-    pub text_hash: Option<String>,
+    pub text_hash: Option<CryptoSHA256>,
     /// Its embedding, of unit length; null until embedded, or with embeddings off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding: Option<Vec<GenericFloat64>>,
@@ -343,10 +343,10 @@ pub struct UnitAttachments {
     #[serde(rename = "mediaType")]
     pub media_type: String,
     /// Its length in bytes.
-    pub size: GenericInt64,
+    pub size: FileSizeBytes,
     /// The SHA-256 of its bytes, 64 lowercase hex digits: declared by the upload, checked when it completes.
     #[serde(rename = "contentHash")]
-    pub content_hash: String,
+    pub content_hash: CryptoSHA256,
     /// The name of the bucket's object that holds its bytes, which a file filed onto another row shares.
     #[serde(rename = "objectKey")]
     pub object_key: String,
@@ -481,7 +481,7 @@ pub struct UnitCommentsEdits {
     pub number: Option<GenericInt64>,
     /// The body before the edit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
+    pub body: Option<TextMarkdown>,
     /// The blocks before the edit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "deserialize_optional_generic_json")]
@@ -551,7 +551,7 @@ pub struct UnitCommentsMessages {
     pub state: Option<String>,
     /// The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
+    pub body: Option<TextMarkdown>,
     /// The blocks as posted or last edited, in order.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "deserialize_optional_generic_json")]

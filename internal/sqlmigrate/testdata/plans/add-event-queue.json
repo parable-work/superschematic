@@ -1,7 +1,7 @@
 {
   "dialect": "postgres",
   "from": "c6787cdef058267033f38e38e6c4e788b8fc54fcc00776b78d8b4db345c93d96",
-  "hash": "2e636c1ad9808334fed461c928be7f9be3bc5c100e2551d6503afd325cd5b6c1",
+  "hash": "98de35a969b194b1200f9095fc83b6cd9590fa94a11523f4e0915b6accc6f963",
   "service": "shop-db",
   "steps": [
     {
@@ -42,7 +42,7 @@
       "op": "createTable",
       "phase": "expand",
       "statements": [
-        "CREATE TABLE product_schedules_schedules (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  product_id UUID NOT NULL,\n  \"name\" TEXT NOT NULL,\n  kind TEXT,\n  spec TEXT,\n  time_zone TEXT,\n  state TEXT,\n  set_at TIMESTAMPTZ,\n  next_at TIMESTAMPTZ,\n  retry_at TIMESTAMPTZ,\n  runs BIGINT,\n  attempt BIGINT,\n  last_at TIMESTAMPTZ,\n  last_outcome TEXT,\n  finished_at TIMESTAMPTZ,\n  ended_by TEXT,\n  CONSTRAINT product_schedules_schedules_pkey PRIMARY KEY (id)\n)",
+        "CREATE TABLE product_schedules_schedules (\n  id UUID DEFAULT gen_random_uuid() NOT NULL,\n  product_id UUID NOT NULL,\n  \"name\" TEXT NOT NULL,\n  kind TEXT,\n  spec TEXT,\n  time_zone VARCHAR(100),\n  state TEXT,\n  set_at TIMESTAMPTZ,\n  next_at TIMESTAMPTZ,\n  retry_at TIMESTAMPTZ,\n  runs BIGINT,\n  attempt BIGINT,\n  last_at TIMESTAMPTZ,\n  last_outcome TEXT,\n  finished_at TIMESTAMPTZ,\n  ended_by TEXT,\n  CONSTRAINT product_schedules_schedules_pkey PRIMARY KEY (id)\n)",
         "COMMENT ON TABLE product_schedules_schedules IS 'One row per schedule of the row, keyed by its name: its kind and spec, its time zone, its state, when it was set, its next run and the retry of its latest one, how many runs it has had and which attempt of the latest fired last and when, the outcome reported of it, and when and why it finished. A finished schedule stays until its name is set again, or until the row keeps more than max finished ones, when those finished longest ago go.'"
       ],
       "subject": "table/product_schedules_schedules",
@@ -269,7 +269,7 @@
       "transactional": true
     }
   ],
-  "to": "a28ec3dfa559d2d5462960090e89dd09770c667fc6575486ceccc735ede17476",
+  "to": "c254d0e04d854395383db9bc3b7139d6f903b9d1248b7886e509ec7ff9a77ae5",
   "toModel": null,
   "version": 1
 }

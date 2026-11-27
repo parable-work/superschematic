@@ -620,10 +620,12 @@ func (r *RecipeCommitRepository) GetOne(ctx context.Context, id types.IdentityUU
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple RecipeCommit records by their IDs in a single query
+// GetManyByIDs retrieves multiple RecipeCommit records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *RecipeCommitRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeCommit, error) {
+	resultMap := make(map[types.IdentityUUID]*types.RecipeCommit, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.RecipeCommit{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -635,7 +637,22 @@ func (r *RecipeCommitRepository) GetManyByIDs(ctx context.Context, ids []types.I
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *RecipeCommitRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeCommit, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -733,7 +750,6 @@ func (r *RecipeCommitRepository) GetManyByIDs(ctx context.Context, ids []types.I
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -2466,7 +2482,9 @@ func (r *RecipeCommitRepository) heldOfKey(ctx context.Context, on RecipeCommitU
 	return row, nil
 }
 
-// CreateMany inserts multiple RecipeCommit records in a single statement
+// CreateMany inserts multiple RecipeCommit records and returns them in the
+// inputs' order: a statement of at most 7281 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types.RecipeCommit) ([]*types.RecipeCommit, error) {
 	if len(inputs) == 0 {
 		return []*types.RecipeCommit{}, nil
@@ -2567,18 +2585,40 @@ func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types
 		}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 7281 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.RecipeCommit, error) {
+		return (&RecipeCommitRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "root_id", "ref_id", "parent_commit_id", "message", "schema_epoch", "content_hash", "sequence", "created_at", "created_by"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 7281 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *RecipeCommitRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.RecipeCommit, error) {
+	results := make([]*types.RecipeCommit, 0, len(batch))
+	for start := 0; start < len(batch); start += 7281 {
+		created, err := r.createBatch(ctx, batch[start:min(start+7281, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *RecipeCommitRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.RecipeCommit, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO recipe_commit (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"id", "root_id", "ref_id", "parent_commit_id", "message", "schema_epoch", "content_hash", "sequence", "created_at", "created_by"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -2590,76 +2630,17 @@ func (r *RecipeCommitRepository) CreateMany(ctx context.Context, inputs []*types
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.RecipeCommit{}
+	results := make([]*types.RecipeCommit, 0, len(batch))
 	for rows.Next() {
-		result := &types.RecipeCommit{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		var tempMessage sql.NullString
-		var tempSequence *types.GenericInt64
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		var tempRelRoot *types.IdentityUUID
-		var tempRelRef *types.IdentityUUID
-		var tempRelParentCommit *types.IdentityUUID
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.Id,
-
-			&tempRelRoot,
-
-			&tempRelRef,
-
-			&tempRelParentCommit,
-
-			&tempMessage,
-
-			&result.SchemaEpoch,
-
-			&result.ContentHash,
-
-			&tempSequence,
-
-			&result.CreatedAt,
-
-			&result.CreatedBy,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		if tempMessage.Valid {
-			result.Message = tempMessage.String
-		}
-		if tempSequence != nil {
-			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-			result.Sequence = tempSequence
-		}
-
-		// Set relationship IDs from scanned FK values
-		if tempRelRoot != nil {
-			result.Root.Id = recipeCommitUUIDPtr(*tempRelRoot)
-		}
-		if tempRelRef != nil {
-			result.Ref.Id = recipeCommitUUIDPtr(*tempRelRef)
-		}
-		if tempRelParentCommit != nil {
-			// Initialize pointer for optional relationship before setting ID
-			result.ParentCommit = &types.RecipeCommit{Id: recipeCommitUUIDPtr(*tempRelParentCommit)}
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

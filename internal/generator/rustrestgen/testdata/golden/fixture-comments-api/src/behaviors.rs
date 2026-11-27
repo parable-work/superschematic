@@ -157,7 +157,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -466,7 +466,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -736,7 +736,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -1045,7 +1045,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",

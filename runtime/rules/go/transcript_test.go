@@ -304,9 +304,10 @@ func sqlType(db *rulestest.DB, column rules.Column) string {
 		return types.Timestamp
 	}
 	switch column.Type {
-	case "string":
+	case "string", "Crypto.SHA256", "Temporal.TimeZone", "Text.Markdown":
+		// The scalars a declaration types a text field by (D201) are text.
 		return types.Text
-	case "number":
+	case "number", "Generic.Probability":
 		return types.Number
 	case "Generic.Int64":
 		return types.Integer
