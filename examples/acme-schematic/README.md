@@ -810,8 +810,8 @@ engine types (D103's step 7). Its registration names no crate:
 
 `cli.New` returns the root cobra command with the core's commands:
 `check`, `build`, `build-all`, `migrate`, `queries`, `json-schema`,
-`format`, `behaviors`, `engine-client`, `stack`, `identity`, `env`,
-`catalog`, `init` and `new`. An extension that implements
+`format`, `behaviors`, `stack`, `identity`, `env`, `catalog`, `init`
+and `new`. An extension that implements
 `cli.CommandProvider` contributes more:
 
 ```go

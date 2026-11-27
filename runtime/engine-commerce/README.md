@@ -24,12 +24,13 @@ configs and records (`StockRecord`, `HoldsRecord`, `PaymentsRecord`,
 `PaymentAction`, `CalendarSlot` and the rest) and their constants
 (`DEFAULT_MAX_ITEMS`, `MAX_WINDOW_MS`).
 
-The guide is
-[Selling and booking with the engine](../../docs/src/content/docs/guides/commerce.md);
-this file is the reference for every refusal, event and config change.
-`examples/acme-shop` sells, books and refunds through the four behaviors
-in Go, Rust and TypeScript, with a fake provider, `acmepay`, and its
-webhook (`examples/acme-shop/README.md`).
+This file is the reference for the engine's implementation: every
+refusal, event and config change. The four behaviors run on the
+behaviors' core too, on a table that implements them, which is how
+`examples/acme-shop` sells, books and refunds in Go, Rust and TypeScript,
+with a fake provider, `acmepay`, and its webhook
+([Selling and booking](../../docs/src/content/docs/guides/commerce.md),
+`examples/acme-shop/README.md`).
 
 ```ts
 import { openEngine } from '@superschematic/engine';
@@ -49,16 +50,15 @@ engine.instances.invoke(adapter, 'Checkout', 'c-1', 'recordPaymentEvent', { prov
 - **TypeScript.** The core's Node-API addon (`runtime/engine/rust/addon`)
   is built with the crate, after the work queue's, and a release ships it
   prebuilt. A deployment names the behaviors in the engine's `behaviors`
-  option, all four with `commerceBehaviors` or only those it uses; a
-  generated TypeScript server names the ones its engine types compose.
-- **Rust and Go.** The project's engine crate, which the `projectengine`
-  generator writes when a DB schema's types compose a commerce behavior,
-  depends on the crate at `[paths] engine_commerce_rust` and registers
-  `superschematic_engine_commerce::commerce()` in its `behaviors()`. A
-  Rust server opens the engine with it, and a Go server links the
-  crate's archive (its `ffi/` member) in the core's place. The core's Go
-  archive does not link the crate, whose time zone database would
-  otherwise be in every Go server.
+  option, all four with `commerceBehaviors` or only those it uses.
+- **Rust and Go.** A Rust host registers
+  `superschematic_engine_commerce::commerce()` in its engine's
+  behaviors, and a Go host links an archive built over them in the
+  core's place. The core's Go archive does not link the crate, whose
+  time zone database would otherwise be in every Go host. No generated
+  server opens the engine: a DB type is a table, whose commerce
+  behaviors the behaviors' core runs (D103's step 7,
+  `docs/src/content/docs/guides/commerce.md`).
 - **By hand.** `commerce()` gives every behavior in `NAMES`' order
   (`Stock`, `Calendar`, `Holds`, `Payments`), after the core's;
   `behavior(name)` gives one.
@@ -415,25 +415,15 @@ fields, and a schema must add no card fields of its own.
 ### Tools
 
 The declarations name no invocation policy, so they register under any
-distribution's. A generated build whose engine types compose `Payments`
-or `Stock` is refused unless `outputs.engine.tools.invocation` names one
-for `Payments.openPayment`, `capturePayment`, `voidPayment`,
-`refundPayment` and `refundFor`, and `Stock.receiveStock`, `adjustStock`
-and `countStock` (`enginedoc.MoneyOperations`). The engine document
-hides Payments' service operations wherever it is composed,
-`listPaymentActions`, `recordPaymentEvent` and `settleRefundFor`
-(`enginedoc.ServiceOperations`), beside what `tools.hidden` names
-(`runtime/engine/README.md`, "Tools").
+distribution's. An engine takes the policy of each operation that moves
+money or stock, and the operations its tools hide, in its options'
+`tools` (`runtime/engine/README.md`, "Tools").
 
 ## Throughput
 
 Every commerce write takes the namespace's writer lock (D58), which is
 what keeps two shoppers from holding the last unit, across replicas and
-languages. `TestCommerceServersOversellNothing`
-(`internal/generator/servergen`) moves 1,000 checkouts to held at once
-over a Go, a Rust and a TypeScript server on one Postgres for three
-units, and 1,000 bookings of one slot of capacity 1: exactly three and
-one hold. `TestCommerceHoldsLoad` measures holds a second at 1, 10 and 50
+languages. `TestCommerceHoldsLoad` measures holds a second at 1, 10 and 50
 items a claim when `SUPERSCHEMATIC_COMMERCE_LOAD=1`; D70's Status records
 what it measured. The lock makes a namespace one queue of writes, so
 each shop is a namespace of its own.
@@ -461,15 +451,6 @@ the checkout's).
   `runtime/engine/testdata/scenarios/commerce-*.json`, which the test kit
   replays, and fails when a committed file is not what it records
   (`UPDATE_ENGINE_CORPUS=1` rewrites them).
-- **Generated servers** (`internal/generator/servergen`,
-  `shop-commerce-db`): `TestCommerceEngineEntrypointServes`, `…Rust` and
-  `…TypeScript` build and serve each language's server offline and on
-  Postgres; `TestCommerceServersAnswerOneScriptAlike` runs one script
-  against the three over one Postgres (stock, a cart's holds,
-  `total_unknown`, a payment's events repeated, late and in another
-  currency, placing, a refund through Approvals, expiry and the late
-  payment through the runner, cross-server reads) and requires their
-  transcripts to be identical.
 
 ```
 make engine-rust          # the workspace, the commerce crate among its members
@@ -478,5 +459,4 @@ cd runtime/engine-commerce/typescript
 bun install --frozen-lockfile
 bun run typecheck
 bun run test              # build, then test:node and test:bun
-make engine-servers       # the generated servers; on Postgres with SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL
 ```

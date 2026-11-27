@@ -34,12 +34,10 @@ in the engine's `behaviors` option (`workQueueBehaviors`, from
 `@superschematic/engine-workqueue`). Four, `Stock`, `Calendar`,
 `Holds` and `Payments`, are commerce (D70): the core declares them with
 the package `@superschematic/engine-commerce`, the core's addon carries
-them and a project's engine crate links them, and an engine runs them
-once a deployment names them (`commerceBehaviors`), as a generated
-server does. The last six, `Seats`, `Reconcile`, `Schedules`, `Pool`,
-`Recurrence` and `Aliased`, no engine runs: the behaviors' core
-implements them for a DB table alone, and the build refuses an engine
-type that composes one, naming the table form.
+them, and an engine runs them once a deployment names them
+(`commerceBehaviors`). The last six, `Seats`, `Reconcile`, `Schedules`,
+`Pool`, `Recurrence` and `Aliased`, no engine runs: the behaviors' core
+implements them for a DB table.
 
 A DB table that implements a behavior, or types a field as one, stays a
 table (D103): its rules run in the behaviors' core, the Rust library every
@@ -883,18 +881,11 @@ instance itself, as the first is, acts only while the field still holds
 `to` when the runner gets to it, as an `enters` rule acts only while the
 status is still in its state.
 
-Work done against a spec goes back to review when the spec changes:
-
-```json
-{ "name": "Links", "config": { "links": { "spec": { "schema": "specs", "pinned": true } } } },
-{ "name": "Reactions", "config": { "rules": [
-    { "when": { "revised": { "link": "spec" } }, "then": { "transition": "review" } } ] } }
-```
-
-A new revision of a spec moves each work item pinned to an earlier one;
-an item linked again to the new revision before the runner gets to it
-stays where it is. With `Queue`'s `excludeStale` the same items are not
-claimed meanwhile ([Work queues](/superschematic/guides/work-queues/)).
+A `revised` rule, which moved work back to review when a spec it was
+pinned to took a new revision, heard a link `Links` pinned. `Links`
+folds into a relation ([Links](#links)), which pins no revision yet, so
+no schema composes one; on a table the build refuses `revised`, naming
+what it waits for.
 
 - A rule acts only where it can. A target already in the state, with no
   transition to it, or whose guards veto the move (an open blocker, say)

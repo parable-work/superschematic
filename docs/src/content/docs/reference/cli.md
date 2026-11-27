@@ -846,8 +846,8 @@ It changes only when the declaration does.
 superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
 superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
 superschematic behaviors --package @superschematic/rules --out runtime/engine/rust/rules-behaviors/declarations --check
-acme-schematic behaviors --extension acme --out crates/behaviors/declarations
-acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check
+my-schematic behaviors --extension my --out crates/my-rules/declarations
+my-schematic behaviors --extension my --out crates/my-rules/declarations --check
 ```
 
 | Flag | Default | Meaning |
@@ -859,9 +859,11 @@ acme-schematic behaviors --extension acme --out crates/behaviors/declarations --
 | `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
 
 It is a command of the binary, not a tool in the core module, because an
-extension's declarations are registered only in its own binary: acme's
-copy comes from `acme-schematic`, into its `acme-behaviors` crate, and
-its smoke runs `--check`. The core binary writes the behaviors the core
+extension's declarations are registered only in its own binary: an
+extension's copy comes from it, into the crate whose hooks run its
+behavior on the behaviors' core (its registration's `Rules` crate).
+acme.Rating's rules are declarative, so no crate implements it and acme
+keeps no copy. The core binary writes the behaviors the core
 declares into the four Rust crates that implement them: `Workflow`,
 `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
 `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`,

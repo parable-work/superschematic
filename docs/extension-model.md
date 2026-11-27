@@ -401,7 +401,7 @@ Document generators are driven by presence, not by the kind's pipeline
 | `Dirs` | the directories the generator writes for this run |
 | `Enabled` | whether it runs; a non-empty reason is recorded in `Result.Skipped`. nil means enabled |
 | `Generate` | writes the outputs |
-| `RendersBehaviors` | the generator's output covers what a type's behaviors add, or nothing of the type at all; without it, `Run` refuses a schema whose types compose behaviors, or that uses a DB service's engine type (section 3.16) |
+| `RendersFieldBehaviors` | the generator's output covers what a table's behaviors add, implemented by it or anchored on a field, or nothing of the table at all; without it, `Run` refuses a schema one of whose tables composes one, or that imports or projects such a table of a DB service (section 3.16) |
 
 A generator reaches a kind in one of two ways. The kind's `Pipeline` names
 it, and it runs at that position. Or the generator lists the kind in
@@ -413,10 +413,9 @@ runs on every build and a schema config cannot turn it off.
 
 `GenerateContext` is the per-run state every generator in a pipeline
 shares: the schema, its config, the parsed outputs, the options, the
-registry, memoized `LoadDependency`, `APIOutput`, `EnvConfig` and
-`EngineDocument` closures, and the `Result`. `EngineDocument` returns the
-engine document of a DB schema with engine types as JSON, or nil (section
-3.16). `Done(key, dir)` and `Skip(key)` record outputs.
+registry, memoized `LoadDependency`, `APIOutput` and `EnvConfig`
+closures, and the `Result`. `Done(key, dir)` and `Skip(key)` record
+outputs.
 `InstallTargetDir` resolves a directory relative to the repository root for
 a generator that installs files outside the output root.
 
@@ -427,7 +426,6 @@ The core generators:
 | `types` | `types` | Go, TypeScript, Python and Rust types, one switch per language |
 | `sql` | `sql` | Postgres DDL, projection views with their migrations and Arrow schemas, and SQLite DDL when `outputs.sql.dialects` lists `sqlite`; implied by the DB kind, and `outputs.sql` places the view migrations (`migrationsDir`), sets their role (`viewOwner`), qualifies the tables the views read (`sourceSchema`) and lists the dialects (`dialects`) |
 | `orm` | none | the Go ORM; implied by the DB kind |
-| `enginedoc` | `engine` | the engine document of a DB schema whose types compose behaviors, its engine types: `engine/<schema>.json` in the Go types module, which the types hold as a constant too (section 3.16); last in the DB kind's pipeline, and `outputs.engine.namespace` names the engine namespace, `mount` where the servers of the APIs on the database mount the engine, `policy` its access policy, and `retention` how long its event log keeps events, which the database's runner prunes (D58) |
 | `api` | `api` | the Go chi server, the Rust axum crate or the TypeScript Hono package (`outputs.api.language`), and OpenAPI |
 | `sdks` | `sdk` | TypeScript, Go, Python and Rust clients, one switch per language |
 | `envConfig` | none | the environment loader for a schema with an `@envVars` class |
@@ -813,14 +811,14 @@ with them. It declares, carries and checks behaviors; it runs none.
 type BehaviorSpec struct {
     Extension   string
     Package     string
-    Rust        BehaviorRust
+    Rules       BehaviorRust
     Declaration json.RawMessage
 }
 
 type BehaviorRust struct {
     Crate    string // the Cargo package name
     Path     string // its directory, relative to the project
-    Register string // the Rust expression the project's engine registers
+    Register string // the Rust expression the project's rules crate adds
 }
 ```
 
@@ -834,66 +832,34 @@ engine implements, which the behaviors' core alone runs on a table (D104:
 behavior runs in its engine, so `RegisterBehavior` refuses
 `RulesPackage` on an extension's spec.
 
-`Rust` is optional too: the Rust crate that implements an extension's
-behavior for the Rust engine (D58), a crate implementing the engine's
-`Behavior` trait, which the project's engine compiles in. `Crate` is its
-Cargo package name (a letter, then letters, digits, `-` and `_`, at most
-64 characters); `Path` is its directory relative to the project, the
-parent of the schemas root that the `[paths]` keys are relative to as
-well, slash-separated, clean and not absolute; and `Register` is the
-expression `BehaviorSet::with` takes, a Rust path into the crate (its name
-with `-` folded to `_`, then `::<Name>`), called with no arguments or
-not. acme's is `{Crate: "acme-behaviors", Path: "crates/behaviors",
-Register: "acme_behaviors::Rating"}`. `RegisterBehavior` refuses a `Rust`
-on a core behavior, whose implementations are the engine's own crates,
-and any part that breaks these rules; `Finalize` refuses two behaviors
-that name one crate at two paths. The behaviors command copies the
-declaration into the crate as into a package:
+`Rules` is optional too: the Rust crate whose implementation of the
+core's hooks runs an extension's behavior on the behaviors' core (D103's
+step 5), a crate implementing `superschematic_rules::Behavior`, which the
+project's rules crate adds to the core's behaviors. `Crate` is its Cargo
+package name (a letter, then letters, digits, `-` and `_`, at most 64
+characters); `Path` is its directory relative to the project, the parent
+of the schemas root that the `[paths]` keys are relative to as well,
+slash-separated, clean and not absolute; and `Register` is the expression
+`Core::with` takes, a Rust path into the crate (its name with `-` folded
+to `_`, then `::<Name>`), called with no arguments or not. The core's own
+behaviors are the core's crate and name none. acme.Rating names none
+either: its rules are the declarative vocabulary's, which the core
+interprets (D103's step 5).
 
-```sh
-acme-schematic behaviors --extension acme --out crates/behaviors/declarations
-```
-
-For a DB or General schema whose types compose an extension's behavior,
-the core's `projectengine` generator (`internal/generator/projectengine`)
-writes the project's engine crate, `engine/rust/<schema>`, named
-`<rust_crate_prefix><schema>-engine`. It depends on
-`superschematic-engine`, `superschematic-engine-behaviors` and, when the
-schema composes one of their behaviors, `superschematic-engine-workqueue`
-and `superschematic-engine-commerce` (D70), by path at the `[paths]` keys
-`engine_rust`, `engine_behaviors_rust`, `engine_workqueue_rust` and
-`engine_commerce_rust` (by version when unset), and on each extension's
-crate by its path in the project. Its `behaviors()` registers the core's
-behaviors, the work queue's, the commerce ones and each composed
-extension behavior, by `Register`; `tools()` is
-the D11 options the binary registers, under which an operation that names
-a value of the extension's invocation policy registers; and `COMPOSED`
-lists the behaviors the schema's types compose, which its test finds
-registered in an engine opened on SQLite. That library is what a Rust
-server links. A host of another language links a binding of the engine
-over `behaviors()`, a member of the workspace the crate's `Cargo.toml`
-roots, so they build from one lock file:
-
-| Member | Package | What it is |
-| --- | --- | --- |
-| `ffi/` | `<crate>-ffi` | The engine's C ABI over `behaviors()` (`superschematic_engine_abi::export_engine_c_abi!(behaviors = project::behaviors)`, the C ABI's library at `[paths] engine_abi_rust`), the static archive a Go server links in place of the core's: `scripts/engine-archive.sh --crate <crate>/ffi --out <dir>`, then `-L<dir>` first in `CGO_LDFLAGS`. Its config takes the engine document's `tools`, without which an engine refuses an operation that names the extension's policy value. Its test opens an engine through its own `eng_open` and finds every composed behavior registered |
-| `napi/` | `<crate>-napi` | The engine's Node-API addon over `behaviors()` (`superschematic_engine_napi::export_engine_napi!(behaviors = project::behaviors)`, the twin of `export_engine_c_abi!`, the addon's library at `[paths] engine_napi_rust`), a cdylib a TypeScript server loads in place of the core's addon: `scripts/engine-napi.sh --crate <crate>/napi --out <dir>` prints the `.node` file, which the engine option `addon` or `SUPERSCHEMATIC_ENGINE_ADDON` names. An engine registers the core's behaviors when it opens, then each other one its options' `behaviors` name. Node-API symbols resolve only when Node.js or Bun loads it, so it has no Rust test; acme's smoke loads it in Node.js and rates a product on it |
-
-A generated Go or TypeScript server, job, worker or runner on such a
-database takes its member without anything set by hand: the entrypoint's
-`engine-project.json` names the crate and the member, which its image's
-engine stage and `stack dev` build, `stack dev` handing the archive to the
-Go build's `CGO_LDFLAGS` and the addon to the process's
-`SUPERSCHEMATIC_ENGINE_ADDON` (D58, amended).
-
-A schema that composes the
-core's behaviors alone gets no crate: the release's engine runs them. An
-extension behavior that names no crate, or one the project does not hold,
-leaves the schema with no engine that can run it (an engine refuses it),
-and the build's log says why.
-The generator claims no output directory, so the build cache does not
-store the crate, and it removes a crate an earlier build wrote when the
-schema needs none.
+For a DB schema whose tables compose a behavior with a `Rules` crate, the
+core's `rulescore` generator (`internal/generator/rulescore`) writes the
+project's rules crate, `rules/rust/<schema>`, named
+`<rust_crate_prefix><schema>-rules`. It depends on the core's crates by
+path at the `[paths]` key `rules_behaviors_rust` and its siblings, and on
+each composed behavior's crate by its path in the project. Its `core()` is
+the core's behaviors with each composed one added, and it exports the
+core's ABI over them: the static archive the Go binding links in the
+stock one's place (`scripts/rules-archive.sh --crate <crate> --out
+<dir>`), and the wasm32 module `@superschematic/rules` loads when a host
+names it. A schema whose tables compose the core's behaviors alone gets
+no crate: the stock core runs them. The generator claims no output
+directory, so the build cache does not store the crate, and it removes a
+crate an earlier build wrote when the schema needs none.
 
 A behavior is declared once, in a JSON file beside the Go package that
 registers it, which embeds it and passes it to `RegisterBehavior`. Its
@@ -951,10 +917,10 @@ marker, may say `"asks": "read"`: an engine asks the access policy
 `read` for it rather than `write`. `RegisterBehavior` refuses any other
 value of `asks`, and `asks` on any other operation.
 
-A field carries a name, a description and whether it is volatile. On an
-engine type it needs no type: its type can depend on the behavior's
-config, and the loader needs only the name to refuse a collision. On a
-table, which a field-anchored use keeps (D103), each field is a column, and
+A field carries a name, a description and whether it is volatile. On a
+General schema's type it needs no type: its type can depend on the
+behavior's config, and the loader needs only the name to refuse a
+collision. On a table, which a field-anchored use keeps (D103), each field is a column, and
 its `type` says which: a builtin (`string`, `number`, `boolean`) or a
 scalar of the registry's catalog, which the generators map as an own
 field's; a date-time scalar is epoch milliseconds in the core. Finalize
@@ -1095,7 +1061,7 @@ exports the carrier, which resolves to the empty object type as `User`
 does. Its first type argument is the table itself, and the walker reads
 its second, the config, as it reads a field type's. The use's entry is
 `{ name, implements: true, config }`, anchored on the type and marked
-apart from a `@behavior` use, which makes an engine type; a type's uses
+apart from a `@behavior` use, which a DB type does not take; a type's uses
 list its implements uses before its field types. The loader adds a typed
 declared field of the use as a column, `<storage key>_<field>`, each of
 its `tables` as a child table `<Type><Behavior><Table>`, when it
@@ -1128,82 +1094,45 @@ alone, with the same verdicts, and the schema-file TypeScript types in
 `@superschematic/schema-ir` type an entry as `BehaviorRef`, with the name
 and config left open.
 
-Until a generator renders behaviors, it refuses a type that composes one.
-`generator.Run` checks once, before any generator in the pipeline runs:
-the first enabled generator without `GeneratorSpec.RendersBehaviors` fails
-the run with `generator: <name> does not render behaviors yet: type <T>
-composes behavior <B>`. The check covers core and extension generators
-alike; document generators, which render their documents, are not asked.
-`build --emit-ir`, `format` and `json-schema` run no generator and accept
-the schema. A generator whose output holds nothing a behavior adds, as
-acme's `acmeManifest` lists the types by name, sets the flag too.
+A DB type is a table, so it takes no `@behavior`: the loader refuses
+one, once per use, naming the form the behavior takes on a table,
+`implements Seats<T, { ... }>` for a behavior anchored on the type and
+`status: Workflow<{ ... }>` for one anchored on its value field (D103).
+Nothing lowers it for you. It refuses `outputs.engine` in a schema config
+too (`registry.ErrEngineOutputs`). A General schema's type composes
+behaviors with `@behavior`, and development mode serves it (D117).
 
-Of the core's pipeline generators, `types`, `sql`, `orm`, `enginedoc`,
-`projectengine` and `envConfig` set the flag (D58), so the DB and General pipelines build
-a schema whose types compose behaviors. For each such type, each
-language's types write `<T>Behaviors`: what a read returns under
-`behaviors`, one member per behavior that declares a field, holding those
-fields (Go's `behaviors.go`, TypeScript's `types/behaviors.ts`, Rust's
-`src/behaviors.rs`, Python's `behaviors.py`). The own-field type `<T>` is
-unchanged: it is the instance's `data`. `envConfig` reads the `@envVars`
-class alone.
-
-A type of a DB schema that composes a behavior is an engine type: its
-instances are the engine's, kept in the DB service's database, in the
-engine's own tables. `sql` and `orm` leave it out
-(`codegen.WithoutEngineTypes`): it gets no table, no repository, and no
-step in a migration plan, which `sqlmigrate` builds on `sql` (D27). The
-`enginedoc` generator writes the schema's engine document,
-`engine/<schema>.json` in the Go types module, and the types hold the
-same bytes as `EngineDocument` in Go, `engineDocument` in TypeScript
-(exported as `<types package>/engine`, not from the package's index) and
-`ENGINE_DOCUMENT` in Rust. It holds the engine namespace
-(`outputs.engine.namespace`, else the service's name), the meta-schema
-the binary's `json-schema` prints, the D11 tool options the binary
-registers (its invocation policy and the vendor keys the tool hooks
-leave), each behavior the engine types compose with the package that
-implements it and, for an extension's, the crate its `Rust` names, and
-one schema-file document per engine type: a `General`
-document named after the type, holding it, the value types it reaches
-(`@jsonField` types, and types it imports from a General dependency) and
-the enums and scalars they use, with no imports.
-`internal/generator/enginedoc/README.md` is its contract.
-
-Before any generator runs, `Run` refuses, one line per problem
-(`enginedoc.Problems`):
-
-- an engine type that reaches a table: a field of it, or of a value type
-  it holds, typed as a table or as another engine type. The engine
-  reaches another instance through the `Links` behavior (D16), and a
-  table's row through its key in a plain field;
-- a table, a value type or a projection that references or reads an
-  engine type, which has no table;
-- an engine type that declares what only a table has (`@versioned`,
-  `@optimistic`, a version graph, the `User` or `UserRole` trait, a
-  queue, a projection) or a field the database generates (`AutoGenerate`):
-  the engine gives each instance its id;
-- an engine type that reaches a map or a union, which the engine's schema
-  runtime does not validate.
-
+`generator.Run` checks once, before any generator in the pipeline runs.
 An API's own type never composes a behavior: `Run` refuses it with
 `generator: type <T> of API <api> composes behavior <B>, but behaviors
-compose on DB types ...`. An API that imports a DB service's engine type,
-or projects one with `@source`, builds its types, but the first enabled
-generator without the flag refuses it, `api` or `sdks`:
-`generator: api does not render engine types yet: <api> imports
-<db>.<T>, which composes behavior <B> (D58)`. The `server` generator
-refuses a server that serves such an API the same way. The generated
-servers do not open the engine yet.
+compose on DB tables, by implements and field types, and an API serves
+their operations through @behaviorOperations (D103)`. A table that
+implements a behavior or carries one on a field is refused by the first
+enabled generator without `GeneratorSpec.RendersFieldBehaviors`:
+`generator: <name> does not render behaviors yet: type <T> implements
+behavior <B> (D103)`. So is a schema that imports such a table of a DB
+service, or projects one with `@source`. The check covers core and
+extension generators alike; document generators, which render their
+documents, are not asked. `build --emit-ir`, `format` and `json-schema`
+run no generator and accept the schema.
 
-`types` shares its narrowings with the other generator that renders
-behaviors, a command of its own and not in a pipeline: `engine-client`
-types the engine's client for engine schemas (D49).
+Of the core's pipeline generators, `types`, `sql`, `orm`, `api`, `sdks`,
+`envConfig` and `rulescore` set the flag. For each type of a General
+schema that composes behaviors, each language's types write
+`<T>Behaviors`: what a read returns under `behaviors`, one member per
+behavior that declares a field, holding those fields (Go's
+`behaviors.go`, TypeScript's `types/behaviors.ts`, Rust's
+`src/behaviors.rs`, Python's `behaviors.py`). The own-field type `<T>` is
+unchanged: it is the instance's `data`. A table holds its behaviors'
+owned fields as fields of its own, and its repositories run the
+behaviors' operations through the core. `envConfig` reads the `@envVars`
+class alone.
+
 `internal/generator/behaviortypes` narrows the core's behaviors by their
-configs, a Workflow's states, a Links config's names, a Timers config's
-deadlines, for both. An extension's behavior has no narrowing:
-`engine-client` types its operations' parameters and results, create
-parameters, precondition and veto codes as declared, and both type its
-fields as any JSON, since a declaration names a field without a schema.
+configs, a Workflow's states, a Timers config's deadlines, for the types
+and the repositories. An extension's behavior has no narrowing: its
+fields are typed as any JSON, since a declaration names a field without
+a schema.
 A behavior's member keeps its exact name in the JSON; where a language's
 names cannot hold it, the member takes the behavior's name in PascalCase,
 each run of letters and digits capitalized and the runs joined
@@ -1234,9 +1163,16 @@ package (`registry.EnginePackage`, `registry.WorkQueuePackage`,
 therefore accepts a schema that composes them, the schema-file JSON
 Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
 types the configs of every one an engine implements; it names none of
-`Seats`, `Reconcile`, `Schedules` and `Pool`, so an engine type's `@behavior("Seats", ...)`
-does not type-check, and the agent's behaviors catalog, which lists what
-an engine type composes, leaves them out. None names an invocation
+`Seats`, `Reconcile`, `Schedules` and `Pool`, so a General schema's
+`@behavior("Seats", ...)` does not type-check, and the agent's behaviors
+catalog, which lists what `@behavior` composes, leaves them out. D103
+folds four of them into schema features: `Links` is a `Relation<>`,
+`Search` is `@searchField`, `Queue` is `@queue` and `Branches` is
+`@versioned`. Their declarations stay registered while the engine that
+runs them is in the tree, so its crates' copies still match, but the
+loader refuses each in every kind and form, naming its replacement
+(`verify.FoldedBehaviors`), `BehaviorConfigs` names none of them, and the
+catalog leaves them out. None names an invocation
 policy, since a distribution's policy need not have the core's values;
 each operation takes the policy's default. Every
 `paramsSchema` sets `additionalProperties: false`. `Links` and
@@ -1297,7 +1233,7 @@ instances of the schema a config names, which the loader does not
 resolve; the engine looks the name up when an operation runs or a field
 is read, in the instance's namespace and then the shared one, and checks
 a rollup's schema and link when the schema is defined. `make cli-smoke`
-loads `fixture-cross-instance-json`, whose type composes the first two,
+loads `fixture-cross-instance-json`, whose type composes `Dependencies`,
 and `fixture-rollups-json`, whose type rolls up its tasks, with the core
 binary, and their TypeScript twins in the tsreader fixtures load to the
 same IR.
@@ -1306,9 +1242,8 @@ same IR.
 the loader does not check against the type: the engine refuses a field
 the type does not declare or whose values are not strings when the schema
 is defined. Its `vectors` name what an outside embedder computes vectors
-with; the engine keeps and ranks them. `make cli-smoke` loads
-`fixture-search-json`, whose type keeps vectors, and its TypeScript twin
-to the same IR as well.
+with; the engine keeps and ranks them. The loader refuses `Search` now,
+naming `@searchField`, so no fixture composes it.
 
 `Reactions` declares a config and nothing else: the engine's runner
 applies its rules after a change commits (D16, amended), and a rule's
@@ -1323,7 +1258,7 @@ does, when the schema is defined. `make cli-smoke` loads
 `fixture-approvals-json`, whose expense claims wait for sign-offs before
 they are approved and paid, and its TypeScript twin loads to the same IR.
 
-`Numbering` names a link of the type's Links config (`scope`), which the
+`Numbering` names a link of the type (`scope`), which the
 loader does not check: the engine refuses one that is not a required,
 single-valued link, a format outside its tokens and a yearly reset whose
 format prints no year, when the schema is defined. It declares no veto
@@ -1364,8 +1299,8 @@ the meter, and each `releaseLeases` table one that implements `Lease`.
 The members only a table takes (each config's `status`, Retries'
 `backoff`, `retryInto`, `then`, `giveUpAfterMs`, `window` and `keyField`,
 Presence's `ttlByState`, Budget's resets but `daily`, its `window` and
-`observePermission`) are refused on an engine type, and the members only
-the engine's runner reads (`sweepMs`), Lease's `directOn` and Retries'
+`observePermission`) are the core's alone, and the members only the
+engine's runner reads (`sweepMs`), Lease's `directOn` and Retries'
 `resultField` are refused on a table.
 
 `Seats` and `Reconcile` (D104) are checked by the loader alone, in the
@@ -1383,12 +1318,11 @@ the table's first command, since the build links no zone database.
 `Pool` is too (`verify/behaviors_pool.go`): `order` a field of the table
 and a number one (`number`, `Generic.Int64` or `Generic.Float64`), in the
 core's words, and not an owned field, a relation, an audit field, a list
-or a field encrypted at rest. An
-engine type, of a DB or a General schema, that composes any of them is
-refused, naming the table form
-(`write implements Seats<T, { ... }> on a DB table`), since no engine
-implements them; enginedoc, projectengine and engineclientgen read engine
-types alone, so they never meet one.
+or a field encrypted at rest. A
+DB type that composes any of them with `@behavior` is refused, as any
+`@behavior` on a DB type is, naming the table form
+(`implements Seats<T, { ... }>`); a General schema's type composes them
+with `@behavior`, and development mode serves them (D117).
 
 acme declares `acme.Rating` and types its config in
 `packages/schema/src/behaviors.ts` (section 10);
@@ -1419,9 +1353,10 @@ ones that package implements), and
 `--check` fails, naming each file, on a copy that differs, is missing or
 has no behavior. It is a command of the binary rather than a tool in the
 core module, as `internal/tools/scalarcatalog` is, because an extension's
-declarations are registered only in its own binary: acme's copy comes
-from `acme-schematic behaviors --extension acme`, which acme's smoke runs
-with `--check` (section 10). The core's copies come from
+declarations are registered only in its own binary: an extension's copy
+comes from it, `acme-schematic behaviors --extension acme` for acme's,
+whose acme.Rating no crate implements, so acme keeps no copy. The core's
+copies come from
 the core binary, each into the Rust crate that implements it (D58): `make
 behaviors` writes the engine's `runtime/engine/rust/behaviors/declarations`
 with `--package @superschematic/engine`, the work queue's
@@ -1677,11 +1612,10 @@ reading only each config's `name` and `kind`.
    other generator whose `Kinds` lists the kind, in registration order.
 4. Call each generator's `Enabled`. Collect the `Dirs` of the enabled ones
    and fail, before any runs, if two claim the same directory, if a
-   type composes a behavior and an enabled generator does not set
-   `RendersBehaviors`, or the schema is an API, or the schema uses a DB
-   service's engine type and an enabled generator does not set it, or a
-   DB schema's engine types reach a table or a table references one
-   (section 3.16), or if `types` is enabled and a
+   type of an API composes a behavior, if a table composes one or the
+   schema uses such a table of a DB service and an enabled generator does
+   not set `RendersFieldBehaviors` (section 3.16), or if `types` is
+   enabled and a
    library it writes imports the types of a dependency whose config does
    not enable that language. The dependencies are the ones
    `codegen.TypeDependencies` finds in `Schema.Imports`: those that
@@ -1967,7 +1901,7 @@ each surface:
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Configuration | `[extension.acme] region` and `projection_scope_setting`; `metadata_key_prefix`, `scalar_jsdoc_tag`, `[package_aliases]` (`@acme/schema-config`) and `[deps] copy` | `ext/extension.go`, `schemas/superschematic.toml` |
 | Tool invocation policy | `confirm`: `never` or `always`, `never` by default, with its `MCPToolOptions` augmentation | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
-| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation; its engine implementation, a Rust crate over the declaration's copy, which the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `crates/behaviors` |
+| Behavior | `acme.Rating`, which a General data-form service in `ext/testdata/services/shop-ratings` composes, and its TypeScript twin `shop-ratings-ts` with `@behavior`; its `BehaviorConfigs` augmentation; its rules, the declarative vocabulary's, which the behaviors' core interprets with no crate (D103's step 5) | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts` |
 | Binary | `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 | A core mechanism in acme's terms | the `Planogram` version graph (D17): `Bay` and `Facing` members declared with the core's `@versionGraph`, `@graphMember` and `@conflictUnit` | `schemas/services/shop-db/src/planogram.schema.ts` |
 
@@ -1992,11 +1926,8 @@ that way. Two scripts check it, and the `acme` job in
   records reach the OpenAPI document under `x-acme-docs` and the tool
   documents carry acme's keys; `acme.Rating` reaches the IR of
   `shop-ratings` and of its TypeScript twin, `json-schema` and `format`
-  accept it (to YAML and to TypeScript), and `build` refuses the service,
-  naming the `types` generator; the implementation's copy of its
-  declaration is current (`behaviors --check`), and an engine with the
-  implementation publishes `shop-ratings`' `Product`, rates one and reads
-  its rating fields while an engine without it refuses the schema;
+  accept it (to YAML and to TypeScript), and `build` writes its
+  `ProductBehaviors` type;
   shop-db's `Planogram` graph expands in
   the IR, its descriptor and shell are written and the ORM and the API
   over it compile, and `format` writes the declarations back rather than

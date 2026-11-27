@@ -53,7 +53,7 @@ kinds it may reference, and which generators run, in order.
 
 | Kind | A class is | May import | May reference | Generators |
 | --- | --- | --- | --- | --- |
-| DB | a table; one that composes a behavior with `@behavior` is an engine type | `@superschematic/db` | General | `sql`, `orm`, `types`, `enginedoc` |
+| DB | a table, which composes a behavior by `implements` or a field type, never `@behavior` | `@superschematic/db` | General | `sql`, `orm`, `types`, `rulescore` |
 | API | a request or response type; with `@source`, a view of a table | `@superschematic/api` | DB, General, API | `types`, `api`, `sdks` |
 | General | a plain type | neither | General | `types`, `envConfig` |
 | Stack | a declaration of what runs where: the stack, a deployable or an environment | `@superschematic/stack` | none; it names services by their handles | `stack`, `server`, `ci` |

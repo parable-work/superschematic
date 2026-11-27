@@ -227,9 +227,10 @@ jobs:
         # builds the version-graph and rules TypeScript packages and
         # superscalar's browser and workerd builds, and
         # rustsdkgen compile tests run cargo clippy on the generated SDK
-        # crates, so this toolchain carries clippy; the projectengine tests
-        # hold the engine crates they write to rustfmt's layout, so it
-        # carries rustfmt too.
+        # crates, so this toolchain carries clippy; the Rust server and
+        # behaviors tests (rustrestgen, the Rust jobs and workers on SQLite)
+        # hold the files they write to rustfmt's layout, so it carries
+        # rustfmt too.
         run: |
           rustup toolchain install "$RUST_VERSION" --profile minimal --target wasm32-unknown-unknown --component clippy --component rustfmt
           rustup default "$RUST_VERSION"

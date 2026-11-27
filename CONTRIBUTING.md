@@ -411,11 +411,10 @@ commit it. CI fails on catalog or schema-file drift.
 
 `go test ./...` runs each package's tests in a process of its own, in
 parallel, and they share this checkout's built runtime packages: the HTTP
-runtime's and the engine's `dist/`, their `node_modules`, and the engine's
-addon in `runtime/engine/typescript/native/`. A test that needs the HTTP
-runtime built calls `testpaths.BuildHTTPRuntime` (or, for another package,
-`testpaths.BuildTypeScriptPackage`, naming each package whose `dist/` its
-build copies in, as the engine's copies the HTTP runtime's). It holds a
+runtime's and the rules package's `dist/` and their `node_modules`. A test
+that needs the HTTP runtime built calls `testpaths.BuildHTTPRuntime` (or,
+for another package, `testpaths.BuildTypeScriptPackage`, naming each
+package whose `dist/` its build copies in). It holds a
 lock on the package that every test process takes (`flock` on a file
 under the user's cache directory, keyed by the package's resolved path),
 and skips the build when what the build would read is what the last build
@@ -425,11 +424,7 @@ its build script names, the bun and node versions, and the copied
 packages' `dist/`. The outputs are its `dist/` and its `node_modules`
 symlinks. So the first test to need it builds it, the others wait for it,
 and none rebuilds it under another's feet. A test never runs `bun install`
-or `bun run build` in a runtime package itself, and never builds the
-engine's package or addon in place: it checks they are built and skips, or
-fails under `SUPERSCHEMATIC_REQUIRE_TS_CHECKS=1`, as
-`requireEngineTypeScript` does, and builds a project's addon into a
-directory of its own (`scripts/engine-napi.sh --crate <dir> --out <dir>`).
+or `bun run build` in a runtime package itself.
 
 A build run outside the tests (`make ts`, CI, another terminal) never
 removes what a test reads, but it does not swap it in as a whole either.
@@ -509,9 +504,9 @@ binary is not `go install`able: users download it from the release or run
 `superschematic-migrate`, whose module has none, installs that way.
 
 A generated Go server links superscalar's static archive, and the version
-graph's and the engine's (D58) when it uses them, through cgo, and no
-module the module proxy serves carries them. Each release ships them, with the engine's C ABI
-header, as `superschematic-archives_<version>_<platform>.tar.gz`
+graph's and the behaviors' core's when it uses them, through cgo, and no
+module the module proxy serves carries them. Each release ships them, with
+the engine's archive and C ABI header while the engine is in the tree, as `superschematic-archives_<version>_<platform>.tar.gz`
 beside the CLI, built by `scripts/release-archives.sh` with `RUST_VERSION`
 in the release's `build-archives` job, before the CLIs: each CLI links its
 platform's tarball and every tarball's SHA-256 (`internal/release`), which

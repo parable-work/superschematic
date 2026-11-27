@@ -111,10 +111,12 @@ Seats, Reconcile, Schedules, Pool, Rollups, Dependencies, Numbering,
 Revisions, Comments, Derived and Provenance, commerce's Stock, Holds,
 Calendar and Payments
 ([Selling and booking](/superschematic/guides/commerce/)), and Blueprint.
-`examples/engine-notes` and `examples/engine-jobs` run on both:
-`test/notes.dev.test.ts` serves the notes schema with `superschematic-dev`,
-and `test/jobs.dev.test.ts` serves the jobs' `schemas/dev` with
-`@superschematic/rules-handler`.
+`examples/engine-notes` and `examples/engine-jobs` run on development mode
+alone. `test/notes.dev.test.ts` serves the notes schema with
+`@superschematic/rules-handler` over a SQLite file, and
+`test/notes.dev-server.test.ts` serves that file with
+`superschematic-dev`. `test/jobs.dev.test.ts` serves the jobs'
+`schemas/dev` with `@superschematic/rules-handler`.
 
 A get and a list also show the fields a behavior computes at a read,
 which no row holds. They are named as the use's other fields are:
