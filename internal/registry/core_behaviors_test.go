@@ -1069,7 +1069,7 @@ func TestSchedulesIsTheCoresAlone(t *testing.T) {
 		fields = append(fields, field.Name+":"+field.Type)
 	}
 	if !ok || table.Key != "name" || len(schedules.Fields) != 0 || schedules.Value != "" || !schedules.ArmsDeadlines || !schedules.HearsChanges || len(schedules.Requires) != 0 ||
-		!slices.Equal(fields, []string{"name:string", "kind:string", "spec:string", "timeZone:string", "state:string", "setAt:Temporal.DateTime", "nextAt:Temporal.DateTime", "retryAt:Temporal.DateTime", "runs:Generic.Int64", "attempt:Generic.Int64", "lastAt:Temporal.DateTime", "lastOutcome:string", "finishedAt:Temporal.DateTime", "endedBy:string"}) {
+		!slices.Equal(fields, []string{"name:string", "kind:string", "spec:string", "timeZone:Temporal.TimeZone", "state:string", "setAt:Temporal.DateTime", "nextAt:Temporal.DateTime", "retryAt:Temporal.DateTime", "runs:Generic.Int64", "attempt:Generic.Int64", "lastAt:Temporal.DateTime", "lastOutcome:string", "finishedAt:Temporal.DateTime", "endedBy:string"}) {
 		t.Errorf("Schedules: table %v keyed by %q with fields %v, fields %v, value %q, arms deadlines %v, hears changes %v, requires %v", ok, table.Key, fields, schedules.Fields, schedules.Value, schedules.ArmsDeadlines, schedules.HearsChanges, schedules.Requires)
 	}
 	var ops, vetoes, kinds []string

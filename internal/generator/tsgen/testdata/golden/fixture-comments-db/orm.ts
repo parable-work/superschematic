@@ -633,7 +633,7 @@ export const fixtureCommentsDbRules: RulesLayout = {
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -942,7 +942,7 @@ export const fixtureCommentsDbRules: RulesLayout = {
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -1212,7 +1212,7 @@ export const fixtureCommentsDbRules: RulesLayout = {
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -1521,7 +1521,7 @@ export const fixtureCommentsDbRules: RulesLayout = {
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",

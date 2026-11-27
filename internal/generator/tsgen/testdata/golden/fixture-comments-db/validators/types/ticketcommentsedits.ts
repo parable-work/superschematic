@@ -14,6 +14,8 @@ import type { TicketCommentsEdits, JSDate, Ticket } from '../../types';
 
 import { validateGenericInt64Required, validateGenericInt64 } from '../scalars/generic_int64';
 
+import { validateTextMarkdownRequired, validateTextMarkdown } from '../scalars/text_markdown';
+
 import { validateGenericJSONRequired, validateGenericJSON } from '../scalars/generic_json';
 
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
@@ -78,7 +80,12 @@ export function validateTicketCommentsEdits(value: TicketCommentsEdits | null | 
     }
   }
 
-  expectString(errors, "body", value.body);
+  if (value.body !== null && value.body !== undefined) {
+    const [valid, fieldErrors] = validateTextMarkdown(value.body);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "body", fieldErrors);
+    }
+  }
 
   if (value.blocks !== null && value.blocks !== undefined) {
     const [valid, fieldErrors] = validateGenericJSON(value.blocks);

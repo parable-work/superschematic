@@ -158,7 +158,7 @@ const rulesLayoutJSON = `{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -467,7 +467,7 @@ const rulesLayoutJSON = `{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -737,7 +737,7 @@ const rulesLayoutJSON = `{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -1046,7 +1046,7 @@ const rulesLayoutJSON = `{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",

@@ -52,10 +52,10 @@
       "key": "field",
       "fields": [
         { "name": "field", "description": "The derived field's name.", "type": "string" },
-        { "name": "sourceHash", "description": "The SHA-256 of the model label, the instruction, the output schema and the inputs that hold a value; absent while no input holds one.", "type": "string" },
-        { "name": "settledHash", "description": "The source hash of the last value settled; absent before the first.", "type": "string" },
+        { "name": "sourceHash", "description": "The SHA-256 of the model label, the instruction, the output schema and the inputs that hold a value; absent while no input holds one.", "type": "Crypto.SHA256" },
+        { "name": "settledHash", "description": "The source hash of the last value settled; absent before the first.", "type": "Crypto.SHA256" },
         { "name": "model", "description": "The model label the last value was settled under.", "type": "string" },
-        { "name": "confidence", "description": "The confidence the last value was settled with, from 0 to 1.", "type": "number" },
+        { "name": "confidence", "description": "The confidence the last value was settled with, from 0 to 1.", "type": "Generic.Probability" },
         { "name": "settledAt", "description": "When the last value was settled, in epoch milliseconds.", "type": "Temporal.DateTime" },
         { "name": "settledBy", "description": "The subject of the deriver that settled it.", "type": "string" },
         { "name": "overriddenBy", "description": "Who wrote the field over Derived: a caller's subject, another behavior's name, or existing for a value the row held before; absent until one does and after rederive.", "type": "string" },

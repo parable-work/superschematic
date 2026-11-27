@@ -615,7 +615,7 @@ export abstract class Schedules<C extends SchedulesConfig> {
      * The IANA time zone a cron line is read in, as the bundled database
      * spells it; absent for after and every.
      */
-    timeZone: string;
+    timeZone: Temporal.TimeZone;
     /** active, paused or finished. */
     state: string;
     /**

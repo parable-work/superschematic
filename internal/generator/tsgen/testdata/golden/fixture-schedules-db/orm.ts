@@ -429,7 +429,7 @@ export const fixtureSchedulesDbRules: RulesLayout = {
                   "name": "timeZone",
                   "field": "timeZone",
                   "column": "time_zone",
-                  "type": "string"
+                  "type": "Temporal.TimeZone"
                 },
                 {
                   "name": "state",

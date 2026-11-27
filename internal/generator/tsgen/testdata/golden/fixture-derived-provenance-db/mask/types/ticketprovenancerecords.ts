@@ -17,7 +17,7 @@ export function maskSecretsTicketProvenanceRecords(value: TicketProvenanceRecord
     bySubject: value.bySubject !== undefined ? value.bySubject : null,
     forSubject: value.forSubject !== undefined ? value.forSubject : null,
     writtenAt: value.writtenAt,
-    confidence: value.confidence !== undefined ? value.confidence : null,
+    confidence: value.confidence,
     review: value.review !== undefined ? value.review : null,
     reviewedBy: value.reviewedBy !== undefined ? value.reviewedBy : null,
     reviewedAt: value.reviewedAt,

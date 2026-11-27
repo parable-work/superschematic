@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, Category, Article, ArticleDerivedDerivations, Ticket, TicketDerivedDerivations, TicketProvenanceRecords,  } from '@schemas/fixture-derived-provenance-db-types/types';
+import type { CryptoSHA256, GenericInt64, GenericJSON, GenericProbability, IdentityUUID, TemporalDateTime, Category, Article, ArticleDerivedDerivations, Ticket, TicketDerivedDerivations, TicketProvenanceRecords,  } from '@schemas/fixture-derived-provenance-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-derived-provenance-db-types';
@@ -76,7 +76,14 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ## Type System
 
 
-### Scalars (4)
+### Scalars (6)
+
+
+- **Crypto.SHA256** - Lowercase hexadecimal SHA-256 digest
+  - TypeScript type: `string`
+  - Pattern: `^[0-9a-f]{64}$`
+  - Min length: 64
+  - Max length: 64
 
 
 - **Generic.Int64** - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
@@ -87,6 +94,12 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 - **Generic.JSON** - Any valid JSON value: object, array, primitive, or null
   - TypeScript type: `JSONValue`
+
+
+- **Generic.Probability** - Probability value from 0.0 to 1.0 inclusive
+  - TypeScript type: `number`
+  - Minimum: 0
+  - Maximum: 1
 
 
 - **Identity.UUID** - UUID v4 with automatic base62 encoding for client-facing APIs
