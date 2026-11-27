@@ -66,7 +66,7 @@ function world() {
     role: table({ name: 'UserRole', access: 'roles' }, [
       { id: 'role-agent', name: 'worker-agent', permissions: ['tasks.read', 'tasks.write', 'notes.read'], reaches: ['TaskNote:task'] },
       { id: 'role-boss', name: 'boss', permissions: ['tasks.read', 'notes.read'] },
-      { id: 'role-party', name: 'tenant', permissions: ['tasks.read'], reaches: [] },
+      { id: 'role-party', name: 'guest', permissions: ['tasks.read'], reaches: [] },
     ]),
     userRoleGrant: table({ name: 'UserRoleGrant' }, [{ id: 'urg-1', userId: BOSS, roleId: 'role-boss' }]),
     agent: table({ name: 'Agent', agents: 'definitions' }),
@@ -109,7 +109,7 @@ describe("an agent run's token (D194)", () => {
     await expect(agents.authenticator()(bearer(token))).rejects.toMatchObject({ status: 401 });
     expect(await agents.principalOf(new Request('http://x/', { headers: { authorization: `Bearer ${token}` } }))).toBeNull();
 
-    const party = await issueGrant(orm, { holder: 'party-1', holderKind: 'party', role: 'tenant', targetType: 'Task', targetId: 'task-a' });
+    const party = await issueGrant(orm, { holder: 'party-1', holderKind: 'party', role: 'guest', targetType: 'Task', targetId: 'task-a' });
     for (const authenticate of [grantAuthenticator({ orm }), agents.authenticator()]) {
       expect(await authenticate(bearer(party.token))).toMatchObject({ subject: 'party-1', kind: 'party', permissions: ['tasks.read'] });
     }
