@@ -25,6 +25,11 @@ var sqliteReaders = map[string][]string{
 	"@audience":    {registry.LangTypeScript},
 	"@references":  {registry.LangTypeScript},
 	"@attachments": {registry.LangTypeScript},
+	// The search index on SQLite (D186): its triggers keep a row's index
+	// row whichever ORM writes it, and the TypeScript runtime searches it;
+	// the Rust search runs on Postgres alone (D188), and a Go server serves
+	// none (D180).
+	"@searchable": {registry.LangTypeScript, registry.LangGo},
 }
 
 // refuseSQLiteReaders refuses decorator on td in a DB service that lists the

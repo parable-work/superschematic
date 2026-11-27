@@ -15,7 +15,9 @@ import (
 // row names its record by one key. On SQLite the index is kept by row
 // triggers and ranked by FTS5 (D186), so whichever ORM writes a row, its
 // triggers keep its index row, as on Postgres; only the TypeScript runtime
-// searches it. The title and body are text fields
+// searches it, so a service that lists sqlite takes no Rust types, whose
+// search runs on Postgres alone (refuseSQLiteReaders). The title and body
+// are text fields
 // of the table, and the scope a field of it holding one value. None of
 // them is Encrypted<T>: an index row holds its text in the clear, so an
 // encrypted field is never indexed. comments: true needs a table that
@@ -51,6 +53,7 @@ func checkSearchables(schema *ir.Schema, in Input, r *Result) {
 			fail("%s's key is not one field, and an index row names its record by one key", td.Name)
 			continue
 		}
+		refuseSQLiteReaders(schema, in, td, "@searchable", r)
 		s := td.Searchable
 		for i, name := range s.Fields() {
 			role := "body"

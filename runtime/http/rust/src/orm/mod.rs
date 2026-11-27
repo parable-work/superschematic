@@ -39,6 +39,7 @@
 //! [`Error::AccessRefused`]. Repositories opened for no caller, a job's or
 //! the system's, read every row.
 
+pub mod calendar;
 pub mod fieldcrypt;
 mod plan;
 #[cfg(feature = "postgres")]
@@ -46,6 +47,7 @@ pub mod postgres;
 pub mod routes;
 pub mod rowfeatures;
 mod run;
+pub mod search_tables;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 #[cfg(feature = "sqlite")]
@@ -351,6 +353,16 @@ pub struct Table {
     /// rows a grant's role names. None for every other.
     #[serde(default)]
     pub access: Option<String>,
+    /// The table's `@calendarSource` declarations (D152), which
+    /// [`calendar::read_calendar`] merges; none for most tables, and on
+    /// Postgres alone (D188).
+    #[serde(default)]
+    pub calendar: Vec<calendar::CalendarSource>,
+    /// A `@searchable` table's index (D155), which
+    /// [`search_tables::search_tables`] ranks and
+    /// [`search_tables::index_search`] writes; Postgres alone (D188).
+    #[serde(default)]
+    pub searchable: Option<search_tables::SearchableDefinition>,
 }
 
 /// A one-to-many relation of a table (D90, D156): the rows of another

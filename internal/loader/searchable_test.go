@@ -135,3 +135,39 @@ export abstract class Ticket {
 		})
 	}
 }
+
+// TestSearchableOnSQLiteTakesNoRustTypes: a service that lists sqlite
+// serves @searchable with the TypeScript and Go types, whose writes the
+// index's triggers keep (D186), and refuses the Rust types, whose search
+// runs on Postgres alone (D188).
+func TestSearchableOnSQLiteTakesNoRustTypes(t *testing.T) {
+	const schema = `
+import { Identity } from "superscalar";
+import { AutoGenerate, key, queue, searchable } from "@superschematic/db";
+@queue()
+export abstract class Indexing {}
+@searchable<Ticket>({ title: "title", queue: Indexing })
+export abstract class Ticket {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+}`
+	base := filepath.ToSlash(filepath.Join(testpaths.RepoRoot(t), "internal", "loader", "tsreader", "testdata", "tsconfig.base.json"))
+	for _, tc := range []struct{ types, want string }{
+		{`"typescript": {"enabled": true}, "go": {"enabled": true}`, ""},
+		{`"typescript": {"enabled": true}, "rust": {"enabled": true}`, "@searchable on Ticket: tickets-db lists the sqlite dialect and enables the Rust types"},
+	} {
+		dir := writeService(t, map[string]string{
+			"schema.config.json":    `{"name": "tickets-db", "kind": "DB", "outputs": {"types": {` + tc.types + `}, "sql": {"dialects": ["postgres", "sqlite"]}}}`,
+			"tsconfig.json":         `{"extends": "` + base + `", "include": ["src/**/*.ts"]}`,
+			"src/tickets.schema.ts": schema,
+		})
+		_, err := LoadService(dir)
+		switch {
+		case tc.want == "" && err != nil:
+			t.Errorf("with %s: LoadService = %v", tc.types, err)
+		case tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)):
+			t.Errorf("with %s: LoadService = %v, want it to hold %q", tc.types, err, tc.want)
+		}
+	}
+}

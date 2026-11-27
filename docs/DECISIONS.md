@@ -2140,8 +2140,9 @@ Left:
   the row plans again on its own write, at a fire, or at `setRecurrence`.
 - The generated router mounting `calendarRoutes` and the calendar MCP
   tool; an app wires them, as it wires `grantAuthenticator` (D156).
-- The Go and Rust servers: Recurrence's operations through their adapters
-  end to end, and the calendar read and feed.
+- The Go server: Recurrence's operations through its adapter end to end,
+  and the calendar read and feed. D188 serves them in Rust, on Postgres;
+  a Rust server on SQLite is refused them.
 - A hand-written scenario of Recurrence that every adapter replays.
 - The SDK types narrowed by the config (`behaviortypes`: the anchors).
 - A calendar source's permission in the schema, beside the route's option;
@@ -2215,7 +2216,8 @@ kept while the text holds and fall back to the text order.
 
 Left:
 
-- The Go and Rust repositories and servers, and Python's.
+- The Go repositories and servers, and Python's. D188 serves search in
+  the Rust repositories and runtime, on Postgres.
 - The generated router mounting `searchRoutes` and the MCP tool, and a
   generated handler for the indexing queue; an app wires them.
 - A list operation's row rule (`by`), which is its operation's and not
@@ -2630,7 +2632,7 @@ Left:
 - The typed filters' one-to-many members; a path filter is the
   untyped repositories' and the table operations' so far.
 - The D152 to D159 features the refusals name, which the later Rust
-  entries port: D185 ports D154 and D159.
+  entries port: D185 ports D154 and D159, and D188 D152 and D155.
 
 ## D182. The TypeScript repositories run on SQLite and D1, an audience there is a JSON array of ids a trigger keeps and a read reaches through json_each, references and files are row triggers, and no trigger counts on another firing (D79, D116, D154, D156 amended)
 
@@ -2916,6 +2918,57 @@ Left:
 - A provider package named by its Go module path alone, resolved from
   the module cache rather than a directory.
 
+## D188. The Rust runtime and server serve D152's Recurrence and calendar and D155's search across tables on Postgres, a read across tables takes its caller's principal, and a stop never strands a claim (D152, D155, D181 amended)
+
+D152 and D155 built Recurrence's routes and worker, the calendar and its
+feed, and search across tables in the TypeScript runtime; D181 refused
+them in the Rust outputs, Recurrence on a Rust server alone, since the
+Rust core runs it. This entry ports them to Rust, on Postgres, with the
+TypeScript tables, statements, ranking, states and refusals. It is the
+third of the Rust parity entries.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Rust server serves a table that composes Recurrence through the adapter it serves every behavior through: the router's `recurrence` routes run `setRecurrence`, `complete`, `skip`, `moveOne` and `listOccurrences` through the core, and the behavior worker's generated queues fire the `open`, `remind`, `overdue` and `plan` deadlines, hear a raw write on the change queue, and hand `opened`, `reminded` and `missed` to the Workers methods. Nothing in the adapter was missing: the refusal was lifted, and the TypeScript cases hold the Rust server to it. | A Recurrence module of the Rust runtime, a second runner beside the adapter's. |
+| The Postgres definition of a Rust types crate carries each table's `@calendarSource` entries (`Table.calendar`) and its search index (`Table.searchable`), member for member the documents tsgen writes into orm.ts (`rustgen/calendar_search.go`). The SQLite definition carries neither. | A definition of their own beside the repositories', which the runtime would join by type. |
+| The runtime's `orm::calendar` and `orm::search_tables` port `calendar.ts` and `search-tables.ts`: `read_calendar`, the feed's grant (`issue_calendar_feed`, `rotate_calendar_feed`, `revoke_calendar_feed`, `calendar_feed_of`), `calendar_ics`, `calendar_routes` and the MCP tool; `search_tables`, `index_search`, `reindex_search`, `search_routes`, `search_mcp_tool`, `call_search_tool` and `search_embeddings_of`. Rust has no ambient caller (D181), so a read across tables takes the caller's principal and opens the repositories for it (`with_access`), the client, keys and clock the ones it is lent. | A read on repositories the caller already opened `with_access`, which a route that reads as a feed's holder, not its caller, could not use. |
+| A caller with grants is held inside the search's query by an `EXISTS` back to each table with `Repository::conditions`, the conditions its repository applies for that caller, as TypeScript's `repository.conditions`; a raw statement over them runs through `orm::postgres::query_rows`. | A second copy of the grant reach in the search module. |
+| `index_search` takes `&mut` a client and opens its transaction there, embedding after it commits, as `indexSearch` does. | The caller's transaction, as D185's locking writes take: the share lock and the embedding call must not sit in one transaction. |
+| Embeddings re-rank through the model provider's optional `embed` (D185): `search_embeddings_of` asks it to embed no text and refuses a provider that answers it embeds nothing, as `searchEmbeddingsOf` refuses one with no `embed`. A search's `Embedder` is a trait, so a test or an app gives its own. | Asking at the first search, which would fail one late. |
+| A Rust server whose database lists `sqlite` first is refused Recurrence and a calendar source (`rustrestgen`'s `checkSQLiteDeps`), since the adapter's Recurrence tables and `orm::calendar` read Postgres; `@searchable` on SQLite stays the loader's refusal for every language. An API whose database has a calendar source or a `@searchable` table turns on its Rust types' repositories, whose definition the routes open. | Serving the calendar on SQLite, D152's left for every language. |
+| The worker loop no longer drops a claim in flight at a stop: it awaits the claim within its own timeout and releases what it answered. Dropping it left messages the database had claimed with no handler until their lease ran out, which the Recurrence case of an event claimed as the worker stopped found. TypeScript's loop awaits its claim too. | Starting them at the stop, as TypeScript does, which the stop's grace then waits for. |
+
+Built: the refusals of D181 lose `@calendarSource`, `@searchable` and
+Recurrence on a Rust server (`verify/rust_features.go`), and rustrestgen
+gains the SQLite one; the definition's `calendar` and `searchable`
+(`internal/generator/rustgen/calendar_search.go`, goldens
+`fixture-search-db` and `fixture-recurrence-db`) and the types crate's
+re-exports; `orm::calendar`, `orm::search_tables`, `Repository::conditions`,
+`query_rows` and `Tables::keys` (`runtime/http/rust/src/orm/`); the claim
+at a stop (`worker.rs`). `TestRustRecurrenceEndToEnd` runs D152's cases
+through the generated Rust router and worker on Postgres: the plan to the
+horizon off a holiday with its deadlines, a rule change that leaves the
+open occurrence, the remind deadline on the worker and its events,
+`complete` and an afterDone recurrence, the refusals, the calendar merging
+a date and occurrences, and a raw write heard. `TestRustAccessEndToEnd`
+gains the feed's case: a feed shows what its principal reads, busy or in
+full, is no credential elsewhere, and is refused once rotated or revoked.
+`TestRustSearchEndToEnd` runs D155's six cases through the Rust
+repositories and runtime, a party's and an agent run's grants among them,
+with embeddings through a model provider.
+`TestARustServerOnSQLiteRefusesRecurrenceAndTheCalendar` holds the
+refusal. The guide's Rust sections.
+
+Left:
+
+- Rust on SQLite: Recurrence on a Rust server and the calendar
+  (D152's "the calendar on SQLite and D1"), and search (D155's).
+- A generated Rust server that mounts `calendar_routes` and
+  `search_routes` and serves the two MCP tools; an app merges them, as in
+  TypeScript (D152's and D155's left).
+- A generated handler for a `@searchable` declaration's queue, which an
+  app's `@worker` writes, calling `index_search`.
+
 ## D186. The SQLite repositories run the behaviors' core in their transactions, a change set on D1 is one batch, Recurrence and the calendar run there as on Postgres, and search's words are an FTS5 table its index's triggers keep (D152, D155, D182 amended)
 
 D182 built the TypeScript repositories on SQLite and D1 and refused a write
@@ -2939,7 +2992,7 @@ parties and agents follow (D189).
 | `searchTables` on SQLite matches each word as a quoted FTS5 phrase in the four texts, every one required, and ranks by `bm25` with Postgres's weights (1, 0.4, 0.2, 0.1), then table and key; a hit's `matched` is the first text that holds every word and its snippet FTS5's of that text. Access is checked inside the query as on Postgres: the audience through `json_each` over the index row's copy (`sqlutil.SQLiteAudienceContains`, the definition's `indexAudience`), a grant's reach by an `EXISTS` back to each table with its repository's SQLite conditions, and a table no grant reaches left out. | Ranking parity with `ts_rank_cd`'s scores, which the two engines do not share; their order by weight is the same. |
 | `indexSearch` on SQLite reads the row and its texts and writes the index row with the row's access columns read by the write itself (`INSERT ... SELECT` from the row), so on D1, which holds no transaction open, an audience change between the reads and the write is copied as it stands, and a row deleted between them writes none. | A share lock, which SQLite has no form of. |
 | Embeddings stay a Postgres option: a search on SQLite with a `vector` is refused as a bad request (`TypeError`), and `embeddings` in the options of a search or an indexing throws. | Storing vectors as JSON and comparing them in the runtime, which would read every hit's vector. |
-| The loader serves `@searchable` on the sqlite dialect, whichever languages' types the service enables: on SQLite as on Postgres the triggers keep a row's index row whichever ORM writes it, and only the TypeScript runtime searches; a Go or a Rust server is refused the feature on every dialect (D180, D181). Recurrence and `@calendarSource` were not refused on SQLite: Recurrence is the core's in every language, and the calendar is a read of the TypeScript runtime, whose Rust types refuse it on every dialect. The generated server's refusals over a database that lists sqlite first now name what is left: `Deps.orm`, built over a pg pool alone, and the behavior worker's claims, which go through the Postgres queue client. | Lifting those, which is D182's left item of the generated server over SQLite. |
+| The loader serves `@searchable` on the sqlite dialect with the TypeScript and Go types: on SQLite as on Postgres the triggers keep a row's index row whichever ORM writes it, only the TypeScript runtime searches there, and a Go server is refused the feature on every dialect (D180). Rust's search runs on Postgres alone (D188), so a service that lists sqlite and declares `@searchable` takes no Rust types (`refuseSQLiteReaders`). Recurrence and `@calendarSource` were not refused on SQLite: Recurrence is the core's in every language, and the calendar is a read of the TypeScript runtime, whose Rust types refuse it on every dialect. The generated server's refusals over a database that lists sqlite first now name what is left: `Deps.orm`, built over a pg pool alone, and the behavior worker's claims, which go through the Postgres queue client. | Lifting those, which is D182's left item of the generated server over SQLite. |
 | D1 is proved under the pinned workerd by the fixture `d1-orm`, which now runs three databases' generated `orm-sqlite.ts` and `sqlite/create.sql` (`TestTheWorkerdD1FixtureIsCurrent`): fixture-references-db's, fixture-recurrence-db's and fixture-search-db's, with the rules module embedded. Its stand-in's batch runs in one of the Durable Object's transactions, as D1 runs a batch. workerd's SQLite has FTS5. | A fixture per database. |
 
 Built: the stores (`runtime/http/typescript/src/orm-sqlite.ts`,
@@ -2950,7 +3003,7 @@ grants and `withRulesCore`; `orm_sqlite.tmpl`'s core and the SQLite
 search definition (`tsgen/orm_sqlite.go`); the SQLite triggers and FTS5
 piece (`internal/generator/sqlgen/searchable_sqlite.go`,
 `internal/sqlmigrate/sqlite_model.go`); the loader's check
-(`verify/searchable.go`); the guides' SQLite
+(`verify/searchable.go`, `verify/sqlite_features.go`); the guides' SQLite
 sections of search and of recurrence. fixture-search-db lists sqlite. The
 tests: `TestGeneratedRecurrenceEndToEndOnSQLite`, every case of D152's
 end-to-end test on bun:sqlite, the worker's handlers over `sqliteQueue`;

@@ -24,9 +24,10 @@ var accessRustTest string
 
 // accessRustCases are the cases testdata/access_rust.rs runs, by name:
 // D156's "done when" in the Rust server, the TypeScript server's cases
-// (tsrestgen's accessCases) but the calendar feed's, which is D152's and
-// the Rust outputs refuse (D181).
+// (tsrestgen's accessCases), the calendar feed's (D152) among them since
+// D188.
 var accessRustCases = []string{
+	"a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused",
 	"a private row never appears to another user in a list, a read, a search or a count",
 	"a named row is visible to its owner and to the principals it names",
 	"a document inherits its folder's audience, and follows it when the folder's changes",
@@ -43,10 +44,10 @@ var accessRustCases = []string{
 // SUPERSCHEMATIC_RULES_TEST_DATABASE_URL with the database's create.sql
 // applied: testdata/access_rust.rs drives it through the router with the
 // runtime's GrantAuthenticator and access log, and every case of
-// accessRustCases must run. The database's @calendarSource (D152), which
-// the Rust outputs refuse, is left out of the loaded schema; its contract
-// terms are sealed with a key the API's config holds, as no fixture
-// declares one.
+// accessRustCases must run, the calendar feed's through the runtime's
+// orm::calendar routes over the database's @calendarSource (D152, D188).
+// Its contract terms are sealed with a key the API's config holds, as no
+// fixture declares one.
 //
 // The test needs cargo, which it skips without, the database, and runs
 // outside -short.
@@ -83,9 +84,6 @@ func TestRustAccessEndToEnd(t *testing.T) {
 			// The Go ORM, which a DB service always generates, imports
 			// its Go types.
 			types["go"] = map[string]any{"enabled": true}
-			for _, td := range schema.Types {
-				td.CalendarSources = nil
-			}
 			sql, _ := cfg.Outputs["sql"].(map[string]any)
 			if sql == nil {
 				sql = map[string]any{"enabled": true}
