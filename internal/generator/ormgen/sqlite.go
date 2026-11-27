@@ -306,6 +306,9 @@ func sqliteRefusal(repo *Repository) string {
 	if reason := sqlutil.SQLiteTableRefusal(repo.Table); reason != "" {
 		return reason
 	}
+	if repo.sqliteAccess != "" {
+		return repo.sqliteAccess
+	}
 	switch {
 	case repo.Versioned:
 		return "it is @versioned, whose history the SQLite DDL does not keep"

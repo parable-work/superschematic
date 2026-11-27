@@ -223,31 +223,24 @@ func (o *ORMOutput) HeldByAccess() bool {
 	return o.Access != nil && o.Access.Held
 }
 
-// refuseSQLiteAccess refuses the ORM of a database whose DB service lists
-// the sqlite dialect and declares per-record access (D156): its
-// repositories on SQLite (D116) keep to no audience and no grant's reach,
-// and record no access log, so a held caller would read every row there.
-// The loader refuses such a service's Go types by decorator and table
-// (verify/sqlite_features.go, D182); this holds a generation that did not
-// read the service's config to the same.
-func refuseSQLiteAccess(schema *ir.Schema, access *AccessModel, sqlite bool) error {
-	if !sqlite || access == nil {
-		return nil
+// sqliteAccessRefusal is why the repository of typeName refuses every
+// call on SQLite under the database's per-record access (D156), or "": the
+// Go repositories on SQLite (D116) keep to no audience and no grant's
+// reach, so in a database whose reads keep to a caller (Held) every table's
+// would read rows a held caller may not, and the server records its calls
+// in the access log on Postgres alone. The loader refuses such a service's
+// Go types on sqlite by decorator and table (verify/sqlite_features.go,
+// D182); this holds a generation that did not read the service's config,
+// whose Go ORM the DB kind writes always, to repositories that refuse,
+// naming why, as a table SQLite does not hold has.
+func sqliteAccessRefusal(access *AccessModel, typeName string) string {
+	switch {
+	case access == nil:
+		return ""
+	case access.Held:
+		return "its database keeps its rows to per-record access (D156), an audience or grants, which the Go repositories on SQLite do not hold yet (D180, D182)"
+	case access.Log == typeName:
+		return "it is the @accessLog table, which the Go server records its calls in on Postgres alone (D180)"
 	}
-	var declared []string
-	for _, t := range access.Tables {
-		if t.Effective != "" {
-			declared = append(declared, "@audience on "+t.Type)
-		}
-	}
-	if access.Grants != "" {
-		declared = append(declared, "@accessGrants on "+access.Grants)
-	}
-	if access.Log != "" {
-		declared = append(declared, "@accessLog on "+access.Log)
-	}
-	if len(declared) == 0 {
-		return nil
-	}
-	return fmt.Errorf("ormgen: %s lists the sqlite dialect and declares %s: the Go repositories on SQLite keep to no audience or grant and record no access log yet (D180, D182); build it for postgres alone (outputs.sql.dialects: [\"postgres\"])", schema.Name, strings.Join(declared, ", "))
+	return ""
 }
