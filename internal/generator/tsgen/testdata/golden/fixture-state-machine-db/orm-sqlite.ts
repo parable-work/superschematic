@@ -74,7 +74,7 @@ export const ticketTable: TableDefinition = {
     update: "UPDATE ticket SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\"",
     updateMany: "UPDATE ticket SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO ticket (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\"",
     softDelete: "",

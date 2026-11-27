@@ -898,6 +898,13 @@ export interface ExecuteOptions {
    */
   readonly ownColumns?: Readonly<Record<string, unknown>>;
   /**
+   * The columns an update of the command's own row sets to the database's
+   * clock (stampNow), beside its own columns: the updatedAt a repository
+   * stamps, which then comes from the clock its insert's default read,
+   * whatever the host's says. Absent for none.
+   */
+  readonly nowColumns?: readonly string[];
+  /**
    * The columns a delete of the command's own row sets in place of
    * deleting it, by column, as the store binds them: a soft-deletable
    * table's deletedAt and deletedBy, which the repository stamps. The
@@ -2055,7 +2062,8 @@ function live(table: RulesTable): string {
  *     row's deletes of its deadlines' messages and its sub-table rows,
  *     each unless a row of the key is back, with no fence. The command's
  *     own row binds its own columns from options.ownColumns when the caller
- *     encoded them;
+ *     encoded them, and an update of it sets options.nowColumns to the
+ *     database's clock;
  *  2. a deadline command's spend of its arming, or a claimed change's of
  *     its message (spend), which must delete one message;
  *  3. each sub-table row write, an insert that must add one row, an update
@@ -2114,6 +2122,7 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
       case 'update': {
         const assigned = [...ownColumns(table, dialect, write.own, mine ? options.ownColumns : undefined), ...ownedColumns(table, dialect, write.owned)];
         const sets = assigned.map(([column, value]) => `${quote(column)} = ${bind(value)}`);
+        if (mine) for (const column of options.nowColumns ?? []) sets.push(`${quote(column)} = ${stampNow(dialect)}`);
         // The version moves on with every write, the core's own: on
         // Postgres @optimistic's trigger sets it to the same value.
         sets.push(`${quote(table.version)} = ${quote(table.version)} + 1`);
@@ -2340,6 +2349,16 @@ function ownedColumns(table: RulesTable, dialect: RulesDialect, owned: Readonly<
     }
   }
   return out;
+}
+
+/**
+ * The database's clock as an update stamps a row with it, sqlutil's
+ * StampNow: on Postgres the statement's time, later than every earlier
+ * statement of its transaction and so than the row's insert; on SQLite
+ * its 'now', the statement's, in the form of its default.
+ */
+function stampNow(dialect: RulesDialect): string {
+  return dialect === 'postgres' ? 'statement_timestamp()' : "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 }
 
 /** An identifier quoted as Postgres and SQLite both read one. */

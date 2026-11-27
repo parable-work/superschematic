@@ -15,7 +15,7 @@ takes one path, which decides who sent it and what it may reach.
 
 | Built | Not built yet |
 | --- | --- |
-| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | the Go runtime; the Rust runtime on SQLite |
+| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
 | one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a generated server that mounts the path and its workers |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
 | threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
@@ -23,6 +23,7 @@ takes one path, which decides who sent it and what it may reach.
 | a lapsed identity, verified again by a code | |
 | sending as a permission, with a rate limit, an approval policy and opt-outs | |
 | a message's trust narrowing the agent run that takes its request: a sender entered by hand asks before every write ([agent runs](/superschematic/guides/agent-runs/)) | |
+| the Go runtime's `inbound` package, on Postgres | |
 | the Rust runtime's `orm::parties` and `orm::inbound`, on Postgres | |
 
 D157 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
@@ -152,6 +153,54 @@ pool. A message, its files and its run request are written as the
 repositories write them, each statement its own on D1, which holds no
 transaction open: a run request is enqueued once the message and its
 files are stored.
+
+## In Go
+
+The Go HTTP runtime's `inbound` package is the same path, on Postgres
+(D192). The generated Go ORM of a database with a `@party` table, the
+conversations or a `@runRequests` queue, and the notifier, writes
+`orchestration.go`: the conversations' tables by part with their columns,
+the `@party` tables, the run requests queue, and
+`Database.Orchestration()`, the notifier's host with what the inbound path
+adds. `inbound.New` finds the conversations, the messages and the channel
+identities from it:
+
+```go
+host := db.Orchestration()
+notifier, err := notify.New(host, notify.Options{Providers: deps.Providers})
+in, err := inbound.New(host, inbound.Options{
+	Notifier:       notifier,
+	Providers:      deps.Providers,
+	Bucket:         inbound.BucketOf(files),
+	InboundAddress: "inbox@example.test",
+})
+
+// A relay's @webhook route.
+outcomes, err := in.Inbound(ctx, "SMS", request)
+// The run requests queue's worker: each request to a handler, the agent
+// dispatcher's or the app's own.
+queue, err := in.RunQueue(dispatcher.HandleRunRequest)
+err = worker.Run(ctx, queue, options)
+// A send, held to the permission, the identity, the rate limit and the
+// approval policy.
+sent, err := in.Send(ctx, inbound.SendInput{As: principal, Party: orchestration.PartyRef{Table: "Contact", Key: key}, Channel: "sms", Body: "Booked for Monday."})
+```
+
+`PrincipalOf` is `orchestration.PartyPrincipal`, a party with its grants'
+reach and their roles' permissions; Go's `access.Principal` holds no
+permissions, so `orchestration.Principal` carries them beside it, and a
+handler reads and writes as the party with `orm.WithPrincipal`.
+`orchestration.IdentityLapsed` decides a lapsed identity from the rows,
+which the notifier now asks too before it sends to a party's address. The
+conversations' tables are read and written by statements over the columns
+the definitions name, as the notifier's are; a party's row and a row a
+message is filed onto are read through their repository as the caller.
+The approval policy is a `SendApproval`: the app's (`ApprovalFunc`), or
+the agent dispatcher, which is built before the path and given it
+(`SetInbound`). A run request's message and grant are in base62, as the
+repositories write a key. A Go server over a database that lists `sqlite`
+first is refused the parties' tables, which run on SQLite and D1 in
+TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
 
 ## In Rust
 

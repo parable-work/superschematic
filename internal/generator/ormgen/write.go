@@ -9,6 +9,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/profile"
 )
 
@@ -166,6 +167,9 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 		return fmt.Errorf("failed to remove crosstable.go: %w", err)
 	}
 	if err := writeNotifications(generator, outputDir, output); err != nil {
+		return err
+	}
+	if err := writeOrchestration(generator, outputDir, output); err != nil {
 		return err
 	}
 	// fences.go holds the fences of each table with a @fenced field and
@@ -402,6 +406,7 @@ func templateFuncs() template.FuncMap {
 		},
 		"goRawString": goRawString,
 		"docComment":  docComment,
+		"filled":      sqlutil.Filled,
 	}
 }
 

@@ -70,7 +70,7 @@ export const stepTable: TableDefinition = {
     update: "UPDATE step SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"title\", \"kind\", \"result\"",
     updateMany: "UPDATE step SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO step (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"title\", \"kind\", \"result\"",
     softDelete: "",

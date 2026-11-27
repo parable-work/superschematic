@@ -17,7 +17,8 @@ import (
 // transaction, which a failed batch rolls back; UpsertOneResult compares
 // a location as its text and reads back a line it left; FindMany skips its
 // count; In on a time and a boolean; TransactionWith's isolation and read
-// only, and Tx.Transaction's savepoints.
+// only, and Tx.Transaction's savepoints; and a line's times, which come from
+// the database's clock alone, whatever the host's reads.
 func TestGeneratedUpsertManyOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping compile check in -short mode")
@@ -36,6 +37,7 @@ func TestGeneratedUpsertManyOnPostgres(t *testing.T) {
 		"TestUpsertManyOnPostgres/one_result",
 		"TestUpsertManyOnPostgres/find_without_a_count",
 		"TestUpsertManyOnPostgres/transactions",
+		"TestUpsertManyOnPostgres/the_database's_clock",
 	} {
 		if !strings.Contains(out, "--- PASS: "+name) {
 			t.Errorf("the generated ORM did not pass %s:\n%s", name, out)
@@ -433,6 +435,85 @@ func TestUpsertManyOnPostgres(t *testing.T) {
 		found, _, err := db.BankAccount.FindMany(ctx, &BankAccountFilter{Code: &StringFilter{In: []string{"kept", "dropped", "deeper", "after"}}}, &BankAccountFindOptions{Fields: BankAccountFields{Code: true}, OrderBy: []BankAccountOrderBy{{Field: BankAccountOrderByCode}}})
 		if err != nil || len(found) != 2 || found[0].Code != "after" || found[1].Code != "kept" {
 			t.Fatalf("the accounts the transaction kept = %+v, %v; want after and kept", found, err)
+		}
+	})
+
+	t.Run("the database's clock", func(t *testing.T) {
+		// The database's clock an hour ahead of the host's: its
+		// statement_timestamp() in a schema the search path names before
+		// pg_catalog, which the line's defaults read too. An update that
+		// stamped the host's time would stamp a line an hour before its
+		// insert.
+		skew := schema + "_skew"
+		if _, err := base.Exec(ctx, "CREATE SCHEMA "+skew); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _, _ = base.Exec(context.Background(), "DROP SCHEMA "+skew+" CASCADE") }()
+		if _, err := base.Exec(ctx, "CREATE FUNCTION "+skew+".statement_timestamp() RETURNS timestamptz LANGUAGE sql STABLE AS $$ SELECT pg_catalog.statement_timestamp() + interval '1 hour' $$"); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := pgxpool.ParseConfig(dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg.ConnConfig.RuntimeParams["search_path"] = skew + ",pg_catalog," + schema + ",public"
+		ahead, err := pgxpool.NewWithConfig(ctx, cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer ahead.Close()
+		for _, column := range []string{"created_at", "updated_at"} {
+			if _, err := ahead.Exec(ctx, "ALTER TABLE line_item ALTER COLUMN "+column+" SET DEFAULT statement_timestamp()"); err != nil {
+				t.Fatal(err)
+			}
+			defer func() {
+				_, _ = pool.Exec(context.Background(), "ALTER TABLE line_item ALTER COLUMN "+column+" SET DEFAULT CURRENT_TIMESTAMP")
+			}()
+		}
+		skewed, err := ConnectWithPool(ahead)
+		if err != nil {
+			t.Fatal(err)
+		}
+		line := lines("skew", 1)[0]
+		created, err := skewed.LineItem.CreateOne(ctx, line)
+		if err != nil {
+			t.Fatal(err)
+		}
+		at := time.Time(created.CreatedAt)
+		if !at.After(time.Now().Add(50 * time.Minute)) {
+			t.Fatalf("the line was created at %v, not an hour ahead of the host's clock", at)
+		}
+		name := "Renamed"
+		updated, err := skewed.LineItem.UpdateOne(ctx, *created.Id, &LineItemUpdate{Name: &name})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if time.Time(updated.UpdatedAt).Before(at) {
+			t.Fatalf("UpdateOne stamped the line at %v, before its insert at %v", updated.UpdatedAt, at)
+		}
+		line.Name = "Upserted"
+		upserted, err := skewed.LineItem.UpsertOneResult(ctx, line, LineItemUniqueByPlaidTransactionId, &LineItemUpdate{Name: &line.Name}, nil)
+		if err != nil || upserted.Status != UpsertUpdated {
+			t.Fatalf("the upsert = %+v, %v; want updated", upserted, err)
+		}
+		if time.Time(upserted.Row.UpdatedAt).Before(time.Time(updated.UpdatedAt)) {
+			t.Fatalf("UpsertOneResult stamped the line at %v, before its update at %v", upserted.Row.UpdatedAt, updated.UpdatedAt)
+		}
+		line.Name = "Again"
+		many, err := skewed.LineItem.UpsertMany(ctx, []*types.LineItem{line}, LineItemUniqueByPlaidTransactionId, LineItemFields{Name: true}, nil)
+		if err != nil || len(many) != 1 || time.Time(many[0].Row.UpdatedAt).Before(time.Time(upserted.Row.UpdatedAt)) {
+			t.Fatalf("UpsertMany = %+v, %v; want the line stamped after its upsert at %v", many, err, upserted.Row.UpdatedAt)
+		}
+		filed := "Filed"
+		if n, err := skewed.LineItem.UpdateMany(ctx, &LineItemFilter{PlaidTransactionId: &StringFilter{In: []string{line.PlaidTransactionId}}}, &LineItemUpdate{Name: &filed}); err != nil || n != 1 {
+			t.Fatalf("UpdateMany = %d, %v; want 1", n, err)
+		}
+		read, err := skewed.LineItem.GetOne(ctx, *created.Id, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if time.Time(read.UpdatedAt).Before(time.Time(many[0].Row.UpdatedAt)) || !time.Time(read.CreatedAt).Equal(at) {
+			t.Fatalf("after UpdateMany the line was created at %v and updated at %v; want its insert's %v and no earlier than %v", read.CreatedAt, read.UpdatedAt, at, many[0].Row.UpdatedAt)
 		}
 	})
 }

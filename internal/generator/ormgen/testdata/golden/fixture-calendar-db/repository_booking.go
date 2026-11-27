@@ -350,8 +350,9 @@ func (r *BookingRepository) corePatch(update *BookingUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and BookingUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and BookingUpdate holds none.
 func (r *BookingRepository) updateColumns(ctx context.Context, update *BookingUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Title != nil {

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"time"
 
 	types "example.com/schemas/types/go/fixture-revisions-db"
 	"github.com/jackc/pgx/v5"
@@ -458,8 +457,9 @@ func (r *PolicyRepository) corePatch(update *PolicyUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and PolicyUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and PolicyUpdate holds none.
 func (r *PolicyRepository) updateColumns(ctx context.Context, update *PolicyUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Title != nil {
@@ -473,7 +473,6 @@ func (r *PolicyRepository) updateColumns(ctx context.Context, update *PolicyUpda
 	} else if update.Body != nil {
 		columns["body"] = *update.Body
 	}
-	columns["updated_at"] = time.Now()
 	return columns, nil
 }
 
@@ -481,8 +480,7 @@ func (r *PolicyRepository) updateColumns(ctx context.Context, update *PolicyUpda
 // updatedAt.
 func (r *PolicyRepository) operationOptions(ctx context.Context) *rules.ExecuteOptions {
 	columns := map[string]any{}
-	columns["updated_at"] = time.Now()
-	return &rules.ExecuteOptions{OwnColumns: columns}
+	return &rules.ExecuteOptions{OwnColumns: columns, NowColumns: []string{"updated_at"}}
 }
 
 // createThroughCore is CreateOne on the repository's transaction: input's row
@@ -1513,9 +1511,7 @@ func (r *PolicyRepository) upsertRow(ctx context.Context, input *types.Policy, o
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 		// Set updated_by
 
@@ -1650,8 +1646,7 @@ func (r *PolicyRepository) upsertBatches(ctx context.Context, inputs []*types.Po
 			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			assignments = append(assignments, "updated_at = statement_timestamp()")
 		}
 		query := fmt.Sprintf(
 			`INSERT INTO policy (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "title", "body", "updated_at", "revisions_revision", "_version", (xmax = 0) AS _inserted`,
@@ -1869,10 +1864,7 @@ func (r *PolicyRepository) UpdateOne(ctx context.Context, id types.IdentityUUID,
 		if err != nil {
 			return nil, err
 		}
-		if len(patch) == 0 && len(columns) == 0 {
-			return nil, fmt.Errorf("no fields to update")
-		}
-		if err := rules.RunUpdate(ctx, rulesHost(tx), "Policy", id.String(), patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns}); err != nil {
+		if err := rules.RunUpdate(ctx, rulesHost(tx), "Policy", id.String(), patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns, NowColumns: []string{"updated_at"}}); err != nil {
 			return nil, behaviorNotFound(err, "Policy", id)
 		}
 		return repo.GetOne(ctx, id, nil)
@@ -1902,9 +1894,7 @@ func (r *PolicyRepository) UpdateMany(ctx context.Context, filter *PolicyFilter,
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 
