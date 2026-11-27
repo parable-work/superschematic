@@ -1463,6 +1463,10 @@ type RoleFilter struct {
 	Id          *UUIDFilter
 	Name        *StringFilter
 	Permissions *ArrayStringFilter
+	// UserRoleGrants keeps the rows that some UserRoleGrant row the filter
+	// finds points at by its role (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	UserRoleGrants *UserRoleGrantFilter
 	// ReferencedByUserRoleGrantRole filters on the presence or absence of a
 	// UserRoleGrant whose role points at this row.
 	ReferencedByUserRoleGrantRole *ReferencedByFilter
@@ -1619,6 +1623,16 @@ func (f *RoleFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				conditions = append(conditions, `role."name" IS NOT NULL`)
 			}
 		}
+	}
+	if f.UserRoleGrants != nil {
+		before := len(*args)
+		through := f.UserRoleGrants.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`role.id IN (SELECT user_role_grant.role_id FROM user_role_grant%s)`, where))
 	}
 	if f.ReferencedByUserRoleGrantRole != nil {
 		probe := `SELECT 1 FROM user_role_grant WHERE user_role_grant.role_id = role.id`
@@ -2210,6 +2224,22 @@ type UserFilter struct {
 	Email       *StringFilter
 	DisplayName *StringFilter
 	CreatedAt   *DateTimeFilter
+	// Sessions keeps the rows that some Session row the filter
+	// finds points at by its user (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Sessions *SessionFilter
+	// UserApiKeys keeps the rows that some UserApiKey row the filter
+	// finds points at by its user (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	UserApiKeys *UserApiKeyFilter
+	// UserCredentials keeps the rows that some UserCredential row the filter
+	// finds points at by its user (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	UserCredentials *UserCredentialFilter
+	// UserRoleGrants keeps the rows that some UserRoleGrant row the filter
+	// finds points at by its user (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	UserRoleGrants *UserRoleGrantFilter
 	// ReferencedBySessionUser filters on the presence or absence of a
 	// Session whose user points at this row.
 	ReferencedBySessionUser *ReferencedByFilter
@@ -2482,6 +2512,46 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				conditions = append(conditions, `"user".created_at IS NOT NULL`)
 			}
 		}
+	}
+	if f.Sessions != nil {
+		before := len(*args)
+		through := f.Sessions.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"user".id IN (SELECT "session".user_id FROM "session"%s)`, where))
+	}
+	if f.UserApiKeys != nil {
+		before := len(*args)
+		through := f.UserApiKeys.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"user".id IN (SELECT user_api_key.user_id FROM user_api_key%s)`, where))
+	}
+	if f.UserCredentials != nil {
+		before := len(*args)
+		through := f.UserCredentials.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"user".id IN (SELECT user_credential.user_id FROM user_credential%s)`, where))
+	}
+	if f.UserRoleGrants != nil {
+		before := len(*args)
+		through := f.UserRoleGrants.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"user".id IN (SELECT user_role_grant.user_id FROM user_role_grant%s)`, where))
 	}
 	if f.ReferencedBySessionUser != nil {
 		probe := `SELECT 1 FROM "session" WHERE "session".user_id = "user".id`

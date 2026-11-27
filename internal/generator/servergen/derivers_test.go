@@ -134,7 +134,8 @@ func TestDeriversOfTheStack(t *testing.T) {
 
 // TestDeriverRefusals: the build refuses a rules policy with no rule that
 // names a deriver's subject and allows, and builds once one does; a
-// deriver of a type that composes no Derived; and a Go API's deriver.
+// deriver of a type that composes no Derived; and a Go API's deriver of
+// engine types (D146).
 func TestDeriverRefusals(t *testing.T) {
 	build := func(f fixture, services ...string) error {
 		repoRoot := t.TempDir()
@@ -185,8 +186,8 @@ func TestDeriverRefusals(t *testing.T) {
 	dbConfig := *f.configs["triage-db"]
 	dbConfig.Outputs = map[string]any{"types": map[string]any{"go": map[string]any{"enabled": true}, "typescript": map[string]any{"enabled": true}, "rust": map[string]any{"enabled": true}}}
 	f.configs["triage-db"] = &dbConfig
-	if err := build(f, "triage-db", "triage-ts-api"); err == nil || !strings.Contains(err.Error(), "triage-ts-api declares deriver TriageTickets, and it is a Go API; a deriver runs on a TypeScript or Rust API; Go follows (D74)") {
-		t.Errorf("build = %v, want a Go API's deriver refused", err)
+	if err := build(f, "triage-db", "triage-ts-api"); err == nil || !strings.Contains(err.Error(), "triage-ts-api declares deriver FillAll, which fills the derived fields of Ticket, engine types of its database, and it is a Go API; a deriver of engine types runs on a TypeScript or Rust API, and a Go API's deriver fills tables alone (D146)") {
+		t.Errorf("build = %v, want a Go API's deriver of engine types refused", err)
 	}
 }
 

@@ -140,9 +140,7 @@ func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
 	}
-	if f := onEnqueue.Load(); f != nil {
-		(*f)(t.queue)
-	}
+	wakeQueue(t.queue)
 	return nil
 }
 
@@ -162,6 +160,17 @@ func OnEnqueue(f func(queue string)) {
 		return
 	}
 	onEnqueue.Store(&f)
+}
+
+// wakeQueue calls what OnEnqueue last gave with queue, the `@queue` class,
+// when it gave one: after an enqueue's statement, after a command of the
+// behaviors' core that gave a behavior worker's queue a message (the rules
+// host's Wake, D151), and after a write past the core of a table whose
+// trigger writes its change queue (D145).
+func wakeQueue(queue string) {
+	if f := onEnqueue.Load(); f != nil {
+		(*f)(queue)
+	}
 }
 
 // slot takes one of slots locks named for the table, the first that is

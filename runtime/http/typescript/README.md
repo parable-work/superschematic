@@ -675,7 +675,15 @@ reads that drain from `WORKER_MODE`, `WORKER_IDLE_SECONDS` and
 `WORKER_SLOTS`, and is undefined for a worker that polls until it is
 stopped. `postgresQueue(pool, queue).slot(slots)` takes the slot, a
 session's advisory lock on a connection of its own, which giving the slot
-back ends.
+back ends. `runWorkers(queues, options)` runs a behavior worker's queues
+together, as Go's `worker.RunAll` does: in drain mode it takes one slot
+for them all, of the first queue that has `slot`, and its loops share one
+idle clock, so they stop together. The rules adapter wakes a behavior
+worker's queues once a command's statements have run: the event queue of
+each event, the deadline queue of each deadline armed, and the change
+queue of each row written, whose trigger writes the message; a
+repository's `updateMany`, `deleteMany` and `hardDeleteOne` wake the
+change queue too.
 
 `enqueue` also wakes its queue's worker where the environment holds a
 wake for it in `QUEUE_WAKES` (D145), a JSON object that gives each queue's

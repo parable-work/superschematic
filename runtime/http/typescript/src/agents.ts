@@ -59,9 +59,17 @@ The run's principal. authenticator() resolves the token to the grant's
 holder, the run, as kind agent, acting for whom the run acts for, holding
 the agent's role's permissions narrowed to those whom it acts for holds, and
 reaching the run's targets and the rows the role's paths reach from them
-(every grant the run holds). The repositories keep its reads and writes to
-that reach and to each row's audience and agent access (followRole,
-readOnly, none), as for any agent run (D156).
+(every grant the run holds). A run acting for a party reaches through only
+the paths the party's grant of the same target reaches too, and from a
+target its grant names not, the row alone (D183). The repositories keep its
+reads and writes to that reach and to each row's audience and agent access
+(followRole, readOnly, none), as for any agent run (D156).
+
+Trust. A run an inbound message started records the message's trust
+(D157): verified, or entered for a sender entered by hand, or a message the
+dispatcher could not read. An entered sender's run reads as its policy
+says, and every other operation asks, whatever a policy row says, as a
+money movement always does (D183); its token's claims carry the trust.
 
 Autonomy. Each tool call passes gate: the most specific policy row for the
 agent and the operation or its class (read, internalWrite, messageParty,
@@ -106,7 +114,11 @@ Transcripts are redacted (the run's token, bearer tokens, and the patterns
 the options add) as each entry is written, kept on the run row while it
 runs and in the bucket after, for transcriptRetentionDays (30), after which
 prune deletes the object and stamps the row; the run row itself is history
-and stays.
+and stays. Each turn replays the run's earlier completions as assistant
+messages with the tool calls they made and the provider's own state of
+them (ModelCompletion.providerState), which a completion keeps unredacted
+while the run lives, since a provider checks it as it returned it; a read
+of the transcript and the transcript the run leaves hold it redacted.
 */
 
 /** The triggers of a run (D158). */
@@ -212,6 +224,14 @@ export interface TranscriptEntry {
   readonly content?: string;
   readonly toolCallId?: string;
   readonly toolCalls?: readonly { readonly id: string; readonly name: string; readonly input: unknown }[];
+  /**
+   * A completion's ModelCompletion.providerState, which the turns after it
+   * pass back on its assistant message. It is the one member kept
+   * unredacted while the run lives, since a provider checks it as it
+   * returned it (a Claude thinking block's signature); a read of the
+   * transcript, and the transcript the run leaves, hold it redacted.
+   */
+  readonly providerState?: unknown;
   readonly tool?: string;
   readonly args?: unknown;
   readonly outcome?: string;
@@ -386,6 +406,46 @@ export function defaultAutonomy(cls: OperationClass): Autonomy {
   return cls === 'read' || cls === 'internalWrite' ? 'auto' : 'ask';
 }
 
+/**
+ * The trust of an inbound message's run (D157, D183): verified for a
+ * message its row records as from a verified identity, and entered for
+ * anything else, an identity entered by hand, a trust the row does not
+ * record, a message the dispatcher could not read.
+ */
+export type RunTrust = 'verified' | 'entered';
+
+/** The run's trust of a message's recorded trust: verified only when the row says so. */
+export function trustOf(recorded: unknown): RunTrust {
+  return recorded === 'verified' ? 'verified' : 'entered';
+}
+
+/**
+ * The autonomy a run has over an operation of class cls (D158, D183): the
+ * policy's mode, but a money movement asks whatever it says, and so does
+ * every operation but a read of a run whose sender was entered by hand.
+ */
+export function effectiveAutonomy(mode: Autonomy, cls: OperationClass, trust: RunTrust | null | undefined): Autonomy {
+  if (cls === 'moneyMovement') return 'ask';
+  if (trust === 'entered' && cls !== 'read') return 'ask';
+  return mode;
+}
+
+/**
+ * The relation paths a run reaches from a target it holds, narrowed to
+ * those of the party it acts for (D183): the role's paths the party's
+ * grants of the same target also reach, by type. A target no grant of the
+ * party names gives no path: the run reaches the row and nothing through
+ * it.
+ */
+export function narrowReaches(role: Readonly<Record<string, readonly string[]>>, party: readonly Readonly<Record<string, readonly string[]>>[]): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [type, paths] of Object.entries(role)) {
+    const kept = paths.filter(path => party.some(reach => reach[type]?.includes(path)));
+    if (kept.length > 0) out[type] = [...new Set(kept)];
+  }
+  return out;
+}
+
 /** The SHA-256, in hex, of an operation and its parameters as canonical JSON: what an approval is bound to. */
 export function paramsHash(operation: string, params: unknown): string {
   return hex(sha256(new TextEncoder().encode(canonicalJson({ operation, params }))));
@@ -488,7 +548,12 @@ export function createAgents(options: AgentsOptions): Agents {
       const row = await runs(tx).findOne({ id: { eq: runId } });
       if (!row) return;
       const at = now().toISOString();
-      const next = [...((row.transcript as TranscriptEntry[] | null) ?? []), ...entries.map(entry => redact({ at, ...entry }))];
+      // Every member is redacted as it is written but a completion's
+      // providerState, which the turns after it pass back as it was.
+      const next = [
+        ...((row.transcript as TranscriptEntry[] | null) ?? []),
+        ...entries.map(({ providerState, ...entry }) => ({ ...redact({ at, ...entry }), ...(providerState !== undefined ? { providerState } : {}) })),
+      ];
       await runs(tx).updateOne(runId, { transcript: next });
     });
   };
@@ -643,12 +708,14 @@ export function createAgents(options: AgentsOptions): Agents {
         log.warn('a sandbox cost was not read', { run: runId, detail: err instanceof Error ? err.message : String(err) });
       }
     }
-    const entries = (run.transcript as TranscriptEntry[] | null) ?? [];
+    // The transcript a run leaves is redacted whole, its completions'
+    // providerState with the rest, since no later turn passes it back.
+    const entries = redact((run.transcript as TranscriptEntry[] | null) ?? []);
     let transcriptObject: string | null = (run.transcriptObject as string | null) ?? null;
     let transcript: TranscriptEntry[] | null = entries;
     if (options.transcripts) {
       transcriptObject = `agent-runs/${runId}.json`;
-      await options.transcripts.put(transcriptObject, JSON.stringify(redact(entries)), { contentType: 'application/json' });
+      await options.transcripts.put(transcriptObject, JSON.stringify(entries), { contentType: 'application/json' });
       transcript = null;
     }
     const status = outcome === 'done' ? 'done' : outcome === 'failed' ? 'failed' : 'cancelled';
@@ -764,9 +831,16 @@ export function createAgents(options: AgentsOptions): Agents {
       const targets = await scopeOf(request);
       if (typeof targets === 'string') return refuseRun(request, definition, 'refused', targets);
       const fields = runFields(request, definition, targets);
-      if (request.trigger === 'inbound' && typeof request.message === 'string') {
-        const read = await readInbound({ party: request.party!, message: request.message, grant: String(request.grant) });
-        if (read) fields.input = { ...(fields.input as Values), inboundText: read.text, ...(read.trust ? { trust: read.trust } : {}), grant: String(request.grant) };
+      if (request.trigger === 'inbound') {
+        // The grant the run is under, which narrows its permissions and its paths (D183).
+        fields.input = { ...(fields.input as Values), grant: String(request.grant) };
+        const read = typeof request.message === 'string' ? await readInbound({ party: request.party!, message: request.message, grant: String(request.grant) }) : null;
+        if (read) fields.input = { ...(fields.input as Values), inboundText: read.text };
+        // The message's trust, as its row records it (D157): a sender
+        // entered by hand, and a message the dispatcher cannot read or that
+        // the request carries as text, is entered, whose run asks before
+        // anything but a read (D183).
+        fields.trust = trustOf(read?.trust);
       }
       run = await runs().createOne(fields);
       // The run on the timeline of the row that started it (D154): a reference from the run, which the row lists among its backlinks.
@@ -991,12 +1065,30 @@ export function createAgents(options: AgentsOptions): Agents {
     if (!run || !['running', 'waiting'].includes(String(run.status))) return null;
     const reaches: GrantReach[] = [];
     const db = sys(orm);
-    for (const grant of await activeGrants(db, { holder: base.subject, now: now() })) {
-      const role = rolesMember ? await repo(db, rolesMember).findOne({ name: { eq: grant.role } }) : null;
-      reaches.push({ id: String(grant.id), targetType: String(grant.targetType), targetId: String(grant.targetId), reaches: reachesOf(role?.reaches as string[] | undefined) });
-    }
+    const roleReaches = async (name: unknown): Promise<Record<string, string[]>> => {
+      const role = rolesMember ? await repo(db, rolesMember).findOne({ name: { eq: String(name) } }) : null;
+      return reachesOf(role?.reaches as string[] | undefined);
+    };
     const actingFor = run.actingForKind && run.actingFor ? { kind: run.actingForKind as 'user' | 'party', subject: String(run.actingFor) } : undefined;
     const input = (run.input as Values | null) ?? {};
+    // A run acting for a party reaches through no path the party's grant
+    // does not (D183): the grant it runs under, or each active grant of the
+    // party, read on every call, so a grant that ended narrows it to nothing.
+    let partyGrants: { targetType: string; targetId: string; reaches: Record<string, string[]> }[] | undefined;
+    if (actingFor?.kind === 'party') {
+      partyGrants = [];
+      for (const grant of await activeGrants(db, { holder: actingFor.subject, now: now() })) {
+        if (typeof input.grant === 'string' && String(grant.id) !== input.grant) continue;
+        partyGrants.push({ targetType: String(grant.targetType), targetId: String(grant.targetId), reaches: await roleReaches(grant.role) });
+      }
+    }
+    for (const grant of await activeGrants(db, { holder: base.subject, now: now() })) {
+      const own = await roleReaches(grant.role);
+      const narrowed = partyGrants
+        ? narrowReaches(own, partyGrants.filter(g => g.targetType === String(grant.targetType) && g.targetId === String(grant.targetId)).map(g => g.reaches))
+        : own;
+      reaches.push({ id: String(grant.id), targetType: String(grant.targetType), targetId: String(grant.targetId), reaches: narrowed });
+    }
     const permissions = actingFor
       ? narrow(base.permissions, await permissionsOf({ ...actingFor, ...(run.actingForTable ? { table: String(run.actingForTable) } : {}), ...(typeof input.grant === 'string' ? { grant: input.grant } : {}) }))
       : [...base.permissions];
@@ -1007,7 +1099,7 @@ export function createAgents(options: AgentsOptions): Agents {
       grants: reaches,
       ...(actingFor ? { actingFor } : {}),
       ...(base.credential ? { credential: base.credential } : {}),
-      claims: { run: String(run.id), agent: String(run.agent), definitionVersion: Number(run.definitionVersion) },
+      claims: { run: String(run.id), agent: String(run.agent), definitionVersion: Number(run.definitionVersion), ...(run.trust ? { trust: String(run.trust) } : {}) },
     };
   };
 
@@ -1075,8 +1167,8 @@ export function createAgents(options: AgentsOptions): Agents {
     const run = await runOf(principal);
     const cls = gateOptions.class ?? 'internalWrite';
     const policy = await policyMode(String(run.agent), operation, cls);
-    let mode: Autonomy = policy.mode ?? gateOptions.mode ?? defaultAutonomy(cls);
-    if (cls === 'moneyMovement') mode = 'ask';
+    const trust = run.trust ? trustOf(run.trust) : null;
+    const mode = effectiveAutonomy(policy.mode ?? gateOptions.mode ?? defaultAutonomy(cls), cls, trust);
     if (mode !== 'ask') return { run: true, mode };
     const approvals = repo(self(orm), parts.approvals);
     const hash = paramsHash(operation, args);
@@ -1092,7 +1184,8 @@ export function createAgents(options: AgentsOptions): Agents {
     }
     const denied = (await approvals.findMany({ run: { eq: run.id }, operation: { eq: operation }, paramsHash: { eq: hash }, state: { eq: 'denied' } }, { limit: 1, count: false })).rows[0];
     if (denied) return { run: false, status: 403, code: 'approval_denied', detail: `${operation} was denied`, approval: String(denied.id) };
-    const approval = same ?? (await askApproval(run, operation, cls, args, policy.permission ?? AGENT_PERMISSIONS.approve, `${run.agentName} asks to run ${operation} with ${canonicalJson(args)}`));
+    const sender = trust === 'entered' ? ", for a sender entered by hand and not verified" : '';
+    const approval = same ?? (await askApproval(run, operation, cls, args, policy.permission ?? AGENT_PERMISSIONS.approve, `${run.agentName} asks to run ${operation} with ${canonicalJson(args)}${sender}`));
     if (run.status === 'running') await moveRun(orm, String(run.id), 'waiting');
     return { run: false, status: 428, code: 'approval_required', detail: `${operation} runs once someone holding ${approval.permission} approves it: approval ${approval.id}`, approval: String(approval.id) };
   };
@@ -1277,6 +1370,12 @@ export function createAgents(options: AgentsOptions): Agents {
             await record('ask_principal', args, 'forbidden', {});
             return problem(403, 'forbidden', 'a run asks only in the thread of one of its target rows');
           }
+          // Posting in a thread is an internal write: an entered sender's run asks first (D183).
+          const gated = await gate(principal, 'ask_principal', args, { class: 'internalWrite' });
+          if (!gated.run) {
+            await record('ask_principal', args, gated.code, {});
+            return problem(gated.status, gated.code, gated.detail, gated.approval ? { approval: gated.approval } : {});
+          }
           const question = String(args.question);
           const message = await withCaller(principal, () =>
             orm.as(principal).withBehaviorCaller(caller).transaction((tx: any) => threadOf().post(tx, { row, question, ...(typeof args.principal === 'string' ? { principal: args.principal } : {}), caller }))
@@ -1356,7 +1455,16 @@ export function createAgents(options: AgentsOptions): Agents {
     for (const entry of history) {
       if (entry.kind === 'task') messages.push({ role: 'user', content: String(entry.content ?? ''), ...(entry.untrusted ? { untrusted: true } : {}) });
       else if (entry.kind === 'message') messages.push({ role: entry.role ?? 'tool', content: String(entry.content ?? ''), ...(entry.toolCallId ? { toolCallId: entry.toolCallId } : {}), ...(entry.untrusted ? { untrusted: true } : {}) });
-      else if (entry.kind === 'completion') messages.push({ role: 'assistant', content: String(entry.content ?? '') });
+      // An earlier completion, with the tool calls the tool messages after
+      // it answer and the provider's state of it, as the provider returned
+      // it (D158).
+      else if (entry.kind === 'completion')
+        messages.push({
+          role: 'assistant',
+          content: String(entry.content ?? ''),
+          ...(entry.toolCalls && entry.toolCalls.length > 0 ? { toolCalls: entry.toolCalls.map(c => ({ id: c.id, name: c.name, input: c.input })) } : {}),
+          ...(entry.providerState !== undefined ? { providerState: entry.providerState } : {}),
+        });
     }
     const { provider, slot } = await modelOf(definition);
     let completion: ModelCompletion;
@@ -1378,7 +1486,15 @@ export function createAgents(options: AgentsOptions): Agents {
         modelSlot: slot,
       });
     });
-    await append(orm, String(run.id), [{ kind: 'completion', role: 'assistant', content: completion.content, toolCalls: completion.toolCalls.map(c => ({ id: c.id, name: c.name, input: c.input })) }]);
+    await append(orm, String(run.id), [
+      {
+        kind: 'completion',
+        role: 'assistant',
+        content: completion.content,
+        toolCalls: completion.toolCalls.map(c => ({ id: c.id, name: c.name, input: c.input })),
+        ...(completion.providerState !== undefined ? { providerState: completion.providerState } : {}),
+      },
+    ]);
     await meterUsage(agent, spent);
     return json(200, { content: redactText(completion.content), toolCalls: redact(completion.toolCalls), stop: completion.stop, usage: completion.usage });
   };
@@ -1499,7 +1615,9 @@ export function createAgents(options: AgentsOptions): Agents {
       const text = typeof read.text === 'function' ? await read.text() : await new Response(read.body!).text();
       return JSON.parse(text) as TranscriptEntry[];
     }
-    return (run.transcript as TranscriptEntry[] | null) ?? [];
+    // A live run's completions keep their providerState unredacted for the
+    // turns after them; a reader gets it redacted, as the rest.
+    return redact((run.transcript as TranscriptEntry[] | null) ?? []);
   };
 
   const prune = async (limit: number): Promise<number> => {

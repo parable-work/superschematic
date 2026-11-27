@@ -3461,6 +3461,8 @@ type RecipePublished struct {
 	Root IdentityUUID `json:"root"`
 
 	Commit IdentityUUID `json:"commit"`
+
+	Sequence *GenericInt64 `json:"sequence,omitempty"`
 }
 
 // MaskSecrets returns a copy of RecipePublished with secret fields cleared.
@@ -3475,6 +3477,8 @@ func (t *RecipePublished) MaskSecrets() *RecipePublished {
 
 	masked.Commit = t.Commit
 
+	masked.Sequence = t.Sequence
+
 	return masked
 }
 
@@ -3482,7 +3486,7 @@ func (t *RecipePublished) MaskSecrets() *RecipePublished {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*RecipePublished) JSONFieldNames() []string {
-	return []string{"root", "commit"}
+	return []string{"root", "commit", "sequence"}
 }
 
 // Validate validates all fields in RecipePublished
@@ -3499,6 +3503,15 @@ func (t *RecipePublished) Validate() ValidationErrors {
 
 	if valid, fieldErrs := validateIdentityUUIDValue(t.Commit, true); !valid {
 		errors.SetFieldErrors("commit", fieldErrs)
+	}
+
+	// Validate sequence (optional)
+
+	// Validate optional pointer field
+	if t.Sequence != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Sequence, false); !valid {
+			errors.SetFieldErrors("sequence", fieldErrs)
+		}
 	}
 
 	return errors

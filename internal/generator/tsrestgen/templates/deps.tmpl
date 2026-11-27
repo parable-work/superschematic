@@ -59,6 +59,9 @@ import type { {{ .Deps.ORM }}{{ if .WorkerEvents }}, {{ .DepsTx }}{{ end }} } fr
 {{- if .Deps.Engine }}
 import type { EngineBackground } from '{{ .Deps.Engine.Package }}/server';
 {{- end }}
+{{- if .HasAgents }}
+import type { Agents, AgentsOptions } from '{{ .RuntimePackage }}/postgres';
+{{- end }}
 {{- if .WorkerEventTypes }}
 import type { {{ join .WorkerEventTypes ", " }} } from '{{ .TypesPackage }}/types';
 {{- end }}
@@ -131,6 +134,18 @@ export interface Deps {
    */
   readonly engine: EngineBackground;
 {{- end }}
+{{- with .Deps.Agents }}
+  /**
+   * The agent dispatcher (D158, D183): createAgents over orm and the queue
+   * {{ .Requests }}, with the options the implementation's
+   * createAgentOptions answers. The workers of {{ .Requests }}{{ if .RunRequests }} and of
+   * {{ .RunRequests }}{{ end }} hand each message to agents.handle; a server mounts
+   * agents.routes() at its endpoint and holds the calls a run makes to its
+   * MCP endpoint to the run's autonomy (agents.mcpGate). An authenticator
+   * that accepts a run's token is agents.authenticator(inner).
+   */
+  readonly agents: Agents;
+{{- end }}
   /** The API's logger. */
   readonly logger: Logger;
 }
@@ -140,6 +155,25 @@ export interface Deps {
  * the API's Deps. The scaffolded implementation exports create: Constructor.
  */
 export type Constructor = (deps: Deps) => Implementations | Promise<Implementations>;
+{{- if .HasAgents }}
+
+/**
+ * What the agent dispatcher is built with beside Deps.orm and its queue,
+ * which the entrypoint fills (D183): the URL a run's sandbox instance
+ * reaches the agent routes at, the providers its sandbox and model slots
+ * name (D159), the notifier and the inbound path, the app's tools and the
+ * rest of createAgents' options.
+ */
+export type AgentOptions = Omit<AgentsOptions, 'orm' | 'requests'>;
+
+/**
+ * The type of the implementation's createAgentOptions, which the
+ * entrypoint calls with Deps but its dispatcher, then builds Deps.agents
+ * with its answer (withAgents). The scaffolded implementation exports
+ * createAgentOptions: AgentOptionsConstructor.
+ */
+export type AgentOptionsConstructor = (deps: Omit<Deps, 'agents'>) => AgentOptions | Promise<AgentOptions>;
+{{- end }}
 {{- if .ChecksEndUsers }}
 
 /**

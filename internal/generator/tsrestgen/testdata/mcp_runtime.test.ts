@@ -127,10 +127,16 @@ describe('the MCP endpoint', () => {
     const { tools } = (await mcp(app(), 'tools/list')).result;
     expect(tools.map((tool: { name: string }) => tool.name)).toEqual(['list_orders', 'get_order', 'update_order', 'open_return']);
     const byName = Object.fromEntries(tools.map((tool: { name: string }) => [tool.name, tool]));
-    expect(byName.get_order).toMatchObject({ title: 'Get an order', description: 'Returns one order by its identifier.', annotations: { readOnlyHint: true } });
+    expect(byName.get_order).toMatchObject({ title: 'Get an order', description: 'Returns one order by its identifier.' });
+    // The hints are the tool's resolved record (D123): read_only reads,
+    // compare_and_swap may write and does not say it only adds, and an
+    // idempotent one that only adds is neither destructive nor read-only.
+    expect(byName.get_order.annotations).toEqual({ readOnlyHint: true, destructiveHint: false, idempotentHint: false });
+    expect(byName.update_order.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
+    expect(byName.open_return.annotations).toEqual({ readOnlyHint: false, destructiveHint: false, idempotentHint: true });
     expect(byName.get_order._meta).toMatchObject({ ui: { resourceUri: 'ui://orders/detail' }, invocationPolicy: 'auto' });
     expect(byName.get_order._meta['superschematic/operation-guidance'].useWhen).toBe('Use when you have an order identifier.');
-    expect(byName.update_order).toMatchObject({ annotations: { readOnlyHint: false }, _meta: { invocationPolicy: 'ask' } });
+    expect(byName.update_order).toMatchObject({ _meta: { invocationPolicy: 'ask' } });
     expect(byName.update_order.inputSchema.properties.confirmationToken).toMatchObject({ type: 'string' });
     expect(byName.get_order.inputSchema.properties.confirmationToken).toBeUndefined();
     expect(byName.list_orders.inputSchema.required).toEqual(['statuses']);

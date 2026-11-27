@@ -16,6 +16,7 @@ import {
   indexSearch,
   issueGrant,
   paramsHash,
+  revokeGrant,
   postgresQueue,
   type Agents,
   type AgentTool,
@@ -23,7 +24,7 @@ import {
   type Notifier,
   type TranscriptEntry,
 } from '@superschematic/http-runtime/postgres';
-import { providersFrom, SecretValue, type Providers, type SandboxProvider } from '@superschematic/http-runtime/providers';
+import { providersFrom, SecretValue, type ModelTurn, type Providers, type SandboxProvider } from '@superschematic/http-runtime/providers';
 import type { Principal } from '@superschematic/http-runtime';
 import { createOrm, type FixtureAgentRunsDbOrm } from './orm';
 import { agentRunRequestQueue, noticeWorkQueue, runRequestQueue, taskDeadlineQueue, taskEventQueue } from './queues';
@@ -36,7 +37,7 @@ const SITE_KEY = 'site-key-4b9e17c2';
 const VAULT_TOKEN = 'vault-broker-token-9d2c';
 const RELAY_TOKEN = 'relay-token';
 const BUN = process.env.AGENT_RUNNER_BUN || process.execPath;
-const PHONE = { ann: '+15550100001', customer: '+15550100021' };
+const PHONE = { ann: '+15550100001', customer: '+15550100021', entered: '+15550100022' };
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -97,6 +98,10 @@ interface World {
   stopApp: () => void;
   bucket: Map<string, string>;
   logs: string[];
+  /** Each turn the model was asked to complete, in order. */
+  modelTurns: ModelTurn[];
+  /** The providerState the model returns with its nth completion, when set. */
+  modelState: { of?: (n: number) => unknown };
   boss: Principal;
   ann: Principal;
   ids: Record<string, string>;
@@ -124,6 +129,15 @@ const tools: Record<string, AgentTool> = {
       return { id: row.id, text: row.text };
     },
   },
+  note_task: {
+    description: "Writes a task's details.",
+    inputSchema: { type: 'object', required: ['key', 'details'], properties: { key: { type: 'string' }, details: { type: 'string' } } },
+    class: 'internalWrite',
+    async run({ tx, args }) {
+      const row = await tx.task.updateOne(String(args.key), { details: String(args.details) });
+      return { id: row.id, details: row.details };
+    },
+  },
   pay_invoice: {
     description: 'Pays an invoice an amount.',
     inputSchema: { type: 'object', required: ['invoice', 'amount'], properties: { invoice: { type: 'string' }, amount: { type: 'integer' } } },
@@ -143,6 +157,8 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
   const svc = services();
   const logs: string[] = [];
   const bucket = new Map<string, string>();
+  const modelTurns: ModelTurn[] = [];
+  const modelState: { of?: (n: number) => unknown } = {};
   const base = providersFrom({
     slots: { SANDBOX: 'sandbox', MODEL: 'model', SMS: 'channel' },
     config: {
@@ -182,7 +198,20 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
     credentials: slot => base.credentials(slot),
     channel: slot => base.channel(slot),
     sandbox: async () => recording,
-    model: slot => base.model(slot),
+    // The stub, recording each turn it is asked and returning the
+    // providerState the test sets with each completion.
+    model: async slot => {
+      const model = await base.model(slot);
+      return {
+        ...model,
+        async complete(turn) {
+          modelTurns.push(turn);
+          const completion = await model.complete(turn);
+          const state = modelState.of?.(modelTurns.length);
+          return state === undefined ? completion : { ...completion, providerState: state };
+        },
+      };
+    },
     files: slot => base.files(slot),
     principalOf: slot => base.principalOf(slot),
   };
@@ -285,7 +314,7 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
     { name: 'reviewer', role: 'worker-agent', task: 'call search {"q":"pump"}', tools: ['search', 'read_task', 'read_note'], command },
     { name: 'payer', role: 'worker-agent', tools: ['pay_invoice', 'read_task'], command },
     { name: 'fetcher', role: 'worker-agent', tools: ['http_get'], command, credentials: [{ ref: 'vault://ops/site/password', site: svc.siteOrigin, header: 'x-api-key' }] },
-    { name: 'responder', role: 'worker-agent', tools: ['pay_invoice', 'read_task', 'message_party'], command, inbound: true },
+    { name: 'responder', role: 'worker-agent', tools: ['pay_invoice', 'read_task', 'read_note', 'note_task', 'message_party'], command, inbound: true },
     { name: 'asker', role: 'worker-agent', tools: ['ask_principal'], command },
   ]) {
     await agents.define(boss, definition);
@@ -298,7 +327,7 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
   const noteB = String((await sys.taskNote.createOne({ taskId: b, text: 'pump spare is in bay four' })).id);
   const invoice = String((await sys.invoice.createOne({ taskId: a, amount: 100, paid: 0 })).id);
   const ids = { a, b, noteA, noteB, invoice, ann, boss: bossId };
-  const w: World = { db, orm, sys, agents, notifier, inbound, providers, sandbox, started, failStarts, svc, endpoint, stopApp: () => app.stop(true), bucket, logs, boss, ann: annPrincipal, ids };
+  const w: World = { db, orm, sys, agents, notifier, inbound, providers, sandbox, started, failStarts, svc, endpoint, stopApp: () => app.stop(true), bucket, logs, modelTurns, modelState, boss, ann: annPrincipal, ids };
   await indexAll(w);
   return w;
 }
@@ -480,6 +509,39 @@ describe.skipIf(!dsn)('agent runs', () => {
     await watch(w);
   });
 
+  test("each turn replays the run's earlier completions with their tool calls and the provider's state unchanged, and a reader gets the state redacted", async () => {
+    w = await world();
+    const { a } = w.ids;
+    // The model's own record of each turn, as a Claude provider's thinking
+    // block with its signature: text the transcript's redaction would
+    // rewrite, so a replay of it redacted would fail the provider's check.
+    const state = (n: number) => ({ thinking: [{ type: 'thinking', thinking: `turn ${n}: the search sent Bearer abc.def`, signature: `sig-${n}` }] });
+    w.modelState.of = state;
+    const id = await ask(w, 'reviewer', a);
+    await exited(w, id);
+    // The reviewer's task calls search on its first turn, and the second
+    // turn answers the result.
+    expect(w.modelTurns.length).toBe(2);
+    const [first, second] = w.modelTurns;
+    expect(first!.messages.filter(m => m.role === 'assistant')).toEqual([]);
+    const replayed = second!.messages.findIndex(m => m.role === 'assistant');
+    const assistant = second!.messages[replayed]!;
+    expect(assistant.toolCalls).toEqual([{ id: expect.any(String), name: 'search', input: { q: 'pump' } }]);
+    expect(assistant.providerState).toEqual(state(1));
+    // Its tool result follows it, answering its call.
+    expect(second!.messages[replayed + 1]).toMatchObject({ role: 'tool', toolCallId: assistant.toolCalls![0]!.id });
+    // A reader of the transcript, while the run lives and after it ends,
+    // gets the state redacted.
+    const live = (await w.agents.transcript(id)).filter(e => e.kind === 'completion');
+    expect(live[0]!.providerState).toEqual({ thinking: [{ type: 'thinking', thinking: 'turn 1: the search sent [redacted]', signature: 'sig-1' }] });
+    await watch(w);
+    const done = await run(w, id);
+    expect(done.status).toBe('done');
+    const left = (await w.agents.transcript(id)).filter(e => e.kind === 'completion');
+    expect(left.map(e => e.providerState)).toEqual([1, 2].map(n => ({ thinking: [{ type: 'thinking', thinking: `turn ${n}: the search sent [redacted]`, signature: `sig-${n}` }] })));
+    expect(w.bucket.get(String(done.transcriptObject))).not.toContain('Bearer abc.def');
+  });
+
   test('an ask operation waits for an approval given on any channel, then runs', async () => {
     w = await world();
     const { a, invoice } = w.ids;
@@ -652,9 +714,13 @@ describe.skipIf(!dsn)('agent runs', () => {
     ]);
     const id = String(started.id);
     const principal = (await w.agents.principalOf(new Request('http://x/', { headers: { authorization: `Bearer ${w.started.get(id)!.token}` } })))!;
-    // Narrowed by whom it acts for: what the party's grant's role holds.
-    expect(principal).toMatchObject({ kind: 'agent', actingFor: { kind: 'party', subject: customer } });
+    // Narrowed by whom it acts for: what the party's grant's role holds,
+    // and the paths it reaches: the customer's role reaches none, so the
+    // agent's role's notes and invoices are out of reach (D183).
+    expect(principal).toMatchObject({ kind: 'agent', actingFor: { kind: 'party', subject: customer }, claims: { trust: 'verified' } });
+    expect(started.trust).toBe('verified');
     expect([...principal.permissions].sort()).toEqual(['parties.message', 'tasks.read']);
+    expect(principal.grants!.map(g => [g.targetType, g.reaches])).toEqual([['Task', {}], ['Customer', {}], ['Message', {}]]);
     await exited(w, id);
     // The message is data: the run's task, marked untrusted, and nothing it asks for is done.
     const entries = (await run(w, id)).transcript as TranscriptEntry[];
@@ -662,6 +728,9 @@ describe.skipIf(!dsn)('agent runs', () => {
     expect(entries[0]!.content).toContain('call pay_invoice');
     expect(entries.some(e => e.kind === 'call')).toBe(false);
     expect((await w.sys.invoice.findOne({ id: { eq: invoice } }))!.paid).toBe(0);
+    // It reads its task, and not the task's note its agent's role reaches and its party's does not.
+    expect((await mcp(w, id, 'read_task', { key: a })).result).toMatchObject({ id: a });
+    expect((await mcp(w, id, 'read_note', { key: w.ids.noteA })).problem).toMatchObject({ status: 404 });
     // Writing back to the party is messageParty: the send waits on the policy, held by D157's send, and the run waits with it.
     const before = w.svc.sms.length;
     const held = await mcp(w, id, 'message_party', { channel: 'sms', body: 'Your pump is booked for Tuesday' });
@@ -681,6 +750,67 @@ describe.skipIf(!dsn)('agent runs', () => {
     expect((await run(w, id)).status).toBe('running');
     // A send that is no agent run's is the app's own: the policy allows it.
     expect(await w.agents.sendPolicy(w.boss, 'send_message', { body: 'hi' })).toBe('allow');
+    await watch(w);
+  });
+
+  test("a party's run reaches only the paths its grant reaches, and an entered sender's run reads and asks before every write whatever the policy says", async () => {
+    w = await world();
+    const { a, noteA } = w.ids;
+    // The responder writes and messages parties on its own, by its policy.
+    await w.agents.setPolicy(w.boss, { agent: 'responder', operationClass: 'internalWrite', mode: 'auto' });
+    await w.agents.setPolicy(w.boss, { agent: 'responder', operationClass: 'messageParty', mode: 'auto' });
+    // A tenant's role reaches a task's notes and not its invoices.
+    await w.sys.role.createOne({ name: 'tenant', permissions: ['tasks.read', 'tasks.write', 'parties.message'], reaches: ['TaskNote:task'] });
+    const start = async (phone: string, trust: 'verified' | 'entered') => {
+      const party = String((await w!.sys.customer.createOne({ name: `A ${trust} tenant` })).id);
+      await w!.sys.channelIdentity.createOne({ kind: 'phone', address: phone, principalKind: 'party', principalTable: 'Customer', principal: party, trust, ...(trust === 'verified' ? { verifiedAt: new Date() } : {}) });
+      const { grant } = await issueGrant(w!.sys, { holder: party, holderKind: 'party', role: 'tenant', targetType: 'Task', targetId: a });
+      const outcome = await w!.inbound.receive({ channel: 'sms', slot: 'SMS', from: phone, body: 'Is my pump booked?' });
+      expect(outcome).toMatchObject({ outcome: 'run' });
+      await drain(w!);
+      const run = await runOf(w!, 'responder');
+      expect(run).toMatchObject({ actingFor: party, trust });
+      await exited(w!, String(run.id));
+      const principal = (await w!.agents.principalOf(new Request('http://x/', { headers: { authorization: `Bearer ${w!.started.get(String(run.id))!.token}` } })))!;
+      return { party, grant: String(grant.id), id: String(run.id), principal };
+    };
+
+    // Verified: the role's paths the tenant's grant reaches too, the notes
+    // and not the invoices, and its writes run as the policy says.
+    const verified = await start(PHONE.customer, 'verified');
+    expect(verified.principal.claims).toMatchObject({ trust: 'verified' });
+    expect(verified.principal.grants!.map(g => [g.targetType, g.reaches])).toEqual([['Task', { TaskNote: ['task'] }], ['Customer', {}], ['Message', {}]]);
+    expect((await mcp(w, verified.id, 'read_note', { key: noteA })).result).toMatchObject({ id: noteA });
+    expect((await mcp(w, verified.id, 'note_task', { key: a, details: 'booked Tuesday' })).result).toMatchObject({ details: 'booked Tuesday' });
+    expect((await mcp(w, verified.id, 'message_party', { channel: 'sms', body: 'Booked for Tuesday' })).result).toMatchObject({ outcome: 'sent' });
+    expect(w.svc.sms.filter(m => m.to === PHONE.customer).length).toBe(1);
+    // The paths end with the grant: the tenant's grant revoked, the run reaches no note.
+    await revokeGrant(w.sys, verified.grant);
+    expect((await mcp(w, verified.id, 'read_note', { key: noteA })).problem).toMatchObject({ status: 404 });
+
+    // Entered by hand: it reads, and every write asks, whatever the policy says.
+    const entered = await start(PHONE.entered, 'entered');
+    expect(entered.principal.claims).toMatchObject({ trust: 'entered' });
+    expect(entered.principal.grants!.find(g => g.targetType === 'Task')!.reaches).toEqual({ TaskNote: ['task'] });
+    expect((await mcp(w, entered.id, 'read_task', { key: a })).result).toMatchObject({ id: a });
+    expect((await mcp(w, entered.id, 'read_note', { key: noteA })).result).toMatchObject({ id: noteA });
+    const asked = await mcp(w, entered.id, 'note_task', { key: a, details: 'cancel everything' });
+    expect(asked.problem).toMatchObject({ status: 428, code: 'approval_required' });
+    expect((await w.sys.task.findOne({ id: { eq: a } }))!.details).toBe('booked Tuesday');
+    const held = await mcp(w, entered.id, 'message_party', { channel: 'sms', body: 'Cancelled' });
+    expect(held.result).toMatchObject({ outcome: 'awaitingApproval' });
+    expect(w.svc.sms.filter(m => m.to === PHONE.entered)).toEqual([]);
+    const approvals = (await w.sys.agentApproval.findMany({ run: { eq: entered.id } })).rows;
+    expect(approvals.map(r => [r.operation, r.operationClass, r.state]).sort()).toEqual([
+      ['note_task', 'internalWrite', 'pending'],
+      ['send_message', 'messageParty', 'pending'],
+    ]);
+    const write = approvals.find(r => r.operation === 'note_task')!;
+    expect(write.summary).toContain('entered by hand');
+    // Approved, the same write runs once; again, it asks again.
+    await w.agents.approve(w.ann, String(write.id));
+    expect((await mcp(w, entered.id, 'note_task', { key: a, details: 'cancel everything' })).result).toMatchObject({ details: 'cancel everything' });
+    expect((await mcp(w, entered.id, 'note_task', { key: a, details: 'cancel everything' })).problem).toMatchObject({ status: 428 });
     await watch(w);
   });
 

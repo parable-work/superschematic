@@ -186,6 +186,12 @@ required-features = ["postgres"]
 name = "queue"
 required-features = ["postgres"]
 
+# The queue client's wake (D145) on the same Postgres, a binary of its
+# own: the process's waker reads QUEUE_WAKES once.
+[[test]]
+name = "queue_wake"
+required-features = ["postgres"]
+
 # The queue client and the worker loop on a SQLite file (D53, amended).
 [[test]]
 name = "orm_sqlite_file"

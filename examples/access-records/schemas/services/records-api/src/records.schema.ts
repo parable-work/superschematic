@@ -1,4 +1,4 @@
-import { Identity } from "superscalar";
+import { Identity, Temporal } from "superscalar";
 import { Nullable, Secret, Validate } from "@superschematic/schema";
 import { envVars } from "@superschematic/schema-config";
 import {
@@ -12,7 +12,7 @@ import {
   source,
   tableOperation
 } from "@superschematic/api";
-import { Agreement, Page, Ticket, Workspace } from "@schemas/records-db";
+import { AccessEntry, Agreement, Grant, Page, Ticket, Workspace } from "@schemas/records-db";
 
 // The keys of records-db's Encrypted<T> fields, which its config names
 // (D85): the API's config, so each environment sets the one secret.
@@ -85,6 +85,35 @@ export abstract class TicketView {
 @source(Ticket)
 export abstract class CreateTicketInput {
   title: Validate<string, { minLength: 1 }>;
+}
+
+// A grant, a row of the database's @accessGrants table, without the hash
+// of its token.
+@source(Grant)
+export abstract class GrantView {
+  id: Identity.UUID;
+  holder: Identity.UUID;
+  holderKind: string;
+  role: string;
+  targetType: string;
+  targetId: Identity.UUID;
+  startsAt: Temporal.DateTime;
+  endsAt: Nullable<Temporal.DateTime>;
+  revokedAt: Nullable<Temporal.DateTime>;
+}
+
+// A row of the database's @accessLog table.
+@source(AccessEntry)
+export abstract class AccessEntryView {
+  id: Identity.UUID;
+  at: Temporal.DateTime;
+  kind: string;
+  principal: Nullable<string>;
+  principalKind: Nullable<string>;
+  operation: Nullable<string>;
+  targetType: Nullable<string>;
+  targetId: Nullable<string>;
+  field: Nullable<string>;
 }
 
 export class Workspaces extends Authenticated {
@@ -163,6 +192,26 @@ export class Tickets extends Authenticated {
   @requirePermission(["tickets.write"])
   @tableOperation()
   openTicket(siteId: Identity.UUID, input: CreateTicketInput): TicketView {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class Access extends Authenticated {
+  // The grants, for a settings page.
+  @rest(HttpMethod.GET, "access/grants")
+  @requirePermission(["access.admin"])
+  @paginated()
+  @tableOperation()
+  listGrants(): GrantView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // The access log, for a settings page.
+  @rest(HttpMethod.GET, "access/log")
+  @requirePermission(["access.admin"])
+  @paginated()
+  @tableOperation()
+  listAccessLog(): AccessEntryView[] {
     throw new Error("schema declaration only");
   }
 }

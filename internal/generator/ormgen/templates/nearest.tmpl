@@ -309,7 +309,7 @@ func (r *{{ .Name }}) Nearest(ctx context.Context, field {{ .TypeName }}VectorFi
 	// leaves out{{ if .HasSoftDelete }}, then the soft-delete condition{{ end }}, then a vector
 	// that may be null's presence; the vector is the last parameter.
 	var args []interface{}
-	conditions := opts.Filter.conditions(&args, 0)
+	conditions := {{ if $.HeldByAccess }}r.accessConditions(ctx, opts.Filter, &args, 0, false){{ else }}opts.Filter.conditions(&args, 0){{ end }}
 	if len(opts.ExcludeIDs) > 0 {
 		placeholders := make([]string, len(opts.ExcludeIDs))
 		for i, id := range opts.ExcludeIDs {

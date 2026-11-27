@@ -193,7 +193,7 @@ impl Jobs for RestockJobs {
                 .rq_media
                 .put(&format!("restocks/{sku}.txt"), sku.to_string().into(), PutOptions::content_type("text/plain"))
                 .await?;
-            println!("stored {} of {} bytes", stored.name, stored.size);
+            println!("stored {} of {} bytes", stored.object.name, stored.object.size);
         }
         let queue = QueueDefinition::parse(database_types::STOCK_LOW_QUEUE)?;
         let mut client = self.deps.db.get().await?;

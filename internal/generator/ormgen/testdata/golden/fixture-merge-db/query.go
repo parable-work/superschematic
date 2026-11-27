@@ -3068,6 +3068,14 @@ type CustomerFilter struct {
 	Status          *StringFilter
 	StatusEnteredAt *DateTimeFilter
 	Version         *Int64Filter
+	// CustomerProfiles keeps the rows that some CustomerProfile row the filter
+	// finds points at by its customer (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	CustomerProfiles *CustomerProfileFilter
+	// Purchases keeps the rows that some Purchase row the filter
+	// finds points at by its customer (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Purchases *PurchaseFilter
 	// ReferencedByCustomerProfileCustomer filters on the presence or absence of a
 	// CustomerProfile whose customer points at this row.
 	ReferencedByCustomerProfileCustomer *ReferencedByFilter
@@ -3395,6 +3403,26 @@ func (f *CustomerFilter) conditions(args *[]interface{}, paramOffset int) []stri
 			}
 		}
 	}
+	if f.CustomerProfiles != nil {
+		before := len(*args)
+		through := f.CustomerProfiles.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`customer.id IN (SELECT customer_profile.customer_id FROM customer_profile%s)`, where))
+	}
+	if f.Purchases != nil {
+		before := len(*args)
+		through := f.Purchases.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`customer.id IN (SELECT purchase.customer_id FROM purchase%s)`, where))
+	}
 	if f.ReferencedByCustomerProfileCustomer != nil {
 		probe := `SELECT 1 FROM customer_profile WHERE customer_profile.customer_id = customer.id`
 		if f.ReferencedByCustomerProfileCustomer.Exists {
@@ -3698,6 +3726,10 @@ func (f *CustomerProfileFilter) conditions(args *[]interface{}, paramOffset int)
 type DocumentFilter struct {
 	Id    *UUIDFilter
 	Title *StringFilter
+	// DocumentLabels keeps the rows that some DocumentLabel row the filter
+	// finds points at by its document (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	DocumentLabels *DocumentLabelFilter
 	// ReferencedByDocumentLabelDocument filters on the presence or absence of a
 	// DocumentLabel whose document points at this row.
 	ReferencedByDocumentLabelDocument *ReferencedByFilter
@@ -3849,6 +3881,16 @@ func (f *DocumentFilter) conditions(args *[]interface{}, paramOffset int) []stri
 				conditions = append(conditions, `document.title IS NOT NULL`)
 			}
 		}
+	}
+	if f.DocumentLabels != nil {
+		before := len(*args)
+		through := f.DocumentLabels.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`document.id IN (SELECT document_label.document_id FROM document_label%s)`, where))
 	}
 	if f.ReferencedByDocumentLabelDocument != nil {
 		probe := `SELECT 1 FROM document_label WHERE document_label.document_id = document.id`
@@ -4162,6 +4204,38 @@ type LabelFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows, so a row whose parent is null is not kept.
 	Parent *LabelFilter
+	// DocumentLabels keeps the rows that some DocumentLabel row the filter
+	// finds points at by its label (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	DocumentLabels *DocumentLabelFilter
+	// LabelCodes keeps the rows that some LabelCode row the filter
+	// finds points at by its label (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LabelCodes *LabelCodeFilter
+	// LabelNotes keeps the rows that some LabelNote row the filter
+	// finds points at by its label (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LabelNotes *LabelNoteFilter
+	// LabelPairsByFirst keeps the rows that some LabelPair row the filter
+	// finds points at by its first (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LabelPairsByFirst *LabelPairFilter
+	// LabelPairsBySecond keeps the rows that some LabelPair row the filter
+	// finds points at by its second (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LabelPairsBySecond *LabelPairFilter
+	// Labels keeps the rows that some live Label row the filter
+	// finds points at by its parent (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Labels *LabelFilter
+	// LabelSlots keeps the rows that some LabelSlot row the filter
+	// finds points at by its label (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LabelSlots *LabelSlotFilter
+	// Subscriptions keeps the rows that some live Subscription row the filter
+	// finds points at by its label (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Subscriptions *SubscriptionFilter
 	// ReferencedByDocumentLabelLabel filters on the presence or absence of a
 	// DocumentLabel whose label points at this row.
 	ReferencedByDocumentLabelLabel *ReferencedByFilter
@@ -4396,6 +4470,88 @@ func (f *LabelFilter) conditions(args *[]interface{}, paramOffset int) []string 
 			where = " WHERE " + strings.Join(through, " AND ")
 		}
 		conditions = append(conditions, fmt.Sprintf(`label.parent_id IN (SELECT label.id FROM label%s)`, where))
+	}
+	if f.DocumentLabels != nil {
+		before := len(*args)
+		through := f.DocumentLabels.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label.id IN (SELECT document_label.label_id FROM document_label%s)`, where))
+	}
+	if f.LabelCodes != nil {
+		before := len(*args)
+		through := f.LabelCodes.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label.id IN (SELECT label_code.label_id FROM label_code%s)`, where))
+	}
+	if f.LabelNotes != nil {
+		before := len(*args)
+		through := f.LabelNotes.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label.id IN (SELECT label_note.label_id FROM label_note%s)`, where))
+	}
+	if f.LabelPairsByFirst != nil {
+		before := len(*args)
+		through := f.LabelPairsByFirst.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label.id IN (SELECT label_pair.first_id FROM label_pair%s)`, where))
+	}
+	if f.LabelPairsBySecond != nil {
+		before := len(*args)
+		through := f.LabelPairsBySecond.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label.id IN (SELECT label_pair.second_id FROM label_pair%s)`, where))
+	}
+	if f.Labels != nil {
+		before := len(*args)
+		through := f.Labels.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `label.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label.id IN (SELECT label.parent_id FROM label%s)`, where))
+	}
+	if f.LabelSlots != nil {
+		before := len(*args)
+		through := f.LabelSlots.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label.id IN (SELECT label_slot.label_id FROM label_slot%s)`, where))
+	}
+	if f.Subscriptions != nil {
+		before := len(*args)
+		through := f.Subscriptions.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `subscription.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`label.id IN (SELECT subscription.label_id FROM subscription%s)`, where))
 	}
 	if f.ReferencedByDocumentLabelLabel != nil {
 		probe := `SELECT 1 FROM document_label WHERE document_label.label_id = label.id`

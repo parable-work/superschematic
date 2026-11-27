@@ -16,12 +16,13 @@ takes one path, which decides who sent it and what it may reach.
 | Built | Not built yet |
 | --- | --- |
 | `@party` on a table; the conversations' tables and the run requests queue, which the build fills | Go and Rust runtimes; SQLite and D1 |
-| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a message's trust narrowing the agent run that takes its request ([agent runs](/superschematic/guides/agent-runs/)) |
-| email held to its SPF, DKIM and DMARC results; one inbound address per deployment | a generated server that mounts the path and its workers |
-| threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | Comments' `via`, the channel a message came on |
-| messages as rows, with their files and the rows they are about | giving a held message to a party, its address added from triage; a triage page in Topcoat |
+| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a generated server that mounts the path and its workers |
+| email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
+| threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
+| messages as rows, with their files and the rows they are about | |
 | a lapsed identity, verified again by a code | |
 | sending as a permission, with a rate limit, an approval policy and opt-outs | |
+| a message's trust narrowing the agent run that takes its request: a sender entered by hand asks before every write ([agent runs](/superschematic/guides/agent-runs/)) | |
 
 D157 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
 records the design and what is left. `examples/parties` is the worked

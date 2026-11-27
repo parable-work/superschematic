@@ -78,7 +78,7 @@ environments   a target (gcp, local, ...) and the values only a person can decid
 | memoryStore | one MemoryStore schema | channels, counters and claims that every replica shares and can lose | nothing (D75, section 8.12) |
 | site | one Site schema | static files over HTTPS, with a config per environment | the public address of each API it calls (D55) |
 | runner | one engine database: a DB schema whose types compose behaviors | the engine's runner, which runs reactions, schedules, Timers' deadlines and retention, one process at a time under the runner's lock | a connection to its database (D58) |
-| deriver | one `@deriver` of a TypeScript or Rust API schema | a loop that fills the Derived fields of its API's engine types, waking on the engine's commits, or of its API's tables, through their repositories (D146, a TypeScript API's), until stopped | its API's needs; its API's database (D74, section 8.8) |
+| deriver | one `@deriver` of a TypeScript or Rust API schema, or of a Go API schema over tables | a loop that fills the Derived fields of its API's engine types, waking on the engine's commits, or of its API's tables, through their repositories (D146), until stopped | its API's needs; its API's database (D74, section 8.8) |
 | app | one `@app` of a Rust API schema | the project's own HTTP program over its API's `Deps`, implementations, identity and engine, at an address a server's platform gives it | its API's needs (D78, section 8.6) |
 
 A queue is not a deployable: it lives in the database of the DB schema
@@ -3579,9 +3579,10 @@ export abstract class FulfilOrders {}
   within its horizon, five minutes, so a queue that is empty runs
   nothing. `instances` is then how many of it may run at once,
   and `maxInstances` beside it is refused, as is `idle` on a pool's
-  worker, and drain mode on a behavior worker, whose queues triggers and
-  the clock fill. The core names no provider. It gives a platform three
-  things to build on:
+  worker. A behavior worker drains too: its claim loops take one slot
+  for them all, of its first queue, and stop together, and its wakes are
+  given under each of its queues. The core names no provider. It gives a
+  platform three things to build on:
   - the worker's mode in its run, and three variables its entrypoint
     reads (`ir.WorkerModeVariable`, `ir.WorkerIdleSecondsVariable`,
     `ir.WorkerSlotsVariable`): `WORKER_MODE=drain`, the idle time in
@@ -3601,7 +3602,18 @@ export abstract class FulfilOrders {}
     `ir.QueueWake`: a URL to `POST` an empty JSON object to, and where
     the bearer token comes from, a URL to `GET` with headers that answers
     `{ access_token, expires_in }`. A worker another target runs, or a
-    platform with no wake, leaves the variable out;
+    platform with no wake, leaves the variable out. The queue clients
+    send a wake after an enqueue's statement: the Go ORM's (`OnEnqueue`),
+    the TypeScript runtime's (`queue-wake.ts`) and the Rust runtime's
+    (`wake`). A behavior worker's queues are filled by the behaviors'
+    core and by its table's change trigger, so each language's rules
+    adapter wakes them once a command's unit has applied: the event
+    queue of each event, the deadline queue of each deadline armed due
+    within five minutes (`rules.WakeHorizon`, Rust's `WAKE_HORIZON_MS`),
+    and the change queue of each row written, through the host's wake
+    (Go's `rules.Host.Wake`, Rust's `Host::with_wake`), which the
+    generated code gives the queue client's; the repositories' writes
+    past the core wake the change queue too;
   - the slots. `sqlutil.PostgresQueueStatements` writes one more
     statement, `slot`, `SELECT pg_try_advisory_lock(hashtext('superschematic.drain.<table>'), $1::int)`,
     which the Go ORM's `<Queue>Queue.Slot(ctx, slots)` and the TypeScript
@@ -3661,7 +3673,9 @@ export abstract class FulfilOrders {}
     exits 0;
   - in drain mode (`worker.DrainFromEnv`, `worker.Options.Drain`) takes a
     slot of its queue before its first claim, through the queue's `Slot`,
-    and returns at once when none is free; then runs the same loop, which
+    and returns at once when none is free (a behavior worker's
+    `worker.RunAll` takes one for all its queues, of the first that has a
+    `Slot`, and its loops share one idle clock); then runs the same loop, which
     ends, with `drained: no message was ready or held`, once a claim
     found nothing, no method runs and none has run or returned for the
     idle time, and the queue's `NextDue` reads no message due within the
@@ -3746,8 +3760,8 @@ export abstract class FulfilOrders {}
   always allocated, so `cpu` takes one or more. Bootstrap needs no new API
   or role: `run.googleapis.com` is on for the Cloud Run types, `deployer`'s
   `roles/run.admin` manages worker pools, and `planner`'s `roles/viewer`
-  reads them. A worker in drain mode (D145), in Go or TypeScript, is no
-  worker pool: it is a Cloud Run job, `<worker>.job`, named and configured
+  reads them. A worker in drain mode (D145), in any language and a
+  behavior worker among them, is no worker pool: it is a Cloud Run job, `<worker>.job`, named and configured
   as the pool would be, of one task with no retries and a day to run,
   with `WORKER_MODE`, `WORKER_IDLE_SECONDS` and `WORKER_SLOTS`, the
   last its `instances`. Its tick is a Cloud Scheduler job, `<worker>.tick`,
@@ -3770,8 +3784,7 @@ export abstract class FulfilOrders {}
   does not wait for the worker. A waker that rolls out first sends wakes
   the job refuses until the worker's wave, which the tick covers. A drain
   worker the environment turns off keeps its job and has no tick and no
-  grant. A Rust worker in drain mode is refused, since its entrypoint
-  does not exit when idle yet. `deployer`'s `roles/run.admin` and
+  grant. `deployer`'s `roles/run.admin` and
   `roles/cloudscheduler.admin` manage all of it, as they manage a
   scheduled job's.
 - **Dead messages.** A dead message stays in the table, with its last
@@ -3856,34 +3869,41 @@ export class TriageTickets {}
   one method per derived field of each schema, typed by the field: the
   item's `inputs` are the field's `from` fields with their own types,
   each optional, and the answer's value is the field's own type. The
-  implementation exports `createDerivers` (TypeScript) or
-  `create_derivers` (Rust) beside its `create`, and the scaffold writes
+  implementation exports `createDerivers` (TypeScript), or declares
+  `create_derivers` (Rust) or `NewDerivers` (Go), beside its `create`
+  or its `New`, and the scaffold writes
   one with every method failing. A method calls a model, mapping the
   item's `model` label to a provider's model through the API's own
   config, and holding the answer to the item's `output`, the field's
   JSON Schema.
 - **The deployable.** `<api>-<deriver>` in kebab case, as a worker's
-  name is, in its API's language: TypeScript or Rust. Go is refused
-  until it follows. Its edges, config, secrets and identity are its
+  name is, in its API's language: TypeScript or Rust, or Go for a
+  deriver of tables. A Go API's deriver of engine types is refused. Its
+  edges, config, secrets and identity are its
   API's. Its entrypoint opens the engine for Deps as a worker's does,
   and runs the engine's deriver loop (`runDeriver`,
   `derive::run_deriver`), which pulls each schema's stale fields, calls
   the method of each, settles the answers in batches, and waits for a
   commit when nothing is stale. A method that throws or returns an
   error settles as a failure, which Derived counts as an attempt.
-- **Over tables** (D146). A TypeScript deriver of tables opens no
-  engine. Its entrypoint opens the database's repositories with
-  `withBehaviorCaller`, as the deployable's name holding each Derived
-  config's `permission`, and runs the HTTP runtime's `runDeriver`
-  (`@superschematic/http-runtime/deriver`) over each table's
-  `derived.staleDerivations` and `derived.settleDerivations`: the same
+- **Over tables** (D146). A deriver of tables opens no engine. Its
+  entrypoint opens the database's repositories as the deployable's name
+  holding each Derived config's `permission` (`withBehaviorCaller` in
+  TypeScript, the ORM's `WithBehaviorCaller` in Go, `with_caller` in a
+  transaction of the pool per call in Rust), and runs its HTTP runtime's
+  loop (`runDeriver` of `@superschematic/http-runtime/deriver`,
+  `deriver.Run` of `runtime/http/go/deriver`, `deriver::run_deriver` of
+  the Rust runtime) over each table's `staleDerivations` and
+  `settleDerivations`: the same
   loop, which pulls again after five seconds when a pass settles
   nothing, a table having no commit to wake it, holds each answer to
   what a settle takes so that a bad one fails its own field, and waits
   out a table whose pull or settle fails for a reason time cures, a
   second, doubling to thirty; a refusal of the core's other than busy
   ends it with the error. The repositories run on
-  Postgres, so the database lists `postgres` first. Rust and Go follow.
+  Postgres, so the database lists `postgres` first. A Rust API's
+  derivers fill one kind, since its `Derivers` types the items of the
+  engine's loop or the runtime's.
 - **Its principal.** The deployable's name as the subject, holding each
   derived type's name and each Derived config's `permission`. The
   engine's policy must admit it: with `{ rules }`, the build refuses a

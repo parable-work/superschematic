@@ -2109,6 +2109,11 @@ func (r *ProblemRepository) UpdateMany(ctx context.Context, filter *ProblemFilte
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute update: %w", err)
 	}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of ProblemChange (D145).
+		wakeQueue("ProblemChange")
+	}
 
 	return int(result.RowsAffected()), nil
 }
@@ -2145,6 +2150,11 @@ func (r *ProblemRepository) DeleteMany(ctx context.Context, filter *ProblemFilte
 	}
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete records: %w", err)
+	}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of ProblemChange (D145).
+		wakeQueue("ProblemChange")
 	}
 
 	return int(result.RowsAffected()), nil

@@ -44,6 +44,7 @@ mod plan;
 #[cfg(feature = "postgres")]
 pub mod postgres;
 pub mod routes;
+pub mod rowfeatures;
 mod run;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
@@ -127,6 +128,15 @@ pub struct Definition {
     pub clear_history_actor: String,
     /// The tables, in the schema's order.
     pub tables: Vec<Table>,
+    /// The references of the database (D154): its `@references` tables,
+    /// the tables a reference may point at, and the conversations whose
+    /// ref blocks are references; none for a database with neither.
+    #[serde(default)]
+    pub references: Option<rowfeatures::RowReferencesDefinition>,
+    /// The attachments of the database (D154): its `@attachments` tables;
+    /// none for a database with none.
+    #[serde(default)]
+    pub attachments: Option<rowfeatures::AttachmentsDefinition>,
 }
 
 /// A database's system actor (D87): a user's id and the name an app shows

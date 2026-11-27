@@ -10,6 +10,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/mcptools"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // MCPFile is the module of the crate that holds its MCP endpoint, under
@@ -31,12 +32,37 @@ type MCPInfo struct {
 	// outputs.api.mcpConfirmationKey names. Empty for an endpoint that
 	// confirms no tool. The dispatch layer sets it.
 	ConfirmationKey string
+	// Idempotent is the @idempotent of each tool's operation that has one
+	// (D140), by the operation's key: the tool takes the call's key in an
+	// argument, which the runtime sends to the route as its
+	// Idempotency-Key, as the TypeScript router reads it from its
+	// operation table.
+	Idempotent map[string]*ir.IdempotentConfig
+}
+
+// rustRouteTool is a tool as the Rust runtime's RouteTool reads it: the
+// table's, with its operation's @idempotent (D140).
+type rustRouteTool struct {
+	mcptools.Tool
+	Idempotent *rustToolIdempotency `json:"idempotent,omitempty"`
+}
+
+// rustToolIdempotency is the runtime's ToolIdempotency.
+type rustToolIdempotency struct {
+	Required bool `json:"required,omitempty"`
 }
 
 // ToolsRust is the tool table as a Rust raw string literal of its JSON,
 // which the runtime's Mount reads.
 func (m *MCPInfo) ToolsRust() (string, error) {
-	literal, err := m.ToolsLiteral()
+	tools := make([]rustRouteTool, len(m.Tools))
+	for i, tool := range m.Tools {
+		tools[i] = rustRouteTool{Tool: tool}
+		if idempotent := m.Idempotent[tool.Operation]; idempotent != nil {
+			tools[i].Idempotent = &rustToolIdempotency{Required: idempotent.Required}
+		}
+	}
+	literal, err := mcptools.JSONLiteral(tools, true)
 	if err != nil {
 		return "", err
 	}
@@ -64,9 +90,11 @@ func (e EndpointInfo) OperationKey() string {
 // CheckControlCalls are the RouteControls builder calls of the route's
 // check (D98): ControlCalls but the rate limit, which counts the runs
 // alone, so a call that is checked, confirmed and run takes one token, as a
-// request does.
+// request does, and but the idempotency step, whose key is the run's: a
+// check that kept it would answer the run what the check answered (D140).
 func (e EndpointInfo) CheckControlCalls(authenticator, serviceAuthenticator string) []string {
 	e.RateLimit = 0
+	e.Idempotent = nil
 	return e.ControlCalls("", authenticator, serviceAuthenticator)
 }
 
@@ -105,7 +133,13 @@ func mcpInfo(output *APIOutput, api *apigen.APIOutput, clock codegen.Clock) (*MC
 	if err != nil {
 		return nil, err
 	}
-	return &MCPInfo{Endpoint: endpoint}, nil
+	info := &MCPInfo{Endpoint: endpoint, Idempotent: map[string]*ir.IdempotentConfig{}}
+	for _, endpoint := range output.AllEndpoints() {
+		if endpoint.Idempotent != nil {
+			info.Idempotent[endpoint.OperationKey()] = endpoint.Idempotent
+		}
+	}
+	return info, nil
 }
 
 // writeMCP writes src/router/mcp.rs with outputs.api.mcp on; one an

@@ -1035,6 +1035,10 @@ type ParcelPage struct {
 type CourierFilter struct {
 	Id   *UUIDFilter
 	Name *StringFilter
+	// Deliveries keeps the rows that some Delivery row the filter
+	// finds points at by its courier (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Deliveries *DeliveryFilter
 	// ReferencedByDeliveryCourier filters on the presence or absence of a
 	// Delivery whose courier points at this row.
 	ReferencedByDeliveryCourier *ReferencedByFilter
@@ -1186,6 +1190,16 @@ func (f *CourierFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				conditions = append(conditions, `courier."name" IS NOT NULL`)
 			}
 		}
+	}
+	if f.Deliveries != nil {
+		before := len(*args)
+		through := f.Deliveries.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`courier.id IN (SELECT delivery.courier_id FROM delivery%s)`, where))
 	}
 	if f.ReferencedByDeliveryCourier != nil {
 		probe := `SELECT 1 FROM delivery WHERE delivery.courier_id = courier.id`

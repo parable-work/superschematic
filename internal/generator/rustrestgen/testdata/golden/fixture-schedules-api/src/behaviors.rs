@@ -22,6 +22,7 @@
 //! in the HTTP runtime's claim loop.
 
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use axum::http::StatusCode;
 use serde::de::DeserializeOwned;
@@ -30,7 +31,7 @@ use serde_json::{Map, Value};
 use superschematic_http_runtime::postgres::{tokio_postgres, Pool};
 use superschematic_http_runtime::queue::{PostgresQueue, QueueDefinition};
 use superschematic_http_runtime::worker::{Claimed, SelfCompleting};
-use superschematic_http_runtime::{ApiError, BoxError, RequestContext};
+use superschematic_http_runtime::{wake, ApiError, BoxError, RequestContext};
 use superschematic_rules_adapter::{
     postgres, Assurance, Caller, Claim, Core, Deadline, DeadlineRun, Error, Host, Layout, Refusal,
     TableChange,
@@ -370,6 +371,14 @@ fn layout() -> &'static Layout {
     })
 }
 
+/// The host a command runs with: the core and the layout, and the wake of
+/// the behavior workers' queues (D145, D151), the HTTP runtime's, which
+/// sends a queue's wake where the environment gives one (QUEUE_WAKES) for
+/// each event, each deadline due soon and each row write of a command.
+fn host() -> Host<'static> {
+    Host::new(core(), layout()).with_wake(|queue| wake::enqueued(queue, Duration::ZERO))
+}
+
 /// The caller the core runs an operation as (D103): the route's principal
 /// with the permissions it holds, each once, its kind and whom it acts for,
 /// each left out for a user, its run's Agent and its assurance (D200);
@@ -435,7 +444,7 @@ where
     let params = serde_json::to_value(params).map_err(internal)?;
     let mut client = behaviors.pool.get().await.map_err(internal)?;
     let tx = client.transaction().await.map_err(internal)?;
-    let host = Host::new(core(), layout());
+    let host = host();
     let ran = postgres::run_operation(
         &host,
         &*tx,
@@ -534,7 +543,7 @@ impl EventRun<'_> {
             other => other.to_string(),
         };
         let params = serde_json::to_value(params).map_err(unconverted)?;
-        let host = Host::new(core(), layout());
+        let host = host();
         let result = postgres::run_operation(
             &host,
             self.tx,
@@ -598,7 +607,7 @@ pub async fn run_problem_wake_ups_deadline(
     };
     let mut client = pool.get().await?;
     let tx = client.transaction().await?;
-    let host = Host::new(core(), layout());
+    let host = host();
     let run = postgres::run_deadline(
         &host,
         &*tx,
@@ -649,7 +658,7 @@ pub async fn run_problem_wake_ups_change(
     };
     let mut client = pool.get().await?;
     let tx = client.transaction().await?;
-    let host = Host::new(core(), layout());
+    let host = host();
     let run = postgres::run_change(
         &host,
         &*tx,
@@ -700,7 +709,7 @@ pub async fn run_problem_wake_ups_event(
     };
     let mut client = pool.get().await?;
     let tx = client.transaction().await?;
-    let host = Host::new(core(), layout());
+    let host = host();
     let spent = postgres::spend_event(&host, &*tx, "Problem", Some(&claim)).await?;
     if !spent.ran() {
         tracing::info!(
