@@ -1,0 +1,973 @@
+{
+  "name": "acme-rating",
+  "description": "acme.Rating, the acme example's behavior, defined with no Rust (D103's step 5): its declaration (ext/rating.behavior.json) states its rules in the declarative vocabulary the behaviors' core interprets. A shopper's rating upserts the shopper's row of a ratings sub-table, its stars held to 1 to the config's maxStars; ratingCount and ratingAverage are derived from the rows; a new version may raise maxStars and not lower it. Cases written by hand in the recorded format: the engine's acme.Rating (crates/behaviors) counts every rate call, where the declarative one keeps one rating per shopper. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers is left out.",
+  "source": "written by hand (D103's step 5): examples/acme-schematic/testdata/rules/acme-rating.json",
+  "declarations": [
+    "../../ext/rating.behavior.json"
+  ],
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "acme.Rating > each shopper's rating is a row of the item's ratings sub-table, keyed by the shopper, its stars held to 1 to maxStars, and the count and average are derived from the rows",
+      "behaviors": [
+        "acme.Rating"
+      ],
+      "principals": {
+        "admin": {
+          "subject": "admin",
+          "permissions": []
+        },
+        "ann": {
+          "subject": "ann",
+          "permissions": []
+        },
+        "bo": {
+          "subject": "bo",
+          "permissions": []
+        },
+        "cy": {
+          "subject": "cy",
+          "permissions": []
+        },
+        "dee": {
+          "subject": "dee",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "admin",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Product",
+              "types": {
+                "Product": {
+                  "name": "Product",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "acme.Rating",
+                      "config": {
+                        "maxStars": 5
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Product",
+            "version": null,
+            "instanceType": "Product"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "admin",
+          "args": [
+            "Product"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Product",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "admin",
+          "args": [
+            "Product",
+            {
+              "title": "Desk lamp"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Product",
+            "id": "p1",
+            "data": {
+              "title": "Desk lamp"
+            },
+            "behaviors": {
+              "acme.Rating": {
+                "ratingCount": 0,
+                "ratingAverage": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 4
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "ratingCount": 1,
+            "ratingAverage": 4
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bo",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 5
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "ratingCount": 2,
+            "ratingAverage": 4.5
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 2
+            }
+          ],
+          "now": 1003000,
+          "expect": {
+            "ratingCount": 2,
+            "ratingAverage": 3.5
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "cy",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 6
+            }
+          ],
+          "now": 1004000,
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation rate of behavior acme.Rating: /stars: must be <= 5",
+            "details": {
+              "issues": [
+                {
+                  "path": "/stars",
+                  "message": "must be <= 5"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "cy",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 0
+            }
+          ],
+          "now": 1004000,
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation rate of behavior acme.Rating: /stars: must be >= 1",
+            "details": {
+              "issues": [
+                {
+                  "path": "/stars",
+                  "message": "must be >= 1"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "cy",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 3.5
+            }
+          ],
+          "now": 1004000,
+          "error": {
+            "class": "OperationParamsError",
+            "code": "invalid_argument",
+            "message": "operation rate of behavior acme.Rating: /stars: must be integer",
+            "details": {
+              "issues": [
+                {
+                  "path": "/stars",
+                  "message": "must be integer"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "cy",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 3
+            }
+          ],
+          "now": 1005000,
+          "expect": {
+            "ratingCount": 3,
+            "ratingAverage": 3.3333333333333335
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "dee",
+          "args": [
+            "Product",
+            "p1",
+            "ratingSummary",
+            {}
+          ],
+          "now": 1006000,
+          "expect": {
+            "ratingCount": 3,
+            "ratingAverage": 3.3333333333333335
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "admin",
+          "args": [
+            "Product",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Product",
+            "id": "p1",
+            "data": {
+              "title": "Desk lamp"
+            },
+            "behaviors": {
+              "acme.Rating": {
+                "ratingCount": 3,
+                "ratingAverage": 3.3333333333333335
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "acme.Rating > a rating names its shopper: a call with no subject keys no row and is refused",
+      "behaviors": [
+        "acme.Rating"
+      ],
+      "principals": {
+        "admin": {
+          "subject": "admin",
+          "permissions": []
+        },
+        "ann": {
+          "subject": "ann",
+          "permissions": []
+        },
+        "bo": {
+          "subject": "bo",
+          "permissions": []
+        },
+        "cy": {
+          "subject": "cy",
+          "permissions": []
+        },
+        "dee": {
+          "subject": "dee",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "admin",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Product",
+              "types": {
+                "Product": {
+                  "name": "Product",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "acme.Rating",
+                      "config": {
+                        "maxStars": 5
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Product",
+            "version": null,
+            "instanceType": "Product"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "admin",
+          "args": [
+            "Product"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Product",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "admin",
+          "args": [
+            "Product",
+            {
+              "title": "Desk lamp"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Product",
+            "id": "p1",
+            "data": {
+              "title": "Desk lamp"
+            },
+            "behaviors": {
+              "acme.Rating": {
+                "ratingCount": 0,
+                "ratingAverage": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 4
+            }
+          ],
+          "now": 1001000,
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "Product p1: rate keys a row of ratings by its caller, and the call names none"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "admin",
+          "args": [
+            "Product",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Product",
+            "id": "p1",
+            "data": {
+              "title": "Desk lamp"
+            },
+            "behaviors": {
+              "acme.Rating": {
+                "ratingCount": 0,
+                "ratingAverage": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "acme.Rating > a new version may raise maxStars, which every stored rating still fits, and may not lower it",
+      "behaviors": [
+        "acme.Rating"
+      ],
+      "principals": {
+        "admin": {
+          "subject": "admin",
+          "permissions": []
+        },
+        "ann": {
+          "subject": "ann",
+          "permissions": []
+        },
+        "bo": {
+          "subject": "bo",
+          "permissions": []
+        },
+        "cy": {
+          "subject": "cy",
+          "permissions": []
+        },
+        "dee": {
+          "subject": "dee",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "admin",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Product",
+              "types": {
+                "Product": {
+                  "name": "Product",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "acme.Rating",
+                      "config": {
+                        "maxStars": 5
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Product",
+            "version": null,
+            "instanceType": "Product"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "admin",
+          "args": [
+            "Product"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Product",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "admin",
+          "args": [
+            "Product",
+            {
+              "title": "Desk lamp"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Product",
+            "id": "p1",
+            "data": {
+              "title": "Desk lamp"
+            },
+            "behaviors": {
+              "acme.Rating": {
+                "ratingCount": 0,
+                "ratingAverage": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ann",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 5
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "ratingCount": 1,
+            "ratingAverage": 5
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "admin",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Product",
+              "types": {
+                "Product": {
+                  "name": "Product",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "acme.Rating",
+                      "config": {
+                        "maxStars": 7
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Product",
+            "version": 1,
+            "instanceType": "Product"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "admin",
+          "args": [
+            "Product"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Product",
+            "version": 2,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bo",
+          "args": [
+            "Product",
+            "p1",
+            "rate",
+            {
+              "stars": 7
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "ratingCount": 2,
+            "ratingAverage": 6
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "admin",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Product",
+              "types": {
+                "Product": {
+                  "name": "Product",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "acme.Rating",
+                      "config": {
+                        "maxStars": 6
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "IncompatibleChangeError",
+            "code": "incompatible_change",
+            "message": "schema Product in namespace default: a new version cannot replace version 2: behavior acme.Rating on type Product cannot change its config from {\"maxStars\":7} to {\"maxStars\":6}: maxStars cannot fall from 7 to 6. A new version may only add optional fields and enum values, widen bounds, change documentation and make the behavior changes each behavior allows; publish any other change under a new schema name",
+            "details": {
+              "changes": [
+                {
+                  "path": "Product.behaviors.acme.Rating",
+                  "message": "behavior acme.Rating on type Product cannot change its config from {\"maxStars\":7} to {\"maxStars\":6}: maxStars cannot fall from 7 to 6"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "admin",
+          "args": [
+            "Product",
+            "p1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Product",
+            "id": "p1",
+            "data": {
+              "title": "Desk lamp"
+            },
+            "behaviors": {
+              "acme.Rating": {
+                "ratingCount": 2,
+                "ratingAverage": 6
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "acme.Rating > the define check holds the config to the declaration's configSchema",
+      "behaviors": [
+        "acme.Rating"
+      ],
+      "principals": {
+        "admin": {
+          "subject": "admin",
+          "permissions": []
+        },
+        "ann": {
+          "subject": "ann",
+          "permissions": []
+        },
+        "bo": {
+          "subject": "bo",
+          "permissions": []
+        },
+        "cy": {
+          "subject": "cy",
+          "permissions": []
+        },
+        "dee": {
+          "subject": "dee",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "admin",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Product",
+              "types": {
+                "Product": {
+                  "name": "Product",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "acme.Rating",
+                      "config": {
+                        "maxStars": 2
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Product/behaviors/0: must match \"then\" schema; /types/Product/behaviors/0/config/maxStars: must be >= 3",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Product/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Product/behaviors/0/config/maxStars",
+                  "message": "must be >= 3"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "admin",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Product",
+              "types": {
+                "Product": {
+                  "name": "Product",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "acme.Rating",
+                      "config": {
+                        "maxStars": 5,
+                        "minStars": 1
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Product/behaviors/0: must match \"then\" schema; /types/Product/behaviors/0/config: unknown key \"minStars\"",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Product/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Product/behaviors/0/config",
+                  "message": "unknown key \"minStars\""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "admin",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Product",
+              "types": {
+                "Product": {
+                  "name": "Product",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "acme.Rating"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Product/behaviors/0: must match \"then\" schema; /types/Product/behaviors/0: must have required property 'config'",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Product/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Product/behaviors/0",
+                  "message": "must have required property 'config'"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

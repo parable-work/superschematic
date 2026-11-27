@@ -27,8 +27,8 @@ use std::fs;
 use superschematic_engine_testkit::{load, ScenarioFile};
 use superschematic_rules::Core;
 use superschematic_rules_testkit::{
-    hand_written_path, hand_written_transcript, ported, scenario_path, transcript, transcript_path,
-    Transcript, TranscriptStep,
+    declarations_of, hand_written_path, hand_written_transcript, hand_written_transcript_declaring,
+    ported, scenario_path, transcript, transcript_path, Transcript, TranscriptStep,
 };
 
 /// The steps `core-workflow.transcript.json` holds, of `core-workflow.json`'s
@@ -485,7 +485,7 @@ fn the_checked_in_transcripts_are_what_the_writer_writes() {
         ("core-refunds", "commerce-payments-refunds", REFUNDS_FLOOR),
         ("core-blueprint", "workqueue-blueprint", BLUEPRINT_FLOOR),
     ] {
-        let written = written(name, &scenario_path(source), transcript);
+        let written = written(name, &scenario_path(source), &transcript);
         let kinds = |kind: fn(&TranscriptStep) -> bool| {
             written
                 .scenarios
@@ -543,7 +543,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-aliased", ALIASED_FLOOR, true),
         ("core-bundles", BUNDLES_FLOOR, false),
     ] {
-        let written = written(name, &hand_written_path(name), hand_written_transcript);
+        let written = written(name, &hand_written_path(name), &hand_written_transcript);
         let mut repeats = 0;
         for scenario in &written.scenarios {
             // The version each row's last command left it at.
@@ -609,8 +609,95 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
     }
 }
 
+/// The steps `core-declarative.transcript.json` holds, of the hand-written
+/// `core-declarative.json`'s 52 (D103's step 5): its define and publish
+/// checks, five of them refused, and its creates, votes, flags, accepts,
+/// summaries and updates, with the changes the runner's sweeps ran for
+/// test.Votes' reactions, each holding its row's version; the opens and the
+/// reads of rows are left out.
+const DECLARATIVE_FLOOR: usize = 49;
+
+/// A transcript of declarative behaviors (D103's step 5) holds each one's
+/// declaration file whole, which a host hands its core before it replays
+/// it, and names it among its behaviors after the core's own.
+#[test]
+fn a_declarative_transcript_holds_its_declarations() {
+    let name = "core-declarative";
+    let source = hand_written_path(name);
+    let declarations = declarations_of(&source).unwrap_or_else(|error| panic!("{error}"));
+    assert_eq!(
+        declarations.len(),
+        1,
+        "core-declarative declares test.Votes"
+    );
+    let write = |file: &ScenarioFile, make_core: &dyn Fn() -> Core| {
+        hand_written_transcript_declaring(
+            file,
+            make_core,
+            &declarations,
+            "runtime/engine/testdata/rules/scenarios/core-declarative.json",
+        )
+    };
+    let written = written(name, &source, &write);
+    assert_eq!(written.declarations, declarations);
+    assert_eq!(
+        written.behaviors.last().map(String::as_str),
+        Some("test.Votes")
+    );
+    println!(
+        "{}: {} scenarios, {} steps, {} left out",
+        written.file,
+        written.scenarios.len(),
+        written.steps(),
+        written.skipped()
+    );
+    assert!(
+        written.steps() >= DECLARATIVE_FLOOR,
+        "{name}'s transcript holds {} steps, under the floor of {DECLARATIVE_FLOOR}",
+        written.steps()
+    );
+}
+
+/// The steps `acme-rating.transcript.json` holds, of the acme example's
+/// hand-written `acme-rating.json` (D103's step 5): acme.Rating as a
+/// declaration with no crate, its define and publish checks and its
+/// creates, rates and summaries, each holding its row's version.
+const ACME_RATING_FLOOR: usize = 26;
+
+/// acme.Rating's transcript (D103's step 5), written from the acme
+/// example's scenarios beside its declaration
+/// (`examples/acme-schematic/testdata/rules/acme-rating.json`), holds the
+/// extension's declaration file whole, so every host replays it with no
+/// file of the example's: the core's own transcripts' directory keeps it.
+#[test]
+fn acme_ratings_transcript_holds_its_declaration() {
+    let name = "acme-rating";
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../../examples/acme-schematic/testdata/rules/acme-rating.json");
+    let declarations = declarations_of(&source).unwrap_or_else(|error| panic!("{error}"));
+    let write = |file: &ScenarioFile, make_core: &dyn Fn() -> Core| {
+        hand_written_transcript_declaring(
+            file,
+            make_core,
+            &declarations,
+            "examples/acme-schematic/testdata/rules/acme-rating.json",
+        )
+    };
+    let written = written(name, &source, &write);
+    assert_eq!(written.declarations, declarations);
+    assert_eq!(
+        written.behaviors.last().map(String::as_str),
+        Some("acme.Rating")
+    );
+    assert!(
+        written.steps() >= ACME_RATING_FLOOR,
+        "{name}'s transcript holds {} steps, under the floor of {ACME_RATING_FLOOR}",
+        written.steps()
+    );
+}
+
 // The writer of a scenario file's transcript.
-type Writer = fn(&ScenarioFile, &dyn Fn() -> Core) -> Result<Transcript, String>;
+type Writer<'w> = &'w dyn Fn(&ScenarioFile, &dyn Fn() -> Core) -> Result<Transcript, String>;
 
 // written writes a scenario file's transcript under a name, which names the
 // file it is written to and its `file`, rewrites the checked-in file when

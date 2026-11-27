@@ -127,6 +127,13 @@ var transcriptFiles = []transcriptFile{
 	// Aliased (D147): names unique across rows in a shared table, a
 	// removed alias's and a deleted row's rows deleted.
 	{"../../engine/testdata/rules/core-aliased.transcript.json", 46},
+	// The declarative vocabulary (D103's step 5): test.Votes, whose
+	// declaration states its rules, which the transcript holds whole and
+	// the core is handed (Declare) before the replay.
+	{"../../engine/testdata/rules/core-declarative.transcript.json", 49},
+	// acme.Rating as a declaration with no crate (D103's step 5): the acme
+	// example's extension's file, which the transcript holds whole.
+	{"../../engine/testdata/rules/acme-rating.transcript.json", 26},
 }
 
 // poolFloor is core-pool's floor, the testkit's POOL_FLOOR: the steps of
@@ -134,9 +141,13 @@ var transcriptFiles = []transcriptFile{
 const poolFloor = 82
 
 type transcript struct {
-	File      string     `json:"file"`
-	Behaviors []string   `json:"behaviors"`
-	Scenarios []scenario `json:"scenarios"`
+	File      string   `json:"file"`
+	Behaviors []string `json:"behaviors"`
+	// Declarations are the declaration files of the declarative behaviors
+	// its scenarios compose (D103's step 5), each whole, which the core is
+	// handed before the replay; none for a transcript of the core's own.
+	Declarations []json.RawMessage `json:"declarations"`
+	Scenarios    []scenario        `json:"scenarios"`
 }
 
 type scenario struct {
@@ -416,6 +427,13 @@ type mismatch struct {
 
 func replayTranscript(t *testing.T, db *rulestest.DB, file transcriptFile) {
 	tr := readTranscript(t, file.path)
+	// The core runs the declarative behaviors the transcript declares, and
+	// its declarations list them for the layout rule.
+	if len(tr.Declarations) > 0 {
+		if _, err := rules.Declare(tr.Declarations...); err != nil {
+			t.Fatal(err)
+		}
+	}
 	declarations, err := rules.Native().Declarations()
 	if err != nil {
 		t.Fatal(err)

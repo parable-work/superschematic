@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 37] = [
+const TRANSCRIPTS: [(&str, usize); 39] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -129,6 +129,8 @@ const TRANSCRIPTS: [(&str, usize); 37] = [
     ("core-blueprint", BLUEPRINT_FLOOR),
     ("core-aliased", ALIASED_FLOOR),
     ("core-bundles", BUNDLES_FLOOR),
+    ("core-declarative", DECLARATIVE_FLOOR),
+    ("acme-rating", ACME_RATING_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -368,6 +370,14 @@ const ALIASED_FLOOR: usize = 46;
 /// booking's hold, payment and expiry, a rollout's gate and deadline, a
 /// message's lease and its expiry back to the queue, and one seat.
 const BUNDLES_FLOOR: usize = 84;
+/// core-declarative's floor (D103's step 5): the steps of the scenarios
+/// written by hand over test.Votes, a behavior whose declaration states its
+/// rules, which the transcript holds whole and the core is handed before
+/// the replay.
+const DECLARATIVE_FLOOR: usize = 49;
+/// acme-rating's floor (D103's step 5): the acme example's acme.Rating as a
+/// declaration with no crate, the transcript holding the extension's file.
+const ACME_RATING_FLOOR: usize = 26;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
@@ -405,12 +415,14 @@ struct DeclaredTable {
     shared: bool,
 }
 
-/// The declaration files of the core's behaviors.
-fn declarations() -> Vec<Declared> {
+/// The declaration files of the core's behaviors, then those of the
+/// declarative behaviors a transcript holds (D103's step 5).
+fn declarations(declared: &[Value]) -> Vec<Declared> {
     superschematic_rules_behaviors::DECLARATIONS
         .iter()
-        .map(|text| {
-            let file: Value = serde_json::from_str(text).expect("a declaration file reads");
+        .map(|text| serde_json::from_str::<Value>(text).expect("a declaration file reads"))
+        .chain(declared.iter().cloned())
+        .map(|file| {
             let list = |name: &str| {
                 file.get(name)
                     .and_then(Value::as_array)
@@ -1468,8 +1480,10 @@ async fn replay(mut db: Db, dialect: &str) {
 /// listed in full by scenario, or on fewer steps replayed than its floor.
 async fn replay_one(db: &mut Db, dialect: &str, prefix: &str, name: &str, floor: usize) {
     let transcript = transcript(name);
-    let declared = declarations();
-    let core = superschematic_rules_behaviors::core();
+    let declared = declarations(&transcript.declarations);
+    // The core with the declarative behaviors the transcript declares.
+    let core = superschematic_rules_behaviors::core_declaring(&transcript.declarations)
+        .unwrap_or_else(|reason| panic!("{name}: {reason}"));
     let mut counts = Counts::default();
     let mut failed = Vec::new();
     for (index, scenario) in transcript.scenarios.iter().enumerate() {

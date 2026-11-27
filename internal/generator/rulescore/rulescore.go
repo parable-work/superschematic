@@ -325,9 +325,9 @@ mod tests {
 
     #[test]
     fn the_abi_declares_every_composed_behavior() {
+        let rules = superschematic_rules_wasm::Rules::new(core, declarations());
         let (out, ok) = superschematic_rules_wasm::run_json_on(
-            &core(),
-            &declarations(),
+            &rules,
             superschematic_rules_wasm::Op::Declarations,
             b"",
         );

@@ -171,6 +171,15 @@ impl ConstantsConfig {
         if !issues.is_empty() {
             return Err(ConfigError::Schema(issues.into_issues()));
         }
+        Self::of(raw, target)
+    }
+
+    /// A config whose shape its schema has held (`fields`, `oneWay` and
+    /// `permission`, each optional here), each field held to the type's own
+    /// as [`ConstantsConfig::parse`] holds it, in the engine's words: what
+    /// the declarative vocabulary's `constant` and `oneWay` rules read
+    /// (D103's step 5), whose lists a declaration or its use's config gives.
+    pub fn of(raw: &Value, target: &ConfigTarget<'_>) -> Result<ConstantsConfig, ConfigError> {
         let type_name = target.type_name();
         let fields: Vec<String> = strings(raw.get("fields"));
         let names = || -> String {

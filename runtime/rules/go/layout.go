@@ -28,6 +28,12 @@ const (
 type Layout struct {
 	Types map[string]*Table `json:"types"`
 
+	// Declarations are the declaration files of the declarative behaviors
+	// (D103's step 5) the tables' uses name, each whole, which a command's
+	// core is handed (Declarer) before the layout's specs are checked;
+	// none for a layout whose uses name none.
+	Declarations []json.RawMessage `json:"declarations,omitempty"`
+
 	// checks is the define check of each type, made once per core a
 	// command runs on over this layout.
 	checks layoutChecks
@@ -324,6 +330,13 @@ func (l *Layout) refusalOf(core Core, typeName string) (*Refusal, error) {
 		specs := make([]TypeSpec, len(names))
 		for i, name := range names {
 			specs[i] = l.Types[name].Spec
+		}
+		// The core runs the declarative behaviors the layout's uses name
+		// (D103's step 5) before it checks the specs that name them.
+		if declarer, ok := core.(Declarer); ok && len(l.Declarations) > 0 {
+			if _, err := declarer.Declare(l.Declarations...); err != nil {
+				return nil, err
+			}
 		}
 		found, err := core.Check(specs)
 		if err != nil {

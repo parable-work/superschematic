@@ -1,6 +1,6 @@
 {
   "name": "acme.Rating",
-  "description": "Shoppers rate a catalog item from one star to the configured maximum.",
+  "description": "Shoppers rate a catalog item from one star to the configured maximum, one rating per shopper.",
   "configSchema": {
     "type": "object",
     "required": ["maxStars"],
@@ -15,13 +15,25 @@
     }
   },
   "fields": [
-    { "name": "ratingCount", "description": "How many ratings the item has." },
-    { "name": "ratingAverage", "description": "The mean rating; 0 before the first." }
+    { "name": "ratingCount", "description": "How many ratings the item has.", "type": "Generic.Int64" },
+    { "name": "ratingAverage", "description": "The mean rating; 0 before the first.", "type": "number" }
+  ],
+  "tables": [
+    {
+      "name": "ratings",
+      "description": "One row per shopper who rated the item: the stars and when the rating came.",
+      "key": "rater",
+      "fields": [
+        { "name": "rater", "description": "The shopper's subject.", "type": "string" },
+        { "name": "stars", "description": "The stars the shopper gave, 1 to maxStars.", "type": "Generic.Int64" },
+        { "name": "ratedAt", "description": "When the shopper rated the item last.", "type": "Temporal.DateTime" }
+      ]
+    }
   ],
   "operations": [
     {
       "name": "rate",
-      "description": "Records one shopper's rating of the item.",
+      "description": "Records one shopper's rating of the item, replacing the shopper's earlier one.",
       "paramsSchema": {
         "type": "object",
         "required": ["stars"],
@@ -52,5 +64,30 @@
         }
       }
     }
-  ]
+  ],
+  "rules": {
+    "operations": {
+      "rate": {
+        "params": { "stars": { "lte": { "config": "maxStars" } } },
+        "effects": [
+          {
+            "upsert": {
+              "table": "ratings",
+              "key": { "caller": true },
+              "values": { "stars": { "param": "stars" }, "ratedAt": { "now": true } }
+            }
+          }
+        ],
+        "result": { "ratingCount": { "field": "ratingCount" }, "ratingAverage": { "field": "ratingAverage" } }
+      },
+      "ratingSummary": {
+        "result": { "ratingCount": { "field": "ratingCount" }, "ratingAverage": { "field": "ratingAverage" } }
+      }
+    },
+    "derived": {
+      "ratingCount": { "count": { "table": "ratings" } },
+      "ratingAverage": { "average": { "table": "ratings", "field": "stars", "empty": 0 } }
+    },
+    "configChange": { "oneWay": { "maxStars": "up" } }
+  }
 }

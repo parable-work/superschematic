@@ -397,6 +397,14 @@ Most are load errors; knowing them saves a build round-trip:
   a Go server links in the stock one's place. Write the class's bodies as
   abstract signatures: a class declares and never implements. The
   extension guide's "A behavior declared by a class" lists its form.
+- An extension's behavior whose rules are a count or an average over a
+  sub-table, a guard over the row and the caller, a counter, a move or a
+  field kept or frozen needs no Rust: state them in its declaration's
+  `rules` (D103's step 5), which the behaviors' core interprets, as
+  `examples/acme-schematic/ext/rating.behavior.json` does. Reach for a
+  crate only for what the vocabulary has no rule for (loops, expressions,
+  deadlines, events, contracts); the reference page "Declarative
+  behaviors" lists it.
 - A status no writer may move out of order, and that needs no permission
   (a ledger entry, a payment, a run), is an enum field with a
   `@stateMachine` on its class, from `@superschematic/schema` (D118), not

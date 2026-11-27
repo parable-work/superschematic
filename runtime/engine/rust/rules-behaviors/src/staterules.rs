@@ -167,6 +167,15 @@ impl StateRulesConfig {
         if !issues.is_empty() {
             return Err(ConfigError::Schema(issues.into_issues()));
         }
+        Self::of(raw, target)
+    }
+
+    /// A config whose shape its schema has held (`states`, `status` and
+    /// `permission`), its Workflow, states and fields held to the type as
+    /// [`StateRulesConfig::parse`] holds them, in the engine's words: what
+    /// the declarative vocabulary's `states` rule reads (D103's step 5),
+    /// whose rules a declaration or its use's config gives.
+    pub fn of(raw: &Value, target: &ConfigTarget<'_>) -> Result<StateRulesConfig, ConfigError> {
         let flow = flow_of(target, raw.get("status").and_then(Value::as_str))?;
         let empty = Map::new();
         let rules = raw

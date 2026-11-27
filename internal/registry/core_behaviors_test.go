@@ -1230,12 +1230,27 @@ func TestRulesBehaviorsAreTheTranscripts(t *testing.T) {
 		}
 		var transcript struct {
 			Behaviors []string `json:"behaviors"`
+			// Declarations are the declarative behaviors' files (D103's
+			// step 5), whose names follow the core's own.
+			Declarations []struct {
+				Name string `json:"name"`
+			} `json:"declarations"`
 		}
 		if err := json.Unmarshal(data, &transcript); err != nil {
 			t.Fatalf("%s: %v", file, err)
 		}
-		if !slices.Equal(transcript.Behaviors, RulesBehaviors) {
-			t.Errorf("%s records the behaviors %v, and RulesBehaviors is %v", filepath.Base(file), transcript.Behaviors, RulesBehaviors)
+		declared := len(transcript.Declarations)
+		if declared > len(transcript.Behaviors) {
+			t.Fatalf("%s declares %d behaviors and records %d", filepath.Base(file), declared, len(transcript.Behaviors))
+		}
+		own := transcript.Behaviors[:len(transcript.Behaviors)-declared]
+		for i, declaration := range transcript.Declarations {
+			if got := transcript.Behaviors[len(own)+i]; got != declaration.Name {
+				t.Errorf("%s records %s where it declares %s", filepath.Base(file), got, declaration.Name)
+			}
+		}
+		if !slices.Equal(own, RulesBehaviors) {
+			t.Errorf("%s records the behaviors %v, and RulesBehaviors is %v", filepath.Base(file), own, RulesBehaviors)
 		}
 	}
 	reg := New(naming.Default())

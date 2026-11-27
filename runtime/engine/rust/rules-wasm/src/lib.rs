@@ -56,6 +56,14 @@
 //!   null for a spec the core takes and the [`Refusal`] for one it refuses.
 //!   A host checks the specs its layout holds when it first opens the core,
 //!   so a core that lacks a behavior or refuses a config fails then.
+//! - `declare`: `{"declarations": [declaration file]}`, the declaration
+//!   files of declarative behaviors (D103's step 5), each whole, to
+//!   `{"declared": [name]}`, every declarative behavior the core runs since:
+//!   `run` and `check` run them after the core's own, and `declarations`
+//!   lists their files after the core's. A file the vocabulary does not
+//!   read, one that names a behavior the core implements, and a second file
+//!   of a declared name that differs from the first are the error document
+//!   `invalid_input` with the reason; a file declared again is one behavior.
 //!
 //! - `expand`: a recurrence (D152), `{"anchor", "timeZone"?, "rule"?,
 //!   "start"?, "every"?, "lastDone"?, "date"?, "offset"?, "adjust"?,
@@ -76,8 +84,9 @@
 //!
 //! The core is built once per process (on wasm, once per instance), the
 //! first time an operation runs, and kept: a behavior reads its declaration
-//! file when it is registered, which a command should not pay for. Every
-//! thread shares it, since [`Core`] is `Send` and `Sync`, so the Go
+//! file when it is registered, which a command should not pay for. A
+//! `declare` that adds a behavior builds it again with every one declared.
+//! Every thread shares it, since [`Core`] is `Send` and `Sync`, so the Go
 //! binding's goroutines, on whatever threads cgo runs them, run one core.
 //!
 //! A project whose tables compose a behavior a class declares and a Rust
@@ -88,14 +97,16 @@
 //! `abi` feature, which exports the stock core's. Its archive and module
 //! stand in the stock ones' place: the Go binding links whichever archive
 //! named `libsuperschematic_rules.a` its `CGO_LDFLAGS` find first, and
-//! `@superschematic/rules` loads the module a host names.
+//! `@superschematic/rules` loads the module a host names. A `declare` adds
+//! declarative behaviors to a project's core as to the stock one, and
+//! refuses one its crates register.
 //!
 //! [`Step`]: superschematic_rules::Step
 //! [`Refusal`]: superschematic_rules::Refusal
 
 pub mod ffi;
 
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, RwLock};
 
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
@@ -103,12 +114,120 @@ use serde_json::{json, Value};
 
 use superschematic_rules::{Action, Answers, Caller, Command, Core, Outcome, Step, TypeSpec};
 
-// The core every operation runs on: each behavior ported so far
-// (superschematic_rules_behaviors::core()), built the first time an
-// operation runs and shared by every thread after: Core is Send and Sync,
-// so the Go binding's goroutines, on whatever threads cgo runs them, run
-// one core. A wasm32-unknown-unknown module runs on one thread.
-static CORE: LazyLock<Core> = LazyLock::new(superschematic_rules_behaviors::core);
+/// What every operation of the ABI runs on: a core and the declarative
+/// behaviors (D103's step 5) declared on it since. The core is built when
+/// the value is, which [`export_rules_abi`]'s static and [`run_json`]'s
+/// stock one do the first time an operation runs, and shared by every
+/// thread after: Core is Send and Sync, so the Go binding's goroutines, on
+/// whatever threads cgo runs them, run one core. A wasm32-unknown-unknown
+/// module runs on one thread. A `declare` that adds a behavior builds the
+/// core again, the built core's behaviors and every one declared.
+pub struct Rules {
+    build: fn() -> Core,
+    declarations: Vec<&'static str>,
+    // The names of the behaviors the built core registers, which a
+    // declaration may not take.
+    names: Vec<String>,
+    held: RwLock<Declared>,
+}
+
+// The core and the declaration files of the declarative behaviors it runs
+// beside the built ones.
+struct Declared {
+    core: Arc<Core>,
+    files: Arc<Vec<Value>>,
+}
+
+impl Rules {
+    /// The core `build` makes, whose behaviors' declaration files are
+    /// `declarations`, in its order, with no behavior declared yet: the
+    /// stock core's ([`superschematic_rules_behaviors::core`] and its
+    /// `DECLARATIONS`) or a project's (D103's step 5).
+    pub fn new(build: fn() -> Core, declarations: Vec<&'static str>) -> Rules {
+        let names = declarations
+            .iter()
+            .filter_map(|text| {
+                let file: Value = serde_json::from_str(text).ok()?;
+                file.get("name").and_then(Value::as_str).map(str::to_owned)
+            })
+            .collect();
+        Rules {
+            build,
+            declarations,
+            names,
+            held: RwLock::new(Declared {
+                core: Arc::new(build()),
+                files: Arc::new(Vec::new()),
+            }),
+        }
+    }
+
+    // The core as declare last left it, and the files declared on it; one
+    // a panic poisoned answers as it was.
+    fn current(&self) -> (Arc<Core>, Arc<Vec<Value>>) {
+        let held = self
+            .held
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        (held.core.clone(), held.files.clone())
+    }
+
+    // declare adds the declarative behaviors of declaration files to the
+    // core, building it again when one is new.
+    fn declare(&self, input: &[u8]) -> Result<Value, (&'static str, String)> {
+        let input: DeclareInput = parse(Op::Declare, input)?;
+        let mut held = self
+            .held
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut files = held.files.as_ref().clone();
+        for file in input.declarations {
+            if !files.contains(&file) {
+                files.push(file);
+            }
+        }
+        let refused = |reason: String| ("invalid_input", format!("declare: {reason}"));
+        let declared = superschematic_rules_behaviors::declaratives(&files).map_err(refused)?;
+        // A project's core registers its crates' behaviors beside the
+        // stock ones, which a declaration may not replace either.
+        if let Some(behavior) = declared
+            .iter()
+            .find(|behavior| self.names.iter().any(|name| name == behavior.name()))
+        {
+            return Err(refused(format!(
+                "behavior {}: the core implements it, and a declaration cannot replace it",
+                behavior.name()
+            )));
+        }
+        let names: Vec<Value> = declared
+            .iter()
+            .map(|behavior| Value::from(behavior.name()))
+            .collect();
+        // Two files of one behavior are refused above; a file given again is
+        // already there.
+        let files: Vec<Value> = declared
+            .iter()
+            .map(|behavior| behavior.document().clone())
+            .collect();
+        if files != *held.files {
+            let mut core = (self.build)();
+            for behavior in declared {
+                core.push(behavior);
+            }
+            held.core = Arc::new(core);
+            held.files = Arc::new(files);
+        }
+        Ok(json!({ "declared": names }))
+    }
+}
+
+// The stock core, which run_json runs on: every behavior ported so far.
+static STOCK: LazyLock<Rules> = LazyLock::new(|| {
+    Rules::new(
+        superschematic_rules_behaviors::core,
+        superschematic_rules_behaviors::DECLARATIONS.to_vec(),
+    )
+});
 
 // The core is shared across threads, which only a Send and Sync core may
 // be; a behavior that broke it would fail to compile here.
@@ -116,10 +235,6 @@ const _: () = {
     const fn shared<T: Send + Sync>() {}
     shared::<Core>();
 };
-
-/// The core's type, for [`export_rules_abi`]'s expansion in another crate.
-#[doc(hidden)]
-pub use superschematic_rules::Core as __Core;
 
 /// The stock core's behaviors' declaration files, in its order.
 #[cfg(feature = "abi")]
@@ -142,6 +257,7 @@ pub enum Op {
     Declarations,
     Check,
     Expand,
+    Declare,
 }
 
 impl Op {
@@ -152,8 +268,15 @@ impl Op {
             Op::Declarations => "declarations",
             Op::Check => "check",
             Op::Expand => "expand",
+            Op::Declare => "declare",
         }
     }
+}
+
+/// `declare`'s input.
+#[derive(Deserialize)]
+struct DeclareInput {
+    declarations: Vec<Value>,
 }
 
 /// `run`'s input.
@@ -175,22 +298,18 @@ struct CheckInput {
     now: i64,
 }
 
-/// Runs an operation on its JSON input and returns its output document,
-/// with true for the operation's output and false for an error document.
+/// Runs an operation on its JSON input on the stock core and returns its
+/// output document, with true for the operation's output and false for an
+/// error document.
 pub fn run_json(op: Op, input: &[u8]) -> (String, bool) {
-    run_json_on(
-        &CORE,
-        &superschematic_rules_behaviors::DECLARATIONS,
-        op,
-        input,
-    )
+    run_json_on(&STOCK, op, input)
 }
 
-/// Runs an operation on core, whose behaviors' declaration files are
-/// declarations in its order, as [`run_json`] runs it on the stock core: a
-/// project's core ([`export_rules_abi`]) answers through it.
-pub fn run_json_on(core: &Core, declarations: &[&str], op: Op, input: &[u8]) -> (String, bool) {
-    match output_on(core, declarations, op, input) {
+/// Runs an operation on rules, a core and the behaviors declared on it, as
+/// [`run_json`] runs it on the stock core: a project's core
+/// ([`export_rules_abi`]) answers through it.
+pub fn run_json_on(rules: &Rules, op: Op, input: &[u8]) -> (String, bool) {
+    match output_on(rules, op, input) {
         Ok(value) => (value.to_string(), true),
         Err((code, message)) => (error_document(code, &message), false),
     }
@@ -202,20 +321,26 @@ pub fn error_document(code: &str, message: &str) -> String {
 }
 
 fn output_on(
-    core: &Core,
-    declarations: &[&str],
+    rules: &Rules,
     op: Op,
     input: &[u8],
 ) -> Result<Value, (&'static str, String)> {
     match op {
-        Op::Declarations => Ok(Value::Array(
-            declarations
-                .iter()
-                .map(|text| serde_json::from_str(text).unwrap_or(Value::Null))
-                .collect(),
-        )),
+        Op::Declarations => {
+            let (_, declared) = rules.current();
+            Ok(Value::Array(
+                rules
+                    .declarations
+                    .iter()
+                    .map(|text| serde_json::from_str(text).unwrap_or(Value::Null))
+                    .chain(declared.iter().cloned())
+                    .collect(),
+            ))
+        }
+        Op::Declare => rules.declare(input),
         Op::Run => {
             let input: RunInput = parse(op, input)?;
+            let (core, _) = rules.current();
             let step: Step = core.run(&input.spec, &input.command, &input.answers);
             serde_json::to_value(step).map_err(|error| ("internal", error.to_string()))
         }
@@ -226,6 +351,7 @@ fn output_on(
         }
         Op::Check => {
             let input: CheckInput = parse(op, input)?;
+            let (core, _) = rules.current();
             let define = Command::new(input.caller, input.now, Action::Define);
             let refusals = input
                 .specs
@@ -543,6 +669,86 @@ mod tests {
             json!({"done": {"changed": {"rows": [], "subRows": [], "events": [], "deadlines": [], "result":
                 {"member": {"key": "a2", "availability": "open", "order": 1, "preferred": true}}}}})
         );
+    }
+
+    /// A declare adds a declarative behavior (D103's step 5) the core runs
+    /// from then on and lists among its declarations; the same file again is
+    /// one behavior, and a second file of its name that differs, one of a
+    /// behavior the core implements and one the vocabulary does not read are
+    /// refused, leaving the core as it was. A state of the test's own keeps
+    /// the process's core as it is for the other tests.
+    #[test]
+    fn declare_adds_a_declarative_behavior_the_core_runs() {
+        let votes: Value = serde_json::from_str(include_str!(
+            "../../../testdata/rules/declarations/test.Votes.behavior.json"
+        ))
+        .unwrap();
+        let rules = Rules::new(
+            superschematic_rules_behaviors::core,
+            superschematic_rules_behaviors::DECLARATIONS.to_vec(),
+        );
+        let input = json!({ "declarations": [votes.clone()] }).to_string();
+        assert_eq!(
+            rules.declare(input.as_bytes()),
+            Ok(json!({"declared": ["test.Votes"]}))
+        );
+        assert_eq!(
+            rules.declare(input.as_bytes()),
+            Ok(json!({"declared": ["test.Votes"]}))
+        );
+        let (core, files) = rules.current();
+        assert_eq!(files.as_slice(), std::slice::from_ref(&votes));
+        assert!(core.declaration("test.Votes").is_some());
+        let listed = output_on(&rules, Op::Declarations, b"").unwrap();
+        assert_eq!(listed.as_array().unwrap().last(), Some(&votes));
+        // A proposal whose votes the core now runs passes the define check.
+        let proposal = json!({"specs": [{
+            "name": "Proposal",
+            "uses": [
+                {"behavior": "Workflow", "config": {"states": ["open", "accepted", "closed"], "transitions": [{"from": "open", "to": "accepted"}, {"from": "open", "to": "closed"}]}, "anchor": {"field": "status"}},
+                {"behavior": "test.Votes", "config": {"maxScore": 5, "quorum": 2}, "anchor": "type"}
+            ],
+            "fields": [{"name": "title", "type": "string"}, {"name": "owner", "type": "string"}]
+        }]});
+        let checked = output_on(&rules, Op::Check, proposal.to_string().as_bytes()).unwrap();
+        assert_eq!(checked, json!([null]));
+        let mut other = votes.clone();
+        other["description"] = Value::from("another");
+        for (refused, reason) in [
+            (other, "two declarations of it differ"),
+            (
+                json!({"name": "Workflow", "rules": {}}),
+                "the core implements it",
+            ),
+            (json!({"name": "test.Plain"}), "states no rules"),
+        ] {
+            let input = json!({ "declarations": [refused] }).to_string();
+            let (code, message) = rules.declare(input.as_bytes()).unwrap_err();
+            assert_eq!(code, "invalid_input");
+            assert!(message.contains(reason), "{message}");
+        }
+        assert_eq!(rules.current().1.as_slice(), [votes]);
+    }
+
+    /// A project's core (D103's step 5) refuses a declaration of a behavior
+    /// its crates register, as the stock core refuses one of its own: a
+    /// name the core it was built with registers.
+    #[test]
+    fn declare_refuses_a_behavior_the_built_core_registers() {
+        fn project() -> Core {
+            superschematic_rules_behaviors::core()
+        }
+        let mut declarations = superschematic_rules_behaviors::DECLARATIONS.to_vec();
+        declarations.push(r#"{"name": "test.Plain"}"#);
+        let rules = Rules::new(project, declarations);
+        let input = json!({ "declarations": [{"name": "test.Plain", "rules": {}}] }).to_string();
+        let (code, message) = rules.declare(input.as_bytes()).unwrap_err();
+        assert_eq!(code, "invalid_input");
+        assert!(
+            message.contains("test.Plain: the core implements it"),
+            "{message}"
+        );
+        assert!(rules.current().1.is_empty());
     }
 
     #[test]

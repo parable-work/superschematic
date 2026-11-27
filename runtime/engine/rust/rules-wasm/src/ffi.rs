@@ -20,10 +20,10 @@
 //! call from any number of threads at once, all of which run one core.
 //!
 //! The operations ([`crate`] says each one's documents): `rules_run`,
-//! `rules_declarations`, `rules_check` and `rules_expand`, which
-//! [`crate::export_rules_abi`] defines over a core: the stock core's, at
-//! this crate's root, with its default `abi` feature, or a project's (D103's
-//! step 5), at its rules crate's.
+//! `rules_declarations`, `rules_check`, `rules_expand` and `rules_declare`,
+//! which [`crate::export_rules_abi`] defines over a core: the stock core's,
+//! at this crate's root, with its default `abi` feature, or a project's
+//! (D103's step 5), at its rules crate's.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -104,11 +104,13 @@ pub unsafe fn dealloc(ptr: *mut u8, len: usize) {
 }
 
 /// Defines the ABI's exports (`rules_run`, `rules_declarations`,
-/// `rules_check`, `rules_expand`, `rules_free`, and on wasm32
-/// `rules_alloc` and `rules_dealloc`) at the root of the crate it is
-/// invoked in, over the core `core()` builds once, the first time an
+/// `rules_check`, `rules_expand`, `rules_declare`, `rules_free`, and on
+/// wasm32 `rules_alloc` and `rules_dealloc`) at the root of the crate it
+/// is invoked in, over the core `core()` builds once, the first time an
 /// operation runs, whose behaviors' declaration files `declarations()`
-/// gives in the core's order. The stock crate invokes it over
+/// gives in the core's order, and the declarative behaviors a `declare`
+/// adds to it (D103's step 5), with which it builds the core again
+/// ([`crate::Rules`]). The stock crate invokes it over
 /// `superschematic_rules_behaviors::core` with its `abi` feature; a
 /// project's rules crate over its own core, the core's behaviors and its
 /// crates' (D103's step 5), depending on this crate without that feature,
@@ -116,13 +118,12 @@ pub unsafe fn dealloc(ptr: *mut u8, len: usize) {
 #[macro_export]
 macro_rules! export_rules_abi {
     (core = $core:path, declarations = $declarations:path $(,)?) => {
-        static __RULES_CORE: ::std::sync::LazyLock<$crate::__Core> =
-            ::std::sync::LazyLock::new($core);
-        static __RULES_DECLARATIONS: ::std::sync::LazyLock<::std::vec::Vec<&'static str>> =
-            ::std::sync::LazyLock::new(|| $declarations().into_iter().collect());
+        static __RULES: ::std::sync::LazyLock<$crate::Rules> = ::std::sync::LazyLock::new(|| {
+            $crate::Rules::new($core, $declarations().into_iter().collect())
+        });
 
         fn __rules_run(op: $crate::Op, input: &[u8]) -> (::std::string::String, bool) {
-            $crate::run_json_on(&__RULES_CORE, &__RULES_DECLARATIONS, op, input)
+            $crate::run_json_on(&__RULES, op, input)
         }
 
         /// `run`: `{"spec", "command", "answers"?}` to the core's step.
@@ -205,6 +206,29 @@ macro_rules! export_rules_abi {
             $crate::ffi::call_with(
                 __rules_run,
                 $crate::Op::Expand,
+                in_ptr,
+                in_len,
+                out_ptr,
+                out_len,
+            )
+        }
+
+        /// `declare`: declarative behaviors' declaration files (D103's
+        /// step 5), which the core runs from then on, to the names of
+        /// every one it runs.
+        ///
+        /// # Safety
+        /// As [`rules_run`].
+        #[no_mangle]
+        pub unsafe extern "C" fn rules_declare(
+            in_ptr: *const u8,
+            in_len: usize,
+            out_ptr: *mut *mut u8,
+            out_len: *mut usize,
+        ) -> i32 {
+            $crate::ffi::call_with(
+                __rules_run,
+                $crate::Op::Declare,
                 in_ptr,
                 in_len,
                 out_ptr,

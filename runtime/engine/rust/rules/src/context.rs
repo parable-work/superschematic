@@ -61,6 +61,22 @@ impl<'r, C> View<'r, C> {
         self.config
     }
 
+    /// The view of the same use, row and request with another config, one
+    /// the use's own holds: what a behavior whose declaration states its
+    /// rules (D103's step 5) hands the code of a rule it shares with
+    /// another behavior, as the declarative vocabulary hands Constants' and
+    /// StateRules' rules the part of its config they read.
+    pub fn with_config<D>(&self, config: &'r D) -> View<'r, D> {
+        View {
+            run: self.run,
+            frame: self.frame,
+            index: self.index,
+            config,
+            action: self.action,
+            precondition: self.precondition,
+        }
+    }
+
     /// The name of the type of the row the hook runs on.
     pub fn type_name(&self) -> &'r str {
         &self.frame.spec.name
@@ -416,6 +432,18 @@ impl<'r, C> Cx<'r, C> {
     /// The context as a view.
     pub fn view(&self) -> &View<'r, C> {
         &self.view
+    }
+
+    /// The context of the same use and row with another config, one the
+    /// use's own holds ([`View::with_config`]): it writes as this one does.
+    pub fn with_config<D>(&self, config: &'r D) -> Cx<'r, D> {
+        Cx {
+            view: self.view.with_config(config),
+            writable: self.writable,
+            own: self.own,
+            handler: self.handler,
+            fired: self.fired,
+        }
     }
 
     /// Whether the context writes: false in a read-only operation.
