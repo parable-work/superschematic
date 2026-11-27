@@ -391,7 +391,8 @@ Most are load errors; knowing them saves a build round-trip:
   behavior (D103's step 5): an abstract class marked `@declaresBehavior`
   from `@superschematic/db`, in the directory `behaviors` names in
   `superschematic.toml`, named `<prefix>.<Name>`, with the Rust crate
-  that runs it on the core (`crate`). A table implements it with
+  that runs it on the core (`crate`) or its declarative `rules` (below).
+  A table implements it with
   `implements Behavior<typeof Rating, Movie, { ... }>`, and the build
   writes the project's rules crate (`rules/rust/<schema>`), whose archive
   a Go server links in the stock one's place. Write the class's bodies as
@@ -399,9 +400,10 @@ Most are load errors; knowing them saves a build round-trip:
   extension guide's "A behavior declared by a class" lists its form.
 - An extension's behavior whose rules are a count or an average over a
   sub-table, a guard over the row and the caller, a counter, a move or a
-  field kept or frozen needs no Rust: state them in its declaration's
-  `rules` (D103's step 5), which the behaviors' core interprets, as
-  `examples/acme-schematic/ext/rating.behavior.json` does. Reach for a
+  field kept or frozen needs no Rust: state them in its class's
+  `@declaresBehavior({ rules })`, or its declaration's `rules` (D103's
+  step 5), which the behaviors' core interprets, as acme.Rating's class
+  `examples/acme-schematic/ext/rating.behavior.ts` does. Reach for a
   crate only for what the vocabulary has no rule for (loops, expressions,
   deadlines, events, contracts); the reference page "Declarative
   behaviors" lists it.

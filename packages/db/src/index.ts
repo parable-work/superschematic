@@ -170,6 +170,7 @@ export type {
   BehaviorField,
   Capacity,
   Const,
+  DeclarativeRules,
   DeclaresBehaviorOptions,
   Hears,
   Integer,

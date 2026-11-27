@@ -20,7 +20,7 @@ The extension adds one of each registration surface:
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
 | Check, a tool hook and an invocation policy on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant; `confirm` replaces the core's `invocationPolicy` | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
-| Behavior | `acme.Rating`, declared in a JSON file whose `rules` the behaviors' core interprets on a table, with no crate (D103's step 5), replayed from `testdata/rules`; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation; the `acme-behaviors` crate implements it for the engine, over a copy of the declaration, which its registration names and the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `crates/behaviors`, `testdata/rules` |
+| Behavior | `acme.Rating`, declared by a class whose `rules` the behaviors' core interprets on a table, with no crate (D103's step 5), its JSON declaration derived from the class, replayed from `testdata/rules`; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation; the `acme-behaviors` crate implements it for the engine, over a copy of the declaration, which its registration names and the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.ts`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `crates/behaviors`, `testdata/rules` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -93,6 +93,7 @@ examples/acme-schematic/
     mcp.go                    every shop-api operation declares @mcp; acme tool keys and icon variant; the confirm policy
     projection_policy.go      projection policy: a check on DB views' first rule
     behavior.go               registers acme.Rating from rating.behavior.json, its declaration
+    rating.behavior.ts        acme.Rating's class, which rating.behavior.json is derived from
     testdata/services/returns-api  an API the tests load that declares confirm on @mcp
     testdata/services/shop-ratings  a General data-form service whose Product composes acme.Rating
     testdata/services/shop-ratings-ts  its TypeScript twin, with @behavior
@@ -718,7 +719,10 @@ A behavior adds fields, operations, checks and storage to a type when an
 engine runs the schema. The compiler only declares, carries and checks
 behaviors. acme declares one, `acme.Rating`: shoppers rate a catalog item
 from one star to a maximum each type sets. The declaration is one JSON file,
-`ext/rating.behavior.json`, which `ext/behavior.go` embeds and registers:
+`ext/rating.behavior.json`, which `ext/behavior.go` embeds and registers.
+`make behaviors` derives it from the behavior's class,
+`ext/rating.behavior.ts` (D103's step 5), and `make behaviors-check` holds
+the two to one declaration:
 
 ```go
 //go:embed rating.behavior.json

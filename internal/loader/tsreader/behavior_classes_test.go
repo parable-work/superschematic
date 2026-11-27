@@ -122,3 +122,44 @@ func requireSuperscalarCheckout(t *testing.T) {
 		t.Skip("the superscalar checkout (third_party/superscalar) is absent: scripts/superscalar-dep.sh --checkout")
 	}
 }
+
+// acmeExtDir holds acme.Rating's class and the declaration the acme
+// example's extension embeds (D103's step 5).
+const acmeExtDir = "../../../examples/acme-schematic/ext"
+
+// TestAcmeRatingClassDerivesItsDeclaration reads acme.Rating's class
+// (examples/acme-schematic/ext/rating.behavior.ts), a behavior whose rules
+// are the declarative vocabulary's (@declaresBehavior's rules), and holds
+// the declaration derived from it byte for byte to the committed
+// rating.behavior.json the extension registers, and to the acme-behaviors
+// crate's copy, which acme-schematic behaviors writes from it.
+func TestAcmeRatingClassDerivesItsDeclaration(t *testing.T) {
+	requireSuperscalarCheckout(t)
+	classes, err := ReadBehaviorClasses(acmeExtDir, nil)
+	if err != nil {
+		t.Fatalf("ReadBehaviorClasses: %v", err)
+	}
+	if len(classes) != 1 || classes[0].Declaration.Name != "acme.Rating" {
+		t.Fatalf("classes %+v, want acme.Rating alone", classes)
+	}
+	class := classes[0]
+	if !class.Declaration.Declarative() || class.Rules.Declared() {
+		t.Fatalf("acme.Rating states rules %t and names crate %+v: it is declarative, with no crate", class.Declaration.Declarative(), class.Rules)
+	}
+	derived, err := registry.CanonicalDeclaration(class.Declaration)
+	if err != nil {
+		t.Fatalf("CanonicalDeclaration: %v", err)
+	}
+	for _, committed := range []string{
+		filepath.Join(acmeExtDir, "rating.behavior.json"),
+		"../../../examples/acme-schematic/crates/behaviors/declarations/acme.Rating.behavior.json",
+	} {
+		data, err := os.ReadFile(committed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(derived, data) {
+			t.Errorf("%s derives a declaration that differs from %s:\n%s", class.File, committed, firstDifference(derived, data))
+		}
+	}
+}

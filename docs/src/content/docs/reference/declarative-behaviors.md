@@ -25,7 +25,12 @@ must register the behavior, as an extension's binary does.
 
 `acme.Rating`, the acme example's behavior
 (`examples/acme-schematic/ext/rating.behavior.json`), keeps one rating
-per shopper in a sub-table and derives a count and an average from it:
+per shopper in a sub-table and derives a count and an average from it.
+The file is derived from the behavior's class,
+`examples/acme-schematic/ext/rating.behavior.ts`, whose
+`@declaresBehavior` gives the same rules in its `rules` option (the
+extension guide's "A class that states its rules"); here is the
+declaration, shortened:
 
 ```json
 {

@@ -182,7 +182,9 @@ generic-schemas-check:
 # The core's behaviors a class declares (D103) derive their declarations
 # from it (internal/registry/behaviors/<name>.behavior.ts, read by the
 # TypeScript reader, behaviorclasses), which needs superscalar's checkout
-# in third_party. Then the engine's behaviors crate, the work queue's crate (D58), the
+# in third_party, and so does acme.Rating, the acme example's declarative
+# behavior (examples/acme-schematic/ext/rating.behavior.ts, D103's step
+# 5), whose rating.behavior.json the extension embeds. Then the engine's behaviors crate, the work queue's crate (D58), the
 # commerce crate (D70) and the behaviors' core (rules-behaviors, for the
 # behaviors no engine implements, D104) implement the core's behaviors over
 # a copy of each declaration (internal/registry/behaviors), which the core
@@ -197,6 +199,7 @@ RULES_RUST_DECLARATIONS := runtime/engine/rust/rules-behaviors/declarations
 
 behaviors:
 	go run ./internal/tools/behaviorclasses
+	go run ./internal/tools/behaviorclasses examples/acme-schematic/ext
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS)
@@ -204,6 +207,7 @@ behaviors:
 
 behaviors-check:
 	go run ./internal/tools/behaviorclasses -check
+	go run ./internal/tools/behaviorclasses -check examples/acme-schematic/ext
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS) --check

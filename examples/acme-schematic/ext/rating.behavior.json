@@ -2,21 +2,31 @@
   "name": "acme.Rating",
   "description": "Shoppers rate a catalog item from one star to the configured maximum, one rating per shopper.",
   "configSchema": {
-    "type": "object",
-    "required": ["maxStars"],
     "additionalProperties": false,
     "properties": {
       "maxStars": {
-        "type": "integer",
-        "minimum": 3,
+        "description": "The highest rating a shopper can give.",
         "maximum": 10,
-        "description": "The highest rating a shopper can give."
+        "minimum": 3,
+        "type": "integer"
       }
-    }
+    },
+    "required": [
+      "maxStars"
+    ],
+    "type": "object"
   },
   "fields": [
-    { "name": "ratingCount", "description": "How many ratings the item has.", "type": "Generic.Int64" },
-    { "name": "ratingAverage", "description": "The mean rating; 0 before the first.", "type": "number" }
+    {
+      "name": "ratingCount",
+      "description": "How many ratings the item has.",
+      "type": "Generic.Int64"
+    },
+    {
+      "name": "ratingAverage",
+      "description": "The mean rating; 0 before the first.",
+      "type": "number"
+    }
   ],
   "tables": [
     {
@@ -24,9 +34,21 @@
       "description": "One row per shopper who rated the item: the stars and when the rating came.",
       "key": "rater",
       "fields": [
-        { "name": "rater", "description": "The shopper's subject.", "type": "string" },
-        { "name": "stars", "description": "The stars the shopper gave, 1 to maxStars.", "type": "Generic.Int64" },
-        { "name": "ratedAt", "description": "When the shopper rated the item last.", "type": "Temporal.DateTime" }
+        {
+          "name": "rater",
+          "description": "The shopper's subject.",
+          "type": "string"
+        },
+        {
+          "name": "stars",
+          "description": "The stars the shopper gave, 1 to maxStars.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "ratedAt",
+          "description": "When the shopper rated the item last.",
+          "type": "Temporal.DateTime"
+        }
       ]
     }
   ],
@@ -35,18 +57,32 @@
       "name": "rate",
       "description": "Records one shopper's rating of the item, replacing the shopper's earlier one.",
       "paramsSchema": {
-        "type": "object",
-        "required": ["stars"],
         "additionalProperties": false,
-        "properties": { "stars": { "type": "integer", "minimum": 1 } }
+        "properties": {
+          "stars": {
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "stars"
+        ],
+        "type": "object"
       },
       "resultSchema": {
-        "type": "object",
-        "required": ["ratingCount", "ratingAverage"],
         "properties": {
-          "ratingCount": { "type": "integer" },
-          "ratingAverage": { "type": "number" }
-        }
+          "ratingAverage": {
+            "type": "number"
+          },
+          "ratingCount": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ratingCount",
+          "ratingAverage"
+        ],
+        "type": "object"
       },
       "writes": true,
       "invocationPolicy": "always"
@@ -54,40 +90,93 @@
     {
       "name": "ratingSummary",
       "description": "Returns the item's rating count and average.",
-      "paramsSchema": { "type": "object", "additionalProperties": false },
+      "paramsSchema": {
+        "additionalProperties": false,
+        "type": "object"
+      },
       "resultSchema": {
-        "type": "object",
-        "required": ["ratingCount", "ratingAverage"],
         "properties": {
-          "ratingCount": { "type": "integer" },
-          "ratingAverage": { "type": "number" }
-        }
+          "ratingAverage": {
+            "type": "number"
+          },
+          "ratingCount": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ratingCount",
+          "ratingAverage"
+        ],
+        "type": "object"
       }
     }
   ],
   "rules": {
-    "operations": {
-      "rate": {
-        "params": { "stars": { "lte": { "config": "maxStars" } } },
-        "effects": [
-          {
-            "upsert": {
-              "table": "ratings",
-              "key": { "caller": true },
-              "values": { "stars": { "param": "stars" }, "ratedAt": { "now": true } }
-            }
-          }
-        ],
-        "result": { "ratingCount": { "field": "ratingCount" }, "ratingAverage": { "field": "ratingAverage" } }
-      },
-      "ratingSummary": {
-        "result": { "ratingCount": { "field": "ratingCount" }, "ratingAverage": { "field": "ratingAverage" } }
+    "configChange": {
+      "oneWay": {
+        "maxStars": "up"
       }
     },
     "derived": {
-      "ratingCount": { "count": { "table": "ratings" } },
-      "ratingAverage": { "average": { "table": "ratings", "field": "stars", "empty": 0 } }
+      "ratingAverage": {
+        "average": {
+          "empty": 0,
+          "field": "stars",
+          "table": "ratings"
+        }
+      },
+      "ratingCount": {
+        "count": {
+          "table": "ratings"
+        }
+      }
     },
-    "configChange": { "oneWay": { "maxStars": "up" } }
+    "operations": {
+      "rate": {
+        "effects": [
+          {
+            "upsert": {
+              "key": {
+                "caller": true
+              },
+              "table": "ratings",
+              "values": {
+                "ratedAt": {
+                  "now": true
+                },
+                "stars": {
+                  "param": "stars"
+                }
+              }
+            }
+          }
+        ],
+        "params": {
+          "stars": {
+            "lte": {
+              "config": "maxStars"
+            }
+          }
+        },
+        "result": {
+          "ratingAverage": {
+            "field": "ratingAverage"
+          },
+          "ratingCount": {
+            "field": "ratingCount"
+          }
+        }
+      },
+      "ratingSummary": {
+        "result": {
+          "ratingAverage": {
+            "field": "ratingAverage"
+          },
+          "ratingCount": {
+            "field": "ratingCount"
+          }
+        }
+      }
+    }
   }
 }

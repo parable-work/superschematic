@@ -37,19 +37,19 @@
       "name": "acme.Rating",
       "description": "Shoppers rate a catalog item from one star to the configured maximum, one rating per shopper.",
       "configSchema": {
-        "type": "object",
-        "required": [
-          "maxStars"
-        ],
         "additionalProperties": false,
         "properties": {
           "maxStars": {
-            "type": "integer",
-            "minimum": 3,
+            "description": "The highest rating a shopper can give.",
             "maximum": 10,
-            "description": "The highest rating a shopper can give."
+            "minimum": 3,
+            "type": "integer"
           }
-        }
+        },
+        "required": [
+          "maxStars"
+        ],
+        "type": "object"
       },
       "fields": [
         {
@@ -92,32 +92,32 @@
           "name": "rate",
           "description": "Records one shopper's rating of the item, replacing the shopper's earlier one.",
           "paramsSchema": {
-            "type": "object",
-            "required": [
-              "stars"
-            ],
             "additionalProperties": false,
             "properties": {
               "stars": {
-                "type": "integer",
-                "minimum": 1
+                "minimum": 1,
+                "type": "integer"
               }
-            }
+            },
+            "required": [
+              "stars"
+            ],
+            "type": "object"
           },
           "resultSchema": {
-            "type": "object",
+            "properties": {
+              "ratingAverage": {
+                "type": "number"
+              },
+              "ratingCount": {
+                "type": "integer"
+              }
+            },
             "required": [
               "ratingCount",
               "ratingAverage"
             ],
-            "properties": {
-              "ratingCount": {
-                "type": "integer"
-              },
-              "ratingAverage": {
-                "type": "number"
-              }
-            }
+            "type": "object"
           },
           "writes": true,
           "invocationPolicy": "always"
@@ -126,29 +126,66 @@
           "name": "ratingSummary",
           "description": "Returns the item's rating count and average.",
           "paramsSchema": {
-            "type": "object",
-            "additionalProperties": false
+            "additionalProperties": false,
+            "type": "object"
           },
           "resultSchema": {
-            "type": "object",
+            "properties": {
+              "ratingAverage": {
+                "type": "number"
+              },
+              "ratingCount": {
+                "type": "integer"
+              }
+            },
             "required": [
               "ratingCount",
               "ratingAverage"
             ],
-            "properties": {
-              "ratingCount": {
-                "type": "integer"
-              },
-              "ratingAverage": {
-                "type": "number"
-              }
-            }
+            "type": "object"
           }
         }
       ],
       "rules": {
+        "configChange": {
+          "oneWay": {
+            "maxStars": "up"
+          }
+        },
+        "derived": {
+          "ratingAverage": {
+            "average": {
+              "empty": 0,
+              "field": "stars",
+              "table": "ratings"
+            }
+          },
+          "ratingCount": {
+            "count": {
+              "table": "ratings"
+            }
+          }
+        },
         "operations": {
           "rate": {
+            "effects": [
+              {
+                "upsert": {
+                  "key": {
+                    "caller": true
+                  },
+                  "table": "ratings",
+                  "values": {
+                    "ratedAt": {
+                      "now": true
+                    },
+                    "stars": {
+                      "param": "stars"
+                    }
+                  }
+                }
+              }
+            ],
             "params": {
               "stars": {
                 "lte": {
@@ -156,61 +193,24 @@
                 }
               }
             },
-            "effects": [
-              {
-                "upsert": {
-                  "table": "ratings",
-                  "key": {
-                    "caller": true
-                  },
-                  "values": {
-                    "stars": {
-                      "param": "stars"
-                    },
-                    "ratedAt": {
-                      "now": true
-                    }
-                  }
-                }
-              }
-            ],
             "result": {
-              "ratingCount": {
-                "field": "ratingCount"
-              },
               "ratingAverage": {
                 "field": "ratingAverage"
+              },
+              "ratingCount": {
+                "field": "ratingCount"
               }
             }
           },
           "ratingSummary": {
             "result": {
-              "ratingCount": {
-                "field": "ratingCount"
-              },
               "ratingAverage": {
                 "field": "ratingAverage"
+              },
+              "ratingCount": {
+                "field": "ratingCount"
               }
             }
-          }
-        },
-        "derived": {
-          "ratingCount": {
-            "count": {
-              "table": "ratings"
-            }
-          },
-          "ratingAverage": {
-            "average": {
-              "table": "ratings",
-              "field": "stars",
-              "empty": 0
-            }
-          }
-        },
-        "configChange": {
-          "oneWay": {
-            "maxStars": "up"
           }
         }
       }
@@ -357,8 +357,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 0,
-                  "ratingAverage": 0
+                  "ratingAverage": 0,
+                  "ratingCount": 0
                 }
               }
             },
@@ -391,8 +391,8 @@
           },
           "expect": {
             "result": {
-              "ratingCount": 1,
-              "ratingAverage": 4
+              "ratingAverage": 4,
+              "ratingCount": 1
             },
             "row": {
               "own": {
@@ -400,8 +400,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 1,
-                  "ratingAverage": 4
+                  "ratingAverage": 4,
+                  "ratingCount": 1
                 }
               }
             },
@@ -411,8 +411,8 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 4,
-                      "ratedAt": 1001000
+                      "ratedAt": 1001000,
+                      "stars": 4
                     }
                   }
                 ]
@@ -447,8 +447,8 @@
           },
           "expect": {
             "result": {
-              "ratingCount": 2,
-              "ratingAverage": 4.5
+              "ratingAverage": 4.5,
+              "ratingCount": 2
             },
             "row": {
               "own": {
@@ -456,8 +456,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 2,
-                  "ratingAverage": 4.5
+                  "ratingAverage": 4.5,
+                  "ratingCount": 2
                 }
               }
             },
@@ -467,15 +467,15 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 4,
-                      "ratedAt": 1001000
+                      "ratedAt": 1001000,
+                      "stars": 4
                     }
                   },
                   {
                     "key": "bo",
                     "values": {
-                      "stars": 5,
-                      "ratedAt": 1002000
+                      "ratedAt": 1002000,
+                      "stars": 5
                     }
                   }
                 ]
@@ -510,8 +510,8 @@
           },
           "expect": {
             "result": {
-              "ratingCount": 2,
-              "ratingAverage": 3.5
+              "ratingAverage": 3.5,
+              "ratingCount": 2
             },
             "row": {
               "own": {
@@ -519,8 +519,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 2,
-                  "ratingAverage": 3.5
+                  "ratingAverage": 3.5,
+                  "ratingCount": 2
                 }
               }
             },
@@ -530,15 +530,15 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 2,
-                      "ratedAt": 1003000
+                      "ratedAt": 1003000,
+                      "stars": 2
                     }
                   },
                   {
                     "key": "bo",
                     "values": {
-                      "stars": 5,
-                      "ratedAt": 1002000
+                      "ratedAt": 1002000,
+                      "stars": 5
                     }
                   }
                 ]
@@ -592,8 +592,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 2,
-                  "ratingAverage": 3.5
+                  "ratingAverage": 3.5,
+                  "ratingCount": 2
                 }
               }
             },
@@ -603,15 +603,15 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 2,
-                      "ratedAt": 1003000
+                      "ratedAt": 1003000,
+                      "stars": 2
                     }
                   },
                   {
                     "key": "bo",
                     "values": {
-                      "stars": 5,
-                      "ratedAt": 1002000
+                      "ratedAt": 1002000,
+                      "stars": 5
                     }
                   }
                 ]
@@ -665,8 +665,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 2,
-                  "ratingAverage": 3.5
+                  "ratingAverage": 3.5,
+                  "ratingCount": 2
                 }
               }
             },
@@ -676,15 +676,15 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 2,
-                      "ratedAt": 1003000
+                      "ratedAt": 1003000,
+                      "stars": 2
                     }
                   },
                   {
                     "key": "bo",
                     "values": {
-                      "stars": 5,
-                      "ratedAt": 1002000
+                      "ratedAt": 1002000,
+                      "stars": 5
                     }
                   }
                 ]
@@ -738,8 +738,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 2,
-                  "ratingAverage": 3.5
+                  "ratingAverage": 3.5,
+                  "ratingCount": 2
                 }
               }
             },
@@ -749,15 +749,15 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 2,
-                      "ratedAt": 1003000
+                      "ratedAt": 1003000,
+                      "stars": 2
                     }
                   },
                   {
                     "key": "bo",
                     "values": {
-                      "stars": 5,
-                      "ratedAt": 1002000
+                      "ratedAt": 1002000,
+                      "stars": 5
                     }
                   }
                 ]
@@ -792,8 +792,8 @@
           },
           "expect": {
             "result": {
-              "ratingCount": 3,
-              "ratingAverage": 3.3333333333333335
+              "ratingAverage": 3.3333333333333335,
+              "ratingCount": 3
             },
             "row": {
               "own": {
@@ -801,8 +801,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 3,
-                  "ratingAverage": 3.3333333333333335
+                  "ratingAverage": 3.3333333333333335,
+                  "ratingCount": 3
                 }
               }
             },
@@ -812,22 +812,22 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 2,
-                      "ratedAt": 1003000
+                      "ratedAt": 1003000,
+                      "stars": 2
                     }
                   },
                   {
                     "key": "bo",
                     "values": {
-                      "stars": 5,
-                      "ratedAt": 1002000
+                      "ratedAt": 1002000,
+                      "stars": 5
                     }
                   },
                   {
                     "key": "cy",
                     "values": {
-                      "stars": 3,
-                      "ratedAt": 1005000
+                      "ratedAt": 1005000,
+                      "stars": 3
                     }
                   }
                 ]
@@ -860,8 +860,8 @@
           },
           "expect": {
             "result": {
-              "ratingCount": 3,
-              "ratingAverage": 3.3333333333333335
+              "ratingAverage": 3.3333333333333335,
+              "ratingCount": 3
             },
             "row": {
               "own": {
@@ -869,8 +869,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 3,
-                  "ratingAverage": 3.3333333333333335
+                  "ratingAverage": 3.3333333333333335,
+                  "ratingCount": 3
                 }
               }
             },
@@ -880,22 +880,22 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 2,
-                      "ratedAt": 1003000
+                      "ratedAt": 1003000,
+                      "stars": 2
                     }
                   },
                   {
                     "key": "bo",
                     "values": {
-                      "stars": 5,
-                      "ratedAt": 1002000
+                      "ratedAt": 1002000,
+                      "stars": 5
                     }
                   },
                   {
                     "key": "cy",
                     "values": {
-                      "stars": 3,
-                      "ratedAt": 1005000
+                      "ratedAt": 1005000,
+                      "stars": 3
                     }
                   }
                 ]
@@ -1058,8 +1058,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 0,
-                  "ratingAverage": 0
+                  "ratingAverage": 0,
+                  "ratingCount": 0
                 }
               }
             },
@@ -1103,8 +1103,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 0,
-                  "ratingAverage": 0
+                  "ratingAverage": 0,
+                  "ratingCount": 0
                 }
               }
             },
@@ -1283,8 +1283,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 0,
-                  "ratingAverage": 0
+                  "ratingAverage": 0,
+                  "ratingCount": 0
                 }
               }
             },
@@ -1317,8 +1317,8 @@
           },
           "expect": {
             "result": {
-              "ratingCount": 1,
-              "ratingAverage": 5
+              "ratingAverage": 5,
+              "ratingCount": 1
             },
             "row": {
               "own": {
@@ -1326,8 +1326,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 1,
-                  "ratingAverage": 5
+                  "ratingAverage": 5,
+                  "ratingCount": 1
                 }
               }
             },
@@ -1337,8 +1337,8 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 5,
-                      "ratedAt": 1001000
+                      "ratedAt": 1001000,
+                      "stars": 5
                     }
                   }
                 ]
@@ -1479,8 +1479,8 @@
           },
           "expect": {
             "result": {
-              "ratingCount": 2,
-              "ratingAverage": 6
+              "ratingAverage": 6,
+              "ratingCount": 2
             },
             "row": {
               "own": {
@@ -1488,8 +1488,8 @@
               },
               "owned": {
                 "acme.Rating": {
-                  "ratingCount": 2,
-                  "ratingAverage": 6
+                  "ratingAverage": 6,
+                  "ratingCount": 2
                 }
               }
             },
@@ -1499,15 +1499,15 @@
                   {
                     "key": "ann",
                     "values": {
-                      "stars": 5,
-                      "ratedAt": 1001000
+                      "ratedAt": 1001000,
+                      "stars": 5
                     }
                   },
                   {
                     "key": "bo",
                     "values": {
-                      "stars": 7,
-                      "ratedAt": 1002000
+                      "ratedAt": 1002000,
+                      "stars": 7
                     }
                   }
                 ]

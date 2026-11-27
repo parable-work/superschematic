@@ -291,3 +291,76 @@ export abstract class Thing<C extends { a?: string }> {
 		})
 	}
 }
+
+// A behavior class states its rules in the declarative vocabulary (D103's
+// step 5) with @declaresBehavior's rules, written as the JSON the
+// declaration holds, its members' order canonical; one that also names a
+// crate is refused, and rules that are no object are a type error.
+func TestABehaviorClassStatesDeclarativeRules(t *testing.T) {
+	dir := writeBehaviorClasses(t, map[string]string{"tally.behavior.ts": `
+import { declaresBehavior, subTable } from "@superschematic/db";
+/** Counts the callers' marks. */
+@declaresBehavior({
+  name: "test.Tally",
+  rules: {
+    operations: { mark: { effects: [{ upsert: { table: "marks", key: { caller: true }, values: {} } }] } },
+    derived: { marks: { count: { table: "marks" } } },
+  },
+})
+export abstract class Tally<C extends {}> {
+  /** How many callers marked the row. */
+  marks: number;
+  /**
+   * Marks the row as the caller.
+   * @writes
+   */
+  abstract mark(): {};
+  /** One row per caller who marked it. */
+  @subTable({ key: "by" })
+  static marks = class {
+    /** The caller's subject. */
+    by: string;
+  };
+}
+`})
+	classes, err := ReadBehaviorClasses(dir, nil)
+	if err != nil {
+		t.Fatalf("ReadBehaviorClasses: %v", err)
+	}
+	got, err := registry.CanonicalDeclaration(classes[0].Declaration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decl struct {
+		Rules json.RawMessage `json:"rules"`
+	}
+	if err := json.Unmarshal(got, &decl); err != nil {
+		t.Fatal(err)
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, decl.Rules); err != nil {
+		t.Fatal(err)
+	}
+	want := `{"derived":{"marks":{"count":{"table":"marks"}}},"operations":{"mark":{"effects":[{"upsert":{"key":{"caller":true},"table":"marks","values":{}}}]}}}`
+	if compact.String() != want {
+		t.Errorf("rules %s, want %s", compact.String(), want)
+	}
+	for _, tc := range []struct{ name, options, want string }{
+		{"rules beside a crate", `{ name: "test.Tally", crate: { crate: "tally", path: "crates/tally", register: "tally::Tally" }, rules: { derived: {} } }`, "names a crate and rules"},
+		{"rules that are no object", `{ name: "test.Tally", rules: ["derived"] }`, "has no properties in common with type 'DeclarativeRules'"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writeBehaviorClasses(t, map[string]string{"tally.behavior.ts": `
+import { declaresBehavior } from "@superschematic/db";
+/** A tally. */
+@declaresBehavior(` + tc.options + `)
+export abstract class Tally<C extends {}> {
+}
+`})
+			_, err := ReadBehaviorClasses(dir, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error %v, want one that says %q", err, tc.want)
+			}
+		})
+	}
+}

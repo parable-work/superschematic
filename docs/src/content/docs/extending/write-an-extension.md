@@ -1162,7 +1162,7 @@ Each part of the class is one member of the declaration:
   `@declaresBehavior` give its `name` (the class's own when absent),
   `requires`, `conflicts`, `armsDeadlines`, `hearsChanges`, the contracts
   it `asks`, its `vetoes` (an enum: each member is a code, and its JSDoc
-  is the code's description) and its `crate`.
+  is the code's description), and its `crate` or its `rules`.
 - The last type parameter's constraint is the config. A first one, when
   there are two, is the table the behavior sits on.
 - A property is a field, its type the column's: `string`, `number`,
@@ -1216,6 +1216,44 @@ it held for each behavior:
   them before a behavior's own checks run, and finds from them the tables
   whose writes a table hears.
 
+### A class that states its rules
+
+A behavior whose rules the declarative vocabulary states needs no crate
+(D103's step 5). Its class gives them in `@declaresBehavior`'s `rules`,
+written as the JSON the declaration's `rules` member holds, and names no
+`crate`: a behavior's rules are its crate's or the vocabulary's, not both.
+acme.Rating is one, in `examples/acme-schematic/ext/rating.behavior.ts`:
+
+```ts
+@declaresBehavior({
+  name: "acme.Rating",
+  rules: {
+    operations: {
+      rate: {
+        params: { stars: { lte: { config: "maxStars" } } },
+        effects: [{ upsert: { table: "ratings", key: { caller: true }, values: { stars: { param: "stars" }, ratedAt: { now: true } } } }],
+        result: { ratingCount: { field: "ratingCount" }, ratingAverage: { field: "ratingAverage" } },
+      },
+    },
+    derived: {
+      ratingCount: { count: { table: "ratings" } },
+      ratingAverage: { average: { table: "ratings", field: "stars", empty: 0 } },
+    },
+    configChange: { oneWay: { maxStars: "up" } },
+  },
+})
+export abstract class Rating<C extends RatingConfig> {
+  // its fields, its ratings sub-table and its rate and ratingSummary
+}
+```
+
+The derived declaration keeps the rules' object members in sorted order,
+as it keeps a JSON Schema's. `make behaviors` writes the extension's
+`rating.behavior.json` from the class, which the extension embeds, and
+`make behaviors-check` fails when the two differ. The
+[declarative behaviors](/superschematic/reference/declarative-behaviors/)
+reference lists the vocabulary.
+
 ### A project's own behaviors
 
 A project names the directory of its behaviors in its `superschematic.toml`
@@ -1223,7 +1261,8 @@ A project names the directory of its behaviors in its `superschematic.toml`
 directory holds the classes of its `*.behavior.ts` files, beside a
 `tsconfig.json` that resolves `@superschematic/db`. It may also hold a
 behavior's declaration as data, a `*.behavior.json` or `*.behavior.yaml`
-file, with a `crate` member beside the declaration's. Every command
+file, with a `crate` member beside the declaration's, or with `rules` for a
+declarative behavior. Every command
 registers them before it reads a schema. A project's behavior is named
 `<prefix>.<Name>`, as an extension's is.
 
@@ -1266,7 +1305,8 @@ The crate's archive and module stand in the stock ones' place:
   pass it to `@superschematic/rules`' `init(source)`.
 
 A schema whose tables compose the core's behaviors alone gets no rules
-crate: the stock core runs them. A composed behavior whose crate is not
+crate: the stock core runs them, as it runs a declarative behavior, whose
+declaration the layout hands it. A composed behavior whose crate is not
 in the project leaves no core that can run the schema, and the build's log
 says why.
 

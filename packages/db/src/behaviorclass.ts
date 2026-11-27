@@ -28,7 +28,9 @@
 //     @declaresBehavior its name, requires, conflicts, armsDeadlines,
 //     hearsChanges, vetoes (an enum, each member a code and its JSDoc its
 //     description), the contracts it asks, and the Rust crate whose hooks
-//     run it on the core (crate);
+//     run it on the core (crate) or, for a behavior no Rust implements, its
+//     rules in the declarative vocabulary the core interprets (rules,
+//     written as the JSON the declaration holds, D103's step 5);
 //   - the last type parameter's constraint is the config, whose JSON Schema
 //     the reader writes from the type: an interface or a type literal is an
 //     object that sets additionalProperties false, its optional members
@@ -83,6 +85,40 @@ export interface DeclaresBehaviorOptions {
   readonly asks?: Readonly<Record<string, string>>;
   /** The Rust crate whose hooks run the behavior on the core: a project's or an extension's behavior names one. */
   readonly crate?: BehaviorCrate;
+  /** The behavior's rules in the declarative vocabulary the core interprets, so no crate runs it: the reference page "Declarative behaviors" lists each member. */
+  readonly rules?: DeclarativeRules;
+}
+
+/**
+ * A declarative behavior's rules (D103's step 5), the declaration's rules
+ * member, written as the JSON it is: conditions in the ORM's filter
+ * grammar, the field rules Constants and StateRules have, guards, an
+ * operation's params, effects and result, reactions, fields derived from a
+ * sub-table and how a new version may change a use's config. The core
+ * checks them against the class's fields, sub-tables and operations when a
+ * host hands it the declaration.
+ */
+export interface DeclarativeRules {
+  /** The type's own fields a create sets for good, as Constants keeps them: a list, or `{ config: "<member>" }`. */
+  readonly constant?: unknown;
+  /** Own fields that move one way after the create, by field, `up` or `down`, as Constants keeps them, or `{ config: "<member>" }`. */
+  readonly oneWay?: unknown;
+  /** The permission a caller needs to change a constant or frozen field, or to move a oneWay one back. */
+  readonly permission?: unknown;
+  /** The own fields a state of a Workflow requires or freezes, by state, as StateRules keeps them. */
+  readonly states?: unknown;
+  /** The Workflow use the states and moves are of, by its field. */
+  readonly status?: unknown;
+  /** Conditions a create, an update, a delete or an operation must meet, each vetoed with its code. */
+  readonly guards?: readonly unknown[];
+  /** Each declared operation's rules, by operation: `params`, `effects` and `result`. */
+  readonly operations?: Readonly<Record<string, unknown>>;
+  /** `{ when, then }`: the effects a write that leaves the row meeting a condition has. */
+  readonly reactions?: readonly unknown[];
+  /** Owned fields that hold a count, sum, minimum, maximum or average over a sub-table, by field. */
+  readonly derived?: Readonly<Record<string, unknown>>;
+  /** How a new version may change a use's config: `"any"`, or `{ oneWay: { <member>: "up" | "down" } }`; no change when absent. */
+  readonly configChange?: "any" | { readonly oneWay: Readonly<Record<string, "up" | "down">> };
 }
 
 /** Declares a behavior by its class (D103); the class declares and never implements. */

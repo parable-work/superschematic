@@ -9,7 +9,8 @@ import (
 // CanonicalDeclaration is the canonical copy of a declaration, the bytes
 // `superschematic behaviors` writes into the crate that implements it and
 // the core embeds: its keys in BehaviorDeclaration's order, each JSON
-// Schema's object keys sorted and number literals as written (a signal's
+// Schema's object keys and a declarative behavior's rules' sorted and
+// number literals as written (a signal's
 // paramsSchema keeps the order it is written in, which the engine's
 // describe returns as it reads it), two-space indents, no HTML escaping and
 // a final newline. A declaration derived from
@@ -46,6 +47,12 @@ func CanonicalDeclaration(declaration BehaviorDeclaration) ([]byte, error) {
 	declaration.Events = events
 	if declaration.PreconditionSchema, err = CanonicalSchema(declaration.PreconditionSchema); err != nil {
 		return nil, fmt.Errorf("preconditionSchema: %w", err)
+	}
+	// A declarative behavior's rules (D103's step 5) are data as a schema
+	// is: a class writes them as an object literal, whose members' order
+	// no reader keeps, and the vocabulary reads none of it.
+	if declaration.Rules, err = CanonicalSchema(declaration.Rules); err != nil {
+		return nil, fmt.Errorf("rules: %w", err)
 	}
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

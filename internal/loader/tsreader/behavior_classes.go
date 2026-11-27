@@ -313,9 +313,29 @@ func (r *behaviorClassReader) readOptions(class string, marker decoratorRef, out
 			out.Rules.Crate, _ = crate["crate"].(string)
 			out.Rules.Path, _ = crate["path"].(string)
 			out.Rules.Register, _ = crate["register"].(string)
+		case "rules":
+			// The declarative vocabulary's rules (D103's step 5), written as
+			// the JSON the declaration holds; the core reads and checks them
+			// when a host hands it the declaration.
+			rules, ok := value.(map[string]any)
+			if !ok {
+				bad("an object of the declarative vocabulary's rules (constant, oneWay, permission, states, status, guards, operations, reactions, derived, configChange)")
+				continue
+			}
+			data, err := json.Marshal(rules)
+			if err != nil {
+				bad(err.Error())
+				continue
+			}
+			decl.Rules = data
 		default:
-			r.fail(p, "behavior class %s: @declaresBehavior has no option %s (name, requires, conflicts, armsDeadlines, hearsChanges, vetoes, asks, crate)", class, key)
+			r.fail(p, "behavior class %s: @declaresBehavior has no option %s (name, requires, conflicts, armsDeadlines, hearsChanges, vetoes, asks, crate, rules)", class, key)
 		}
+	}
+	// A behavior's rules are its crate's hooks or its declaration's, not
+	// both.
+	if out.Rules.Declared() && decl.Declarative() {
+		r.fail(marker.node, "behavior class %s: @declaresBehavior names a crate and rules: a behavior's rules are its crate's or the declarative vocabulary's, not both (D103)", class)
 	}
 }
 

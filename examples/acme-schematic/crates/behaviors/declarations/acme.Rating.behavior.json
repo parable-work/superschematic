@@ -112,8 +112,45 @@
     }
   ],
   "rules": {
+    "configChange": {
+      "oneWay": {
+        "maxStars": "up"
+      }
+    },
+    "derived": {
+      "ratingAverage": {
+        "average": {
+          "empty": 0,
+          "field": "stars",
+          "table": "ratings"
+        }
+      },
+      "ratingCount": {
+        "count": {
+          "table": "ratings"
+        }
+      }
+    },
     "operations": {
       "rate": {
+        "effects": [
+          {
+            "upsert": {
+              "key": {
+                "caller": true
+              },
+              "table": "ratings",
+              "values": {
+                "ratedAt": {
+                  "now": true
+                },
+                "stars": {
+                  "param": "stars"
+                }
+              }
+            }
+          }
+        ],
         "params": {
           "stars": {
             "lte": {
@@ -121,61 +158,24 @@
             }
           }
         },
-        "effects": [
-          {
-            "upsert": {
-              "table": "ratings",
-              "key": {
-                "caller": true
-              },
-              "values": {
-                "stars": {
-                  "param": "stars"
-                },
-                "ratedAt": {
-                  "now": true
-                }
-              }
-            }
-          }
-        ],
         "result": {
-          "ratingCount": {
-            "field": "ratingCount"
-          },
           "ratingAverage": {
             "field": "ratingAverage"
+          },
+          "ratingCount": {
+            "field": "ratingCount"
           }
         }
       },
       "ratingSummary": {
         "result": {
-          "ratingCount": {
-            "field": "ratingCount"
-          },
           "ratingAverage": {
             "field": "ratingAverage"
+          },
+          "ratingCount": {
+            "field": "ratingCount"
           }
         }
-      }
-    },
-    "derived": {
-      "ratingCount": {
-        "count": {
-          "table": "ratings"
-        }
-      },
-      "ratingAverage": {
-        "average": {
-          "table": "ratings",
-          "field": "stars",
-          "empty": 0
-        }
-      }
-    },
-    "configChange": {
-      "oneWay": {
-        "maxStars": "up"
       }
     }
   }
