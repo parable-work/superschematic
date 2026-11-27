@@ -207,6 +207,22 @@ func refuseGoEngineDerivers(api *ir.Schema, engine *apigen.EngineInfo) error {
 	return fmt.Errorf("generator: %s declares deriver %s, which fills the derived fields of %s, engine types of its database, and it is a Go API; %s", api.Name, d.Name, strings.Join(names, ", "), stack.DeriverLanguages)
 }
 
+// refuseGoHeldDerivers refuses a Go API's deriver of a table whose rows
+// keep to an audience (@audience, D156). The deriver's context reaches
+// every row, as a job's does (D180), but the Go behaviors' core reads the
+// table's rows with its access columns and decodes effectiveAudience, a
+// list, as one UUID, so its pull of the stale fields fails on every pass.
+func refuseGoHeldDerivers(api *ir.Schema, derivers []apigen.DeriverInfo) error {
+	for _, d := range derivers {
+		for _, s := range d.Schemas {
+			if s.Type != nil && s.Type.Audience != nil {
+				return fmt.Errorf("generator: %s declares deriver %s, which fills the derived fields of %s, and %s keeps its rows to an audience (@audience); a Go API's deriver does not fill such a table yet, since the Go behaviors' core reads its effective audience as one UUID and fails every pull (D146, D180)", api.Name, d.Name, s.Name, s.Name)
+			}
+		}
+	}
+	return nil
+}
+
 // refuseRustMixedDerivers refuses a Rust API whose derivers fill engine
 // types and tables both: deps.rs types the items of one kind of deriver,
 // the engine's or the HTTP runtime's (D146).
