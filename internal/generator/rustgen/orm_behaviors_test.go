@@ -132,13 +132,14 @@ var audienceRulesTest string
 // audienceRulesCases are the cases audience_rules.rs runs, by name, each
 // of which it prints as it starts it: ormgen's
 // TestBehaviorOperationsKeepToTheCallerOnPostgres holds the Go ORM to the
-// same ones.
+// same ones, and TestHeldBehaviorTablesOnPostgres to the deriver's.
 var audienceRulesCases = []string{
 	"a private row's and a named row's behaviors are not found for a user outside their audience, and write nothing",
 	"a private row's behaviors answer its owner",
 	"a named row's behaviors answer the principals it names",
 	"a party whose grant reaches the row runs its behaviors, and one whose grant reaches another row finds it not there",
 	"an agent run reads a read-only row's conversation, and its moves and posts are not found",
+	"a deriver fills a private note's summary, and another user still cannot read it",
 }
 
 // TestRepositoriesKeepBehaviorOperationsToTheCaller runs
@@ -151,8 +152,10 @@ var audienceRulesCases = []string{
 // and writes nothing. A private row answers its owner, a named row the
 // principals it names, a party the row its grant names, and an agent run
 // with read-only access its conversation's reads; the core reads the
-// row's audience ids, a UUID[], as a list. Every case of
-// audienceRulesCases must run.
+// row's audience ids, a UUID[], as a list. A deriver, through repositories
+// opened as its generated main.rs opens them, fills a private Note's
+// Derived summary, which another user still cannot read (D146). Every case
+// of audienceRulesCases must run.
 //
 // It needs cargo, which it skips without, the database, and runs outside
 // -short.

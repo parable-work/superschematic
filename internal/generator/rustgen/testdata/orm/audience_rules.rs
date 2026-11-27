@@ -9,7 +9,9 @@
 //! its grant names and an agent run with read-only access its
 //! conversation's reads alone. Any other caller finds the row not there,
 //! before the core runs, and nothing is written. The core reads the row's
-//! audience ids, a `UUID[]`, as a list. tsgen's audience_behaviors.test.ts
+//! audience ids, a `UUID[]`, as a list, so a deriver fills a private
+//! Note's summary through the repositories its main.rs opens, and the note
+//! stays its author's alone (D146). tsgen's audience_behaviors.test.ts
 //! and ormgen's TestBehaviorOperationsKeepToTheCallerOnPostgres run the
 //! same cases.
 
@@ -17,7 +19,7 @@ use db::orm::postgres::{deadpool_postgres, tokio_postgres};
 use db::orm::*;
 use db::*;
 use serde_json::{json, Value};
-use superschematic_http_runtime::orm::AccessCaller;
+use superschematic_http_runtime::orm::{AccessCaller, Caller};
 use superschematic_http_runtime::{ActingFor, GrantReach, PrincipalKind};
 
 const ALICE: &str = "5f0c3a52-8a5e-4c1b-9d1e-2f6f1b7c8d90";
@@ -265,6 +267,45 @@ async fn on_postgres(pool: &deadpool_postgres::Pool) -> Result<(), Box<dyn std::
     }
     assert_eq!(status!(&watered), "open", "a refused transition moved the row");
     assert_eq!(messages!(&watered), 1, "a refused post wrote");
+
+    case("a deriver fills a private note's summary, and another user still cannot read it");
+    // A note created naming neither audience nor agent access takes the
+    // table's defaults: its author's alone, which agent runs only read.
+    let note = setup
+        .note()?
+        .untyped()
+        .create_one(&values(json!({"author": ALICE, "body": "Call the plumber about the leak under the sink."})))
+        .await?;
+    assert_eq!((&note["audience"], &note["agentAccess"]), (&json!("private"), &json!("readOnly")), "{note:?}");
+    // The repositories as a deriver's generated main.rs opens them: no
+    // caller's access, so they read every row, and the deriver the core's
+    // caller, holding the Derived config's permission (D146).
+    let deriving = postgres::Repositories::new(&transaction)?.with_caller(Caller {
+        subject: "fill-notes".to_owned(),
+        permissions: vec!["notes.derive".to_owned()],
+        stands_in: false,
+    });
+    let page = deriving.note()?.untyped().table_operation("derived", "staleDerivations", &json!({})).await?;
+    let item = page["items"]
+        .as_array()
+        .and_then(|items| items.iter().find(|item| item["id"] == note["id"]))
+        .cloned()
+        .unwrap_or_else(|| panic!("the private note's summary is not stale: {page}"));
+    let settled = deriving
+        .note()?
+        .untyped()
+        .table_operation(
+            "derived",
+            "settleDerivations",
+            &json!({"items": [{"id": item["id"], "field": item["field"], "sourceHash": item["sourceHash"], "value": "A leak to fix."}]}),
+        )
+        .await?;
+    assert_eq!(settled["settled"], 1, "{settled}");
+    // The note stays its author's alone.
+    let read = user(ALICE).note()?.untyped().get_one(&note["id"]).await?;
+    assert_eq!((&read["summary"], &read["effectiveAudience"]), (&json!("A leak to fix."), &json!([note["author"]])), "{read:?}");
+    let hidden = user(BOB).note()?.untyped().get_one(&note["id"]).await;
+    assert!(matches!(hidden, Err(Error::NotFound(_))), "another user's read of the filled note: {hidden:?}");
 
     transaction.commit().await?;
     Ok(())
