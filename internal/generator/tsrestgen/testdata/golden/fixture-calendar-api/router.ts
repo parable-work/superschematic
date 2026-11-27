@@ -257,6 +257,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-calendar-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-calendar-api', options);
@@ -277,9 +284,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<BookingHoldsListHoldsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.holdsListHolds,
-      rateLimitPerMinute: options.rateLimits?.holdsListHolds,
-      timeoutSeconds: options.timeouts?.holdsListHolds,
+      bodyLimitBytes: bodyLimits.holdsListHolds,
+      rateLimitPerMinute: rateLimits.holdsListHolds,
+      timeoutSeconds: timeouts.holdsListHolds,
     }
   );
   // Booking's Holds retakeHolds, a Holds (D103): the
@@ -299,9 +306,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<BookingHoldsRetakeHoldsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.holdsRetakeHolds,
-      rateLimitPerMinute: options.rateLimits?.holdsRetakeHolds,
-      timeoutSeconds: options.timeouts?.holdsRetakeHolds,
+      bodyLimitBytes: bodyLimits.holdsRetakeHolds,
+      rateLimitPerMinute: rateLimits.holdsRetakeHolds,
+      timeoutSeconds: timeouts.holdsRetakeHolds,
     }
   );
   // Booking's status transition, a Workflow (D103): the
@@ -323,9 +330,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<BookingStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.statusTransition,
-      rateLimitPerMinute: options.rateLimits?.statusTransition,
-      timeoutSeconds: options.timeouts?.statusTransition,
+      bodyLimitBytes: bodyLimits.statusTransition,
+      rateLimitPerMinute: rateLimits.statusTransition,
+      timeoutSeconds: timeouts.statusTransition,
     }
   );
   // Desk's Calendar findAvailability, a Calendar's operation of the table as a
@@ -346,9 +353,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<DeskCalendarFindAvailabilityResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.calendarFindAvailability,
-      rateLimitPerMinute: options.rateLimits?.calendarFindAvailability,
-      timeoutSeconds: options.timeouts?.calendarFindAvailability,
+      bodyLimitBytes: bodyLimits.calendarFindAvailability,
+      rateLimitPerMinute: rateLimits.calendarFindAvailability,
+      timeoutSeconds: timeouts.calendarFindAvailability,
     }
   );
   // Desk's Calendar addClosure, a Calendar (D103): the
@@ -370,9 +377,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<DeskCalendarAddClosureResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.calendarAddClosure,
-      rateLimitPerMinute: options.rateLimits?.calendarAddClosure,
-      timeoutSeconds: options.timeouts?.calendarAddClosure,
+      bodyLimitBytes: bodyLimits.calendarAddClosure,
+      rateLimitPerMinute: rateLimits.calendarAddClosure,
+      timeoutSeconds: timeouts.calendarAddClosure,
     }
   );
   // Desk's Calendar checkHold, a Calendar (D103): the
@@ -394,9 +401,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<DeskCalendarCheckHoldResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.calendarCheckHold,
-      rateLimitPerMinute: options.rateLimits?.calendarCheckHold,
-      timeoutSeconds: options.timeouts?.calendarCheckHold,
+      bodyLimitBytes: bodyLimits.calendarCheckHold,
+      rateLimitPerMinute: rateLimits.calendarCheckHold,
+      timeoutSeconds: timeouts.calendarCheckHold,
     }
   );
   // Desk's Calendar commitFor, a Calendar (D103): the
@@ -417,9 +424,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<DeskCalendarCommitForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.calendarCommitFor,
-      rateLimitPerMinute: options.rateLimits?.calendarCommitFor,
-      timeoutSeconds: options.timeouts?.calendarCommitFor,
+      bodyLimitBytes: bodyLimits.calendarCommitFor,
+      rateLimitPerMinute: rateLimits.calendarCommitFor,
+      timeoutSeconds: timeouts.calendarCommitFor,
     }
   );
   // Desk's Calendar holdFor, a Calendar (D103): the
@@ -440,9 +447,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<DeskCalendarHoldForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.calendarHoldFor,
-      rateLimitPerMinute: options.rateLimits?.calendarHoldFor,
-      timeoutSeconds: options.timeouts?.calendarHoldFor,
+      bodyLimitBytes: bodyLimits.calendarHoldFor,
+      rateLimitPerMinute: rateLimits.calendarHoldFor,
+      timeoutSeconds: timeouts.calendarHoldFor,
     }
   );
   // Desk's Calendar listBookings, a Calendar (D103): the
@@ -464,9 +471,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<DeskCalendarListBookingsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.calendarListBookings,
-      rateLimitPerMinute: options.rateLimits?.calendarListBookings,
-      timeoutSeconds: options.timeouts?.calendarListBookings,
+      bodyLimitBytes: bodyLimits.calendarListBookings,
+      rateLimitPerMinute: rateLimits.calendarListBookings,
+      timeoutSeconds: timeouts.calendarListBookings,
     }
   );
   // Desk's Calendar releaseFor, a Calendar (D103): the
@@ -487,9 +494,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<DeskCalendarReleaseForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.calendarReleaseFor,
-      rateLimitPerMinute: options.rateLimits?.calendarReleaseFor,
-      timeoutSeconds: options.timeouts?.calendarReleaseFor,
+      bodyLimitBytes: bodyLimits.calendarReleaseFor,
+      rateLimitPerMinute: rateLimits.calendarReleaseFor,
+      timeoutSeconds: timeouts.calendarReleaseFor,
     }
   );
   // Desk's Calendar removeClosure, a Calendar (D103): the
@@ -510,9 +517,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<DeskCalendarRemoveClosureResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.calendarRemoveClosure,
-      rateLimitPerMinute: options.rateLimits?.calendarRemoveClosure,
-      timeoutSeconds: options.timeouts?.calendarRemoveClosure,
+      bodyLimitBytes: bodyLimits.calendarRemoveClosure,
+      rateLimitPerMinute: rateLimits.calendarRemoveClosure,
+      timeoutSeconds: timeouts.calendarRemoveClosure,
     }
   );
   // Desk's Calendar setOpeningHours, a Calendar (D103): the
@@ -534,9 +541,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<DeskCalendarSetOpeningHoursResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.calendarSetOpeningHours,
-      rateLimitPerMinute: options.rateLimits?.calendarSetOpeningHours,
-      timeoutSeconds: options.timeouts?.calendarSetOpeningHours,
+      bodyLimitBytes: bodyLimits.calendarSetOpeningHours,
+      rateLimitPerMinute: rateLimits.calendarSetOpeningHours,
+      timeoutSeconds: timeouts.calendarSetOpeningHours,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

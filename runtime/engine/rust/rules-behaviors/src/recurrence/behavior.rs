@@ -56,6 +56,12 @@
 //! (`setRecurrence`, `complete`, `skip`, `moveOne`, an update of the
 //! holiday calendar's field or the relation), at every fire, and on a
 //! write of those fields its change queue carries, a raw one among them.
+//! A write of the row a relative recurrence reads its date from is none
+//! of these: the row hears no write of another table's. `setRecurrence`
+//! with the rule the row already holds is what follows it: for a relative
+//! recurrence it plans again from the date as it is now, keeping the
+//! recurrence as it was set, and answers `unchanged` only when the plan
+//! dates what the row already holds.
 //!
 //! What it raises is left to section 3's events: each change of state is
 //! a named deadline's fire today, recorded on the occurrence.
@@ -509,6 +515,7 @@ impl Occ {
 // ---- the plan ----
 
 /// A row's occurrences as a run has them, and what it read them as.
+#[derive(Clone)]
 struct Plan {
     occs: BTreeMap<String, Occ>,
     read: BTreeMap<String, Occ>,
@@ -533,6 +540,16 @@ impl Plan {
             last_done: view.get(LAST_DONE_AT).as_ref().and_then(whole),
             next_due,
         })
+    }
+
+    // pending are the occurrences that are upcoming or open, by key: what
+    // a plan dates, apart from the finished ones it only prunes.
+    fn pending(&self) -> BTreeMap<&str, &Occ> {
+        self.occs
+            .iter()
+            .filter(|(_, occ)| !occ.is_finished())
+            .map(|(key, occ)| (key.as_str(), occ))
+            .collect()
     }
 
     fn sorted(&self) -> Vec<&Occ> {
@@ -585,7 +602,7 @@ impl Plan {
     // desire dates the recurrence over [floor, now + horizon) and keeps
     // the occurrences: see the module's header. Answers when the next
     // occurrence past the horizon falls due, when none is upcoming.
-    fn desire(&mut self, cx: &Cx<'_, RecurrenceConfig>, now: i64) -> Hook<Option<i64>> {
+    fn desire(&mut self, cx: &View<'_, RecurrenceConfig>, now: i64) -> Hook<Option<i64>> {
         let Some(spec) = self.spec.clone() else {
             return Ok(None);
         };
@@ -665,7 +682,7 @@ impl Plan {
     // open_after_previous dates the opening of each upcoming occurrence
     // with no opensBefore: the due of the occurrence before it, the first
     // when it is planned.
-    fn open_after_previous(&mut self, cx: &Cx<'_, RecurrenceConfig>, now: i64) {
+    fn open_after_previous(&mut self, cx: &View<'_, RecurrenceConfig>, now: i64) {
         if cx.config().opens_before.is_some() {
             return;
         }
@@ -986,6 +1003,17 @@ impl Behavior for Recurrence {
                 if held.as_ref().is_some_and(|held| held.same_rule(&spec)) {
                     let mut plan = Plan::load(view)?;
                     plan.catch_up(now);
+                    // A relative recurrence's date is another row's, and no
+                    // write of this row says it moved: the rule it holds
+                    // plans again when a plan would now date its upcoming
+                    // and open occurrences otherwise (set_recurrence).
+                    if spec.anchor == "relative" {
+                        let mut again = plan.clone();
+                        settle_plan(view, &mut again)?;
+                        if again.pending() != plan.pending() {
+                            return Ok(None);
+                        }
+                    }
                     let kept = open_keys(&plan);
                     let mut result = set_result(&plan, held.as_ref().unwrap_or(&spec), &kept);
                     result.insert("unchanged".into(), json!(true));
@@ -1123,8 +1151,10 @@ fn replan(cx: &Cx<'_, RecurrenceConfig>) -> Hook<()> {
 }
 
 // settle_plan runs the plan to rest: catch up, date, and again while an
-// afterDone recurrence's occurrence was missed, which dates the next.
-fn settle_plan(cx: &Cx<'_, RecurrenceConfig>, plan: &mut Plan) -> Hook<Option<i64>> {
+// afterDone recurrence's occurrence was missed, which dates the next. It
+// reads and writes nothing of the row, so settle runs it on a view to ask
+// what a plan would date.
+fn settle_plan(cx: &View<'_, RecurrenceConfig>, plan: &mut Plan) -> Hook<Option<i64>> {
     let now = cx.now();
     plan.catch_up(now);
     let mut plan_at = plan.desire(cx, now)?;
@@ -1282,6 +1312,16 @@ fn set_recurrence(cx: &Cx<'_, RecurrenceConfig>, params: &Value) -> Hook<Value> 
     plan.catch_up(cx.now());
     let kept = open_keys(&plan);
     let mut spec = Spec::from_params(cx.config(), params);
+    // The rule the row holds reaches here only for a relative recurrence
+    // whose date has moved (settle answers every other as unchanged): the
+    // plan runs again as a fire runs it, and the recurrence stays as it
+    // was set, its time and its revision with it, so an occurrence moved
+    // by hand (moveOne) keeps its date.
+    if let Some(held) = plan.spec.clone().filter(|held| held.same_rule(&spec)) {
+        let plan_at = settle_plan(cx, &mut plan)?;
+        plan.write(cx, plan_at)?;
+        return Ok(Value::Object(set_result(&plan, &held, &kept)));
+    }
     spec.set_at = cx.now();
     spec.revision = plan.spec.as_ref().map_or(0, |held| held.revision) + 1;
     cx.set(RECURRENCE, spec.to_json())?;

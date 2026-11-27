@@ -389,6 +389,13 @@ export const identityRegistration: RegistrationOptions = { approval: true, defau
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
   const runtime = identityRouterOptions(options);
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-user-routes-api', options);
@@ -397,124 +404,124 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
   const cors = identityCorsRoutes(router, runtime.identity);
   for (const spec of Object.values(operationSpecs)) cors(spec);
   mountManualOperation(router, operationSpecs.listRoles, identityHandler(runtime.identity, 'listRoles'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.listRoles,
-    rateLimitPerMinute: options.rateLimits?.listRoles,
-    timeoutSeconds: options.timeouts?.listRoles,
+    bodyLimitBytes: bodyLimits.listRoles,
+    rateLimitPerMinute: rateLimits.listRoles,
+    timeoutSeconds: timeouts.listRoles,
   });
   mountManualOperation(router, operationSpecs.createRole, identityHandler(runtime.identity, 'createRole'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.createRole,
-    rateLimitPerMinute: options.rateLimits?.createRole,
-    timeoutSeconds: options.timeouts?.createRole,
+    bodyLimitBytes: bodyLimits.createRole,
+    rateLimitPerMinute: rateLimits.createRole,
+    timeoutSeconds: timeouts.createRole,
   });
   mountManualOperation(router, operationSpecs.deleteRole, identityHandler(runtime.identity, 'deleteRole'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.deleteRole,
-    rateLimitPerMinute: options.rateLimits?.deleteRole,
-    timeoutSeconds: options.timeouts?.deleteRole,
+    bodyLimitBytes: bodyLimits.deleteRole,
+    rateLimitPerMinute: rateLimits.deleteRole,
+    timeoutSeconds: timeouts.deleteRole,
   });
   mountManualOperation(router, operationSpecs.updateRole, identityHandler(runtime.identity, 'updateRole'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.updateRole,
-    rateLimitPerMinute: options.rateLimits?.updateRole,
-    timeoutSeconds: options.timeouts?.updateRole,
+    bodyLimitBytes: bodyLimits.updateRole,
+    rateLimitPerMinute: rateLimits.updateRole,
+    timeoutSeconds: timeouts.updateRole,
   });
   mountManualOperation(router, operationSpecs.listUsers, identityHandler(runtime.identity, 'listUsers'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.listUsers,
-    rateLimitPerMinute: options.rateLimits?.listUsers,
-    timeoutSeconds: options.timeouts?.listUsers,
+    bodyLimitBytes: bodyLimits.listUsers,
+    rateLimitPerMinute: rateLimits.listUsers,
+    timeoutSeconds: timeouts.listUsers,
   });
   mountManualOperation(router, operationSpecs.createUser, identityHandler(runtime.identity, 'createUser'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.createUser,
-    rateLimitPerMinute: options.rateLimits?.createUser,
-    timeoutSeconds: options.timeouts?.createUser,
+    bodyLimitBytes: bodyLimits.createUser,
+    rateLimitPerMinute: rateLimits.createUser,
+    timeoutSeconds: timeouts.createUser,
   });
   mountManualOperation(router, operationSpecs.getUser, identityHandler(runtime.identity, 'getUser'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.getUser,
-    rateLimitPerMinute: options.rateLimits?.getUser,
-    timeoutSeconds: options.timeouts?.getUser,
+    bodyLimitBytes: bodyLimits.getUser,
+    rateLimitPerMinute: rateLimits.getUser,
+    timeoutSeconds: timeouts.getUser,
   });
   mountManualOperation(router, operationSpecs.approveUser, identityHandler(runtime.identity, 'approveUser'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.approveUser,
-    rateLimitPerMinute: options.rateLimits?.approveUser,
-    timeoutSeconds: options.timeouts?.approveUser,
+    bodyLimitBytes: bodyLimits.approveUser,
+    rateLimitPerMinute: rateLimits.approveUser,
+    timeoutSeconds: timeouts.approveUser,
   });
   mountManualOperation(router, operationSpecs.disableUser, identityHandler(runtime.identity, 'disableUser'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.disableUser,
-    rateLimitPerMinute: options.rateLimits?.disableUser,
-    timeoutSeconds: options.timeouts?.disableUser,
+    bodyLimitBytes: bodyLimits.disableUser,
+    rateLimitPerMinute: rateLimits.disableUser,
+    timeoutSeconds: timeouts.disableUser,
   });
   mountManualOperation(router, operationSpecs.enableUser, identityHandler(runtime.identity, 'enableUser'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.enableUser,
-    rateLimitPerMinute: options.rateLimits?.enableUser,
-    timeoutSeconds: options.timeouts?.enableUser,
+    bodyLimitBytes: bodyLimits.enableUser,
+    rateLimitPerMinute: rateLimits.enableUser,
+    timeoutSeconds: timeouts.enableUser,
   });
   mountManualOperation(router, operationSpecs.listUserApiKeys, identityHandler(runtime.identity, 'listUserApiKeys'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.listUserApiKeys,
-    rateLimitPerMinute: options.rateLimits?.listUserApiKeys,
-    timeoutSeconds: options.timeouts?.listUserApiKeys,
+    bodyLimitBytes: bodyLimits.listUserApiKeys,
+    rateLimitPerMinute: rateLimits.listUserApiKeys,
+    timeoutSeconds: timeouts.listUserApiKeys,
   });
   mountManualOperation(router, operationSpecs.revokeUserApiKey, identityHandler(runtime.identity, 'revokeUserApiKey'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.revokeUserApiKey,
-    rateLimitPerMinute: options.rateLimits?.revokeUserApiKey,
-    timeoutSeconds: options.timeouts?.revokeUserApiKey,
+    bodyLimitBytes: bodyLimits.revokeUserApiKey,
+    rateLimitPerMinute: rateLimits.revokeUserApiKey,
+    timeoutSeconds: timeouts.revokeUserApiKey,
   });
   mountManualOperation(router, operationSpecs.setUserPassword, identityHandler(runtime.identity, 'setUserPassword'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.setUserPassword,
-    rateLimitPerMinute: options.rateLimits?.setUserPassword,
-    timeoutSeconds: options.timeouts?.setUserPassword,
+    bodyLimitBytes: bodyLimits.setUserPassword,
+    rateLimitPerMinute: rateLimits.setUserPassword,
+    timeoutSeconds: timeouts.setUserPassword,
   });
   mountManualOperation(router, operationSpecs.revokeRole, identityHandler(runtime.identity, 'revokeRole'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.revokeRole,
-    rateLimitPerMinute: options.rateLimits?.revokeRole,
-    timeoutSeconds: options.timeouts?.revokeRole,
+    bodyLimitBytes: bodyLimits.revokeRole,
+    rateLimitPerMinute: rateLimits.revokeRole,
+    timeoutSeconds: timeouts.revokeRole,
   });
   mountManualOperation(router, operationSpecs.grantRole, identityHandler(runtime.identity, 'grantRole'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.grantRole,
-    rateLimitPerMinute: options.rateLimits?.grantRole,
-    timeoutSeconds: options.timeouts?.grantRole,
+    bodyLimitBytes: bodyLimits.grantRole,
+    rateLimitPerMinute: rateLimits.grantRole,
+    timeoutSeconds: timeouts.grantRole,
   });
   mountManualOperation(router, operationSpecs.capabilities, identityHandler(runtime.identity, 'capabilities'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.capabilities,
-    rateLimitPerMinute: options.rateLimits?.capabilities,
-    timeoutSeconds: options.timeouts?.capabilities,
+    bodyLimitBytes: bodyLimits.capabilities,
+    rateLimitPerMinute: rateLimits.capabilities,
+    timeoutSeconds: timeouts.capabilities,
   });
   mountManualOperation(router, operationSpecs.listApiKeys, identityHandler(runtime.identity, 'listApiKeys'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.listApiKeys,
-    rateLimitPerMinute: options.rateLimits?.listApiKeys,
-    timeoutSeconds: options.timeouts?.listApiKeys,
+    bodyLimitBytes: bodyLimits.listApiKeys,
+    rateLimitPerMinute: rateLimits.listApiKeys,
+    timeoutSeconds: timeouts.listApiKeys,
   });
   mountManualOperation(router, operationSpecs.createApiKey, identityHandler(runtime.identity, 'createApiKey'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.createApiKey,
-    rateLimitPerMinute: options.rateLimits?.createApiKey,
-    timeoutSeconds: options.timeouts?.createApiKey,
+    bodyLimitBytes: bodyLimits.createApiKey,
+    rateLimitPerMinute: rateLimits.createApiKey,
+    timeoutSeconds: timeouts.createApiKey,
   });
   mountManualOperation(router, operationSpecs.revokeApiKey, identityHandler(runtime.identity, 'revokeApiKey'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.revokeApiKey,
-    rateLimitPerMinute: options.rateLimits?.revokeApiKey,
-    timeoutSeconds: options.timeouts?.revokeApiKey,
+    bodyLimitBytes: bodyLimits.revokeApiKey,
+    rateLimitPerMinute: rateLimits.revokeApiKey,
+    timeoutSeconds: timeouts.revokeApiKey,
   });
   mountManualOperation(router, operationSpecs.login, identityHandler(runtime.identity, 'login'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.login,
-    rateLimitPerMinute: options.rateLimits?.login,
-    timeoutSeconds: options.timeouts?.login,
+    bodyLimitBytes: bodyLimits.login,
+    rateLimitPerMinute: rateLimits.login,
+    timeoutSeconds: timeouts.login,
   });
   mountManualOperation(router, operationSpecs.logout, identityHandler(runtime.identity, 'logout'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.logout,
-    rateLimitPerMinute: options.rateLimits?.logout,
-    timeoutSeconds: options.timeouts?.logout,
+    bodyLimitBytes: bodyLimits.logout,
+    rateLimitPerMinute: rateLimits.logout,
+    timeoutSeconds: timeouts.logout,
   });
   mountManualOperation(router, operationSpecs.me, identityHandler(runtime.identity, 'me'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.me,
-    rateLimitPerMinute: options.rateLimits?.me,
-    timeoutSeconds: options.timeouts?.me,
+    bodyLimitBytes: bodyLimits.me,
+    rateLimitPerMinute: rateLimits.me,
+    timeoutSeconds: timeouts.me,
   });
   mountManualOperation(router, operationSpecs.changePassword, identityHandler(runtime.identity, 'changePassword'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.changePassword,
-    rateLimitPerMinute: options.rateLimits?.changePassword,
-    timeoutSeconds: options.timeouts?.changePassword,
+    bodyLimitBytes: bodyLimits.changePassword,
+    rateLimitPerMinute: rateLimits.changePassword,
+    timeoutSeconds: timeouts.changePassword,
   });
   mountManualOperation(router, operationSpecs.register, identityHandler(runtime.identity, 'register'), runtime, {
-    bodyLimitBytes: options.bodyLimits?.register,
-    rateLimitPerMinute: options.rateLimits?.register,
-    timeoutSeconds: options.timeouts?.register,
+    bodyLimitBytes: bodyLimits.register,
+    rateLimitPerMinute: rateLimits.register,
+    timeoutSeconds: timeouts.register,
   });
   mountOperation(
     router,
@@ -526,9 +533,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     runtime,
     {
-      bodyLimitBytes: options.bodyLimits?.greet,
-      rateLimitPerMinute: options.rateLimits?.greet,
-      timeoutSeconds: options.timeouts?.greet,
+      bodyLimitBytes: bodyLimits.greet,
+      rateLimitPerMinute: rateLimits.greet,
+      timeoutSeconds: timeouts.greet,
     }
   );
   return router;

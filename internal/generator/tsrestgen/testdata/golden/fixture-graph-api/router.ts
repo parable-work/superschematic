@@ -365,6 +365,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.graphs.recipe is required: the facade of the Recipe version graph, which runs the graph operations of RecipeOperations (D138)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-graph-api', options);
@@ -380,9 +387,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getRecipe,
-      rateLimitPerMinute: options.rateLimits?.getRecipe,
-      timeoutSeconds: options.timeouts?.getRecipe,
+      bodyLimitBytes: bodyLimits.getRecipe,
+      rateLimitPerMinute: rateLimits.getRecipe,
+      timeoutSeconds: timeouts.getRecipe,
     }
   );
   // Recipe's materialize (D138): the runtime's handler reads the root through
@@ -394,9 +401,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphMaterialize(options.orm, options.graphs.recipe, graphOperations.materialize, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.materialize,
-      rateLimitPerMinute: options.rateLimits?.materialize,
-      timeoutSeconds: options.timeouts?.materialize,
+      bodyLimitBytes: bodyLimits.materialize,
+      rateLimitPerMinute: rateLimits.materialize,
+      timeoutSeconds: timeouts.materialize,
     }
   );
   // Recipe's diff (D138): the runtime's handler reads the root through
@@ -408,9 +415,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphDiff(options.orm, options.graphs.recipe, graphOperations.diff, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.diff,
-      rateLimitPerMinute: options.rateLimits?.diff,
-      timeoutSeconds: options.timeouts?.diff,
+      bodyLimitBytes: bodyLimits.diff,
+      rateLimitPerMinute: rateLimits.diff,
+      timeoutSeconds: timeouts.diff,
     }
   );
   // Recipe's entityHistory (D138): the runtime's handler reads the root through
@@ -422,9 +429,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphEntityHistory(options.orm, options.graphs.recipe, graphOperations.entityHistory, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.entityHistory,
-      rateLimitPerMinute: options.rateLimits?.entityHistory,
-      timeoutSeconds: options.timeouts?.entityHistory,
+      bodyLimitBytes: bodyLimits.entityHistory,
+      rateLimitPerMinute: rateLimits.entityHistory,
+      timeoutSeconds: timeouts.entityHistory,
     }
   );
   // Recipe's branch (D138): the runtime's handler reads the root through
@@ -436,9 +443,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphBranch(options.orm, options.graphs.recipe, graphOperations.branch, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.branch,
-      rateLimitPerMinute: options.rateLimits?.branch,
-      timeoutSeconds: options.timeouts?.branch,
+      bodyLimitBytes: bodyLimits.branch,
+      rateLimitPerMinute: rateLimits.branch,
+      timeoutSeconds: timeouts.branch,
     }
   );
   // Recipe's arrange (D138): the runtime's handler reads the root through
@@ -450,9 +457,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphArrange(options.orm, options.graphs.recipe, graphOperations.arrange, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.arrange,
-      rateLimitPerMinute: options.rateLimits?.arrange,
-      timeoutSeconds: options.timeouts?.arrange,
+      bodyLimitBytes: bodyLimits.arrange,
+      rateLimitPerMinute: rateLimits.arrange,
+      timeoutSeconds: timeouts.arrange,
     }
   );
   // Recipe's commit (D138): the runtime's handler reads the root through
@@ -464,9 +471,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphCommit(options.orm, options.graphs.recipe, graphOperations.commit, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commit,
-      rateLimitPerMinute: options.rateLimits?.commit,
-      timeoutSeconds: options.timeouts?.commit,
+      bodyLimitBytes: bodyLimits.commit,
+      rateLimitPerMinute: rateLimits.commit,
+      timeoutSeconds: timeouts.commit,
     }
   );
   // Recipe's discard (D138): the runtime's handler reads the root through
@@ -478,9 +485,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphDiscard(options.orm, options.graphs.recipe, graphOperations.discard, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.discard,
-      rateLimitPerMinute: options.rateLimits?.discard,
-      timeoutSeconds: options.timeouts?.discard,
+      bodyLimitBytes: bodyLimits.discard,
+      rateLimitPerMinute: rateLimits.discard,
+      timeoutSeconds: timeouts.discard,
     }
   );
   // Recipe's save (D138): the runtime's handler reads the root through
@@ -492,9 +499,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphSave(options.orm, options.graphs.recipe, graphOperations.save, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.save,
-      rateLimitPerMinute: options.rateLimits?.save,
-      timeoutSeconds: options.timeouts?.save,
+      bodyLimitBytes: bodyLimits.save,
+      rateLimitPerMinute: rateLimits.save,
+      timeoutSeconds: timeouts.save,
     }
   );
   // Recipe's history (D138): the runtime's handler reads the root through
@@ -506,9 +513,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphHistory(options.orm, options.graphs.recipe, graphOperations.history, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.history,
-      rateLimitPerMinute: options.rateLimits?.history,
-      timeoutSeconds: options.timeouts?.history,
+      bodyLimitBytes: bodyLimits.history,
+      rateLimitPerMinute: rateLimits.history,
+      timeoutSeconds: timeouts.history,
     }
   );
   // Recipe's merge (D138): the runtime's handler reads the root through
@@ -520,9 +527,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphMerge(options.orm, options.graphs.recipe, graphOperations.merge, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.merge,
-      rateLimitPerMinute: options.rateLimits?.merge,
-      timeoutSeconds: options.timeouts?.merge,
+      bodyLimitBytes: bodyLimits.merge,
+      rateLimitPerMinute: rateLimits.merge,
+      timeoutSeconds: timeouts.merge,
     }
   );
   // Recipe's rebase (D138): the runtime's handler reads the root through
@@ -534,9 +541,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphRebase(options.orm, options.graphs.recipe, graphOperations.rebase, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.rebase,
-      rateLimitPerMinute: options.rateLimits?.rebase,
-      timeoutSeconds: options.timeouts?.rebase,
+      bodyLimitBytes: bodyLimits.rebase,
+      rateLimitPerMinute: rateLimits.rebase,
+      timeoutSeconds: timeouts.rebase,
     }
   );
   // Recipe's revert (D138): the runtime's handler reads the root through
@@ -548,9 +555,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphRevert(options.orm, options.graphs.recipe, graphOperations.revert, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.revert,
-      rateLimitPerMinute: options.rateLimits?.revert,
-      timeoutSeconds: options.timeouts?.revert,
+      bodyLimitBytes: bodyLimits.revert,
+      rateLimitPerMinute: rateLimits.revert,
+      timeoutSeconds: timeouts.revert,
     }
   );
   // Recipe's seal (D138): the runtime's handler reads the root through
@@ -562,9 +569,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphSeal(options.orm, options.graphs.recipe, graphOperations.seal, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.seal,
-      rateLimitPerMinute: options.rateLimits?.seal,
-      timeoutSeconds: options.timeouts?.seal,
+      bodyLimitBytes: bodyLimits.seal,
+      rateLimitPerMinute: rateLimits.seal,
+      timeoutSeconds: timeouts.seal,
     }
   );
   // Recipe's compose (D138): the runtime's handler reads the root through
@@ -576,9 +583,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphCompose(options.orm, options.graphs.recipe, graphOperations.compose, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.compose,
-      rateLimitPerMinute: options.rateLimits?.compose,
-      timeoutSeconds: options.timeouts?.compose,
+      bodyLimitBytes: bodyLimits.compose,
+      rateLimitPerMinute: rateLimits.compose,
+      timeoutSeconds: timeouts.compose,
     }
   );
   // Recipe's release (D138): the runtime's handler reads the root through
@@ -590,9 +597,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphRelease(options.orm, options.graphs.recipe, graphOperations.release, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.release,
-      rateLimitPerMinute: options.rateLimits?.release,
-      timeoutSeconds: options.timeouts?.release,
+      bodyLimitBytes: bodyLimits.release,
+      rateLimitPerMinute: rateLimits.release,
+      timeoutSeconds: timeouts.release,
     }
   );
   // Recipe's released (D138): the runtime's handler reads the root through
@@ -604,9 +611,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => graphReleased(options.orm, options.graphs.recipe, graphOperations.released, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.released,
-      rateLimitPerMinute: options.rateLimits?.released,
-      timeoutSeconds: options.timeouts?.released,
+      bodyLimitBytes: bodyLimits.released,
+      rateLimitPerMinute: rateLimits.released,
+      timeoutSeconds: timeouts.released,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at
