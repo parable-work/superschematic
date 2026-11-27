@@ -85,12 +85,6 @@ func checkGoTables(schema *ir.Schema, where string, r *Result) {
 		if td.ChannelIdentities != nil {
 			goUnserved(r, td.Owner, where, on("@channelIdentities"), "D153")
 		}
-		if td.RowReferences != nil {
-			goUnserved(r, td.Owner, where, on("@references"), "D154")
-		}
-		if td.Attachments != nil {
-			goUnserved(r, td.Owner, where, on("@attachments"), "D154")
-		}
 		if td.Searchable != nil {
 			goUnserved(r, td.Owner, where, on("@searchable"), "D155")
 		}
@@ -110,12 +104,15 @@ func checkGoTables(schema *ir.Schema, where string, r *Result) {
 }
 
 // checkGoOperations refuses the features of schema, an API's, its Go
-// server does not serve: provider slots on its @envVars classes (D159)
-// and an operation's @autonomy (D158).
+// server does not serve: a runtime provider its config lists whose
+// directory holds no Go module (D159, D184), which a Go server cannot
+// link, and an operation's @autonomy (D158). Provider slots are served
+// (D184): the server imports each listed provider's module and builds
+// its Providers into Deps.
 func checkGoOperations(schema *ir.Schema, where string, r *Result) {
-	for _, name := range sortedTypeNames(schema.Types) {
-		if td := schema.Types[name]; td != nil && len(td.ProviderSlots) > 0 {
-			goUnserved(r, td.Owner, where, fmt.Sprintf("the provider slots of %s (@providers)", td.Name), "D159")
+	for _, p := range schema.Providers {
+		if p != nil && p.Module == "" {
+			r.errorf(schema.Name, "%s cannot link runtime provider %s (%s): its directory holds no Go module; a Go server imports a provider's Go module, whose go.mod names it and whose root package exports Definition() (D159, D184), so add one, or serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\")", where, p.Name, p.Path)
 		}
 	}
 	for _, set := range schema.OperationSets {
