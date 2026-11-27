@@ -1825,6 +1825,13 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 		// deriver's main.go names its caller and its refusals (D146).
 		modules = append(modules, runtimeModule(n.RulesGoModule, paths.RulesGo, o.HasDerivers()))
 	}
+	if o.Deps.Providers != nil {
+		// The API package imports each runtime provider's Go module, which
+		// the server replaces with its directory (D159, D184).
+		for _, m := range o.Deps.Providers.Modules {
+			modules = append(modules, servergen.Module{Path: m.Module, Dir: m.Dir})
+		}
+	}
 	return modules
 }
 

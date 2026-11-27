@@ -108,13 +108,20 @@ type RuntimeProvider struct {
 	Crate string `json:"crate,omitempty"`
 
 	// Dir is the directory the loader found the provider in, absolute: what
-	// a Rust server's Cargo.toml names its crate by (D185). It is the
+	// a Rust server's Cargo.toml names its crate by (D185), and a Go
+	// server's go.mod replaces its Module with (D184). It is the
 	// loader's alone, and no schema.json holds it.
 	Dir string `json:"-"`
 
 	// Path is the package's directory as the API's config lists it,
 	// relative to the service's directory, in slash form.
 	Path string `json:"path"`
+
+	// Module is the Go module the directory holds, as its go.mod names it
+	// (D184): the module a Go server imports, whose root package exports
+	// Definition() (runtime/http/go/providers). Empty for a provider of no
+	// Go module, which a Go server cannot link.
+	Module string `json:"module,omitempty"`
 
 	// Operations are the operations the provider implements: every one its
 	// interface requires, and the optional ones it has. The manifest may

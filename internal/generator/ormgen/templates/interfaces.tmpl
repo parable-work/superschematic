@@ -17,6 +17,9 @@ import (
 {{- if .HasBehaviorQueues }}
 	rules "{{ .Naming.RulesGoModule }}"
 {{- end }}
+{{- if .RowFeatures }}
+	"{{ .Naming.SchemaRuntimeGoModule }}/rowrefs"
+{{- end }}
 )
 
 {{- range .Repositories }}
@@ -165,6 +168,12 @@ type DatabaseInterface interface {
 	{{- if .HasQueries }}
 	GetQueries() *Queries
 	{{- end }}
+	{{- if and .RowFeatures .RowFeatures.References }}
+	References() *rowrefs.References
+	{{- end }}
+	{{- if and .RowFeatures .RowFeatures.Attachments }}
+	Attachments() *rowrefs.Attachments
+	{{- end }}
 }
 
 // TxInterface defines repository access within a transaction.
@@ -178,6 +187,12 @@ type TxInterface interface {
 	{{- end }}
 	{{- if .HasQueries }}
 	GetQueries() *Queries
+	{{- end }}
+	{{- if and .RowFeatures .RowFeatures.References }}
+	References() *rowrefs.References
+	{{- end }}
+	{{- if and .RowFeatures .RowFeatures.Attachments }}
+	Attachments() *rowrefs.Attachments
 	{{- end }}
 }
 

@@ -1309,6 +1309,34 @@ let (file, upload) = orm.attachments()?.begin(&begin, bucket.as_ref(), None).awa
 tx.commit().await?;
 ```
 
+### In Go
+
+The Go ORM of a database with `@references`, `@attachments` or a table's
+`Comments` holds the same members, `References()` and `Attachments()`, on
+the database and on a transaction, with the same tables, statements,
+locks and refusals (D184). A route binds its caller with
+`orm.WithPrincipal`, and every read keeps to it through each table's
+repository, as the TypeScript reads do. Keys are a row's wire form, a
+UUID in base62, and either form is read:
+
+```go
+refs := deps.DB.References()
+_, err := refs.Add(ctx, rowrefs.AddInput{From: rowrefs.RowRef{Table: "Note", Key: note}, To: rowrefs.RowRef{Table: "Issue", Key: issue}, Role: "blocks"})
+backlinks, err := refs.ReferencedBy(ctx, rowrefs.RowRef{Table: "Issue", Key: issue}, rowrefs.ReferencedByOptions{})
+// backlinks.Hidden is set for the owner of a private row alone.
+
+files := bucket.ForAttachments(deps.IssueFiles)
+begun, err := deps.DB.Attachments().Begin(ctx, rowrefs.BeginInput{To: rowrefs.RowRef{Table: "Issue", Key: issue}, Name: "plan.pdf", MediaType: "application/pdf", Size: size, SHA256: sha256}, files, 0)
+// The browser sends PUT begun.Upload.URL with begun.Upload.Headers and the bytes.
+file, err := deps.DB.Attachments().Complete(ctx, rowrefs.FileRef{Table: "Issue", ID: begun.Attachment.ID}, files)
+```
+
+The types and the refusals (`rowrefs.Error` and its `Code`) are the
+schema runtime's `rowrefs` package; `bucket.ForAttachments` of the HTTP
+runtime is a listed bucket as the ORM reads it. A Go server serves
+neither as routes yet, as the TypeScript server does not: the
+implementation writes its routes over them.
+
 ## State machines
 
 An enum column's `CHECK` says which values the column holds. It does not

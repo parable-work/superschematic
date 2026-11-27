@@ -143,6 +143,17 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(accessFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove access.go: %w", err)
 	}
+	// rowrefs.go holds a database's references and attachments (D154,
+	// D184); a database without them has none, so a file an earlier build
+	// wrote goes.
+	rowFeaturesFile := filepath.Join(outputDir, "rowrefs.go")
+	if output.RowFeatures != nil {
+		if err := generateFile(generator, "rowrefs.tmpl", rowFeaturesFile, output); err != nil {
+			return fmt.Errorf("failed to write rowrefs.go: %w", err)
+		}
+	} else if err := os.Remove(rowFeaturesFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove rowrefs.go: %w", err)
+	}
 	// fences.go holds the fences of each table with a @fenced field and
 	// the rule by which a write advances them (D119); a schema without one
 	// has none, so a file an earlier build wrote goes.

@@ -1448,6 +1448,25 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 	if ref := r.Schema.RateLimitStore; ref != nil {
 		deps.RateLimitStore = ref.Name
 	}
+	// The runtime providers of the API's slots (D159, D184), whose Go
+	// modules go.mod replaces with their directories.
+	providers, err := apigen.ProvidersOf(r.Schema, output.EnvConfig, deps.Access)
+	if err != nil {
+		return deps, nil, fmt.Errorf("generator: %w", err)
+	}
+	if providers != nil {
+		apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
+		for i := range providers.Modules {
+			m := &providers.Modules[i]
+			if m.Dir == "" {
+				return deps, nil, fmt.Errorf("generator: the Go server of %s links runtime provider %s, whose directory the loader did not read", r.Config.Name, m.Name)
+			}
+			if m.ReplacePath, err = naming.RelPath(apiDir, m.Dir); err != nil {
+				return deps, nil, err
+			}
+		}
+	}
+	deps.Providers = providers
 	return deps, roots, nil
 }
 

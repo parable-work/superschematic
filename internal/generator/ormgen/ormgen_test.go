@@ -280,7 +280,7 @@ func TestWriteORMGolden(t *testing.T) {
 		// Tables of Comments (D103's step 4): its operations under
 		// Comments(), every writing one beside the row, no repository of a
 		// sub-table or of the shared table, no upserts, and no queue.
-		{commentsFixture, []string{"repository_review.go", "repository_ticket.go", "rules.go"}},
+		{commentsFixture, []string{"repository_review.go", "repository_ticket.go", "rowrefs.go", "rules.go"}},
 		// Tables of Derived and Provenance (D73 on D103's step 4): their
 		// operations under Derived() and Provenance(), Derived's of the
 		// table as a whole taking no key, no repository of a sub-table, no

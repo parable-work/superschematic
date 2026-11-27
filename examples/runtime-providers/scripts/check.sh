@@ -32,4 +32,10 @@ node --test 'test/*.test.ts'
 echo "==> the providers on Bun $(bun --version)"
 bun test ./test
 
+echo "==> the providers' Go modules (D184)"
+export CGO_LDFLAGS="$("$REPO_ROOT/scripts/superscalar-dep.sh" --print)"
+for mod in providers/*/go.mod; do
+  (cd "$(dirname "$mod")" && go vet ./... && go test ./...)
+done
+
 echo "runtime-providers: ok"

@@ -234,6 +234,12 @@ type ORMOutput struct {
 	// writes access.go, and go.mod requires the schema runtime, whose
 	// access package holds the principal.
 	Access *AccessModel
+
+	// RowFeatures are the database's references and attachments (D154,
+	// D184), nil for a database with no @references or @attachments table
+	// and no Comments: it writes rowrefs.go, and go.mod requires the
+	// schema runtime, whose rowrefs package runs them.
+	RowFeatures *RowFeaturesModel
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -1179,6 +1185,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	rowFeatures, err := rowFeaturesOf(schema, tables, repositories)
+	if err != nil {
+		return nil, err
+	}
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
@@ -1324,6 +1334,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Queries:                  queries,
 		Rules:                    rules,
 		Access:                   access,
+		RowFeatures:              rowFeatures,
 		SQLite:                   opts.SQLite,
 	}
 	if opts.SQLite {

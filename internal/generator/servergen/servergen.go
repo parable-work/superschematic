@@ -576,6 +576,11 @@ type API struct {
 	// mounts its routes, the first on the database, on a server.
 	Engine       *Engine
 	MountsEngine bool
+
+	// Providers is true for an API whose Deps holds runtime providers
+	// (D159, D184), which the entrypoint reads from its config with the
+	// API package's ProvidersOf.
+	Providers bool
 }
 
 // Call is a client in an API's Deps.
@@ -914,6 +919,9 @@ func Plan(in Input) (*Server, error) {
 			Module:  o.ModulePath,
 			Import:  a.Implementation.Import,
 			Config:  o.HasEnvConfig(),
+			// Deps holds the runtime providers of the API's slots, which
+			// the entrypoint reads from its config (D159, D184).
+			Providers: o.Deps.Providers != nil && o.HasEnvConfig(),
 		}
 		if !s.Background() {
 			// A job or a worker serves no request: it mounts no routes, a

@@ -84,6 +84,11 @@ type DepsInfo struct {
 	// RateLimitStore is the memory store the API's @rateLimit routes count
 	// in, its config's rateLimitStore; empty when they count in process.
 	RateLimitStore string
+
+	// Providers are the runtime providers of the API's provider slots
+	// (D159, D184), which Deps.Providers holds; nil for an API whose
+	// config names no slot.
+	Providers *DepsProviders
 }
 
 // DepsMemoryStore is a memory store in Deps: the HTTP runtime's
