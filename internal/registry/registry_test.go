@@ -24,7 +24,7 @@ func (e fakeExtension) Register(r *Registry) error { return e.register(r) }
 func TestNewRegistersCoreKindsWithTodaysPipelines(t *testing.T) {
 	reg := New(naming.Naming{})
 
-	wantKinds := []string{"API", "Bucket", "DB", "General", "MemoryStore", "Site", "Stack"}
+	wantKinds := []string{"API", "Bucket", "DB", "General", "MemoryStore", "Site", "Stack", "Tasks"}
 	if got := reg.Kinds(); !reflect.DeepEqual(got, wantKinds) {
 		t.Fatalf("Kinds() = %v, want %v", got, wantKinds)
 	}
@@ -37,6 +37,7 @@ func TestNewRegistersCoreKindsWithTodaysPipelines(t *testing.T) {
 		"Site":        {"site"},
 		"Bucket":      nil,
 		"MemoryStore": {"memorystore"},
+		"Tasks":       {"tasks"},
 	}
 	for kind, want := range wantPipelines {
 		spec, ok := reg.Kind(kind)
@@ -102,7 +103,7 @@ func TestRegisterRejectsDuplicatesAndPostFinalizeRegistration(t *testing.T) {
 		t.Fatal("Decorator lookup must be keyed by target")
 	}
 
-	for _, name := range []string{"sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore"} {
+	for _, name := range []string{"sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore", "tasks"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}
@@ -289,7 +290,7 @@ func TestRegisterBuildAllHookRejectsInvalidAndLateRegistrations(t *testing.T) {
 	if err := reg.RegisterBuildAllHook(BuildAllHook{Name: "merge", Run: noop}); err == nil {
 		t.Error("duplicate hook: want error")
 	}
-	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore"} {
+	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore", "tasks"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}

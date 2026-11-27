@@ -92,6 +92,7 @@ The **kind** decides what a class means:
 | `API` | a request or response type; with `@source(Table)` a view of a table; a class of methods is an operation set | `+ @superschematic/api` | types, server, OpenAPI, SDKs |
 | `Stack` | the stack, a server, a database or an environment | `@superschematic/stack` | entrypoints, `environment.json`, CI |
 | `MemoryStore` | with `@channel` or `@key`, a channel or a key of a Redis or Valkey store that replicas share and can lose; its fields are the name's parts | `@superschematic/memory-store`, `superscalar` | typed definitions per language |
+| `Tasks` | with `@task`, one unit of the work a commit needs: a command, the tracked files it reads (`inputs`), the outputs of other tasks it reads (`uses`), the tasks it only waits for (`after`) and the outputs it writes; with `@tasks`, the defaults of every task (D203) | `@superschematic/tasks` | the task file a forge reads, installed at `outputs.tasks.install` and held current by `tasks --check`; `tasks plan <commit>` gives each task an input key |
 | `Bucket`, `Site` | config only: a file bucket, a static front end | | |
 
 Schema classes are `abstract`. An operation's body is

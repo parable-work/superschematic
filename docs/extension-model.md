@@ -55,6 +55,8 @@ links is active for every command it runs.
 | Behavior | `RegisterBehavior(BehaviorSpec)` | 3.16 |
 | Principal `@rateLimit` key | `RegisterRateLimitKey(RateLimitKey)` | D131 |
 | Runtime feature that needs a provider | `RegisterRuntimeFeature(RuntimeFeature)` | 13 |
+| Task input resolver | `RegisterTaskResolver(TaskResolverSpec)` | 3.17 |
+| Task section | `RegisterTaskSection(TaskSectionSpec)` | 3.18 |
 
 `Name()` is the key of everything the extension owns: the `Extension` field
 of each spec it registers, the `extensions.<name>` slot on IR nodes
@@ -466,7 +468,10 @@ date), the repository root, the output root, the naming and the log.
 A hook is for output that needs every service at once, such as values
 merged across services into one chart. It reads what it merges from
 `Services[i].OutputDirs`, which a cached run fills as well as a full one.
-The core registers none. acme's `acmeInventory` merges every service's
+The core registers one, `tasks-install`, which installs each Tasks
+service's task file from its output directory (section 3.17, D203); it is
+a hook because a build that restores the service from the cache runs no
+generator. acme's `acmeInventory` merges every service's
 manifest (section 10); `cli/build_all_hooks_test.go` covers ordering, error
 attribution and a hook across built, up-to-date and cache-restored runs.
 
@@ -1440,6 +1445,130 @@ included), two-space
 indents and a final newline, so it changes only when the declaration
 does.
 
+### 3.17 TaskResolverSpec
+
+The Tasks kind (D203) declares the work a commit of a repository needs:
+a class per task, `@task` from `@superschematic/tasks`, with its command,
+its inputs, the outputs of other tasks it uses, the tasks it follows and
+the outputs it declares. The kind's generator, `tasks`, writes the task
+file (the public `tasks` package holds its shape and its JSON Schema), a
+build-all hook installs it where the service's config says, and `tasks
+plan` gives every task of a commit an input key. The docs site's Tasks
+guide walks all of it; this section and the next are the two seams.
+
+```go
+type TaskResolverSpec struct {
+    Kind      string
+    Extension string
+    Spec      json.RawMessage
+    Resolve   func(TaskResolveRequest) (TaskResolution, error)
+}
+```
+
+A resolver turns one kind of input into tracked files of a commit. `Kind`
+is the registry key and the `kind` an input names. `Spec` is the JSON
+Schema of the input's `spec`; nil means the kind takes none. The kind's
+verification holds every input of a schema to it, and the plan holds
+every input of a task file to it again, since a file may be edited by
+hand. `Resolve` receives a `TaskResolveRequest`: `Tree`, the commit, as a
+`TaskTree` (`Entries`, sorted by path, each a `TaskTreeEntry` with its
+path, its mode and its object id; `Entry`; and `Read`, which returns a
+tracked file's bytes and refuses a submodule and a file over 1 MiB),
+`Task`, the task's name for errors, and `Spec`. It returns a
+`TaskResolution`: `Paths`, the tracked files the input covers, and
+`Generated`, each path a manifest names that the commit does not hold.
+
+The rules of a resolver are part of the seam, since the keys it feeds
+decide what a forge reuses and it runs on a commit somebody else may
+have written:
+
+- It reads tracked files only, through `req.Tree`. The plan runs before
+  anything is generated, and the output root is not tracked.
+- It runs no build tool and starts no process. `cargo metadata` fails
+  when a path dependency has not been generated, so a Cargo resolver
+  parses `Cargo.toml` files.
+- It uses no network and executes nothing the tree holds.
+- It is pure: one tree and one spec give one answer.
+
+A path in `Generated` must be covered by a `paths` output of a task the
+resolving task `uses`. The plan fails otherwise, with the path, the
+manifest that names it, and the edge to add when some task's output
+covers it. So a file a build writes never enters a key as a file: it
+enters through the key of the task that wrote it.
+
+The digest of an input is the SHA-256 over the sorted lines `<mode>
+<path> <object id>` of its `Paths`. It is a second convention beside the
+build cache's `TreeDigest` (section 7.4), not the same one: `TreeDigest`
+hashes a working tree's contents with no git and sees untracked files,
+which the build cache needs, and a plan must be a function of a commit.
+
+The core registers `path` and `schema` (`internal/tasks/resolve.go`).
+`schema` resolves a schema service to a static set found from tracked
+text: its directory, the directory of each service of its schemas root
+it names by directory name or package name, transitively, the root's
+files that belong to no service, and the naming file's `[cache] inputs`.
+The build cache's own key for a service holds more than a commit can
+give: depfiles the build writes, tool versions of the machine and a
+stack's checkout path (section 7.4). The task file's image digest stands
+in for the tool versions, the task file's bytes hold no path of a
+machine, and `tasks inputs` checks the static set after a build against
+the depfiles, so a build fails by name when it read a file the set
+lacks. The check is a command of its own: a schemas root with no Tasks
+service never runs it.
+
+### 3.18 TaskSectionSpec
+
+```go
+type TaskSectionSpec struct {
+    Name      string
+    Extension string
+    File      json.RawMessage
+    Task      json.RawMessage
+    Verify    func(req TaskSectionRequest, r VerifyReporter)
+}
+```
+
+A task section is a part of the task file that one forge owns and
+reads. The test for what is core is what the core computes with: the
+task graph, the inputs, the key and the plan. It computes nothing from a
+forge's tiers, triggers, reuse scopes, trust classes, runner placement,
+resources or timeouts, so those are a section's and no core field.
+
+`File` is the JSON Schema of the section's part that belongs to the
+file, which `@tasks({ sections: { <name>: ... } })` holds, and `Task`
+the schema of its part of one task, which `@task` holds. A section gives
+one or both; a part it does not have is refused. The kind's verification
+holds each part to its schema and then calls `Verify` with a
+`TaskSectionRequest`: `File`, `Tasks` by task name, and `Names`, every
+task of the schema, so a section can require a part of each. The
+generator copies the parts into the file under `sections.<name>` and a
+task's `sections.<name>`, in canonical JSON, and the core reads nothing
+in them. No section enters a key. A reader skips a section it did not
+register.
+
+A forge with no extension registers its section as data: the naming
+file's `[tasks.sections.<name>]` names the two JSON Schema files,
+relative to the schemas root, and `registry.Assemble` registers it with
+no `Verify`. The schemas' bytes are part of the naming value, so the
+build cache keys on them. The rules a JSON Schema cannot say are then
+the forge's to check when it reads the file.
+
+acme registers `acme` (`examples/acme-schematic/ext/tasks.go`): tiers
+with a budget each, and each task's tier and timeout, with a `Verify`
+that holds every task to a declared tier and its timeout to the tier's
+budget. Its test `TestAForgeReusesWorkByKeyAcrossCommits` is the reader
+that proves the file usable: a forge in miniature that decodes the
+committed file with the public `tasks` package, runs `tasks plan`
+across commits and reuses each pass by its key.
+
+The Stack kind's generated workflow (D47; `docs/stack-model.md`,
+section 11.3) and a Tasks schema are two models, and they are not
+merged. A stack's workflow says how one forge deploys one stack. A task
+says what work a commit needs, for any forge. They meet when a deploy
+uses an image a task produced. A CI renderer that writes a workflow
+from a Tasks schema would join them; it is not built (D203 in
+`docs/DECISIONS.md`).
+
 ## 4. The open IR
 
 ### 4.1 Slots
@@ -1924,7 +2053,7 @@ its provider, which supplies those two functions. D15 in
 
 | Surface | Core registration |
 | --- | --- |
-| Kinds | `DB`, `API`, `General`, `Stack` (section 3.3) |
+| Kinds | `DB`, `API`, `General`, `Stack`, and `Tasks` (sections 3.3 and 3.17) |
 | Decorators | 55 specs over the four targets in `internal/registry/core_decorators.go`, `core_projection.go`, `core_stack.go`, `core_display.go`, `docs_decorators.go` and `behaviors.go`, declared in `@superschematic/{schema,db,api,schema-config,stack}`. Types (19): `trait`, `source`, `envVars`, `jsonField`, `denyUnknownFields`, `strictJSON`, `versioned`, `optimistic`, `versionGraph`, `graphMember`, `index`, `projection`, `join`, `behavior`, `display`, `stack`, `server`, `database`, `environment`. Fields (14): `key`, `unique`, `searchField`, `jsonField`, `uiHidden`, `internalMetadata`, `temporalFormat`, `conflictUnit`, `virtual`, `sourceMustProject`, `docs`, `purpose`, `icon`, `column`. Operation sets (5): `rateLimit`, `bodyLimit`, `timeout`, `requireService`, `allowService`. Operations (17): `rest`, `requirePermission`, `requireOwnership`, `auth`, `encrypted`, `publicRoute`, `webhook`, `hmacVerified`, `manualRouteRegistration`, `rateLimit`, `bodyLimit`, `timeout`, `requireService`, `allowService`, `docs`, `mcp`, `icon` |
 | Generators | `types`, `sql`, `orm`, `api`, `sdks`, `envConfig`, and the Stack kind's `stack` and `server` (section 3.6; `docs/stack-model.md`, sections 5.1 and 8.1). For a schema that declares a version graph, `orm` also writes the graph's shell and `types` its descriptor (D17) |
 | Auth providers | `session` (section 8.2) |
@@ -1932,11 +2061,13 @@ its provider, which supplies those two functions. D15 in
 | Tool invocation policy | `invocationPolicy`: `auto` or `ask`, `auto` by default (section 3.15) |
 | Behaviors | `Workflow`, `Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`, `Approvals`; the work-queue package's `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries`; the commerce package's `Stock`, `Calendar`, `Holds`, `Payments` (D70); and `Seats` and `Reconcile`, which the behaviors' core alone implements, on a table (D104) (section 3.16) |
 | Documents | none |
-| Build-all hooks | none |
+| Build-all hooks | `tasks-install`, which installs each Tasks service's task file (section 3.8) |
+| Task input resolvers | `path` and `schema` (section 3.17) |
+| Task sections | none; a naming file's `[tasks.sections.<name>]` registers one as data (section 3.18) |
 | Checks, OpenAPI hooks, tool hooks | none |
 | Platforms, connectors, targets, DNS platforms, provisioners | none (`docs/stack-model.md`, section 6) |
 | Runtime features | none yet: notifications, attachments and agents register theirs as they are built (section 13) |
-| Commands | `build`, `build-all`, `json-schema`, `format` |
+| Commands | `build`, `build-all`, `json-schema`, `format`, `tasks` |
 
 The core stays provider-neutral (`CONTRIBUTING.md`, "The core stays
 provider-neutral"). A surface that only one deployment needs belongs in an

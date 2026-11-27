@@ -735,12 +735,15 @@ held to the schema of `@display`'s argument, which the core registers.
 ```
 superschematic json-schema
 superschematic json-schema --config
+superschematic json-schema --task-file
 superschematic json-schema --naming ./schemas/superschematic.toml
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--config` | false | emit the `schema.config.{json,yaml}` JSON Schema instead |
+| `--task-file` | false | emit the JSON Schema of the task file a Tasks service's build writes instead ([Tasks](/superschematic/guides/tasks/#read-the-file)) |
+| `--task-plan` | false | emit the JSON Schema of the plan `tasks plan` prints instead |
 | `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
 
 The output of the core with no extension linked, under the built-in
@@ -1797,6 +1800,79 @@ it. A name that is not one of the four fails, listing them.
 superschematic catalog decorators | grep -A 12 '^### `@paginated`'
 superschematic catalog scalars > scalars.md
 ```
+
+## `tasks <tasks-service-dir>`
+
+Write the task file of a Tasks service, or check the committed one
+(D203). [Tasks](/superschematic/guides/tasks/) is the guide.
+
+```
+superschematic tasks ./schemas/services/repo-tasks
+superschematic tasks ./schemas/services/repo-tasks --check
+```
+
+It renders the file the service declares and installs it at the path
+its config names, `outputs.tasks.install`, from the repository root.
+`build-all` installs the same bytes on every run, so this command is for
+writing one service's file without a build. It fails when the config
+names no install path, when no git repository holds the service, and
+when the install path's directory does not exist.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--check` | false | write nothing; fail when the committed file is missing or is not what the schema gives, with the first line that differs |
+| `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
+
+### `tasks plan <commit> --file <path>`
+
+Print the plan of a commit as JSON: each task with its work hash, its
+input key and its edges, and an order that runs every task after the
+tasks it uses and follows
+([The plan and the input key](/superschematic/guides/tasks/#the-plan-and-the-input-key)).
+
+```
+superschematic tasks plan HEAD --file ci/tasks.json
+superschematic tasks plan "$MERGE_COMMIT" --base origin/main --file ci/tasks.json
+```
+
+It reads the task file the commit holds at `--file` and the commit's
+tree, through git and nothing else: no working tree, no index and no
+generated file. It runs no build tool. A task that is not hermetic has
+the key `null`.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--file` | required | the task file's path from the repository root, as the service's `outputs.tasks.install` names it |
+| `--base` | none | the commit the plan's commit lands on; a task whose work fields differ from the base's is keyed on both definitions and on the inputs of both |
+| `--repo` | `.` | a directory of the repository |
+| `--naming` | built-in names | naming config file |
+
+It fails when a task names an input kind no resolver of the binary
+resolves, when a path with no wildcard covers no tracked file, and when
+a manifest names a path the commit does not hold and no output the task
+uses covers it.
+
+### `tasks inputs <tasks-service-dir>`
+
+Check each schema input's static set against what the last build read
+([Check a schema input after a build](/superschematic/guides/tasks/#check-a-schema-input-after-a-build)).
+Run it after `build-all`.
+
+```
+superschematic build-all ./schemas/services
+superschematic tasks inputs ./schemas/services/repo-tasks
+```
+
+For each `schema` input of the service's tasks it gathers what the last
+build read: the services the config names, the services its schema
+files reference and the files its documents import, which the build
+records under `<schemas-root>/dist`, and the same of each service those
+reach. It fails with each service or file the input's set at `HEAD`
+lacks.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
 
 ## Extension commands
 

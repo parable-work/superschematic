@@ -9,7 +9,8 @@ A schema file imports decorators and type wrappers from the core authoring
 packages. The package decides which kinds of schema may use them:
 `@superschematic/schema` everywhere, `@superschematic/db` in DB schemas,
 `@superschematic/api` in API schemas, `@superschematic/stack` in Stack
-schemas and `@superschematic/memory-store` in MemoryStore schemas. An extension adds its own from its own package. This page lists every decorator of the core packages and the type wrappers
+schemas, `@superschematic/memory-store` in MemoryStore schemas and
+`@superschematic/tasks` in Tasks schemas. An extension adds its own from its own package. This page lists every decorator of the core packages and the type wrappers
 these docs cover. [`superschematic catalog decorators`](/superschematic/reference/cli/#catalog-scalarsdecoratorsbehaviorscapabilities)
 prints each one's TypeScript declaration and comment, the nodes it may sit
 on and the kinds it is limited to, from the binary you run, an
@@ -198,3 +199,13 @@ is the core's.
 | --- | --- | --- | --- |
 | `@channel({ payload?, name? })` | abstract class | a channel: a wake-up or a sample every replica can lose. `payload` is the object type of each message, from a dependency of the store's schema and never `@strictJSON`; without it the channel is a signal, whose name is the whole message. A channel takes no TTL | [Memory stores](/superschematic/guides/memory-stores/#declare-a-store) |
 | `@key({ use, ttlSeconds \| maxTtlSeconds, name? })` | abstract class | a key, which always expires: `use` is `"counter"`, which counts, or `"claim"`, which lets one caller do a piece of work once. It sets exactly one of `ttlSeconds`, its TTL from the write that creates it, and `maxTtlSeconds`, the longest TTL a call gives it; both are 1 to 604800 seconds | [Memory stores](/superschematic/guides/memory-stores/#declare-a-store) |
+
+## Tasks: `@superschematic/tasks`
+
+A Tasks schema declares the work a commit of a repository needs (D203).
+Each class is a declaration: it holds no fields.
+
+| Name | On | What it does | Covered in |
+| --- | --- | --- | --- |
+| `@task({ run, inputs?, uses?, after?, outputs?, services?, env?, image?, platform?, hermetic?, name?, sections? })` | abstract class | one unit of work. `run` is the command, an argument list. `inputs` are the tracked files it reads, each a path or a glob, or a kind with its spec, as `{ kind: "schema", spec: { service } }`. `uses` names the outputs of other tasks it reads, each by the task's class, and `after` the tasks it only waits for. `outputs` are its named results. `hermetic: false` marks a task whose inputs do not decide its result. Its name is the class's in kebab case unless `name` sets it | [Tasks](/superschematic/guides/tasks/#declare-the-tasks) |
+| `@tasks({ image?, platform?, sections? })` | abstract class | the defaults of every task: the image a task runs from, by its digest, and its platform; and each section's part of the task file. One class per schema | [Tasks](/superschematic/guides/tasks/#declare-the-tasks), [Sections](/superschematic/guides/tasks/#sections-what-a-forge-owns) |

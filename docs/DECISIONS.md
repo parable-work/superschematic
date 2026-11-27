@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D201 is the highest so far.
+  the highest number any branch has used. D203 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -3607,3 +3607,92 @@ Left:
   first (D81, D116).
 - Go on SQLite: parties, the inbound path and the dispatcher (D157's and
   D158's, for every language).
+
+## D203. A Tasks schema declares the work a commit needs, its build writes a task file a forge reads, every task has an input key over git's object ids, and what a forge owns is a section (D10, D47 amended)
+
+A forge that runs a repository's checks needs three things of it: the
+tasks of a commit, read with no compiler; a key per task that names the
+work, so a pass it trusts is not run twice; and the order to run them in.
+The core had none of them. Its build cache keys a service on a working
+tree, on depfiles a build writes, on the tool versions of a machine and on
+a stack's checkout path, none of which a commit gives.
+
+The rule that draws the line (D10): the core holds what the core computes
+with. It computes the task graph, the inputs, the key and the plan. It
+computes nothing from a forge's tiers, triggers, reuse scopes, trust
+classes, runner placement, resources or timeouts, so those are not core
+fields.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A core kind, `Tasks`, whose classes are declarations as a Stack's are: `@task`, one unit of work, and `@tasks`, the defaults of every task, from `@superschematic/tasks`. Each writes a typed field of its class's `TypeDef`, so the declarations load from TypeScript, JSON and YAML and `format` converts between them. Nothing names a Tasks service, so it has no sentinel. | A kind named `Pipeline`: `KindSpec.Pipeline` is already a kind's generator list. The extension slot of a type, which the data forms refuse for a core decorator. Tasks, tiers and triggers as three core declarations, which fixes one forge's words in the core. |
+| A task's work fields are `run`, `inputs`, `uses`, `outputs`, `services`, `env`, `image`, `platform` and `hermetic`. `run` is an argument list and nothing starts a shell. An image and a service container's image are digests, and a tag is refused. `platform` is a field, so a key needs no fact of a runner. `after` and `sections` are no work fields. | One hash over the whole task, which a change of tier or timeout would void with every key downstream. A shell line, which hides what runs. The runner's platform in the key, which is known only once a runner is chosen. |
+| Two edges. `uses: [{ task, output }]`: this task reads a named output of that one, and that task's key enters this one's. `after: [task]`: this task starts once that one passed and reads nothing of it, and it enters no key. Verification refuses a cycle over both together. | One edge, `needs`, for both: an edge that only orders would void the downstream key whenever the upstream inputs moved. |
+| An output is a named result: files at paths, an image's digest, or a value. On a trusted pass a runner stores each under the task's name and key, and a task that uses one gets the stored bytes put in place before it starts, whether the upstream task ran or was reused. So a key over an upstream key is sound. The outputs of a task that is not hermetic are its run's and are stored under no key. A cache is no output. | A key over the digest of the upstream outputs, which is known only after the upstream task ran, so no reuse could be decided before a run. |
+| `hermetic: false` marks a task whose inputs do not decide its result. It has no key. A hermetic task has an image and a platform in effect, and uses no task that is not hermetic; verification refuses both, and the plan refuses the second in a file edited by hand. | `reuse: never`, which says what a forge does and not what the task is. Hermetic by a forge's measurement alone, which leaves an unmeasured task reusable. |
+| The input key covers, in order: the key version with the repository's object format (`1:sha1`); the work hash, the SHA-256 of the work fields in canonical JSON with the image and platform in effect; the digest of each input; and the key of each task used, by task and output. Every key is known before any task runs. | Content hashes of files, which the plan would compute and git already holds. A key with no version, which a change of its definition could not void. |
+| An input's digest is the SHA-256 over the sorted lines `<mode> <path> <object id>` of the tracked files it resolves to in the commit's tree. The mode is in the line. The plan reads a commit through git and never a working tree, with replace refs off. In a SHA-1 repository the key rests on git's hardened SHA-1; the sha256 format gives another key version. It is a second convention beside the build cache's `TreeDigest`, not the same one. | `TreeDigest`, which hashes a working tree with untracked files and needs no git: right for the build cache, wrong for a function of a commit. `<path> <id>` alone, which misses an executable bit, a symbolic link and a submodule. |
+| `tasks plan <commit> --file <path> [--base <commit>]` prints the plan: each task's work hash, key, edges and section parts, and an order. With `--base`, a task whose work hash differs from the base's is keyed on both hashes and on the inputs of both definitions, read against the commit's tree. Those keys differ from the keys of the same tree with no base, so the task and each task that uses it runs once more after the change lands. The plan command ships in the image the file names, the file's default. | A key that is a function of the tree alone, which lets a change reuse a pass of the task it replaced, or pass by narrowing what the task reads. One commit argument, which leaves the base's file unread. |
+| An input resolver is a registration (`RegisterTaskResolver`). It reads tracked files only, through a `TaskTree`; it runs no build tool and starts no process; it uses no network; it executes nothing of the tree; it reads at most 1 MiB of one file. A path a manifest names and the commit lacks is reported, and the plan requires an output the task uses to cover it, or fails with the path, the manifest and the edge to add. The core registers `path` and `schema`. | `cargo metadata`, `turbo run --dry` and the like, which fail before anything is generated and run tools on a commit somebody else wrote. Hashing an untracked directory. |
+| The `schema` resolver takes a service's name and resolves to a static set found from tracked text alone: its directory; the directory of each service of its schemas root it names by directory name or package name, transitively; the root's files that belong to no service; and the naming file's `[cache] inputs`. No schema loads and no config is evaluated, so it needs only git and no sentinel on disk. A file over the limit is taken to name every service. | Reading each config with the TypeScript reader, which reads a directory and needs the sentinels a build writes. The services a build recorded in its depfiles, which exist only after it. One schema-build input for the whole root, which voids every key on any schema edit. |
+| `tasks inputs` checks the static set after a build: for each schema input it gathers what the build cache keys the service on, from the configs and the depfiles the last build wrote, and fails with each service or file the set at HEAD lacks. It is a command of its own, run in the task that builds schemas. | A check inside `build`, which would fail builds of every distribution, with a Tasks service or without. No check, which leaves the set's soundness to the scan. |
+| The task file is `version`, the default `image` and `platform`, `tasks` by name, and `sections`: keys sorted, a two-space indent, a trailing newline, and no byte that depends on the machine. A reader refuses an unknown field and a newer version and names it. Three places are open: an input's `spec`, `sections.<name>` and a task's `sections.<name>`. The image digest carries the plan command, so one change moves the file's version and the plan command together. | Open everywhere, which lets a reader act on half of what a newer file says. |
+| The `tasks` generator writes the file under the output root with its install path beside it, and a build-all hook, `tasks-install`, installs what the output root holds at `outputs.tasks.install` on every build-all. The hook loads no schema: a service the build restored from the cache is not loaded. A missing install directory fails the build; a build with no repository above it logs a line and installs nothing; two services at one path are refused. `tasks <dir> --check` renders the file, writes nothing and fails on a difference. | Installing inside the generator, as the Stack's `ci` does (D47), which a cache restore skips. Rendering in the hook, which has no schema after a restore. Skipping a missing directory silently, which is right for an optional workflow and wrong for a file a forge trusts. |
+| The shape is defined once, as Go types in the public package `tasks`, with a JSON Schema for the file and one for the plan that `json-schema --task-file` and `--task-plan` print. A test holds each schema to its type field for field. A reader in another language generates its types from the schema. | The types generator, which writes a schema's types into the output root of the build that ran it and has no schema to read here. A hand-written type per reader. |
+| A task section is a registration (`RegisterTaskSection`): a name, a JSON Schema for its part of the file and for its part of a task, and a `Verify`. The core checks each part, copies it under `sections.<name>` and reads nothing in it. A forge with no extension registers one as data, in the naming file's `[tasks.sections.<name>]`, with the two schema files and no `Verify`. No section enters a key. | Tiers, triggers and events as core fields. An extension as the only way, which a forge with none cannot take. |
+| D47's workflow of a stack and a Tasks schema stay two models. A stack's workflow says how one forge deploys one stack; a task says what work a commit needs, for any forge. | Merging them here, which would rest a deploy on a model with one reader. |
+
+Settled, and built in one change.
+
+Built: `ir/tasks.go` and `TypeDef.Tasks` and `Task`;
+`internal/registry/core_tasks.go` (the kind, the decorators,
+`verifyTasks`) and `tasks.go` (the two seams); `internal/tasks` (the
+render, the tree over git, the two resolvers, the key and the plan);
+`internal/generator/tasksgen` (the generator and the hook); the public
+`tasks` package with its two JSON Schemas; `cli/tasks.go` (`tasks`,
+`tasks plan`, `tasks inputs`) and `json-schema --task-file` and
+`--task-plan`; `@superschematic/tasks`; the naming file's
+`[tasks.sections]`; the TypeScript writer's `@task`; and
+`examples/acme-schematic`'s `shop-tasks`, its `acme` section and its
+committed `ci/tasks.json`. The tests: `TestKeyVectors`, the keys of a
+fixed tree in both object formats, whose golden is rewritten only when
+`tasks.KeyVersion` moved or no key did;
+`TestAChangedInputChangesTheKeysDownstreamThroughUses`;
+`TestABaseKeysAnEditedTaskOnBothDefinitions`;
+`TestAPathAManifestNamesAndNoFileHoldsMustBeUsed`;
+`TestARepositoryGivesTheTreeItsFilesMake`, a commit read through git
+against a tree in memory; `TestVerifyTasks`;
+`TestTheTaskFileIsTheSameFromTwoCheckouts`;
+`TestBuildAllInstallsTheTaskFileOnEveryBuild`, built, up to date and
+restored; `TestTasksInputsHoldsASchemaInputToWhatTheBuildRead`;
+`TestTheSchemasHoldTheTypes`; and acme's
+`TestAForgeReusesWorkByKeyAcrossCommits`, a forge in miniature that
+decodes the committed file, plans across commits and reuses each pass by
+its key.
+
+Left:
+
+- Resolvers for a Rust crate, a Go module, a JS package and an image, as
+  extension modules beside `extensions/topcoat`. Each parses tracked
+  manifests and reports a generated member, by the rules above.
+- A CI renderer that writes a workflow from a Tasks schema: a job per
+  task, both edges as `needs`, a paths output carried as an artifact
+  named by task and output, an image or a value as a job output, and its
+  `on:` from a section of its own. Without the artifacts it would cover
+  only tasks that use nothing. It would be the file's second reader in
+  this repository, and the step that joins D47's workflow to tasks.
+- A schema input by handle, so a wrong name fails in the editor. It takes
+  the service's name today, which the plan and `tasks inputs` check.
+- `new service --kind Tasks`.
+- Two measures no test here gives: the plan's time on a large
+  repository, where one `git ls-tree -r` covers every task and the
+  resolvers are the likely cost; and how narrow a schema input's set is,
+  as the share of a week's schema edits that change fewer than every
+  schema input's digest.
+- A resolver's rules are stated and reviewed, not enforced: an
+  extension's Go may start a process. A plan run in a sandbox with no
+  network would hold them.
+- `@superschematic/tasks` is a nineteenth npm package. npm accepts a
+  trusted publisher only for a package that exists, so its first version
+  is published by hand before the first release that publishes it
+  (`CONTRIBUTING.md`, the release notes on trusted publishing).

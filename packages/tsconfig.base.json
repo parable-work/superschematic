@@ -19,7 +19,8 @@
       "@superschematic/memory-store": ["memory-store/src/index.ts"],
       "@superschematic/schema": ["schema/src/index.ts"],
       "@superschematic/schema-config": ["schema-config/src/index.ts"],
-      "@superschematic/stack": ["stack/src/index.ts"]
+      "@superschematic/stack": ["stack/src/index.ts"],
+      "@superschematic/tasks": ["tasks/src/index.ts"]
     }
   },
   "exclude": [

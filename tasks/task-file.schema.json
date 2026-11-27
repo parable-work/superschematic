@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superschematic://tasks/task-file.schema.json",
+  "title": "Task file",
+  "description": "A repository's tasks at a commit (D203). A Tasks schema's build writes it, and a forge reads it. A reader refuses a field this schema does not name and a version newer than it reads. Three places are open by design: an input's spec, sections.<name> and a task's sections.<name>.",
+  "type": "object",
+  "required": ["version", "tasks"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "The file's version.",
+      "type": "integer",
+      "const": 1
+    },
+    "image": {
+      "description": "The digest of the image a task runs from unless it names its own. The plan command ships in it.",
+      "$ref": "#/$defs/image"
+    },
+    "platform": {
+      "description": "The platform a task runs on unless it names its own.",
+      "$ref": "#/$defs/platform"
+    },
+    "tasks": {
+      "description": "The tasks by name.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/task" }
+    },
+    "sections": {
+      "description": "By section name, the part of each section that belongs to the file. Open: only the reader that registered a section reads it.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "image": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "platform": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+/[a-z0-9_]+(/[a-z0-9]+)?$"
+    },
+    "task": {
+      "description": "One unit of work. Every field but after and sections is a work field, which the input key reads.",
+      "type": "object",
+      "required": ["run", "hermetic"],
+      "additionalProperties": false,
+      "properties": {
+        "run": {
+          "description": "The command, an argument list. Nothing starts a shell.",
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" }
+        },
+        "inputs": {
+          "description": "What the task reads of the commit.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/input" }
+        },
+        "uses": {
+          "description": "The outputs of other tasks this one reads. Each enters the key by the other task's key.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/use" }
+        },
+        "after": {
+          "description": "The tasks that must pass before this one starts, and from which it reads nothing. It enters no key.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/name" }
+        },
+        "outputs": {
+          "description": "The named results the task declares.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/output" }
+        },
+        "services": {
+          "description": "The service containers the task runs beside.",
+          "type": "array",
+          "items": { "$ref": "#/$defs/service" }
+        },
+        "env": {
+          "description": "The environment the command starts with.",
+          "type": "object",
+          "propertyNames": { "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" },
+          "additionalProperties": { "type": "string" }
+        },
+        "image": {
+          "description": "The digest of the image this task runs from, in place of the file's.",
+          "$ref": "#/$defs/image"
+        },
+        "platform": {
+          "description": "The platform this task runs on, in place of the file's.",
+          "$ref": "#/$defs/platform"
+        },
+        "hermetic": {
+          "description": "False for a task whose result its inputs do not decide. It has no key and is never reused.",
+          "type": "boolean"
+        },
+        "sections": {
+          "description": "By section name, the part of each section that belongs to this task. Open.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/name" },
+          "additionalProperties": true
+        }
+      }
+    },
+    "input": {
+      "description": "One input: the kind of the resolver that turns it into tracked files, and the spec that resolver reads. Open: a registered resolver adds a kind and checks its spec.",
+      "type": "object",
+      "required": ["kind"],
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "$ref": "#/$defs/name" },
+        "spec": true
+      }
+    },
+    "use": {
+      "type": "object",
+      "required": ["task", "output"],
+      "additionalProperties": false,
+      "properties": {
+        "task": { "$ref": "#/$defs/name" },
+        "output": { "$ref": "#/$defs/name" }
+      }
+    },
+    "output": {
+      "description": "One named result: the files at paths, an image's digest, or a value.",
+      "type": "object",
+      "required": ["name", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "kind": { "enum": ["paths", "image", "value"] },
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "service": {
+      "description": "One service container, by its image's digest.",
+      "type": "object",
+      "required": ["name", "image"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "image": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._/:-]*@sha256:[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

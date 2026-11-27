@@ -12,7 +12,7 @@
 //   go run ./internal/tools/schemafiletypes
 
 /** A schema kind: one of the core's, or one a registry adds. */
-export type SchemaKind = 'API' | 'Bucket' | 'DB' | 'General' | 'MemoryStore' | 'Site' | 'Stack' | (string & {});
+export type SchemaKind = 'API' | 'Bucket' | 'DB' | 'General' | 'MemoryStore' | 'Site' | 'Stack' | 'Tasks' | (string & {});
 
 /**
  * Extension data, keyed by extension name. On a type, a field, an operation
@@ -875,7 +875,7 @@ export interface ServiceCallers {
 }
 
 export interface ServiceRef {
-  kind: 'API' | 'Bucket' | 'DB' | 'General' | 'MemoryStore' | 'Site' | 'Stack';
+  kind: 'API' | 'Bucket' | 'DB' | 'General' | 'MemoryStore' | 'Site' | 'Stack' | 'Tasks';
   name: string;
 }
 
@@ -921,6 +921,48 @@ export interface TableOperation {
 export interface TableOperationParent {
   param: string;
   relation: string;
+}
+
+export interface TaskDecl {
+  after?: string[];
+  env?: { [key: string]: string };
+  hermetic?: boolean;
+  image?: string;
+  inputs?: TaskInput[];
+  name?: string;
+  outputs?: TaskOutput[];
+  platform?: string;
+  run: string[];
+  sections?: { [key: string]: { [key: string]: unknown } };
+  services?: TaskService[];
+  uses?: TaskUse[];
+}
+
+export interface TaskInput {
+  kind: string;
+  spec?: { [key: string]: unknown };
+}
+
+export interface TaskOutput {
+  kind?: string;
+  name: string;
+  paths?: string[];
+}
+
+export interface TaskService {
+  image: string;
+  name: string;
+}
+
+export interface TaskUse {
+  output: string;
+  task: string;
+}
+
+export interface TasksDecl {
+  image?: string;
+  platform?: string;
+  sections?: { [key: string]: { [key: string]: unknown } };
 }
 
 export interface TraitConfigSchema {
@@ -992,6 +1034,8 @@ export interface TypeDef {
   stack?: StackDecl;
   stateMachines?: StateMachine[];
   strictJSON?: boolean;
+  task?: TaskDecl;
+  tasks?: TasksDecl;
   traitConfig?: TraitConfigSchema;
   user?: UserTrait;
   userRole?: UserRoleTrait;

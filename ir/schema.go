@@ -46,6 +46,12 @@ const (
 	// their config's memoryStores, and each MemoryStore service a stack
 	// reaches is a deployable of kind memoryStore.
 	SchemaKindMemoryStore SchemaKind = "MemoryStore"
+
+	// SchemaKindTasks represents a repository's tasks: the work a commit
+	// needs, each task a command with what it reads and what it produces
+	// (D203). Its schema declares each task with @task; it generates the
+	// task file a forge reads at a commit, and nothing names it.
+	SchemaKindTasks SchemaKind = "Tasks"
 )
 
 // String returns the string representation of a SchemaKind.

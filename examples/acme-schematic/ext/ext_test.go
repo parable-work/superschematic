@@ -40,7 +40,7 @@ func TestExtensionRegistersEverySurface(t *testing.T) {
 	if got := reg.Extensions(); strings.Join(got, ",") != "acme" {
 		t.Fatalf("Extensions = %v, want acme", got)
 	}
-	if got := reg.Kinds(); strings.Join(got, ",") != "API,Bucket,Catalog,DB,General,MemoryStore,Site,Stack" {
+	if got := reg.Kinds(); strings.Join(got, ",") != "API,Bucket,Catalog,DB,General,MemoryStore,Site,Stack,Tasks" {
 		t.Fatalf("Kinds = %v, want the core kinds plus Catalog", got)
 	}
 
@@ -85,8 +85,9 @@ func TestExtensionRegistersEverySurface(t *testing.T) {
 	for _, hook := range reg.BuildAllHooks() {
 		hooks = append(hooks, hook.Name)
 	}
-	if strings.Join(hooks, ",") != "acmeInventory" {
-		t.Fatalf("BuildAllHooks = %v, want acmeInventory", hooks)
+	// The core's hook installs a Tasks service's task file (D203).
+	if strings.Join(hooks, ",") != "tasks-install,acmeInventory" {
+		t.Fatalf("BuildAllHooks = %v, want the core's tasks-install, then acmeInventory", hooks)
 	}
 	for _, kind := range []string{"DB", "API", "General", ext.Kind} {
 		var scoped bool
@@ -104,9 +105,16 @@ func TestExtensionRegistersEverySurface(t *testing.T) {
 // output directories.
 func TestInventoryHookReadsOutputDirs(t *testing.T) {
 	reg, names := assemble(t)
-	hooks := reg.BuildAllHooks()
+	// The core registers one hook of its own, which installs a Tasks
+	// service's task file (D203); acme's follows it.
+	var hooks []registry.BuildAllHook
+	for _, hook := range reg.BuildAllHooks() {
+		if hook.Extension == ext.Name {
+			hooks = append(hooks, hook)
+		}
+	}
 	if len(hooks) != 1 {
-		t.Fatalf("BuildAllHooks = %v, want one", hooks)
+		t.Fatalf("acme's BuildAllHooks = %v, want one", hooks)
 	}
 	out := t.TempDir()
 	var services []registry.BuildAllService
@@ -154,7 +162,7 @@ func TestCoreRegistryHasNoAcmeSurface(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Assemble core: %v", err)
 	}
-	if got := reg.Kinds(); strings.Join(got, ",") != "API,Bucket,DB,General,MemoryStore,Site,Stack" {
+	if got := reg.Kinds(); strings.Join(got, ",") != "API,Bucket,DB,General,MemoryStore,Site,Stack,Tasks" {
 		t.Fatalf("core Kinds = %v, want no Catalog", got)
 	}
 	if len(reg.Documents()) != 0 {

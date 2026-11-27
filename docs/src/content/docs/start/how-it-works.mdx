@@ -60,6 +60,7 @@ kinds it may reference, and which generators run, in order.
 | Bucket | nothing: the schema declares nothing, and the config is all a bucket has | neither | none | none; an API that lists it in `buckets` holds it in its `Deps` |
 | Site | nothing: its code is TypeScript at its implementation path, which imports the SDKs of the APIs it calls | neither | none | `site`, the code's typed browser config |
 | MemoryStore | a channel or a key, `@channel` or `@key` | `@superschematic/memory-store` | General, API, DB | `memorystore` |
+| Tasks | a task, `@task`, or the defaults of every task, `@tasks` | `@superschematic/tasks` | none; it names a service by its name | `tasks` |
 
 Every kind may import `@superschematic/schema` (wrappers such as
 `Nullable` and `Default`, and decorators that apply everywhere),

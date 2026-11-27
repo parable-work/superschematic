@@ -21,13 +21,16 @@ The extension adds one of each registration surface:
 | Check, a tool hook and an invocation policy on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant; `confirm` replaces the core's `invocationPolicy` | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
 | Behavior | `acme.Rating`, declared by a class whose `rules` the behaviors' core interprets on a table, with no crate (D103's step 5), its JSON declaration derived from the class, replayed from `testdata/rules`; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation; the `acme-behaviors` crate implements it for the engine, over a copy of the declaration, which its registration names and the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.ts`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `crates/behaviors`, `testdata/rules` |
+| Task section | `acme`, the part of a Tasks service's task file that acme's forge reads: the tiers, and each task's tier and timeout, with a `Verify` for what their schemas cannot say (D203) | `ext/tasks.go` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
 The schemas root under `schemas/` has one service per kind: `shop-db` (DB),
 `shop-api` (API, authenticated with `apikey`), `shop-config` (General) and
 `shop-catalog` (Catalog). A second API service, `shop-storefront`, selects
-the TypeScript server; `storefront/` is the app that implements it. Its `superschematic.toml` names the generated
+the TypeScript server; `storefront/` is the app that implements it.
+`shop-tasks` (Tasks) declares the work a commit of the example needs; its
+task file is committed at `ci/tasks.json`. Its `superschematic.toml` names the generated
 packages `example.com/acme/...`, `@acme/...`, `acme_types_...` and `acme-...`.
 
 A product's variants are a list of lists (`string[][]`, one inner list of
@@ -99,6 +102,8 @@ examples/acme-schematic/
     testdata/services/shop-ratings  a General data-form service whose Product composes acme.Rating
     testdata/services/shop-ratings-ts  its TypeScript twin, with @behavior
     testdata/golden/shop-ratings-engine  the project's engine crate a build writes for shop-ratings, with its ffi member
+    tasks.go                  the acme task section: tiers, and each task's tier and timeout
+    tasks_test.go             a forge in miniature: plans across commits and reuses work by key
     command.go                describe subcommand
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
@@ -119,6 +124,8 @@ examples/acme-schematic/
     services/shop-config      General: ShopConfig with @envVars and field @docs/@purpose/@icon
     services/shop-catalog     Catalog: Product, Bundle with @shelf and @feedKey, Bundle with @crossSell; Product.photo, an Acme.Photo upload; catalog.config.yaml
     services/shop-storefront  API on the TypeScript server: carts, a public probe, a manual event stream
+    services/shop-tasks       Tasks: the example's build, vet and smoke as tasks, with acme's section
+  ci/tasks.json               shop-tasks' task file, which build-all installs and `tasks --check` holds current
   storefront/                 app.ts implements the generated shop-storefront router; app.test.ts drives it
   labels/                     shelf-label.d.ts and location.d.ts, the declarations `fields` reads
   scripts/smoke.sh            the end-to-end assertions
@@ -192,7 +199,7 @@ r.RegisterKind(registry.KindSpec{
 A schema declares the kind with `kind: "Catalog"` in `schema.config.ts`.
 `SchemaKind` is a closed enum of the core kinds; `defineConfig` also takes
 any string, and the registry validates it. The core-only binary rejects the
-file with `unknown kind "Catalog" (registered kinds: API, Bucket, DB, General, MemoryStore, Site, Stack)`,
+file with `unknown kind "Catalog" (registered kinds: API, Bucket, DB, General, MemoryStore, Site, Stack, Tasks)`,
 which is one of the smoke's assertions.
 
 ## A generator
@@ -910,6 +917,44 @@ dev` build the member it takes and hand it over, the archive through the
 build's `CGO_LDFLAGS` and the addon through `SUPERSCHEMATIC_ENGINE_ADDON`
 (`TestStackDevBuildsTheProjectsEngine` runs a Go, a Rust and a
 TypeScript server on acme.Rating so).
+
+## A task section
+
+`shop-tasks` is a Tasks service (D203): each class of
+`schemas/services/shop-tasks/src/tasks.schema.ts` is a task, a command
+with what it reads and what it writes. Its build writes the task file,
+which `build-all` installs at `ci/tasks.json`, where it is committed.
+The core computes each task's input key and the plan's order. When a
+task runs and within how long is a forge's, so it is a section, and
+`ext/tasks.go` registers acme's:
+
+```go
+r.RegisterTaskSection(registry.TaskSectionSpec{
+    Name:      TaskSection, // "acme"
+    Extension: Name,
+    File:      taskSectionFile, // tiers, each with a budget
+    Task:      taskSectionTask, // a task's tier, and its timeout
+    Verify:    verifyTaskSection,
+})
+```
+
+The core holds each part to its schema, calls `Verify`, and copies the
+parts into the file under `sections.acme`. `Verify` holds what a schema
+cannot say: every task names a tier, the tier is one `@tasks` declares,
+and no task's timeout is longer than its tier's budget.
+
+```sh
+acme-schematic tasks schemas/services/shop-tasks --check   # the committed file is current
+acme-schematic tasks plan HEAD --file examples/acme-schematic/ci/tasks.json
+acme-schematic tasks inputs schemas/services/shop-tasks    # after build-all
+```
+
+`ext/tasks_test.go` is a reader: a forge in miniature. It decodes the
+committed file with the public `tasks` package, reads acme's section to
+choose a tier's tasks, runs `tasks plan` across commits, and reuses each
+pass by its key. An edit to `ext/` runs `vet` and `schema-build`, which
+read it, and `api-build`, which uses what `schema-build` writes; a file
+no task reads runs nothing.
 
 ## A command
 

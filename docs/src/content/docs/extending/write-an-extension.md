@@ -516,6 +516,88 @@ the directories the service's documents and generators write, which
 the cache stores and restores. acme's `acmeInventory` merges every
 service's manifest that way. `build` of one service runs no hooks.
 
+The core registers one hook itself, `tasks-install`, which installs each
+Tasks service's task file ([Tasks](/superschematic/guides/tasks/#the-task-file)).
+It runs before an extension's.
+
+## Task resolvers and sections
+
+A Tasks service declares the work a commit needs
+([Tasks](/superschematic/guides/tasks/)). An extension adds to it in
+two places.
+
+**An input resolver** turns one kind of input into tracked files of a
+commit. The core has `path` and `schema`; a resolver for a Go module or
+a Rust crate is an extension's:
+
+```go
+r.RegisterTaskResolver(registry.TaskResolverSpec{
+    Kind:      "go-module",
+    Extension: Name,
+    Spec:      json.RawMessage(`{"type":"object","required":["dir"],"additionalProperties":false,"properties":{"dir":{"type":"string"}}}`),
+    Resolve: func(req registry.TaskResolveRequest) (registry.TaskResolution, error) {
+        // req.Tree is the commit: Entries, Entry and Read.
+        // Return the tracked files the input covers in Paths, and in
+        // Generated each path a manifest names that the commit lacks.
+    },
+})
+```
+
+`Spec` is the JSON Schema of the input's `spec`, which the build and the
+plan both hold an input to. `Resolve` is pure: one tree and one spec
+give one answer. A resolver feeds the keys a forge reuses work by, and
+it runs on a commit somebody else may have written, before anything is
+generated. So it reads tracked files only, through `req.Tree`; it runs
+no build tool and starts no process; it uses no network; and it executes
+nothing the tree holds. `Read` refuses a file over 1 MiB.
+
+A manifest often names a path a build writes, such as a workspace member
+under the output root. Report it in `Generated` with the manifest that
+names it, and do not read it. The plan then requires the task to use an
+output that covers the path, and fails with the edge to add when it does
+not.
+
+Type the spec in your authoring package, so a schema's editor checks it:
+
+```ts
+declare module "@superschematic/tasks" {
+  interface InputKinds {
+    "go-module": { readonly dir: string };
+  }
+}
+```
+
+**A task section** is a part of the task file that your forge owns. The
+core checks each part against its schema and copies it, and reads
+nothing in it:
+
+```go
+r.RegisterTaskSection(registry.TaskSectionSpec{
+    Name:      "acme",
+    Extension: Name,
+    File:      taskSectionFile, // the JSON Schema of the part @tasks holds
+    Task:      taskSectionTask, // the JSON Schema of the part @task holds
+    Verify: func(req registry.TaskSectionRequest, r registry.VerifyReporter) {
+        // req.File, req.Tasks by task name, and req.Names, every task.
+    },
+})
+```
+
+`Verify` holds what a schema cannot say. acme's checks that every task
+names a tier, that the tier is one `@tasks` declares, and that no task's
+timeout is longer than its tier's budget (`ext/tasks.go`). A forge with
+no extension registers its section as data instead, in the naming file's
+[`[tasks.sections.<name>]`](/superschematic/reference/naming/#taskssectionsname),
+and checks those rules when it reads the file.
+
+Augment `TaskSections` and `FileSections` of `@superschematic/tasks` to
+type the two parts, as `InputKinds` above.
+
+acme's test `TestAForgeReusesWorkByKeyAcrossCommits`
+(`ext/tasks_test.go`) is a reader in miniature: it decodes the committed
+file with the public `tasks` package, runs `tasks plan` across commits,
+and reuses each pass by its key.
+
 ## An auth provider
 
 The `api` generator renders middleware and routes through named template
@@ -1384,7 +1466,8 @@ environment that runs such an API with no provider of that interface.
 
 `cli.New` returns the core's commands: `check`, `build`, `build-all`,
 `migrate`, `queries`, `json-schema`, `format`, `behaviors`,
-`engine-client`, `stack`, `identity`, `env`, `catalog`, `init` and `new`
+`engine-client`, `stack`, `identity`, `env`, `catalog`, `init`, `new` and
+`tasks`
 ([CLI](/superschematic/reference/cli/)). An extension that implements
 `cli.CommandProvider` contributes more:
 
