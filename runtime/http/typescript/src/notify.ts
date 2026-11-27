@@ -1,6 +1,6 @@
 import type { GrantReach, Principal } from './auth.js';
 import { covers } from './auth.js';
-import { activeGrants, reachesOf } from './access.js';
+import { activeGrants, permissionsOf as rolePermissions, reachesOf, rolesById, rolesByName } from './access.js';
 import { identityLapsed, type IdentityStanding } from './parties.js';
 import { withCaller } from './caller.js';
 import { createLogger, type Logger } from './logger.js';
@@ -9,7 +9,7 @@ import type { ChannelAdapter, DeliveryState, InboundMessage, WebhookRequest } fr
 import type { Providers } from './providers/registry.js';
 import { enqueue, postgresQueue, type QueueDefinition, type QueuePool } from './queue.js';
 import { sha256 } from './sha256.js';
-import { base62UUID, uuidValue } from './uuid.js';
+import { idKey } from './uuid.js';
 import type { WorkerMessage, WorkerQueue } from './worker.js';
 
 /*
@@ -325,7 +325,11 @@ interface RepositoryShape {
   updateOne(id: unknown, update: Values): Promise<Values>;
   updateMany(filter: Values, update: Values): Promise<number>;
   deleteOne(id: unknown): Promise<void>;
+  deleteMany(filter: Values): Promise<number>;
 }
+
+/** The states of a delivery that has not ended, which an acknowledgement ends. */
+const OPEN_DELIVERY_STATES = ['queued', 'sent', 'delivered'];
 
 /** The refusal of a notifier call: an unknown event kind, a notice that is not the caller's. */
 export class NotifierError extends Error {
@@ -344,9 +348,7 @@ function repositoriesOf(orm: object): [string, RepositoryShape][] {
 
 /** The same id in one form, whatever form a UUID came in. */
 export function sameId(id: unknown): string {
-  const text = String(id);
-  const n = uuidValue(text);
-  return n === undefined ? text : base62UUID(n);
+  return idKey(id);
 }
 
 /** An address normalised as the kind of address it is: an email address in lower case, a phone number as + and its digits, a handle trimmed. */
@@ -598,12 +600,8 @@ export function createNotifier(options: NotifierOptions): Notifier {
     const rolesMember = rolesMemberOf(db);
     if (!grantsMember || !rolesMember) return [];
     const grants = await repo(db, grantsMember).findMany({ userId: { eq: recipient.id } }, { limit: 1000, count: false });
-    const out = new Set<string>();
-    for (const grant of grants.rows) {
-      const role = await repo(db, rolesMember).findOne({ id: { eq: grant.roleId } });
-      for (const p of (role?.permissions as string[] | undefined) ?? []) out.add(p);
-    }
-    return [...out];
+    const byId = await rolesById(repo(db, rolesMember), grants.rows.map(grant => grant.roleId));
+    return rolePermissions(grants.rows.map(grant => (grant.roleId === null || grant.roleId === undefined ? undefined : byId.get(idKey(grant.roleId)))));
   };
 
   /** The principal a recipient reads as (D156): a user by its id, a party or an agent with its active grants. */
@@ -611,11 +609,14 @@ export function createNotifier(options: NotifierOptions): Notifier {
     if (recipient.kind === 'user') return { subject: recipient.id, kind: 'user', permissions: [] };
     const db = sys(orm);
     const rolesMember = rolesMemberOf(db);
-    const grants: GrantReach[] = [];
-    for (const grant of await activeGrants(db, { holder: recipient.id, now: now() })) {
-      const role = rolesMember ? await repo(db, rolesMember).findOne({ name: { eq: grant.role } }) : null;
-      grants.push({ id: String(grant.id), targetType: String(grant.targetType), targetId: String(grant.targetId), reaches: reachesOf(role?.reaches as string[] | undefined) });
-    }
+    const held = await activeGrants(db, { holder: recipient.id, now: now() });
+    const byName = await rolesByName(rolesMember ? repo(db, rolesMember) : undefined, held.map(grant => grant.role));
+    const grants: GrantReach[] = held.map(grant => ({
+      id: String(grant.id),
+      targetType: String(grant.targetType),
+      targetId: String(grant.targetId),
+      reaches: reachesOf(byName.get(String(grant.role))?.reaches as string[] | undefined),
+    }));
     return { subject: recipient.id, kind: recipient.kind, permissions: [], grants };
   };
 
@@ -725,9 +726,8 @@ export function createNotifier(options: NotifierOptions): Notifier {
     return { subject: notice.title, body: channel === 'email' ? `${notice.title}${body}\n\nReference ${notice.reference}.${ask}` : `#${notice.reference} ${notice.title}${body}${ask}` };
   });
 
-  const createNotice = async (tx: any, recipient: RecipientRef, event: RaisedEvent, urgency: Urgency, route: string | null): Promise<NoticeRow | null> => {
-    const inbox = repo(sys(tx), parts.inbox);
-    if (await inbox.findOne({ eventId: { eq: event.id }, recipient: { eq: recipient.id } })) return null;
+  /** The title of event's notices: its record's declared title field, or its kind and key. */
+  const noticeTitle = async (tx: any, event: RaisedEvent): Promise<string> => {
     const declared = eventOf(event.table, event.kind);
     let title = `${event.kind}${event.key !== undefined ? ` ${event.key}` : ''}`;
     if (declared?.title && event.table !== undefined && event.key !== undefined) {
@@ -735,6 +735,30 @@ export function createNotifier(options: NotifierOptions): Notifier {
       const row = await repo(sys(tx), tableMember(tx, def.name)).findOne({ [def.key]: { eq: event.key } });
       if (row && row[declared.title] !== null && row[declared.title] !== undefined) title = String(row[declared.title]);
     }
+    return title;
+  };
+
+  /**
+   * Writes and dispatches the notice of event to each recipient that reads
+   * its record and holds none yet. The existing notices are read once for
+   * them all, and the title once, when the first notice is written.
+   */
+  const notifyAll = async (tx: any, recipients: readonly RecipientRef[], event: RaisedEvent, title: { text?: string }, urgency: Urgency, route: string | null): Promise<void> => {
+    if (recipients.length === 0) return;
+    const inbox = repo(sys(tx), parts.inbox);
+    const held = await inbox.findMany({ eventId: { eq: event.id }, recipient: { in: recipients.map(r => r.id) } }, { limit: recipients.length, count: false });
+    const noticed = new Set(held.rows.map(row => sameId(row.recipient)));
+    for (const recipient of recipients) {
+      if (noticed.has(sameId(recipient.id)) || !(await reads(tx, recipient, event))) continue;
+      title.text ??= await noticeTitle(tx, event);
+      const notice = await createNotice(tx, recipient, event, title.text, urgency, route);
+      noticed.add(sameId(recipient.id));
+      await dispatchNotice(tx, notice, recipient, urgency);
+    }
+  };
+
+  /** Writes recipient's notice of event, titled title: the caller has found that it holds none (notifyAll). */
+  const createNotice = async (tx: any, recipient: RecipientRef, event: RaisedEvent, title: string, urgency: Urgency, route: string | null): Promise<NoticeRow> => {
     for (let attempt = 0; ; attempt++) {
       try {
         return (await tx.transaction(async (inner: any) => {
@@ -808,6 +832,8 @@ export function createNotifier(options: NotifierOptions): Notifier {
       const routes = repo(sys(tx), parts.routes);
       const candidates = (await routes.findMany({ enabled: { eq: true }, eventKind: { in: [event.kind, '*'] } }, { limit: 1000, count: false })).rows;
       const declared = eventOf(event.table, event.kind);
+      // The notices' title, read once for every route's recipients.
+      const title: { text?: string } = {};
       for (const row of candidates) {
         if (row.subjectTable && row.subjectTable !== event.table) continue;
         if (row.filter && event.table !== undefined && event.key !== undefined) {
@@ -834,12 +860,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
           });
         }
         const recipients = await recipientsOf(tx, event, (row.recipients as RecipientSpec[]) ?? []);
-        for (const recipient of recipients) {
-          if (!(await reads(tx, recipient, event))) continue;
-          const notice = await createNotice(tx, recipient, event, urgency, String(row.id));
-          if (!notice) continue;
-          await dispatchNotice(tx, notice, recipient, urgency);
-        }
+        await notifyAll(tx, recipients, event, title, urgency, String(row.id));
         const escalation = (row.escalation as EscalationStep[] | null) ?? [];
         if (urgency === 'urgent' && escalation.length > 0 && recipients.length > 0) {
           const inbox = repo(sys(tx), parts.inbox);
@@ -961,11 +982,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
       }
       if (step.recipients?.length) {
         const event: RaisedEvent = { id: String(notice.eventId), kind: notice.eventKind, payload: (notice.payload as Values) ?? {}, at: now().getTime(), ...(notice.subjectTable ? { table: String(notice.subjectTable) } : {}), ...(notice.subjectKey ? { key: String(notice.subjectKey) } : {}) };
-        for (const more of await recipientsOf(tx, event, step.recipients)) {
-          if (!(await reads(tx, more, event))) continue;
-          const added = await createNotice(tx, more, event, 'urgent', String(notice.route));
-          if (added) await dispatchNotice(tx, added, more, 'urgent');
-        }
+        await notifyAll(tx, await recipientsOf(tx, event, step.recipients), event, {}, 'urgent', String(notice.route));
       }
       const next = steps[index + 1];
       if (next) await enqueue(tx, options.dispatch, { step: 'escalate', notice: notice.id }, { delaySeconds: Math.max(0, next.afterSeconds) });
@@ -980,7 +997,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
     const preference = await preferenceOf(orm, recipient, '*', 'digest');
     const channel = outward(preference.channels)[0];
     await orm.transaction(async (tx: any) => {
-      for (const notice of waiting) await repo(sys(tx), parts.inbox).updateOne(notice.id, { digestedAt: now() });
+      await repo(sys(tx), parts.inbox).updateMany({ id: { in: waiting.map(notice => notice.id) } }, { digestedAt: now() });
       if (!channel) return;
       const deliveries = repo(sys(tx), parts.deliveries);
       const lines = waiting.map(n => `#${n.reference} ${n.title}`).join('\n');
@@ -1093,7 +1110,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
     const deliveries = repo(sys(orm), parts.deliveries);
     const before = new Date(now().getTime() - retentionDays * 86_400_000);
     const old = (await deliveries.findMany({ endedAt: { lt: before } }, { limit, count: false })).rows;
-    for (const row of old) await deliveries.deleteOne(row.id);
+    if (old.length > 0) await deliveries.deleteMany({ id: { in: old.map(row => row.id) } });
     return old.length;
   };
 
@@ -1107,10 +1124,12 @@ export function createNotifier(options: NotifierOptions): Notifier {
 
   const acknowledgeIn = async (tx: any, notice: NoticeRow, via: string): Promise<void> => {
     await repo(sys(tx), parts.inbox).updateOne(notice.id, { state: 'acknowledged', acknowledgedAt: now(), acknowledgedVia: via });
-    const deliveries = repo(sys(tx), parts.deliveries);
-    for (const d of (await deliveries.findMany({ notice: { eq: notice.id } }, { limit: 100, count: false })).rows) {
-      if (d.state === 'queued' || d.state === 'sent' || d.state === 'delivered') await deliveries.updateOne(d.id, { state: 'acknowledged', acknowledgedAt: now(), endedAt: now() });
-    }
+    await acknowledgeDeliveries(tx, notice);
+  };
+
+  /** Acknowledges notice's deliveries that have not ended, in one write. */
+  const acknowledgeDeliveries = async (tx: any, notice: NoticeRow): Promise<void> => {
+    await repo(sys(tx), parts.deliveries).updateMany({ notice: { eq: notice.id }, state: { in: OPEN_DELIVERY_STATES } }, { state: 'acknowledged', acknowledgedAt: now(), endedAt: now() });
   };
 
   // ---- identities ----
@@ -1319,10 +1338,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
           const acting = tx.withBehaviorCaller({ subject: principal.subject, permissions: principal.permissions });
           const data = await action.run({ tx: acting, notice: notice!, principal, args: words, channel: input.channel });
           await repo(sys(tx), parts.inbox).updateOne(notice!.id, { state: 'done', acknowledgedAt: notice!.acknowledgedAt ?? now(), acknowledgedVia: input.channel });
-          const deliveries = repo(sys(tx), parts.deliveries);
-          for (const d of (await deliveries.findMany({ notice: { eq: notice!.id } }, { limit: 100, count: false })).rows) {
-            if (!ended(String(d.state))) await deliveries.updateOne(d.id, { state: 'acknowledged', acknowledgedAt: now(), endedAt: now() });
-          }
+          await acknowledgeDeliveries(tx, notice!);
           id = await record(tx, { ...withIdentity, verb, notice: notice!.id, reference: notice!.reference, outcome: 'done', undo: action.undo ? { data: data ?? null, previous: notice!.state } : null });
         })
       );

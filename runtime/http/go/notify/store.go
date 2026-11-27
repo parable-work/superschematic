@@ -101,9 +101,13 @@ func (w *where) ne(field string, v any) *where {
 	return w
 }
 
-// in keeps the rows whose field is one of values.
+// in keeps the rows whose field is one of values, each as eq writes it.
 func (w *where) in(field string, values ...string) *where {
-	w.conds = append(w.conds, fmt.Sprintf("%s = ANY(%s)", w.t.c(field), w.arg(values)))
+	list := make([]any, 0, len(values))
+	for _, v := range values {
+		list = append(list, w.t.value(field, v))
+	}
+	w.conds = append(w.conds, fmt.Sprintf("%s = ANY(%s)", w.t.c(field), w.arg(list)))
 	return w
 }
 

@@ -3,6 +3,7 @@ package tsreader
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -134,7 +135,7 @@ export default defineConfig({ name: "probe", kind: SchemaKind.API, calls: [NotBu
 // TestReadSiteDevConfig: a Site config's site.dev names its dev server's
 // command and port (D82); each is optional, and a member it does not take,
 // a command that is not a string or a port that is not a whole number is
-// refused.
+// refused by the JSON Schema and decoder the data forms use.
 func TestReadSiteDevConfig(t *testing.T) {
 	for _, tc := range []struct {
 		site string
@@ -144,10 +145,10 @@ func TestReadSiteDevConfig(t *testing.T) {
 		{`{ dev: { command: "vite", port: 5173 } }`, &ir.SiteDevConfig{Command: "vite", Port: 5173}, ""},
 		{`{ build: "build", dev: {} }`, &ir.SiteDevConfig{}, ""},
 		{`{ build: "build" }`, nil, ""},
-		{`{ dev: { script: "dev" } }`, nil, "defineConfig site.dev has no key script; it takes command and port"},
-		{`{ dev: { command: 1 } }`, nil, "defineConfig site.dev.command must be a string"},
-		{`{ dev: { port: 51.5 } }`, nil, "defineConfig site.dev.port must be a whole number"},
-		{`{ dev: "vite" }`, nil, "defineConfig site.dev must be an object of command and port"},
+		{`{ dev: { script: "dev" } }`, nil, `at '/site/dev': additional properties 'script' not allowed`},
+		{`{ dev: { command: 1 } }`, nil, `at '/site/dev/command': got number, want string`},
+		{`{ dev: { port: 51.5 } }`, nil, "cannot unmarshal number 51.5 into Go struct field SchemaConfig.site.dev.port of type int"},
+		{`{ dev: "vite" }`, nil, `at '/site/dev': got string, want object`},
 		{`{ dev: { command: "vite --port 3000" } }`, nil, `site.dev.command "vite --port 3000" is no script name`},
 	} {
 		t.Run(tc.site, func(t *testing.T) {
@@ -195,8 +196,9 @@ export default defineConfig({ name: "probe", kind: SchemaKind.API, outputs: {} }
 }
 
 // TestReadContentAddressedBucket: a Bucket config's contentAddressed and
-// maxBytes (D142) are read from the TypeScript form, and a maxBytes that
-// is no whole number of bytes above 0 is refused there.
+// maxBytes (D142) are read from the TypeScript form as from the data forms:
+// a maxBytes of 0 is the default, as when absent, and a fraction or a
+// negative number is refused.
 func TestReadContentAddressedBucket(t *testing.T) {
 	config := func(members string) string {
 		return `import { defineConfig, SchemaKind } from "@superschematic/schema-config";
@@ -213,9 +215,66 @@ export default defineConfig({ name: "probe", kind: SchemaKind.Bucket, ` + member
 	if cfg, err := ReadServiceConfig(configService(t, config("")), nil); err != nil || cfg.ContentAddressed || cfg.MaxBytes != 0 {
 		t.Errorf("a plain bucket: %+v, %v", cfg, err)
 	}
-	for _, bad := range []string{"0", "1.5", "-4"} {
-		if _, err := ReadServiceConfig(configService(t, config("contentAddressed: true, maxBytes: "+bad+",")), nil); err == nil || !strings.Contains(err.Error(), "maxBytes must be a whole number of bytes above 0") {
-			t.Errorf("maxBytes %s: %v", bad, err)
+	if cfg, err := ReadServiceConfig(configService(t, config("contentAddressed: true, maxBytes: 0,")), nil); err != nil || cfg.ContentMaxBytes() != ir.DefaultContentMaxBytes {
+		t.Errorf("maxBytes 0: %+v, %v", cfg, err)
+	}
+	for bad, want := range map[string]string{
+		"1.5": "cannot unmarshal number 1.5 into Go struct field SchemaConfig.maxBytes of type int64",
+		"-4":  "sets maxBytes to -4; it is a whole number of bytes above 0",
+	} {
+		if _, err := ReadServiceConfig(configService(t, config("contentAddressed: true, maxBytes: "+bad+",")), nil); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("maxBytes %s: %v, want it to contain %q", bad, err, want)
 		}
+	}
+}
+
+// TestReadConfigThroughTheJSONSchema: the TypeScript form is decoded as the
+// data forms are, so a mistyped or unknown key is refused, not dropped, an
+// API without outputs is refused, and each handle key takes handles alone.
+// The authDb handle's kind, which the data forms do not write, is kept and
+// checked.
+func TestReadConfigThroughTheJSONSchema(t *testing.T) {
+	for _, tc := range []struct {
+		name, members, want string
+	}{
+		{"a mistyped key", `public: "yes", outputs: {}`, `at '/public': got string, want boolean`},
+		{"an unknown key", `pubic: true, outputs: {}`, `additional properties 'pubic' not allowed`},
+		{"a mistyped outputs key", `outputs: { api: { enabled: "yes" } }`, `at '/outputs/api/enabled': got string, want boolean`},
+		{"an API without outputs", ``, `defineConfig: schema config for probe has no outputs; only a Site service may leave them out`},
+		{"authDb as a name", `authDb: "fixture-db", outputs: {}`, `defineConfig authDb must be a service({...}) sentinel, not a string`},
+		{"dependencies of plain objects", `dependencies: [{ name: "fixture-db", kind: "DB" }], outputs: {}`, `defineConfig dependencies entries must be service({...}) sentinels, not an object`},
+		{"calls that is no list", `calls: service({ name: "other-api", kind: "API" }), outputs: {}`, `defineConfig calls must be a list of service({...}) sentinels, not a service sentinel`},
+		{"an authDb of an unknown kind", `authDb: service({ name: "other-db", kind: "Nope" }), outputs: {}`, `has an authDb of unknown kind "Nope"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := configService(t, `import { defineConfig, service, SchemaKind } from "@superschematic/schema-config";
+export default defineConfig({ name: "probe", kind: SchemaKind.API, `+tc.members+` });
+`)
+			_, err := ReadServiceConfig(dir, nil)
+			if err == nil || !strings.Contains(err.Error(), tc.want) || !strings.Contains(err.Error(), "schema.config.ts:2:1: ") {
+				t.Fatalf("ReadServiceConfig error = %v, want it at schema.config.ts:2:1 and to contain %q", err, tc.want)
+			}
+		})
+	}
+
+	dir := configService(t, `import { defineConfig, service, SchemaKind } from "@superschematic/schema-config";
+import { FixtureDb } from "@schemas/fixture-db";
+export default defineConfig({
+  name: "probe",
+  kind: SchemaKind.API,
+  authDb: FixtureDb,
+  dependencies: [FixtureDb],
+  calls: [service({ name: "other-api", kind: SchemaKind.API })],
+  outputs: { api: { enabled: true } },
+});
+`)
+	cfg, err := ReadServiceConfig(dir, nil)
+	if err != nil {
+		t.Fatalf("ReadServiceConfig: %v", err)
+	}
+	want := []ServiceDependency{{Name: "fixture-db", Kind: ir.SchemaKindDB}}
+	if cfg.AuthDB != "fixture-db" || cfg.AuthDBKind != ir.SchemaKindDB || !reflect.DeepEqual(cfg.Dependencies, want) ||
+		len(cfg.Calls) != 1 || cfg.Calls[0].Name != "other-api" || !reflect.DeepEqual(cfg.Outputs, map[string]any{"api": map[string]any{"enabled": true}}) {
+		t.Errorf("config = %+v", cfg)
 	}
 }

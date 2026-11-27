@@ -1,6 +1,6 @@
 import type { Authenticator, GrantReach, Principal } from './auth.js';
 import { covers } from './auth.js';
-import { activeGrants, grantAuthenticator, grantAuthenticatorAdmittingRuns, issueGrant, reachesOf, revokeGrant } from './access.js';
+import { activeGrants, grantAuthenticator, grantAuthenticatorAdmittingRuns, issueGrant, permissionsOf as rolePermissions, reachesOf, revokeGrant, rolesById, rolesByName } from './access.js';
 import type { BucketBody } from './bucket.js';
 import { withCaller } from './caller.js';
 import { createLogger, type Logger } from './logger.js';
@@ -19,6 +19,7 @@ import type { CoreCaller } from './rules.js';
 import { callSearchTool, searchMcpTool, type SearchOptions } from './search-tables.js';
 import { SecretValue } from './secret.js';
 import { sha256 } from './sha256.js';
+import { idKey } from './uuid.js';
 import type { WorkerMessage, WorkerQueue } from './worker.js';
 
 /*
@@ -1073,18 +1074,16 @@ export function createAgents(options: AgentsOptions): Agents {
     if (ref.kind === 'user') {
       const grantsMember = tableMember('UserRoleGrant');
       if (!grantsMember) return [];
-      for (const grant of (await repo(db, grantsMember).findMany({ userId: { eq: ref.subject } }, { limit: 1000, count: false })).rows) {
-        const role = await repo(db, rolesMember).findOne({ id: { eq: grant.roleId } });
-        for (const p of (role?.permissions as string[] | undefined) ?? []) out.add(p);
-      }
+      const grants = (await repo(db, grantsMember).findMany({ userId: { eq: ref.subject } }, { limit: 1000, count: false })).rows;
+      const byId = await rolesById(repo(db, rolesMember), grants.map(grant => grant.roleId));
+      for (const p of rolePermissions(grants.map(grant => (grant.roleId === null || grant.roleId === undefined ? undefined : byId.get(idKey(grant.roleId)))))) out.add(p);
     } else if (ref.table) {
       // A party is what D157's partyPrincipal says it is: its active grants' roles, or the one grant the run is under.
       return [...(await partyPrincipal(orm, { table: ref.table, key: ref.subject }, { now: now(), ...(ref.grant ? { grant: ref.grant } : {}) })).permissions];
     } else {
-      for (const grant of await activeGrants(db, { holder: ref.subject, now: now() })) {
-        const role = await repo(db, rolesMember).findOne({ name: { eq: grant.role } });
-        for (const p of (role?.permissions as string[] | undefined) ?? []) out.add(p);
-      }
+      const held = await activeGrants(db, { holder: ref.subject, now: now() });
+      const byName = await rolesByName(repo(db, rolesMember), held.map(grant => grant.role));
+      for (const p of rolePermissions(held.map(grant => byName.get(String(grant.role))))) out.add(p);
     }
     return [...out];
   };
@@ -1113,10 +1112,11 @@ export function createAgents(options: AgentsOptions): Agents {
     if (!run || !['running', 'waiting'].includes(String(run.status))) return null;
     const reaches: GrantReach[] = [];
     const db = sys(orm);
-    const roleReaches = async (name: unknown): Promise<Record<string, string[]>> => {
-      const role = rolesMember ? await repo(db, rolesMember).findOne({ name: { eq: String(name) } }) : null;
-      return reachesOf(role?.reaches as string[] | undefined);
-    };
+    // The run's and the party's grants, and their roles in one read.
+    const own = await activeGrants(db, { holder: base.subject, now: now() });
+    const actingGrants = run.actingForKind === 'party' && run.actingFor ? await activeGrants(db, { holder: String(run.actingFor), now: now() }) : [];
+    const roles = await rolesByName(rolesMember ? repo(db, rolesMember) : undefined, [...own, ...actingGrants].map(grant => grant.role));
+    const roleReaches = (name: unknown): Record<string, string[]> => reachesOf(roles.get(String(name))?.reaches as string[] | undefined);
     const actingFor = run.actingForKind && run.actingFor ? { kind: run.actingForKind as 'user' | 'party', subject: String(run.actingFor) } : undefined;
     const input = (run.input as Values | null) ?? {};
     // A run acting for a party reaches through no path the party's grant
@@ -1125,16 +1125,16 @@ export function createAgents(options: AgentsOptions): Agents {
     let partyGrants: { targetType: string; targetId: string; reaches: Record<string, string[]> }[] | undefined;
     if (actingFor?.kind === 'party') {
       partyGrants = [];
-      for (const grant of await activeGrants(db, { holder: actingFor.subject, now: now() })) {
+      for (const grant of actingGrants) {
         if (typeof input.grant === 'string' && String(grant.id) !== input.grant) continue;
-        partyGrants.push({ targetType: String(grant.targetType), targetId: String(grant.targetId), reaches: await roleReaches(grant.role) });
+        partyGrants.push({ targetType: String(grant.targetType), targetId: String(grant.targetId), reaches: roleReaches(grant.role) });
       }
     }
-    for (const grant of await activeGrants(db, { holder: base.subject, now: now() })) {
-      const own = await roleReaches(grant.role);
+    for (const grant of own) {
+      const reachesOfGrant = roleReaches(grant.role);
       const narrowed = partyGrants
-        ? narrowReaches(own, partyGrants.filter(g => g.targetType === String(grant.targetType) && g.targetId === String(grant.targetId)).map(g => g.reaches))
-        : own;
+        ? narrowReaches(reachesOfGrant, partyGrants.filter(g => g.targetType === String(grant.targetType) && g.targetId === String(grant.targetId)).map(g => g.reaches))
+        : reachesOfGrant;
       reaches.push({ id: String(grant.id), targetType: String(grant.targetType), targetId: String(grant.targetId), reaches: narrowed });
     }
     const permissions = actingFor

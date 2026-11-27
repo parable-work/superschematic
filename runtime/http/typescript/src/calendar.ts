@@ -1,6 +1,7 @@
 import type { Principal } from './auth.js';
 import { GRANT_TOKEN_PREFIX, grantEnded, grantTokenHash, issueGrant, revokeGrant, type GrantRow } from './access.js';
 import { sha256 } from './sha256.js';
+import { quoteIdentifier as quote } from './sql-text.js';
 import { uuidFromDb } from './uuid.js';
 
 /*
@@ -202,7 +203,6 @@ async function rowsOf(repository: RepositoryShape, source: CalendarSourceDefinit
 async function occurrencesOf(db: OrmShape, repository: RepositoryShape, source: CalendarSourceDefinition, from: Date, to: Date, limit: number, owned: Values): Promise<{ entries: CalendarEntry[]; more: boolean }> {
   const def = repository.def!;
   const occ = source.occurrences!;
-  const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
   const { rows } = await db.asSystem().query(
     `SELECT ${quote(occ.row)} AS row, ${quote(occ.key)} AS key, ${quote(occ.due)} AS due, ${quote(occ.dueAt)} AS due_at, ${quote(occ.state)} AS state FROM ${quote(occ.table)} WHERE ${quote(occ.dueAt)} >= $1 AND ${quote(occ.dueAt)} < $2 ORDER BY ${quote(occ.dueAt)}, ${quote(occ.key)} LIMIT ${limit + 1}`,
     [from, to]

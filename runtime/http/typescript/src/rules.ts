@@ -2,6 +2,7 @@ import type { SqlDatabase, SqlValue } from './d1.js';
 import type { OrmOptions, OrmQueryable } from './orm.js';
 import { HttpProblem } from './problem.js';
 import { wakeAfterEnqueue } from './queue-wake.js';
+import { quoteIdentifier as quote } from './sql-text.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
 
 /*
@@ -2335,11 +2336,6 @@ function ownedColumns(table: RulesTable, dialect: RulesDialect, owned: Readonly<
  */
 function stampNow(dialect: RulesDialect): string {
   return dialect === 'postgres' ? 'statement_timestamp()' : "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
-}
-
-/** An identifier quoted as Postgres and SQLite both read one. */
-function quote(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
 }
 
 /** The nth placeholder in the store's dialect: $n on Postgres, ?n on SQLite and D1. */

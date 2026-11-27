@@ -1,4 +1,5 @@
-import { SqlIdentityStore, driveAsync, postgresPlaceholders, type SqlRow, type SqlRunner, type SqlStatement, type SqlWork } from './sqlstore.js';
+import { postgresPlaceholders } from '../sql-text.js';
+import { SqlIdentityStore, driveAsync, type SqlRow, type SqlRunner, type SqlStatement, type SqlWork } from './sqlstore.js';
 
 /*
 The identity store's Postgres binding over the npm package pg. It uses only

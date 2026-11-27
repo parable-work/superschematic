@@ -144,8 +144,3 @@ export function parseIdentityDescriptor(input: string | unknown): IdentityDescri
   const { apiKey, role, roleGrant, ...rest } = d;
   return { ...rest, ...(hasApiKey ? { apiKey } : {}), ...(hasRole ? { role, roleGrant } : {}) } as unknown as IdentityDescriptor;
 }
-
-/** Quotes an identifier as every dialect a store speaks reads it: the name in double quotes, each double quote doubled. */
-export function quoteIdentifier(name: string): string {
-  return `"${name.replaceAll('"', '""')}"`;
-}
