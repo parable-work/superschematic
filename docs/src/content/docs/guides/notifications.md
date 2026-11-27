@@ -14,8 +14,9 @@ person who sent it.
 
 | Built | Not built yet |
 | --- | --- |
-| `@event` on a table; the notifier's tables and the channel identities, which the build fills | the Go runtime; SQLite and D1 |
+| `@event` on a table; the notifier's tables and the channel identities, which the build fills | SQLite and D1 |
 | the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
+| the same notifier in the Go runtime, on Postgres ([in Go](#in-go)) | a route to an agent in Go (D158 is TypeScript's alone so far) |
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties | a generated server that builds the notifier into its `Deps` |
 | the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
@@ -264,3 +265,56 @@ Postgres, which holds the zone database. A route that names an agent is
 logged and reaches no one, as in TypeScript without an agent dispatcher:
 the Rust runtime does not serve agent runs yet. A Rust types crate that
 lists `sqlite` is refused the notifier, as every language is.
+
+## In Go
+
+The Go HTTP runtime's `notify` package is the same notifier, on Postgres
+(D190). The generated Go ORM of a database that uses the notifier writes
+`notifications.go`: the notifier's tables by part with their columns, each
+table's key, events and to-one relations, and `Database.Notifications()`,
+the host the notifier runs through. `notify.New` finds the inbox, the
+deliveries, the routes and the rest from it:
+
+```go
+replies := map[string]map[string]notify.ReplyAction{
+	"ticket.overdue":     {"done": markDone},
+	"approval.requested": notify.ApprovalReplies("Approval", "agents.approve"),
+}
+notifier, err := notify.New(db.Notifications(), notify.Options{Providers: deps.Providers, Replies: replies})
+
+// In the transaction of the change that caused it.
+err = db.Transaction(ctx, func(tx orm.TxInterface) error {
+	_, err := notifier.Raise(ctx, tx, notify.RaiseInput{Table: "Ticket", Key: key, Kind: "ticket.overdue"})
+	return err
+})
+// The dispatch queue's worker.
+err = worker.Run(ctx, notifier.WorkerQueue(), options)
+// A relay's @webhook route.
+outcomes, err := notifier.Inbound(ctx, "SMS", request)
+```
+
+A reply action is a `notify.ReplyAction`: its permission, what its echo
+says, its `Run` and, when it can be undone, its `Undo`. It runs in a
+transaction of the database, and its `ReplyContext` holds that transaction
+(`Tx`, the ORM's `TxInterface`) and a context that acts as the sender
+(`Ctx`): the repositories keep what it reads and writes to what the sender
+sees, and a behavior's command runs with the permissions the channel's
+trust leaves the sender. `ApprovalReplies` are the `approve` and `deny` of
+an approval a route sends to the people who hold its permission: each
+decides the row as the replier, refuses an agent run and an approval
+already decided, and writes the state, who decided it and on which
+channel.
+
+A recipient reads the record through the record's repository as
+themselves, held to its audience and their grants. A route's filter and a
+brief's saved query are in the repositories' filter syntax, which the ORM
+reads into the table's filter. `FromBehaviorEvent` takes a behavior's
+event from the project's Workers method, `Cleared` a cleared reference's
+message, and `notify.PasswordReset` sends a reset code through the email
+adapter and sets the password with the identity service's
+`ResetPassword`. The wall time of quiet hours and digests is read from
+Postgres, which holds the zone database. Whether an adapter reports
+statuses or reads inbound messages is whether it implements
+`providers.ChannelStatusReader` and `providers.ChannelInboundReader`. A
+route that names an agent is logged and reaches no one: the Go runtime
+does not serve agent runs yet.

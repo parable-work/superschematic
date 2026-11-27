@@ -628,6 +628,35 @@ tool; an app merges the route into its router. A party's or an agent run's
 search, through `access::GrantAuthenticator`, keeps to the rows its grants
 reach, as in TypeScript.
 
+In Go, the schema runtime's `crosstable` package runs the same statements
+over the generated ORM's `CrossTables()`, which carries each `@searchable`
+table's index (D187). `SearchTables` takes the caller and binds it itself,
+so a route can search as whom it chooses; a caller with grants is held by
+the predicate each table's repository applies for it (`AccessConditions`).
+`IndexSearch` builds a row's index row in a transaction of its own and
+embeds after it commits, as a worker's handler calls it. A model provider
+that implements `providers.ModelEmbedder` re-ranks through
+`providers.SearchEmbeddingsOf`, which refuses one that does not:
+
+```go
+import (
+	"github.com/parable-work/superschematic/runtime/http/go/providers"
+	"github.com/parable-work/superschematic/runtime/schema/go/crosstable"
+)
+
+model, err := deps.Providers.Model(ctx, "MODEL")
+embeddings, err := providers.SearchEmbeddingsOf(model, "text-embedding-1", 0)
+options := crosstable.SearchOptions{Embeddings: embeddings}
+// The worker of the SearchIndexing queue, for each message.
+_, err = crosstable.IndexSearch(ctx, db.CrossTables(), crosstable.SearchIndexing{SourceTable: message.SourceTable, SourceKey: message.SourceKey}, options)
+// A search, as the caller.
+found, err := crosstable.SearchTables(ctx, db.CrossTables(), crosstable.Caller{Principal: principal, Permissions: permissions}, crosstable.SearchRequest{Q: q}, options)
+```
+
+`crosstable.SearchRoutes` serves `GET /api/search` as an `http.Handler`,
+and `SearchMCPTool` with `CallSearchTool` the MCP tool; an app mounts the
+handler on its router. `ReindexSearch` builds every row's index row again.
+
 Search across tables is Postgres alone: the build refuses `@searchable` in
 a service that lists `sqlite`.
 
@@ -3929,9 +3958,8 @@ another, and `DELETE /api/calendar/feeds/<id>` revokes it.
 The generated router mounts neither `calendarRoutes` nor the calendar's
 MCP tool: an app wires them itself, as it wires `grantAuthenticator`
 (`examples/recurring-duties`). Recurrence and the calendar are served end
-to end by a TypeScript server and a Rust one on Postgres. The Go server
-does not run Recurrence's operations end to end or serve the calendar yet,
-and the calendar has no SQLite or D1 form.
+to end by a TypeScript server, a Rust one and a Go one on Postgres, and
+the calendar has no SQLite or D1 form.
 
 A Rust server serves Recurrence on Postgres as the TypeScript one does
 (D188): the router's `recurrence` routes run the operations through the
@@ -3953,6 +3981,29 @@ let routes = calendar_routes(CalendarRoutes::new(Tables::new(pool, postgres_defi
 and `issue_calendar_feed`, `rotate_calendar_feed` and
 `revoke_calendar_feed` are the feed's operations. A Rust server whose
 database lists `sqlite` first is refused Recurrence and a calendar source.
+
+A Go server serves Recurrence on Postgres as the TypeScript one does
+(D187): its `recurrence` routes run the operations through the behaviors'
+core, and the behavior worker's generated queues fire the `open`,
+`remind`, `overdue` and `plan` deadlines and hear a raw write. The schema
+runtime's `crosstable` package reads the calendar over the generated
+ORM's `CrossTables()`, which carries each table's calendar sources:
+
+```go
+import "github.com/parable-work/superschematic/runtime/schema/go/crosstable"
+
+caller := crosstable.Caller{Principal: session.GetCaller(ctx), Permissions: permissions}
+calendar, err := crosstable.ReadCalendar(ctx, db.CrossTables(), caller, crosstable.CalendarRead{From: "2026-12-01", To: "2027-01-01"}, crosstable.CalendarOptions{})
+// GET /api/calendar, the feed and its issue, rotation and revocation.
+router.Mount("/api/calendar", crosstable.CalendarRoutes(crosstable.CalendarRoutesOptions{Host: db.CrossTables(), Authenticate: authenticate}))
+```
+
+`CallCalendarTool` answers the MCP tool `CalendarMCPTool` describes, and
+`IssueFeed`, `RotateFeed` and `RevokeFeed` are the feed's operations; the
+ORM's `AuthenticateGrant` refuses a feed's token on every other route. A
+Go server whose database lists `sqlite` first is refused Recurrence and a
+calendar source, and one whose calendar source is titled by an
+`Encrypted<T>` field is refused it.
 
 ### A pool of members
 

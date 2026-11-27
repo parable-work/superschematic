@@ -31,6 +31,13 @@ import (
 	rules "{{ .RulesGoModule }}"
 {{- end }}
 )
+{{- if .BehaviorsWithoutJSON }}
+
+// The behaviors' core writes this table, which has no use, deadline,
+// change or event of its own (a Recurrence's relative target, D152) and
+// encodes no JSON itself.
+var _ = json.Marshal
+{{- end }}
 
 {{- range .Fields }}
 {{- if and .IsJSONField .IsUnion }}

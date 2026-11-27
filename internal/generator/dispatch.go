@@ -1377,6 +1377,9 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		if err := verify.GoServerDatabaseErr(r.Schema, schema); err != nil {
 			return deps, nil, err
 		}
+		if err := r.goServerSQLiteErr(db, schema); err != nil {
+			return deps, nil, err
+		}
 		// A Go API's Deps.DB is the ORM of its database's first dialect
 		// (D116): over a pool, or over the SQLite file.
 		if r.Options.DependencyConfig != nil {
