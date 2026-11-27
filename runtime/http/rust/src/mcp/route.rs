@@ -9,6 +9,7 @@ use super::confirm::CONFIRMATION_ARGUMENT;
 use super::json::number_text;
 use super::{CallOutcome, Content, Problem, Tool};
 use crate::filter::MAX_IN_VALUES;
+use crate::idempotency::{is_key, CODE_INVALID, KEY_HEADER};
 use crate::response::{problem_body, status_title, REQUEST_ID_HEADER};
 use crate::ApiError;
 use base64::Engine as _;
@@ -68,6 +69,26 @@ pub struct RouteTool {
     /// ask in the core's (D93).
     #[serde(default, skip_serializing_if = "is_false")]
     pub confirm: bool,
+    /// The operation's `@idempotent` (D140), absent for every other: the
+    /// tool takes the call's key in [`IDEMPOTENCY_ARGUMENT`], which goes to
+    /// the route as its `Idempotency-Key`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idempotent: Option<ToolIdempotency>,
+}
+
+/// The argument the tool of an `@idempotent` operation takes the call's key
+/// in (D140): a call has no headers, so the endpoint sends the argument to
+/// the route as its `Idempotency-Key`. A repeat of the call with the same
+/// key and arguments runs nothing and is answered what the first was. The
+/// TypeScript runtime's `MCP_IDEMPOTENCY_ARGUMENT`.
+pub const IDEMPOTENCY_ARGUMENT: &str = "idempotencyKey";
+
+/// An `@idempotent` operation's tool (D140): whether a call must send a key.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolIdempotency {
+    /// The operation requires a key, so the argument is required.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub required: bool,
 }
 
 // serde's skip_serializing_if hands the field by reference.
@@ -76,16 +97,67 @@ fn is_false(flag: &bool) -> bool {
 }
 
 impl RouteTool {
-    /// The tool as `tools/list` answers it: a tool that asks with the
-    /// argument its confirmation comes back in
-    /// ([`with_confirmation_argument`]).
+    /// The tool as `tools/list` answers it: an `@idempotent` operation's
+    /// with the argument its key goes in ([`with_idempotency_argument`]),
+    /// and a tool that asks with the argument its confirmation comes back
+    /// in ([`with_confirmation_argument`]).
     pub fn listed(&self) -> Tool {
         let mut tool = self.tool.clone();
+        if let Some(idempotent) = self.idempotency() {
+            tool.input_schema = with_idempotency_argument(&tool.input_schema, idempotent.required);
+        }
         if self.confirm {
             tool.input_schema = with_confirmation_argument(&tool.input_schema);
         }
         tool
     }
+
+    /// The operation's `@idempotent` when the tool takes the key argument:
+    /// the operation is `@idempotent`, and no argument of its own has the
+    /// name, which then stays the operation's.
+    pub fn idempotency(&self) -> Option<ToolIdempotency> {
+        self.idempotent.filter(|_| {
+            !self
+                .arguments
+                .iter()
+                .any(|argument| argument.key == IDEMPOTENCY_ARGUMENT)
+        })
+    }
+}
+
+/// The input schema of an `@idempotent` operation's tool (D140), with the
+/// argument its key goes in, required when the operation requires one. A
+/// schema that is no object is returned as it is.
+pub fn with_idempotency_argument(input_schema: &Value, required: bool) -> Value {
+    let Some(schema) = input_schema.as_object() else {
+        return input_schema.clone();
+    };
+    let mut properties = schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .cloned()
+        .unwrap_or_default();
+    properties.insert(
+        IDEMPOTENCY_ARGUMENT.to_owned(),
+        json!({
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "description": "A key you make for this call, a UUID say. Send the same key with the same arguments to repeat the call safely: it runs once, and the repeat is answered what the first call was. Use a new key for a new call.",
+        }),
+    );
+    let mut schema = schema.clone();
+    schema.insert("properties".to_owned(), Value::Object(properties));
+    if required {
+        let mut listed = schema
+            .get("required")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        listed.push(Value::from(IDEMPOTENCY_ARGUMENT));
+        schema.insert("required".to_owned(), Value::Array(listed));
+    }
+    Value::Object(schema)
 }
 
 /// What a router checks of its tools before it serves them, as the
@@ -149,12 +221,14 @@ pub fn with_confirmation_argument(input_schema: &Value) -> Value {
 }
 
 // Headers of the endpoint's request a call's request does not carry: its
-// own body's, its conditions, the MCP transport's and the connection's.
-// Every other one goes on, so an authenticator that reads its own header
-// (an API key, say) authenticates the call as it did the endpoint. The
-// TypeScript runtime's list also holds host, which there is part of the
-// URL the call's request keeps; here it is a header, and goes on.
-const UNFORWARDED: [&str; 22] = [
+// own body's, its conditions, the MCP transport's and the connection's,
+// and an idempotency key, which is one call's: the tool's argument (D140),
+// never the key of the request that carries the call. Every other one goes
+// on, so an authenticator that reads its own header (an API key, say)
+// authenticates the call as it did the endpoint. The TypeScript runtime's
+// list also holds host, which there is part of the URL the call's request
+// keeps; here it is a header, and goes on.
+const UNFORWARDED: [&str; 23] = [
     "accept",
     "connection",
     "content-encoding",
@@ -166,6 +240,7 @@ const UNFORWARDED: [&str; 22] = [
     "if-none-match",
     "if-range",
     "if-unmodified-since",
+    "idempotency-key",
     "keep-alive",
     "last-event-id",
     "mcp-method",
@@ -200,15 +275,40 @@ pub fn tool_request<B>(
 ) -> Result<Request<Bytes>, Problem> {
     let name = tool.tool.name.as_str();
     let refuse = |detail: String| problem_body(&ApiError::bad_request(detail), Some(request_id));
-    if let Some(unknown) = arguments
-        .keys()
-        .find(|key| !tool.arguments.iter().any(|argument| argument.key == **key))
-    {
+    // An @idempotent operation's tool takes the call's key as an argument,
+    // which goes to the route as the header a request carries it in (D140).
+    let takes_key = tool.idempotency().is_some();
+    let mut idempotency_key = None;
+    if takes_key {
+        match arguments.get(IDEMPOTENCY_ARGUMENT) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(key)) if is_key(key) => idempotency_key = Some(key.as_str()),
+            Some(_) => {
+                return Err(problem_body(
+                    &ApiError::new(
+                        http::StatusCode::BAD_REQUEST,
+                        CODE_INVALID,
+                        format!(
+                            "{name}: {IDEMPOTENCY_ARGUMENT} is 1 to 255 printable ASCII characters"
+                        ),
+                    ),
+                    Some(request_id),
+                ));
+            }
+        }
+    }
+    if let Some(unknown) = arguments.keys().find(|key| {
+        !(takes_key && key.as_str() == IDEMPOTENCY_ARGUMENT)
+            && !tool.arguments.iter().any(|argument| argument.key == **key)
+    }) {
         let mut keys: Vec<&str> = Vec::new();
         for argument in &tool.arguments {
             if !keys.contains(&argument.key.as_str()) {
                 keys.push(&argument.key);
             }
+        }
+        if takes_key {
+            keys.push(IDEMPOTENCY_ARGUMENT);
         }
         let takes = if keys.is_empty() {
             "takes no arguments".to_owned()
@@ -297,6 +397,9 @@ pub fn tool_request<B>(
     };
     if has_body {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    }
+    if let Some(key) = idempotency_key.and_then(|key| HeaderValue::from_str(key).ok()) {
+        headers.insert(KEY_HEADER, key);
     }
     Ok(request)
 }

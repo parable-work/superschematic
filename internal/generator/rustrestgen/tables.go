@@ -327,7 +327,7 @@ func (o *APIOutput) TableArgs() []string {
 // table operation, which it serves from the table's repository (D106).
 // Its namespace's trait has no method for it.
 func (e EndpointInfo) RouterServed() bool {
-	return e.Behavior != nil || e.Table != nil
+	return e.Behavior != nil || e.Table != nil || e.Graph != nil
 }
 
 // checkTableDeps refuses table operations the crate cannot serve: an API

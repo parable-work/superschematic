@@ -19,8 +19,8 @@ import (
 // fields, which the generated Derivers interface types its methods with,
 // and refuses what no deriver can run: a schema that composes no Derived,
 // a deriver with no schema, one whose schemas are engine types and tables
-// both, a Go API's deriver, and a rules policy that admits no engine
-// deriver's subject.
+// both, a Go API's deriver of engine types, a Rust API whose derivers fill
+// both kinds, and a rules policy that admits no engine deriver's subject.
 
 // deriversOf reads the derivers of the API api over the types of db, its
 // database: engineTypes, its engine types, and tableTypes, its tables that
@@ -192,24 +192,43 @@ func namesSubject(raw json.RawMessage, subject string) bool {
 	return json.Unmarshal(raw, &list) == nil && slices.Contains(list, subject)
 }
 
-// refuseGoDerivers refuses a Go API that declares derivers: a deriver runs
-// on a TypeScript or Rust API (D74).
-func refuseGoDerivers(api *ir.Schema) error {
-	if len(api.Derivers) == 0 {
+// refuseGoEngineDerivers refuses a Go API one of whose derivers fills
+// engine types: a Go API's deriver fills tables that implement Derived
+// (D146), and one of engine types runs on a TypeScript or Rust API (D74).
+func refuseGoEngineDerivers(api *ir.Schema, engine *apigen.EngineInfo) error {
+	if engine == nil || len(engine.Derivers) == 0 {
 		return nil
 	}
-	return fmt.Errorf("generator: %s declares deriver %s, and it is a Go API; %s (D74)", api.Name, api.Derivers[0].Name, stack.DeriverLanguages)
-}
-
-// refuseRustTableDerivers refuses a Rust API one of whose derivers fills
-// tables: a deriver of tables runs on a TypeScript API so far (D146).
-func refuseRustTableDerivers(api *ir.Schema, tables []apigen.DeriverInfo) error {
-	if len(tables) == 0 {
-		return nil
-	}
+	d := engine.Derivers[0]
 	var names []string
-	for _, schema := range tables[0].Schemas {
+	for _, schema := range d.Schemas {
 		names = append(names, schema.Name)
 	}
-	return fmt.Errorf("generator: %s declares deriver %s, which fills the derived fields of %s, tables of its database, and it is a Rust API; %s", api.Name, tables[0].Name, strings.Join(names, ", "), stack.TableDeriverLanguages)
+	return fmt.Errorf("generator: %s declares deriver %s, which fills the derived fields of %s, engine types of its database, and it is a Go API; %s", api.Name, d.Name, strings.Join(names, ", "), stack.DeriverLanguages)
+}
+
+// refuseGoHeldDerivers refuses a Go API's deriver of a table whose rows
+// keep to an audience (@audience, D156). The deriver's context reaches
+// every row, as a job's does (D180), but the Go behaviors' core reads the
+// table's rows with its access columns and decodes effectiveAudience, a
+// list, as one UUID, so its pull of the stale fields fails on every pass.
+func refuseGoHeldDerivers(api *ir.Schema, derivers []apigen.DeriverInfo) error {
+	for _, d := range derivers {
+		for _, s := range d.Schemas {
+			if s.Type != nil && s.Type.Audience != nil {
+				return fmt.Errorf("generator: %s declares deriver %s, which fills the derived fields of %s, and %s keeps its rows to an audience (@audience); a Go API's deriver does not fill such a table yet, since the Go behaviors' core reads its effective audience as one UUID and fails every pull (D146, D180)", api.Name, d.Name, s.Name, s.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// refuseRustMixedDerivers refuses a Rust API whose derivers fill engine
+// types and tables both: deps.rs types the items of one kind of deriver,
+// the engine's or the HTTP runtime's (D146).
+func refuseRustMixedDerivers(api *ir.Schema, engine *apigen.EngineInfo, tables []apigen.DeriverInfo) error {
+	if engine == nil || len(engine.Derivers) == 0 || len(tables) == 0 {
+		return nil
+	}
+	return fmt.Errorf("generator: %s declares deriver %s, which fills engine types, and deriver %s, which fills tables, and it is a Rust API, whose derivers fill one kind or the other; declare them on two APIs (D146)", api.Name, engine.Derivers[0].Name, tables[0].Name)
 }

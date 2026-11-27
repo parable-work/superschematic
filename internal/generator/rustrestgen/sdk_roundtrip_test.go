@@ -28,8 +28,14 @@ func cargoTestRoundtrip(t *testing.T, service string, schema *ir.Schema, testNam
 // dependency of the API crate, so an integration test serves build_router
 // and calls it through the SDK.
 func withSDK(schema *ir.Schema, service string) func(apiDir string, output *APIOutput) error {
+	return withSDKOf(schema, service, apiSource{})
+}
+
+// withSDKOf is withSDK of the API src describes beyond schema: the table
+// of its idempotency keys, say (D140).
+func withSDKOf(schema *ir.Schema, service string, src apiSource) func(apiDir string, output *APIOutput) error {
 	return func(apiDir string, output *APIOutput) error {
-		api, err := apiOutputOf(schema, apiSource{}, Options{SchemaName: service, Clock: nestedArraysClock})
+		api, err := apiOutputOf(schema, src, Options{SchemaName: service, Clock: nestedArraysClock})
 		if err != nil {
 			return err
 		}

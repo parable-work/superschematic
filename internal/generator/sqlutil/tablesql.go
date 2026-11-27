@@ -34,7 +34,9 @@ type TableStatements struct {
 	// Live, LiveWhere and LiveCondition leave a soft-deletable table's
 	// deleted rows out: Live after a WHERE's conditions, LiveWhere as the
 	// whole WHERE, and LiveCondition as one condition qualified by the
-	// table. Empty for a table without deletedAt.
+	// table. On the table of a graph member's released rows whose root is
+	// soft-deletable (TableModel.LiveRoot, D139) they leave out the rows of
+	// a deleted root. Empty for a table without deletedAt.
 	Live          string
 	LiveWhere     string
 	LiveCondition string
@@ -499,6 +501,13 @@ func tableStatements(table *TableModel, d tableDialect) TableStatements {
 			s.SoftDeleteIfVersion = "UPDATE " + t + " SET " + stamps + " WHERE " + key + " = " + p(2) + " AND _version = " + p(3) + " AND " + deletedAt + " IS NULL"
 			s.SoftDeleteMany = "UPDATE " + t + " SET " + stamps + "%s"
 		}
+	} else if table.LiveRoot != "" {
+		// The released rows of a soft-deleted root (D139): every read
+		// leaves them out, as a soft-deleted row's, and no write stamps
+		// them.
+		s.Live = " AND " + table.LiveRoot
+		s.LiveWhere = " WHERE " + table.LiveRoot
+		s.LiveCondition = table.LiveRoot
 	}
 	s.Upsert = "INSERT INTO " + t + " (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s" + bump + "%s RETURNING " + list
 	if !d.sqlite {

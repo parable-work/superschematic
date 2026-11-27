@@ -74,9 +74,10 @@ func (o *APIOutput) HasTableEndpoints() bool {
 
 // TakesDatabase reports whether the Config of an API that is not public
 // takes the ORM of its database: its behavior operations (D103) and its
-// table operations (D106) run through it.
+// table operations (D106) run through it, and so do its graph operations
+// (D138).
 func (o *APIOutput) TakesDatabase() bool {
-	return o.HasBehaviorEndpoints() || o.HasTableEndpoints()
+	return o.HasBehaviorEndpoints() || o.HasTableEndpoints() || o.HasGraphEndpoints()
 }
 
 // TablesWrite reports whether a table operation of the view creates or
@@ -119,10 +120,10 @@ func tableDatabase(endpoints []EndpointInfo) string {
 // setTableDeps gives Deps what tables.go imports beside the ORM: the Go
 // types module of the API's database, whose rows the handlers read and
 // write, under the name of its service. An API with workers has it already
-// (D53).
+// (D53). graphs.go reads the rows of a version graph's tables too (D138).
 func (o *APIOutput) setTableDeps() {
-	marked := slices.ContainsFunc(o.Endpoints, func(ep EndpointInfo) bool { return ep.TableOperation() != nil })
-	if (!marked && len(o.TableEndpoints) == 0) || o.Deps.Database == "" {
+	marked := slices.ContainsFunc(o.Endpoints, func(ep EndpointInfo) bool { return ep.TableOperation() != nil || ep.GraphOperation() != nil })
+	if (!marked && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0) || o.Deps.Database == "" {
 		return
 	}
 	if o.Deps.DatabaseTypes == "" {

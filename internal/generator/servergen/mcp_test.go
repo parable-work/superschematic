@@ -200,10 +200,12 @@ func TestTypeScriptMCPEndpointServes(t *testing.T) {
 	if !slices.Equal(names, []string{"greet", "set_motto"}) {
 		t.Fatalf("tools/list as a user without staff = %v, want greet and set_motto", names)
 	}
-	if tools[0].Title != "Greet the caller" || tools[0].Annotations["readOnlyHint"] != true || tools[0].Meta["invocationPolicy"] != "auto" {
+	if tools[0].Title != "Greet the caller" || tools[0].Annotations["readOnlyHint"] != true || tools[0].Annotations["destructiveHint"] != false || tools[0].Annotations["idempotentHint"] != false || tools[0].Meta["invocationPolicy"] != "auto" {
 		t.Errorf("greet is listed as %+v", tools[0])
 	}
-	if tools[1].Annotations["readOnlyHint"] != false || tools[1].Meta["invocationPolicy"] != "ask" || mustMarshal(t, tools[1].InputSchema["required"]) != `["motto"]` {
+	// The hints are the tool's resolved record (D123): set_motto may write
+	// and does not say it only adds.
+	if tools[1].Annotations["readOnlyHint"] != false || tools[1].Annotations["destructiveHint"] != true || tools[1].Annotations["idempotentHint"] != false || tools[1].Meta["invocationPolicy"] != "ask" || mustMarshal(t, tools[1].InputSchema["required"]) != `["motto"]` {
 		t.Errorf("set_motto is listed as %+v", tools[1])
 	}
 	if properties, _ := tools[1].InputSchema["properties"].(map[string]any); properties["confirmationToken"] == nil {

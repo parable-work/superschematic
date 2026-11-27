@@ -145,8 +145,12 @@ func run(logger *zap.Logger) error {
 	{{ .Var }}Router.Use(runtimemiddleware.Logger({{ .Var }}Logger, {{ .Package }}.ContextWithLogger))
 {{- end }}
 	err = {{ .Package }}.RegisterRoutes({{ .Var }}Router, {{ .Package }}.Config{
-{{- if or .Public .Behaviors .Tables }}
+{{- if or .Public .Behaviors .Tables .Graphs }}
 		DB: {{ .Database.Var }},
+{{- end }}
+{{- if .Graphs }}
+		// The facades its graph operations run through (D138).
+		Graphs: {{ .Package }}.GraphsOf({{ .Database.Var }}),
 {{- end }}
 {{- if and .Public (not .Identity) }}
 		AuthMiddleware: {{ .Var }}Auth,

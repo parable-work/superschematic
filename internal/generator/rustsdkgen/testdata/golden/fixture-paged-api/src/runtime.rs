@@ -376,6 +376,26 @@ pub struct RequestOptions {
     pub request_hook: Option<RequestHook>,
     /// Forward this end user instead of the configured auth.
     pub forward: Option<ForwardedUser>,
+    /// The `Idempotency-Key` of a call to an @idempotent operation (D140):
+    /// a key the caller keeps, a UUID say, to repeat the call safely after
+    /// it lost the answer. `None` lets the method make one for the call.
+    /// Every send of the call carries the one key; a method of any other
+    /// operation sends none.
+    pub idempotency_key: Option<String>,
+}
+
+/// The `Idempotency-Key` a call to an @idempotent operation sends (D140):
+/// the one `options` names, or a random UUID v4 made for the call.
+pub fn idempotency_key(options: Option<&RequestOptions>) -> String {
+    if let Some(key) = options.and_then(|options| options.idempotency_key.as_ref()) {
+        return key.clone();
+    }
+    let mut bytes = [0u8; 16];
+    OsRng.fill_bytes(&mut bytes);
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("{}-{}-{}-{}-{}", &hex[..8], &hex[8..12], &hex[12..16], &hex[16..20], &hex[20..])
 }
 
 impl RequestOptions {
@@ -418,6 +438,7 @@ impl RequestOptions {
                 }
             })),
             forward: None,
+            idempotency_key: None,
         }
     }
 }

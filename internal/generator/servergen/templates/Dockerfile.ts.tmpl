@@ -70,6 +70,20 @@
 # stage emits the package's dist/ with the module in it, which the
 # workspace's root overrides the package with.
 {{- end }}
+{{- with .Docker.VersionGraph }}
+#
+# The {{ $.Kind }} serves a version graph's operations (D138) through the graph's
+# facade, which runs on the version-graph package, the npm package the
+# naming file's [paths] versiongraph_typescript names, whose WebAssembly
+# module no published package ships yet:
+#
+#   {{ .TypeScript }}
+#
+# The versiongraph stage builds the module for wasm32-unknown-unknown from
+# the version-graph core's crate beside it, as the package's build does;
+# the build stage emits the package's dist/ with the module in it, which
+# the workspace's root overrides the package with.
+{{- end }}
 {{- with .Docker.Image }}
 {{- if .Packages }}
 #
@@ -152,6 +166,17 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
     && mkdir /wasm \
     && cp {{ .Workspace }}/target/wasm32-unknown-unknown/dist/{{ .Module }} /wasm/
 {{- end }}
+{{- with .Docker.VersionGraph }}
+
+FROM rust:${RUST_VERSION}-trixie AS versiongraph
+WORKDIR /src
+COPY {{ .Crate }} {{ .Crate }}
+RUN --mount=type=cache,target=/usr/local/cargo/registry,sharing=locked \
+    rustup target add wasm32-unknown-unknown \
+    && cargo build --locked --release --target wasm32-unknown-unknown --manifest-path {{ .Crate }}/Cargo.toml \
+    && mkdir /wasm \
+    && cp {{ .Crate }}/target/wasm32-unknown-unknown/release/{{ .Module }} /wasm/
+{{- end }}
 
 FROM oven/bun:${BUN_VERSION} AS build
 WORKDIR /src
@@ -177,6 +202,13 @@ RUN cd {{ .TypeScript }} \
 {{- end }}
 {{- with .Docker.Rules }}
 COPY --from=rules /wasm/{{ .Module }} {{ .TypeScript }}/dist/
+RUN --mount=type=cache,target=/root/.bun/install/cache \
+    cd {{ .TypeScript }} \
+    && bun install --frozen-lockfile \
+    && bunx tsc -p tsconfig.json
+{{- end }}
+{{- with .Docker.VersionGraph }}
+COPY --from=versiongraph /wasm/{{ .Module }} {{ .TypeScript }}/dist/
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     cd {{ .TypeScript }} \
     && bun install --frozen-lockfile \

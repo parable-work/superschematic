@@ -237,6 +237,9 @@ type Input struct {
 	// Worker, when set, plans the entrypoint of a worker of the one API in
 	// APIs (D53): Server is then the worker's deployable.
 	Worker *WorkerInput
+	// Deriver, when set, plans the entrypoint of a deriver of tables of the
+	// one API in APIs (D146): Server is then the deriver's deployable.
+	Deriver *DeriverInput
 }
 
 // JobInput is the job a job's entrypoint runs.
@@ -318,6 +321,10 @@ type Server struct {
 	// Runner is what an engine's runner's entrypoint runs, nil for every
 	// other (D58).
 	Runner *Runner
+
+	// Deriver is what a deriver's entrypoint runs, nil for every other
+	// (D146).
+	Deriver *Deriver
 
 	// Engines are the engines the entrypoint opens, one per engine
 	// database it connects to (D58). With one, engine.go opens each, and
@@ -428,11 +435,35 @@ type Worker struct {
 	Behavior *apigen.BehaviorWorkerInfo
 }
 
-// Background reports whether the entrypoint is a job's, a worker's or an
-// engine's runner's, which serves no request: it mounts no routes, listens
-// on no port, verifies no end user or caller, and decrypts no payload.
+// Background reports whether the entrypoint is a job's, a worker's, an
+// engine's runner's or a deriver's, which serves no request: it mounts no
+// routes, listens on no port, verifies no end user or caller, and decrypts
+// no payload.
 func (s *Server) Background() bool {
-	return s.Job != nil || s.Worker != nil || s.Runner != nil
+	return s.Job != nil || s.Worker != nil || s.Runner != nil || s.Deriver != nil
+}
+
+// Deriver is the deriver a Go deriver's entrypoint runs (D146): its
+// @deriver class, the field of the API's Derivers that holds it, the tables
+// it fills and a method per derived field, and Database, the API's
+// database, whose repositories it pulls and settles through.
+type Deriver struct {
+	apigen.GoDeriver
+	Database *Database
+}
+
+// DerivedPermissions are the permissions the deriver holds as a behavior
+// caller: each Derived config's permission, which the core asks of a pull
+// and a settle. A table's name, which the engine's permission policy asks
+// of a deriver of engine types, is left out.
+func (d *Deriver) DerivedPermissions() []string {
+	var out []string
+	for _, permission := range d.Permissions {
+		if !slices.Contains(d.Schemas, permission) {
+			out = append(out, permission)
+		}
+	}
+	return out
 }
 
 // BehaviorWorker reports whether the entrypoint is a behavior worker's
@@ -504,6 +535,10 @@ type API struct {
 	ManualRoutes bool
 	Behaviors    bool
 	Tables       bool
+	// Graphs is true when the API serves a version graph's operations,
+	// which read through the ORM of its database and run through each
+	// graph's facade, GraphsOf its ORM (D138).
+	Graphs bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -844,6 +879,20 @@ func Plan(in Input) (*Server, error) {
 		}
 		s.Kind, s.Binary = "worker", "worker"
 		s.Worker = &Worker{Name: o.Workers[i].Name, Method: o.Workers[i].Method, Queue: o.Workers[i].Queue, Concurrency: o.Workers[i].Concurrency, GraceSeconds: grace, Behavior: o.Workers[i].Behavior}
+	case in.Deriver != nil:
+		if len(in.APIs) != 1 {
+			return nil, fmt.Errorf("stack %s: deriver %s runs a deriver of %d APIs; a deriver belongs to one", in.Stack, in.Server, len(in.APIs))
+		}
+		o := in.APIs[0].Output
+		d := o.GoDeriver(in.Deriver.Name)
+		if d == nil {
+			return nil, fmt.Errorf("stack %s: deriver %s runs %s of %s, which declares no such deriver of tables (D146)", in.Stack, in.Server, in.Deriver.Name, o.SchemaName)
+		}
+		if o.Deps.Database == "" || !o.Deps.Rules {
+			return nil, fmt.Errorf("stack %s: deriver %s of %s fills the Derived fields of %s through the repositories of its database, and %s connects to no database whose tables compose behaviors", in.Stack, in.Server, o.SchemaName, strings.Join(d.Schemas, ", "), o.SchemaName)
+		}
+		s.Kind, s.Binary = "deriver", "deriver"
+		s.Deriver = &Deriver{GoDeriver: *d}
 	case len(in.APIs) == 0:
 		return nil, fmt.Errorf("stack %s: server %s serves no API", in.Stack, in.Server)
 	default:
@@ -881,6 +930,7 @@ func Plan(in Input) (*Server, error) {
 			apis[i].ManualRoutes = o.HasManualRoutes()
 			apis[i].Behaviors = o.HasBehaviorEndpoints()
 			apis[i].Tables = o.HasTableEndpoints()
+			apis[i].Graphs = o.HasGraphEndpoints()
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)
@@ -956,6 +1006,9 @@ func Plan(in Input) (*Server, error) {
 			if err := checkTableCallers(in, o); err != nil {
 				return nil, err
 			}
+		}
+		if api.Graphs && api.Database == nil {
+			return nil, fmt.Errorf("stack %s: server %s serves %s, whose graph operations run through the ORM of its database (D138), and it has no database", in.Stack, in.Server, o.SchemaName)
 		}
 		if api.Idempotent {
 			if api.Database == nil {
@@ -1054,6 +1107,9 @@ func Plan(in Input) (*Server, error) {
 	s.APIs = apis
 	if s.Worker != nil {
 		s.Worker.Database = apis[0].Database
+	}
+	if s.Deriver != nil {
+		s.Deriver.Database = apis[0].Database
 	}
 	s.planLoopback(taken)
 	slices.Sort(s.CloudSQL)
@@ -1352,6 +1408,8 @@ func Write(s *Server, dir string) error {
 		main = "job.go.tmpl"
 	case s.Worker != nil:
 		main = "worker.go.tmpl"
+	case s.Deriver != nil:
+		main = "deriver.go.tmpl"
 	case s.Runner != nil:
 		main = runnerTemplate
 	}

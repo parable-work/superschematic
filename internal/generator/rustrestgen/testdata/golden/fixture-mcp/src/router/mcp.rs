@@ -55,7 +55,9 @@ pub const TOOLS: &str = r#"[
       ]
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
     },
     "_meta": {
       "invocationPolicy": "auto",
@@ -100,7 +102,9 @@ pub const TOOLS: &str = r#"[
       ]
     },
     "annotations": {
-      "readOnlyHint": true
+      "readOnlyHint": true,
+      "destructiveHint": false,
+      "idempotentHint": false
     },
     "_meta": {
       "invocationPolicy": "auto",
@@ -161,7 +165,9 @@ pub const TOOLS: &str = r#"[
       ]
     },
     "annotations": {
-      "readOnlyHint": false
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false
     },
     "_meta": {
       "invocationPolicy": "ask",
@@ -262,7 +268,9 @@ pub const TOOLS: &str = r#"[
       ]
     },
     "annotations": {
-      "readOnlyHint": false
+      "readOnlyHint": false,
+      "destructiveHint": false,
+      "idempotentHint": true
     },
     "_meta": {
       "invocationPolicy": "auto",

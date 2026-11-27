@@ -154,6 +154,7 @@ impl Behavior for Toy {
             .operation("notes", false)
             .operation("lockedNotes", false)
             .operation("arm", true)
+            .operation("armLate", true)
             .operation("clear", true)
             .operation("walk", false)
             .operation("mint", true)
@@ -280,6 +281,12 @@ impl Behavior for Toy {
             "arm" => {
                 let payload = params.get("payload").cloned().unwrap_or(Value::Null);
                 cx.arm("expire", cx.now() + 1000, payload)?;
+                Ok(Value::Null)
+            }
+            // A deadline due ten minutes on, past the horizon a wake looks
+            // within (D145).
+            "armLate" => {
+                cx.arm("expire", cx.now() + 600_000, Value::Null)?;
                 Ok(Value::Null)
             }
             "clear" => {
@@ -3564,4 +3571,63 @@ fn the_callers_preconditions_reach_the_command_and_its_uses_guard_and_a_malforme
     ));
     assert_eq!(refusal(prepared).class, "PreconditionsError");
     assert!(store.applied().is_empty());
+}
+
+#[test]
+fn a_unit_that_applied_wakes_the_queues_of_its_events_its_near_deadlines_and_its_written_rows_each_once(
+) {
+    let core = toy();
+    let layout = Layout::new([Table {
+        events: Some(toy_events()),
+        changes: Some(Changes {
+            queue: "OrderChange".into(),
+            table: "order_change_queue".into(),
+            row_key: "row_key".into(),
+            write: "write".into(),
+            at: "at".into(),
+            before: "before".into(),
+            after: "after".into(),
+        }),
+        ..toy_table()
+    }]);
+    let woken = std::sync::Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let saw = std::sync::Arc::clone(&woken);
+    let host = Host::new(&core, &layout)
+        .with_clock(|| 2000)
+        .with_wake(move |queue| saw.lock().unwrap().push(queue.to_string()));
+    let run = |operation: &str, params: Value| {
+        let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()));
+        block(run::execute(
+            &host,
+            &store,
+            "Order",
+            toy_op(operation, params),
+            &ExecuteOptions::default(),
+        ))
+        .expect("applied");
+        std::mem::take(&mut *woken.lock().unwrap())
+    };
+    // An event, a deadline due a second on, and the row the operation
+    // wrote, whose trigger writes its change: each queue once.
+    assert_eq!(
+        run("emit", json!({"arm": true})),
+        ["OrderEvent", "OrderDeadline", "OrderChange"]
+    );
+    // A deadline due past the horizon wakes nothing: the tick finds it
+    // first.
+    assert_eq!(run("armLate", json!({})), ["OrderChange"]);
+    // A read writes nothing and wakes nothing.
+    assert!(run("notes", json!({})).is_empty());
+    // A unit that does not apply wakes nothing.
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row_of_toy()))
+        .applying(&[false; MAX_ATTEMPTS]);
+    let refused = block(run::execute(
+        &host,
+        &store,
+        "Order",
+        toy_op("emit", json!({})),
+        &ExecuteOptions::default(),
+    ));
+    assert!(refused.is_err());
+    assert!(woken.lock().unwrap().is_empty());
 }

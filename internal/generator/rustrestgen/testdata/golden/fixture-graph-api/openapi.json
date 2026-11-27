@@ -1,0 +1,3942 @@
+{
+  "components": {
+    "schemas": {
+      "ProblemDetails": {
+        "description": "An error response in the Problem Details format (RFC 9457).",
+        "properties": {
+          "code": {
+            "description": "The stable error code, when the problem has one.",
+            "type": "string"
+          },
+          "detail": {
+            "description": "What went wrong with this request.",
+            "type": "string"
+          },
+          "details": {
+            "description": "Structured facts about the refusal, such as the entity or the path it concerns. Only some refusals have it."
+          },
+          "errors": {
+            "description": "The fields or filters that failed validation. Only a validation or filter error has it."
+          },
+          "requestId": {
+            "description": "The ID of the request, when the problem has one.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The HTTP status code.",
+            "example": 400,
+            "type": "integer"
+          },
+          "title": {
+            "description": "A short summary, usually the text of the HTTP status.",
+            "example": "Bad Request",
+            "type": "string"
+          },
+          "type": {
+            "description": "The problem type. It is `about:blank`: the status and `code` identify the problem.",
+            "example": "about:blank",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "Recipe": {
+        "description": "A recipe: the stable identity its steps and ingredients are versioned\nunder. Its commits and its releases each enqueue a message.",
+        "properties": {
+          "createdAt": {
+            "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "createdAt",
+          "createdBy"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphArrangeInput": {
+        "description": "The body of the Recipe graph's arrange.",
+        "properties": {
+          "keys": {
+            "description": "The entity keys of every live child of the parent in the ref's tree, in the order wanted.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecipeGraphKind",
+            "description": "The kind whose rows to place: one whose order is a string key."
+          },
+          "parent": {
+            "description": "The parent's entity key. Absent, the rows of the kind that have no parent.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "version": {
+            "description": "The ref's version as the caller read it: a write at another version is refused with version_conflict.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "kind",
+          "keys"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphBranchInput": {
+        "description": "The body of the Recipe graph's branch.",
+        "properties": {
+          "from": {
+            "description": "The ref to branch: a ref of this root. Absent, the root's primary line.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The change set's name, which no live ref of the root holds.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphChange": {
+        "description": "One entity two commits of the Recipe graph differ on.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity's key.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecipeGraphKind",
+            "description": "The entity's kind."
+          },
+          "operation": {
+            "$ref": "#/components/schemas/RecipeGraphChangeOperation",
+            "description": "What the later tree did to the entity."
+          },
+          "row": {
+            "description": "The entity's canonical row in the later tree, as JSON text; absent for a DELETE.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "entityKey",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphChangeOperation": {
+        "description": "What a change of the Recipe graph did to an entity.",
+        "enum": [
+          "ADD",
+          "UPDATE",
+          "DELETE"
+        ],
+        "type": "string"
+      },
+      "RecipeGraphCommit": {
+        "description": "A commit of the Recipe graph: the exact row versions one ref sealed.",
+        "properties": {
+          "contentHash": {
+            "description": "The hash of the content of the commit's tree.",
+            "type": "string"
+          },
+          "createdAt": {
+            "description": "When the commit was written.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "createdBy": {
+            "description": "Who wrote the commit.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "id": {
+            "description": "The commit's id.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "message": {
+            "description": "The commit's message, empty for none.",
+            "type": "string"
+          },
+          "parent": {
+            "description": "The commit before it; absent for a commit with none.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "ref": {
+            "description": "The ref that wrote the commit.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "root": {
+            "description": "The root the commit belongs to.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "schemaEpoch": {
+            "description": "The schema epoch the commit was written at.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "sequence": {
+            "description": "The root's sequence the commit took when it was tagged; absent for an untagged commit.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "snapshot": {
+            "description": "True when the commit's whole tree is stored.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "root",
+          "ref",
+          "message",
+          "schemaEpoch",
+          "contentHash",
+          "createdAt",
+          "createdBy",
+          "snapshot"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphCommitInput": {
+        "description": "The body of the Recipe graph's commit.",
+        "properties": {
+          "message": {
+            "description": "The commit's message.",
+            "nullable": true,
+            "type": "string"
+          },
+          "tag": {
+            "description": "Tags the commit, which takes the root's next sequence: a release names a tagged commit.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "version": {
+            "description": "The ref's version as the caller read it: a write at another version is refused with version_conflict.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphCommitResult": {
+        "description": "A ref of the Recipe graph at its new version, and the commit written.",
+        "properties": {
+          "commit": {
+            "description": "The commit written; absent when there was nothing to commit.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphCommit"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "ref": {
+            "$ref": "#/components/schemas/RecipeGraphRef",
+            "description": "The ref at its new version."
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphConflict": {
+        "description": "One unit both sides of a merge of the Recipe graph changed differently, or an edit against a delete (path \"\").",
+        "properties": {
+          "base": {
+            "description": "The unit's value in the merge base, as JSON text; absent where it is absent.",
+            "nullable": true,
+            "type": "string"
+          },
+          "entityKey": {
+            "description": "The entity's key.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecipeGraphKind",
+            "description": "The entity's kind."
+          },
+          "ours": {
+            "description": "The unit's value on the side merged into, as JSON text; absent where it is absent.",
+            "nullable": true,
+            "type": "string"
+          },
+          "oursAuthor": {
+            "description": "Who wrote our side's row, when the kind names its author.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "path": {
+            "description": "The unit: a column, or an entry of a keyed column; empty for the whole entity.",
+            "type": "string"
+          },
+          "theirs": {
+            "description": "The unit's value on the side merged, as JSON text; absent where it is absent.",
+            "nullable": true,
+            "type": "string"
+          },
+          "theirsAuthor": {
+            "description": "Who wrote their side's row, when the kind names its author.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "entityKey",
+          "path"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphCoverRow": {
+        "description": "A Cover of the Recipe graph: the content of one entity in a tree.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity's key, which its rows on every ref hold.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "photoUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entityKey",
+          "photoUrl"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphCoverRowEdits": {
+        "description": "The edits of the Cover rows of a ref of the Recipe graph: its upserts, then its deletes, then its unsets.",
+        "properties": {
+          "delete": {
+            "description": "The entities to delete on the ref, by key.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "unset": {
+            "description": "The entities whose row on the ref to remove, by key, so the ref reads each through its base again.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "upsert": {
+            "description": "The rows to write as the ref's own, each found by its entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphCoverRowInput"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RecipeGraphCoverRowInput": {
+        "description": "A Cover an upsert writes on a ref of the Recipe graph.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity to write; absent, the row is a new entity, whose key the database makes.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "photoUrl": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "photoUrl"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphDiscardInput": {
+        "description": "The body of the Recipe graph's discard.",
+        "properties": {
+          "version": {
+            "description": "The ref's version as the caller read it: a write at another version is refused with version_conflict.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphEdits": {
+        "description": "The edits a save applies to a ref of the Recipe graph, per kind.",
+        "properties": {
+          "cover": {
+            "description": "The edits of the ref's Cover rows.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphCoverRowEdits"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "ingredient": {
+            "description": "The edits of the ref's Ingredient rows.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphIngredientRowEdits"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "note": {
+            "description": "The edits of the ref's Note rows.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphNoteRowEdits"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "part": {
+            "description": "The edits of the ref's Part rows.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphPartRowEdits"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "step": {
+            "description": "The edits of the ref's Step rows.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphStepRowEdits"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "tasting": {
+            "description": "The edits of the ref's Tasting rows.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphTastingRowEdits"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "utensil": {
+            "description": "The edits of the ref's Utensil rows.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphUtensilRowEdits"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          }
+        },
+        "type": "object"
+      },
+      "RecipeGraphEntityChange": {
+        "description": "One commit of the Recipe graph's primary line that changed an entity, and what it did to it.",
+        "properties": {
+          "commit": {
+            "$ref": "#/components/schemas/RecipeGraphCommit",
+            "description": "The commit."
+          },
+          "operation": {
+            "$ref": "#/components/schemas/RecipeGraphChangeOperation",
+            "description": "What the commit did to the entity."
+          }
+        },
+        "required": [
+          "commit",
+          "operation"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphFinding": {
+        "description": "A problem in a tree of the Recipe graph, such as a row whose parent is absent.",
+        "properties": {
+          "code": {
+            "description": "What is wrong: missing_parent, duplicate_entity_key, singleton, parent_cycle or order_out_of_range.",
+            "type": "string"
+          },
+          "entityKey": {
+            "description": "The entity the finding is about; absent for a finding about a whole kind.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "kind": {
+            "description": "The kind of the entity the finding is about.",
+            "type": "string"
+          },
+          "message": {
+            "description": "The finding, in words.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "kind",
+          "message"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphIngredientRow": {
+        "description": "A Ingredient of the Recipe graph: the content of one entity in a tree.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity's key, which its rows on every ref hold.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "stepKey": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "substitutes": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          }
+        },
+        "required": [
+          "entityKey",
+          "stepKey",
+          "quantity",
+          "substitutes"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphIngredientRowEdits": {
+        "description": "The edits of the Ingredient rows of a ref of the Recipe graph: its upserts, then its deletes, then its unsets.",
+        "properties": {
+          "delete": {
+            "description": "The entities to delete on the ref, by key.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "unset": {
+            "description": "The entities whose row on the ref to remove, by key, so the ref reads each through its base again.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "upsert": {
+            "description": "The rows to write as the ref's own, each found by its entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphIngredientRowInput"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RecipeGraphIngredientRowInput": {
+        "description": "A Ingredient an upsert writes on a ref of the Recipe graph.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity to write; absent, the row is a new entity, whose key the database makes.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "quantity": {
+            "type": "string"
+          },
+          "stepKey": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "substitutes": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          }
+        },
+        "required": [
+          "stepKey",
+          "quantity",
+          "substitutes"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphKind": {
+        "description": "A kind of the Recipe graph's entities, as its descriptor names it.",
+        "enum": [
+          "cover",
+          "ingredient",
+          "note",
+          "part",
+          "step",
+          "tasting",
+          "utensil"
+        ],
+        "type": "string"
+      },
+      "RecipeGraphMergeInput": {
+        "description": "The body of the Recipe graph's merge.",
+        "properties": {
+          "into": {
+            "description": "The ref to merge into: a ref of this root. Absent, the source's parent.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "message": {
+            "description": "The merge commit's message.",
+            "nullable": true,
+            "type": "string"
+          },
+          "resolutions": {
+            "description": "What settles each conflict an earlier call answered.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphResolution"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "tag": {
+            "description": "Tags the merge commit, which takes the root's next sequence.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "version": {
+            "description": "The version of the ref merged into, as the caller read it.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphMergeResult": {
+        "description": "The target of a merge of the Recipe graph, or the change set a rebase moved, and the commit written.",
+        "properties": {
+          "commit": {
+            "description": "The commit written; absent when conflicts are left.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphCommit"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "object"
+              }
+            ]
+          },
+          "conflicts": {
+            "description": "The conflicts left; when there is one, nothing was written.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphConflict"
+            },
+            "type": "array"
+          },
+          "ref": {
+            "$ref": "#/components/schemas/RecipeGraphRef",
+            "description": "The ref written, at its new version; as it was when conflicts are left."
+          }
+        },
+        "required": [
+          "ref",
+          "conflicts"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphNoteRow": {
+        "description": "A Note of the Recipe graph: the content of one entity in a tree.",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "entityKey": {
+            "description": "The entity's key, which its rows on every ref hold.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "replyTo": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "entityKey",
+          "body"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphNoteRowEdits": {
+        "description": "The edits of the Note rows of a ref of the Recipe graph: its upserts, then its deletes, then its unsets.",
+        "properties": {
+          "delete": {
+            "description": "The entities to delete on the ref, by key.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "unset": {
+            "description": "The entities whose row on the ref to remove, by key, so the ref reads each through its base again.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "upsert": {
+            "description": "The rows to write as the ref's own, each found by its entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphNoteRowInput"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RecipeGraphNoteRowInput": {
+        "description": "A Note an upsert writes on a ref of the Recipe graph.",
+        "properties": {
+          "body": {
+            "type": "string"
+          },
+          "entityKey": {
+            "description": "The entity to write; absent, the row is a new entity, whose key the database makes.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "replyTo": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "body"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphPartRow": {
+        "description": "A Part of the Recipe graph: the content of one entity in a tree.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity's key, which its rows on every ref hold.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "heading": {
+            "type": "string"
+          },
+          "parentKey": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "rank": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entityKey",
+          "rank",
+          "heading"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphPartRowEdits": {
+        "description": "The edits of the Part rows of a ref of the Recipe graph: its upserts, then its deletes, then its unsets.",
+        "properties": {
+          "delete": {
+            "description": "The entities to delete on the ref, by key.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "unset": {
+            "description": "The entities whose row on the ref to remove, by key, so the ref reads each through its base again.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "upsert": {
+            "description": "The rows to write as the ref's own, each found by its entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphPartRowInput"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RecipeGraphPartRowInput": {
+        "description": "A Part an upsert writes on a ref of the Recipe graph.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity to write; absent, the row is a new entity, whose key the database makes.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "heading": {
+            "type": "string"
+          },
+          "parentKey": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "rank": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "rank",
+          "heading"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphRebaseInput": {
+        "description": "The body of the Recipe graph's rebase.",
+        "properties": {
+          "resolutions": {
+            "description": "What settles each conflict an earlier call answered.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphResolution"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "version": {
+            "description": "The ref's version as the caller read it: a write at another version is refused with version_conflict.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphRef": {
+        "description": "A line of the Recipe graph: a primary line when parent is absent, else a change set.",
+        "properties": {
+          "base": {
+            "description": "The commit a change set's rows are laid over; absent for none.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "discarded": {
+            "description": "True once the ref is discarded.",
+            "type": "boolean"
+          },
+          "head": {
+            "description": "The ref's last commit; absent before its first.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "id": {
+            "description": "The ref's id.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "name": {
+            "description": "The ref's name, which one live ref of the root holds.",
+            "type": "string"
+          },
+          "parent": {
+            "description": "The ref a change set branched from; absent for a primary line.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "root": {
+            "description": "The root the ref belongs to.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "sealed": {
+            "description": "True once the ref is sealed: it refuses writes.",
+            "type": "boolean"
+          },
+          "version": {
+            "description": "The ref's version, which each write through it takes and moves.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "root",
+          "name",
+          "sealed",
+          "discarded",
+          "version"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphRelease": {
+        "description": "The released commit of one root of the Recipe graph.",
+        "properties": {
+          "commit": {
+            "description": "The released commit.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "id": {
+            "description": "The pointer's id.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "root": {
+            "description": "The root the pointer belongs to.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "version": {
+            "description": "The pointer's version, which a release takes and moves.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "root",
+          "commit",
+          "version"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphReleaseInput": {
+        "description": "The body of the Recipe graph's release.",
+        "properties": {
+          "commit": {
+            "description": "The commit to release: a tagged commit of this root.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "version": {
+            "description": "The release pointer's version as the caller read it: 0 for the root's first release.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "commit",
+          "version"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphReleased": {
+        "description": "A root's release pointer of the Recipe graph and the tree of the commit it names.",
+        "properties": {
+          "release": {
+            "$ref": "#/components/schemas/RecipeGraphRelease",
+            "description": "The release pointer."
+          },
+          "tree": {
+            "$ref": "#/components/schemas/RecipeGraphTree",
+            "description": "The released tree."
+          }
+        },
+        "required": [
+          "release",
+          "tree"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphResolution": {
+        "description": "Settles the conflict at path of one entity of the Recipe graph: take the unit from one side, or give its value.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity's key.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/RecipeGraphKind",
+            "description": "The entity's kind."
+          },
+          "path": {
+            "description": "The conflict's path.",
+            "type": "string"
+          },
+          "take": {
+            "description": "The side to take the unit from; one of take and value.",
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RecipeGraphTake"
+              },
+              {
+                "enum": [
+                  null
+                ],
+                "nullable": true,
+                "type": "string"
+              }
+            ]
+          },
+          "value": {
+            "description": "The unit's value, as JSON text (\"null\" is a value); one of take and value.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "entityKey",
+          "path"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphRevertInput": {
+        "description": "The body of the Recipe graph's revert.",
+        "properties": {
+          "toCommit": {
+            "description": "The commit whose tree the change set is to compose to.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "version": {
+            "description": "The ref's version as the caller read it: a write at another version is refused with version_conflict.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "toCommit"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphRows": {
+        "description": "Rows of the Recipe graph, per kind.",
+        "properties": {
+          "cover": {
+            "description": "The tree's Cover rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphCoverRow"
+            },
+            "type": "array"
+          },
+          "ingredient": {
+            "description": "The tree's Ingredient rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphIngredientRow"
+            },
+            "type": "array"
+          },
+          "note": {
+            "description": "The tree's Note rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphNoteRow"
+            },
+            "type": "array"
+          },
+          "part": {
+            "description": "The tree's Part rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphPartRow"
+            },
+            "type": "array"
+          },
+          "step": {
+            "description": "The tree's Step rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphStepRow"
+            },
+            "type": "array"
+          },
+          "tasting": {
+            "description": "The tree's Tasting rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphTastingRow"
+            },
+            "type": "array"
+          },
+          "utensil": {
+            "description": "The tree's Utensil rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphUtensilRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cover",
+          "ingredient",
+          "note",
+          "part",
+          "step",
+          "tasting",
+          "utensil"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphSaveInput": {
+        "description": "The body of the Recipe graph's save.",
+        "properties": {
+          "edits": {
+            "$ref": "#/components/schemas/RecipeGraphEdits",
+            "description": "The edits, per kind."
+          },
+          "version": {
+            "description": "The ref's version as the caller read it: a write at another version is refused with version_conflict.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "edits"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphSaveResult": {
+        "description": "A ref of the Recipe graph at its new version, and the rows written.",
+        "properties": {
+          "ref": {
+            "$ref": "#/components/schemas/RecipeGraphRef",
+            "description": "The ref at its new version."
+          },
+          "saved": {
+            "$ref": "#/components/schemas/RecipeGraphRows",
+            "description": "The rows written, per kind: a save's upserts in edit order, an arrange's in the order wanted."
+          }
+        },
+        "required": [
+          "ref",
+          "saved"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphSealInput": {
+        "description": "The body of the Recipe graph's seal.",
+        "properties": {
+          "version": {
+            "description": "The ref's version as the caller read it: a write at another version is refused with version_conflict.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphStepRow": {
+        "description": "A Step of the Recipe graph: the content of one entity in a tree.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity's key, which its rows on every ref hold.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "position": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "scratch": {
+            "nullable": true,
+            "type": "string"
+          },
+          "timings": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          }
+        },
+        "required": [
+          "entityKey",
+          "position",
+          "instruction",
+          "timings"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphStepRowEdits": {
+        "description": "The edits of the Step rows of a ref of the Recipe graph: its upserts, then its deletes, then its unsets.",
+        "properties": {
+          "delete": {
+            "description": "The entities to delete on the ref, by key.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "unset": {
+            "description": "The entities whose row on the ref to remove, by key, so the ref reads each through its base again.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "upsert": {
+            "description": "The rows to write as the ref's own, each found by its entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphStepRowInput"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RecipeGraphStepRowInput": {
+        "description": "A Step an upsert writes on a ref of the Recipe graph.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity to write; absent, the row is a new entity, whose key the database makes.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "instruction": {
+            "type": "string"
+          },
+          "position": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "scratch": {
+            "nullable": true,
+            "type": "string"
+          },
+          "timings": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          }
+        },
+        "required": [
+          "position",
+          "instruction",
+          "timings"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphTake": {
+        "description": "The side of a merge of the Recipe graph a resolution takes a unit from.",
+        "enum": [
+          "base",
+          "ours",
+          "theirs"
+        ],
+        "type": "string"
+      },
+      "RecipeGraphTastingRow": {
+        "description": "A Tasting of the Recipe graph: the content of one entity in a tree.",
+        "properties": {
+          "bites": {
+            "items": {
+              "items": {
+                "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                "format": "int64",
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "entityKey": {
+            "description": "The entity's key, which its rows on every ref hold.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "helpers": {
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "remarks": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          },
+          "rested": {
+            "description": "Duration for timeouts and intervals",
+            "maxLength": 32,
+            "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
+            "type": "string"
+          },
+          "salty": {
+            "type": "boolean"
+          },
+          "score": {
+            "format": "double",
+            "type": "number"
+          },
+          "servedAt": {
+            "description": "Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.",
+            "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$",
+            "type": "string"
+          },
+          "servings": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tastedAt": {
+            "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "tastedOn": {
+            "description": "Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).",
+            "format": "date",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "taster": {
+            "description": "UUID v4 string as base62",
+            "pattern": "^[0-9A-Za-z]{1,22}$",
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/RecipeGraphVerdict"
+          }
+        },
+        "required": [
+          "entityKey",
+          "taster",
+          "salty",
+          "score",
+          "servings",
+          "tastedOn",
+          "tastedAt",
+          "servedAt",
+          "rested",
+          "verdict",
+          "remarks",
+          "tags",
+          "helpers",
+          "bites"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphTastingRowEdits": {
+        "description": "The edits of the Tasting rows of a ref of the Recipe graph: its upserts, then its deletes, then its unsets.",
+        "properties": {
+          "delete": {
+            "description": "The entities to delete on the ref, by key.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "unset": {
+            "description": "The entities whose row on the ref to remove, by key, so the ref reads each through its base again.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "upsert": {
+            "description": "The rows to write as the ref's own, each found by its entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphTastingRowInput"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RecipeGraphTastingRowInput": {
+        "description": "A Tasting an upsert writes on a ref of the Recipe graph.",
+        "properties": {
+          "bites": {
+            "items": {
+              "items": {
+                "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+                "format": "int64",
+                "maximum": 9007199254740991,
+                "minimum": -9007199254740991,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "type": "array"
+          },
+          "entityKey": {
+            "description": "The entity to write; absent, the row is a new entity, whose key the database makes.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "helpers": {
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "remarks": {
+            "description": "Any valid JSON value: object, array, primitive, or null"
+          },
+          "rested": {
+            "description": "Duration for timeouts and intervals",
+            "maxLength": 32,
+            "pattern": "^(\\d+(\\.\\d+)?(ns|us|µs|ms|s|m|h))+$",
+            "type": "string"
+          },
+          "salty": {
+            "type": "boolean"
+          },
+          "score": {
+            "format": "double",
+            "type": "number"
+          },
+          "servedAt": {
+            "description": "Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.",
+            "pattern": "^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$",
+            "type": "string"
+          },
+          "servings": {
+            "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "tastedAt": {
+            "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "tastedOn": {
+            "description": "Calendar date, normalized to ISO 'YYYY-MM-DD'. Accepts ISO ('2025-01-01'), slash-separated ('2025/01/15', '01/15/2025'), named-month ('January 15, 2025', 'Jan 15, 2025'), and full RFC3339 datetime (the time portion is dropped).",
+            "format": "date",
+            "maxLength": 40,
+            "type": "string"
+          },
+          "taster": {
+            "description": "UUID v4 string as base62",
+            "pattern": "^[0-9A-Za-z]{1,22}$",
+            "type": "string"
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/RecipeGraphVerdict"
+          }
+        },
+        "required": [
+          "taster",
+          "salty",
+          "score",
+          "servings",
+          "tastedOn",
+          "tastedAt",
+          "servedAt",
+          "rested",
+          "verdict",
+          "remarks",
+          "tags",
+          "helpers",
+          "bites"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphTree": {
+        "description": "A tree of the Recipe graph: the live rows of each kind.",
+        "properties": {
+          "contentHash": {
+            "description": "The hash of the tree's content.",
+            "type": "string"
+          },
+          "cover": {
+            "description": "The tree's Cover rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphCoverRow"
+            },
+            "type": "array"
+          },
+          "findings": {
+            "description": "The problems found in a ref's tree; none for a commit's.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphFinding"
+            },
+            "type": "array"
+          },
+          "ingredient": {
+            "description": "The tree's Ingredient rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphIngredientRow"
+            },
+            "type": "array"
+          },
+          "note": {
+            "description": "The tree's Note rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphNoteRow"
+            },
+            "type": "array"
+          },
+          "part": {
+            "description": "The tree's Part rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphPartRow"
+            },
+            "type": "array"
+          },
+          "step": {
+            "description": "The tree's Step rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphStepRow"
+            },
+            "type": "array"
+          },
+          "tasting": {
+            "description": "The tree's Tasting rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphTastingRow"
+            },
+            "type": "array"
+          },
+          "utensil": {
+            "description": "The tree's Utensil rows, ordered by their order and then by entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphUtensilRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "cover",
+          "ingredient",
+          "note",
+          "part",
+          "step",
+          "tasting",
+          "utensil",
+          "contentHash",
+          "findings"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphUtensilRow": {
+        "description": "A Utensil of the Recipe graph: the content of one entity in a tree.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity's key, which its rows on every ref hold.",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "entityKey",
+          "name"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphUtensilRowEdits": {
+        "description": "The edits of the Utensil rows of a ref of the Recipe graph: its upserts, then its deletes, then its unsets.",
+        "properties": {
+          "delete": {
+            "description": "The entities to delete on the ref, by key.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "unset": {
+            "description": "The entities whose row on the ref to remove, by key, so the ref reads each through its base again.",
+            "items": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            },
+            "nullable": true,
+            "type": "array"
+          },
+          "upsert": {
+            "description": "The rows to write as the ref's own, each found by its entity key.",
+            "items": {
+              "$ref": "#/components/schemas/RecipeGraphUtensilRowInput"
+            },
+            "nullable": true,
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "RecipeGraphUtensilRowInput": {
+        "description": "A Utensil an upsert writes on a ref of the Recipe graph.",
+        "properties": {
+          "entityKey": {
+            "description": "The entity to write; absent, the row is a new entity, whose key the database makes.",
+            "nullable": true,
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "RecipeGraphVerdict": {
+        "description": "How a tasting went.",
+        "enum": [
+          "again",
+          "tweak",
+          "never"
+        ],
+        "type": "string"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-graph-api schema",
+    "title": "Fixture-Graph-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/recipes/{id}": {
+      "get": {
+        "operationId": "RecipeGetRecipeHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Recipe"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "getRecipe",
+        "tags": [
+          "recipe"
+        ]
+      }
+    },
+    "/api/recipes/{id}/commits/{commit}": {
+      "get": {
+        "description": "Reads a commit's tree.",
+        "operationId": "RecipeMaterializeHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "commit parameter",
+            "in": "path",
+            "name": "commit",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphTree"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: materialize",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.materialize",
+          "description": "Reads a commit's tree.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Recipe graph: materialize",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/diff": {
+      "get": {
+        "description": "Lists the entities the trees of two commits differ on.",
+        "operationId": "RecipeDiffHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/RecipeGraphChange"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: diff",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.diff",
+          "description": "Lists the entities the trees of two commits differ on.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Recipe graph: diff",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/entities/{kind}/{key}/history": {
+      "get": {
+        "description": "Lists the commits of the root's primary line that changed one entity, newest first, each with what it did to it.",
+        "operationId": "RecipeEntityHistoryHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "kind parameter",
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "key parameter",
+            "in": "path",
+            "name": "key",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/RecipeGraphEntityChange"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: entity history",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.entity-history",
+          "description": "Lists the commits of the root's primary line that changed one entity, newest first, each with what it did to it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Recipe graph: entity history",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs": {
+      "post": {
+        "description": "Creates a change set of the ref from names, or of the root's primary line without one, which it creates, named main, for a root that has none.",
+        "operationId": "RecipeBranchHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphBranchInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphRef"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "name_taken: a live ref of the root holds the name. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: branch",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.branch",
+          "description": "Creates a change set of the ref from names, or of the root's primary line without one, which it creates, named main, for a root that has none.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: branch",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/arrange": {
+      "post": {
+        "description": "Puts one parent's children of a kind in the order keys gives, on a change set at version.",
+        "operationId": "RecipeArrangeHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphArrangeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphSaveResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "version_conflict: the ref, or the release pointer, is at another version than the one the body names. ref_sealed: the ref is sealed. primary_merge_only: the ref is a primary line, which takes writes only from a merge. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_arrangement: keys are not exactly the parent's live children. order_not_a_key: the kind's order is not a string key."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: arrange",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.arrange",
+          "description": "Puts one parent's children of a kind in the order keys gives, on a change set at version.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: arrange",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/commit": {
+      "post": {
+        "description": "Commits a change set at version: a commit with a patch for each entity it changed.",
+        "operationId": "RecipeCommitHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphCommitInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphCommitResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "version_conflict: the ref, or the release pointer, is at another version than the one the body names. ref_sealed: the ref is sealed. primary_merge_only: the ref is a primary line, which takes writes only from a merge. nothing_to_commit: the change set composes to the tree of its last commit. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_tree: the composed tree breaks the graph's rules; details.findings lists what the core found."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: commit",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.commit",
+          "description": "Commits a change set at version: a commit with a patch for each entity it changed.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: commit",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/discard": {
+      "post": {
+        "description": "Discards a ref at version, which frees its name.",
+        "operationId": "RecipeDiscardHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphDiscardInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "version_conflict: the ref, or the release pointer, is at another version than the one the body names. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: discard",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.discard",
+          "description": "Discards a ref at version, which frees its name.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: discard",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/edits": {
+      "put": {
+        "description": "Applies edits to a change set at version: each kind's upserts, then its deletes, then its unsets.",
+        "operationId": "RecipeSaveHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphSaveInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphSaveResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "version_conflict: the ref, or the release pointer, is at another version than the one the body names. ref_sealed: the ref is sealed. primary_merge_only: the ref is a primary line, which takes writes only from a merge. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_row: a row of the edits does not fit its kind's columns. entity_not_found: an edit deletes an entity the ref does not hold, or unsets a row the ref does not have."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: save",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.save",
+          "description": "Applies edits to a change set at version: each kind's upserts, then its deletes, then its unsets.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: save",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/history": {
+      "get": {
+        "description": "Lists the commits a ref wrote, newest first.",
+        "operationId": "RecipeHistoryHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/RecipeGraphCommit"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: history",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.history",
+          "description": "Lists the commits a ref wrote, newest first.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Recipe graph: history",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/merge": {
+      "post": {
+        "description": "Merges the change set's head into the ref into names, or into its parent, at that ref's version. With conflicts left after resolutions it answers them and writes nothing.",
+        "operationId": "RecipeMergeHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphMergeInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphMergeResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "version_conflict: the ref, or the release pointer, is at another version than the one the body names. ref_sealed: the ref is sealed. no_parent: the ref is a primary line, which has no parent. merge_into_itself: the ref merged into is the ref merged. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_tree: the composed tree breaks the graph's rules; details.findings lists what the core found. invalid_resolution: a resolution takes no side and gives no value, or both. unmatched_resolution: a resolution names no conflict of the merge."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: merge",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.merge",
+          "description": "Merges the change set's head into the ref into names, or into its parent, at that ref's version. With conflicts left after resolutions it answers them and writes nothing.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: merge",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/rebase": {
+      "post": {
+        "description": "Moves a change set at version onto its parent's head. With conflicts left after resolutions it answers them and writes nothing.",
+        "operationId": "RecipeRebaseHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphRebaseInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphMergeResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "version_conflict: the ref, or the release pointer, is at another version than the one the body names. ref_sealed: the ref is sealed. no_parent: the ref is a primary line, which has no parent. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_tree: the composed tree breaks the graph's rules; details.findings lists what the core found. invalid_resolution: a resolution takes no side and gives no value, or both. unmatched_resolution: a resolution names no conflict of the merge."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: rebase",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.rebase",
+          "description": "Moves a change set at version onto its parent's head. With conflicts left after resolutions it answers them and writes nothing.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: rebase",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/revert": {
+      "post": {
+        "description": "Writes the rows that make a change set at version compose to the tree of toCommit, and commits them.",
+        "operationId": "RecipeRevertHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphRevertInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphCommitResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "version_conflict: the ref, or the release pointer, is at another version than the one the body names. ref_sealed: the ref is sealed. primary_merge_only: the ref is a primary line, which takes writes only from a merge. nothing_to_commit: the change set composes to the tree of its last commit. root_mismatch: a commit the body names belongs to another root. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_tree: the composed tree breaks the graph's rules; details.findings lists what the core found."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: revert",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.revert",
+          "description": "Writes the rows that make a change set at version compose to the tree of toCommit, and commits them.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: revert",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/seal": {
+      "post": {
+        "description": "Commits a change set at version when it has changes, and seals it: the ref then refuses writes.",
+        "operationId": "RecipeSealHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphSealInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphCommitResult"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "version_conflict: the ref, or the release pointer, is at another version than the one the body names. ref_sealed: the ref is sealed. primary_merge_only: the ref is a primary line, which takes writes only from a merge. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "invalid_tree: the composed tree breaks the graph's rules; details.findings lists what the core found."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: seal",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.seal",
+          "description": "Commits a change set at version when it has changes, and seals it: the ref then refuses writes.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: seal",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/refs/{ref}/tree": {
+      "get": {
+        "description": "Reads a ref's tree: its base commit's tree with the ref's own rows laid over it, with its content hash and the problems found in it.",
+        "operationId": "RecipeComposeHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ref parameter",
+            "in": "path",
+            "name": "ref",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphTree"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: compose",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.compose",
+          "description": "Reads a ref's tree: its base commit's tree with the ref's own rows laid over it, with its content hash and the problems found in it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Recipe graph: compose",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/release": {
+      "post": {
+        "description": "Points the root's release at a tagged commit, at the pointer's version: 0 for the root's first release.",
+        "operationId": "RecipeReleaseHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecipeGraphReleaseInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphRelease"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "no_actor: the caller's subject is no UUID, which a write records as its actor."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "version_conflict: the ref, or the release pointer, is at another version than the one the body names. not_tagged: the commit is not tagged. root_mismatch: a commit the body names belongs to another root. schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: release",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.release",
+          "description": "Points the root's release at a tagged commit, at the pointer's version: 0 for the root's first release.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Recipe graph: release",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/recipes/{id}/released": {
+      "get": {
+        "description": "Reads the root's release pointer and the tree of the commit it names.",
+        "operationId": "RecipeReleasedHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RecipeGraphReleased"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "not_found: no live row of the root holds the key, or the root has no such ref, commit or kind; a change set the set's row rule keeps from the caller is not told apart from one that is not there."
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "schema_epoch: a commit read is from a newer schema epoch than the server's."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Recipe graph: released",
+        "tags": [
+          "recipe"
+        ],
+        "x-superschematic-docs": {
+          "capability": "recipe.graph.released",
+          "description": "Reads the root's release pointer and the tree of the commit it names.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Recipe graph: released",
+          "visibility": "public"
+        }
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

@@ -20,6 +20,9 @@ type apiSource struct {
 	// authDB is the schema the API's authDb names, which the crate reads
 	// the user model's tables from (D50); nil without one.
 	authDB *ir.Schema
+	// idempotencyTable names the table of the API's database that keeps
+	// the keys of its @idempotent operations (D140); nil without one.
+	idempotencyTable *ir.IdempotencyTable
 }
 
 // apiOutputOf runs apigen on schema with the core session provider, as
@@ -34,7 +37,9 @@ func apiOutputOf(schema *ir.Schema, src apiSource, opts Options) (*apigen.APIOut
 		Dependencies:   opts.Dependencies,
 		Naming:         opts.Naming,
 		Provider:       sessionauth.Provider{},
-		Clock:          opts.Clock,
+		// The table the build reads from the API's database (D140).
+		IdempotencyTable: src.idempotencyTable,
+		Clock:            opts.Clock,
 	})
 }
 

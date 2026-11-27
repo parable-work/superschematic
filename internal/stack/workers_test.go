@@ -227,15 +227,34 @@ func TestWorkerDrainModeRefusals(t *testing.T) {
 	}
 }
 
-// TestABehaviorWorkerDoesNotDrain: drain mode is a `@worker`'s; a behavior
-// worker (D103), whose queues no enqueue's wake hears, is refused it.
-func TestABehaviorWorkerDoesNotDrain(t *testing.T) {
-	s, services := workerShop()
-	orders := service(services, "shop-orders")
-	orders.Workers = append(orders.Workers, ir.Worker{Name: "OrderTimers", Queue: "OrderPlaced", Queues: []string{"OrderPlaced"}, BehaviorWorker: &ir.BehaviorWorkerConfig{Type: "Order"}, Origin: ir.OriginBehavior})
-	settingsFor(s.Environment("Staging"), stacktest.WorkerOf(stacktest.ShopOrders, "OrderTimers")).Mode = ir.WorkerModeDrain
-	_, errs := resolve(t, assemble(t), s, services, "Staging")
-	mustFail(t, errs, stack.CodeInvalidSettings, "worker shop-orders-order-timers is a behavior worker and runs in drain mode (Staging set it)", "leave its mode out, so its instances keep running (D145)")
+// TestABehaviorWorkerDrains (D145): a behavior worker (D103) runs in drain
+// mode as a `@worker` does, and each deployable that may write to its
+// database is given its wake for each of its queues, the deadline, change
+// and event queues the behaviors' core wakes it for; the worker wakes
+// none of its own.
+func TestABehaviorWorkerDrains(t *testing.T) {
+	s, services := behaviorShop(true)
+	timers := stacktest.WorkerOf(stacktest.ShopOrders, "OrderTimers")
+	settingsFor(s.Environment("Staging"), timers).Mode = ir.WorkerModeDrain
+	env := mustResolve(t, assemble(t), s, services, "Staging")
+	worker := env.Deployable("shop-orders-order-timers")
+	if run := worker.Worker; !run.Drains() || run.IdleSeconds != ir.DefaultWorkerIdleSeconds || run.Instances != 1 || !slices.Equal(run.Queues, []string{"OrderDeadline", "OrderChange", "OrderEvent"}) {
+		t.Errorf("the behavior worker runs %+v, want drain mode over its three queues", run)
+	}
+	var woken []string
+	for _, w := range env.Deployable("shop-api").Wakes {
+		if w.Worker == "shop-orders-order-timers" {
+			woken = append(woken, w.Queue+" of "+w.Database)
+		}
+	}
+	if want := []string{"OrderDeadline of shop-db", "OrderChange of shop-db", "OrderEvent of shop-db"}; !slices.Equal(woken, want) {
+		t.Errorf("shop-api wakes the behavior worker for %v, want %v", woken, want)
+	}
+	for _, w := range worker.Wakes {
+		if w.Worker == "shop-orders-order-timers" {
+			t.Errorf("the behavior worker wakes itself: %+v", w)
+		}
+	}
 }
 
 // behaviorShop is the worker shop whose database keeps Order's deadline,

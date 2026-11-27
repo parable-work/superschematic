@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -422,9 +423,33 @@ func (w *RustWorker) HandlerVar(q rustrestgen.BehaviorQueue) string {
 type RustDeriver struct {
 	rustrestgen.DeriverInfo
 
-	// Engine is the engine of the API's engine database, which Deps holds.
+	// Engine is the engine of the API's engine database, which Deps holds;
+	// nil for a deriver of tables (D146).
 	Engine *RustEngine
+
+	// Database is the database whose repositories a deriver of tables
+	// pulls and settles through, the pool Deps.db holds; nil for a deriver
+	// of engine types.
+	Database *RustDatabase
 }
+
+// DerivedPermissions are the permissions a deriver of tables holds as a
+// behavior caller: each Derived config's permission, which the core asks
+// of a pull and a settle. A table's name, which the engine's permission
+// policy asks of a deriver of engine types, is left out.
+func (d *RustDeriver) DerivedPermissions() []string {
+	var out []string
+	for _, permission := range d.Permissions {
+		if !slices.Contains(d.Schemas, permission) {
+			out = append(out, permission)
+		}
+	}
+	return out
+}
+
+// DeriverOfTables reports whether the entrypoint is a deriver's of tables
+// (D146), which clones its pool into the API's Deps and keeps it.
+func (s *RustServer) DeriverOfTables() bool { return s.Deriver != nil && s.Deriver.Tables }
 
 // RustApp is the app a Rust app's entrypoint runs (D78): its @app class
 // and the struct of its parts, from the API crate's apps.rs; its program,
@@ -525,6 +550,16 @@ type RustAPI struct {
 	Tables    bool
 	FieldKeys bool
 
+	// Graphs is true when the API serves a version graph's operations
+	// (D138): Implementations::new then takes Database's pool too, over
+	// which the router's handlers run each through the graph's facade.
+	Graphs bool
+
+	// Idempotency is true when the API has @idempotent operations (D140):
+	// Implementations::new then takes Database's pool too, over which it
+	// builds the store of their keys.
+	Idempotency bool
+
 	// Engine is the engine Deps.engine holds, of the API's engine database
 	// (D58), nil without one.
 	Engine *RustEngine
@@ -571,6 +606,30 @@ type RustCall struct {
 type RustBucketUse struct {
 	Field  string
 	Bucket *RustBucket
+
+	// ContentAddressed is true for a bucket Deps holds as the runtime's
+	// bucket::ContentBucket, which puts at most MaxBytes (D142).
+	ContentAddressed bool
+	MaxBytes         int64
+}
+
+// Init is the Deps field's initializer, indented by indent, as rustfmt
+// lays it out: the bucket main.rs opened, an Arc clone of it when shared,
+// or, for a content bucket (D142), the ContentBucket over it.
+func (b RustBucketUse) Init(indent string, shared bool) string {
+	value := b.Bucket.Var
+	if shared {
+		value = "Arc::clone(&" + value + ")"
+	}
+	if !b.ContentAddressed {
+		return indent + b.Field + ": " + value + ","
+	}
+	args := []string{value, strconv.FormatInt(b.MaxBytes, 10)}
+	list := strings.Join(args, ", ")
+	if line := indent + b.Field + ": ContentBucket::new(" + list + "),"; len(list) <= rustCallWidth && len(line) <= rustWidth {
+		return line
+	}
+	return indent + b.Field + ": ContentBucket::new(\n" + indent + "    " + strings.Join(args, ",\n"+indent+"    ") + ",\n" + indent + "),"
 }
 
 // RustBucket is a bucket main.rs opens once, for every API that lists it,
@@ -1014,6 +1073,18 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			api.Tables = true
 			api.FieldKeys = o.TableFieldKeys()
 		}
+		if o.HasGraphOperations() {
+			if api.Database == nil || api.Database.Service != o.GraphDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose graph operations run on %s (D138), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.GraphDatabase())
+			}
+			api.Graphs = true
+		}
+		if o.HasIdempotent() && !background {
+			if api.Database == nil {
+				return nil, fmt.Errorf("stack %s: server %s serves %s, whose @idempotent operations keep their keys in its database (D140), and opens no pool on it", in.Stack, in.Server, o.SchemaName)
+			}
+			api.Idempotency = true
+		}
 		if o.Identity != nil && !background {
 			d := api.Database
 			if d == nil || d.Service != o.Identity.AuthDB {
@@ -1072,7 +1143,7 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				buckets[b.Service] = h
 				s.Buckets = append(s.Buckets, h)
 			}
-			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h})
+			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h, ContentAddressed: b.ContentAddressed, MaxBytes: b.MaxBytes})
 		}
 		for _, m := range o.Deps.MemoryStores {
 			if bare {
@@ -1142,7 +1213,15 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			return nil, err
 		}
 	}
-	if s.Deriver != nil {
+	switch {
+	case s.DeriverOfTables():
+		// A deriver of tables pulls and settles through the repositories
+		// of the API's database, on its pool (D146).
+		if s.APIs[0].Database == nil {
+			return nil, fmt.Errorf("stack %s: deriver %s of %s fills the Derived fields of %s through the repositories of its database, and %s connects to none (D146)", in.Stack, in.Server, s.APIs[0].Service, strings.Join(s.Deriver.Schemas, ", "), s.APIs[0].Service)
+		}
+		s.Deriver.Database = s.APIs[0].Database
+	case s.Deriver != nil:
 		if s.APIs[0].Engine == nil {
 			return nil, fmt.Errorf("stack %s: deriver %s of %s opens no engine, whose Derived fields it fills (D74)", in.Stack, in.Server, s.APIs[0].Service)
 		}
@@ -1286,8 +1365,10 @@ func (s *RustServer) planManifest(in RustInput, dir string) error {
 		// An app's main.rs serves nothing itself either: its program does
 		// (D78).
 		registry = []CargoDependency{{"tokio", fmt.Sprintf(`{ version = %s, features = ["macros", "rt-multi-thread"] }`, quoteToml(rustTokioVersion))}}
-		if len(s.Engines) > 0 {
-			// engine.rs reads the engine document's JSON.
+		if len(s.Engines) > 0 || s.DeriverOfTables() {
+			// engine.rs reads the engine document's JSON, and a deriver of
+			// tables passes its operations' parameters and results as JSON
+			// (D146).
 			registry = append([]CargoDependency{{"serde_json", quoteToml(rustSerdeJSONVersion)}}, registry...)
 		}
 	}
@@ -1702,7 +1783,15 @@ func (s *RustServer) AnyCORS() bool {
 // Closes reports whether main.rs closes anything once it stops serving or
 // running: an engine, or a memory store (D75).
 func (s *RustServer) Closes() bool {
-	return len(s.Engines) > 0 || len(s.MemoryStores) > 0
+	return len(s.Engines) > 0 || len(s.MemoryStores) > 0 || s.SettlesWakes()
+}
+
+// SettlesWakes reports whether the entrypoint awaits the wakes its
+// enqueues sent before it ends (D145), so a wake sent just before the end
+// still goes out: a job's or a worker's with a pool, whose queue client
+// sends them.
+func (s *RustServer) SettlesWakes() bool {
+	return (s.Job != nil || (s.Worker != nil && !s.Worker.OnSQLite())) && len(s.Databases) > 0
 }
 
 // Dispatches reports whether the server serves more than one API, whose
@@ -1777,12 +1866,21 @@ func (s *RustServer) RuntimeUses() []string {
 // trace export (D67), the claim loop for a worker, and the Shutdown it
 // stops on.
 func (s *RustServer) backgroundUses(runtime string) []string {
-	uses := append(s.bucketUses(runtime), rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
+	uses := s.bucketUses(runtime)
+	if s.DeriverOfTables() {
+		// The loop of a deriver of tables (D146).
+		uses = append(uses, rustutil.UseLine(runtime+"::deriver", []string{"self", "DerivationAnswer", "DerivationItem", "DeriverOptions"}))
+	}
+	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
 	uses = append(uses, s.memoryStoreUses(runtime)...)
 	if len(s.Files) > 0 {
 		// A database on a SQLite file (D116), which a job and a worker
 		// open as a server does.
 		uses = append(uses, "use "+runtime+"::orm::sqlite::{self, Database as SqliteFile};")
+	}
+	if s.DeriverOfTables() {
+		// The repositories' caller and failures (D146).
+		uses = append(uses, "use "+runtime+"::orm;")
 	}
 	if len(s.Databases) > 0 {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
@@ -1800,6 +1898,9 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::telemetry", []string{"self", "Defaults"}))
 	root := []string{"Shutdown"}
+	if s.SettlesWakes() {
+		root = append(root, "wake")
+	}
 	switch {
 	case s.Worker == nil:
 	case !s.Worker.OnSQLite():
@@ -1849,13 +1950,20 @@ func (s *RustServer) appUses(runtime string) []string {
 }
 
 // bucketUses are the use declarations of main.rs from the HTTP runtime for
-// its buckets (D54): the Bucket each API's Deps holds and the gcs module
-// that opens it, none without a bucket.
+// its buckets (D54): the Bucket each API's Deps holds, the ContentBucket
+// over one that names its objects by their content (D142), and the gcs
+// module that opens it, none without a bucket.
 func (s *RustServer) bucketUses(runtime string) []string {
 	if len(s.Buckets) == 0 {
 		return nil
 	}
-	return []string{"use " + runtime + "::bucket::Bucket;", "use " + runtime + "::gcs;"}
+	items := []string{"Bucket"}
+	if slices.ContainsFunc(s.APIs, func(a *RustAPI) bool {
+		return slices.ContainsFunc(a.Buckets, func(b RustBucketUse) bool { return b.ContentAddressed })
+	}) {
+		items = append(items, "ContentBucket")
+	}
+	return []string{rustutil.UseLine(runtime+"::bucket", items), "use " + runtime + "::gcs;"}
 }
 
 // memoryStoreUses are the use declarations of main.rs from the HTTP
@@ -1932,7 +2040,7 @@ func (a *RustAPI) ImplementationsArgs() []string {
 		}
 		args = append(args, authenticator)
 	}
-	if a.Behaviors || a.Tables {
+	if a.Behaviors || a.Tables || a.Graphs || a.Idempotency {
 		args = append(args, a.Database.Var+".clone()")
 	}
 	if a.FieldKeys {
@@ -1974,6 +2082,8 @@ func WriteRust(s *RustServer, dir string) error {
 		main = "worker.rs.tmpl"
 	case s.Runner != nil:
 		main = "runner.rs.tmpl"
+	case s.DeriverOfTables():
+		main = "table_deriver.rs.tmpl"
 	case s.Deriver != nil:
 		main = "deriver.rs.tmpl"
 	case s.App != nil:

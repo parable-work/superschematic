@@ -84,6 +84,11 @@ type EndpointInfo struct {
 	// Implementations.principal_rate_limit_store, under RateLimitBucket.
 	PrincipalRateLimit bool
 	RateLimitBucket    string
+	// Idempotent is the operation's @idempotent (D140), nil for every
+	// other: the route keeps the key a request sends in
+	// Implementations.idempotency_store and answers a repeat what the first
+	// request was, after the permission check and around the timeout.
+	Idempotent *ir.IdempotentConfig
 	// ServiceCallers is the operation's effective @requireService or
 	// @allowService clause; nil without one. ServiceStep marks a route of a
 	// crate whose schema has a service clause anywhere: Implementations then
@@ -115,6 +120,11 @@ type EndpointInfo struct {
 	// other: the router's handler serves it from the table's repository
 	// (src/tables.rs), and its namespace's trait has no method for it.
 	Table *TableInfo
+
+	// Graph is the graph operation the endpoint is (D138), nil for every
+	// other: the router's handler runs it through the graph's facade
+	// (src/graphs.rs), and its namespace's trait has no method for it.
+	Graph *GraphInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -312,15 +322,22 @@ func (e EndpointInfo) HasPathCaptures() bool {
 }
 
 // HasControls reports whether the route has a traffic control, needs a
-// caller or runs the service step: build_router applies RouteControls to
-// it.
+// caller, runs the service step or keeps idempotency keys: build_router
+// applies RouteControls to it.
 func (e EndpointInfo) HasControls() bool {
-	return e.RequiresAuth || e.ServiceStep || e.RateLimit > 0 || e.BodyLimit > 0 || e.Timeout > 0
+	return e.RequiresAuth || e.ServiceStep || e.RateLimit > 0 || e.BodyLimit > 0 || e.Timeout > 0 || e.Idempotent != nil
+}
+
+// IdempotencyOperation names the endpoint to the store of its keys: its
+// namespace and its name, as the Go and TypeScript routers name it (D140).
+func (e EndpointInfo) IdempotencyOperation() string {
+	return e.Namespace + "." + e.Name
 }
 
 // ControlCalls are the RouteControls builder calls of the route, in the
 // order a request meets them: the rate limit, the body limit, the service
-// step, the permission check, then the timeout around the handler.
+// step, the permission check, a rate limit per principal, the idempotency
+// step (D140), then the timeout around the handler.
 // limits is the Rust expression of the RateLimits registry the route takes
 // its operation's limiter from (D44, amended); empty gives the route a
 // limiter of its own, as a manual route the service mounts itself has.
@@ -355,6 +372,9 @@ func (e EndpointInfo) ControlCalls(limits, authenticator, serviceAuthenticator s
 	if e.RateLimit > 0 && e.PrincipalRateLimit {
 		calls = append(calls, fmt.Sprintf(".principal_rate_limit(%s, %s, %d)", principalStore(serviceAuthenticator), rustString(e.RateLimitBucket), e.RateLimit))
 	}
+	if e.Idempotent != nil {
+		calls = append(calls, fmt.Sprintf(".idempotent(%s, %s, %d, %t)", idempotencyStore(serviceAuthenticator), rustString(e.IdempotencyOperation()), e.Idempotent.TTL(), e.Idempotent.Required))
+	}
 	if e.Timeout > 0 {
 		calls = append(calls, fmt.Sprintf(".timeout_seconds(%d)", e.Timeout))
 	}
@@ -370,6 +390,15 @@ func principalStore(serviceAuthenticator string) string {
 		return "Arc::clone(&state.implementations.principal_rate_limit_store)"
 	}
 	return "principal_rate_limit_store"
+}
+
+// idempotencyStore is the Rust expression of the store an @idempotent
+// route keeps its keys in (D140), as principalStore names its store.
+func idempotencyStore(serviceAuthenticator string) string {
+	if strings.Contains(serviceAuthenticator, "state.implementations.") {
+		return "Arc::clone(&state.implementations.idempotency_store)"
+	}
+	return "idempotency_store"
 }
 
 // serviceCall is the route's service step: its @requireService or
@@ -432,6 +461,12 @@ type APIOutput struct {
 	// principal (D131): Implementations then has a
 	// principal_rate_limit_store, which every such route counts in.
 	HasPrincipalRateLimit bool
+	// IdempotencyTable names the table of the API's database that keeps
+	// the keys of its @idempotent operations (D140), nil for an API with
+	// none: Implementations then has an idempotency_store, lib.rs states
+	// the names as IDEMPOTENCY_TABLE, and Implementations::new builds the
+	// store over Deps.db on it.
+	IdempotencyTable *ir.IdempotencyTable
 	// OpenAPIJSON is the service's OpenAPI document as apigen builds it
 	// for every server: written to openapi.json, embedded in src/openapi.rs
 	// and served at GET /api/openapi.json.
@@ -461,6 +496,14 @@ type APIOutput struct {
 	// writes no handler for yet (D106, D116), each with why: it stays a
 	// method of its namespace's trait.
 	UnservedTables []UnservedTable
+	// VersionGraphDepPath is the path of the version graph's engine crate
+	// from the API crate, which an API that serves a graph's operations
+	// depends on (D138); SetReplacePaths sets it. VersionGraphCrate is the
+	// crate's name, and VersionGraphCrateIdent the name src/graphs.rs uses
+	// it by.
+	VersionGraphDepPath    string
+	VersionGraphCrate      string
+	VersionGraphCrateIdent string
 	// MCP is the API's MCP endpoint with outputs.api.mcp on (D81, D116),
 	// nil otherwise: src/router/mcp.rs declares its tools and the router
 	// serves them at POST /api/mcp.
@@ -498,6 +541,33 @@ type APIOutput struct {
 	// src/apps.rs, which the app's entrypoint builds and hands to the
 	// app's program (D78).
 	Apps []AppInfo
+}
+
+// HasIdempotent reports whether a route the router mounts is @idempotent
+// (D140): Implementations then has an idempotency_store.
+func (o *APIOutput) HasIdempotent() bool {
+	return o.IdempotencyTable != nil
+}
+
+// IdempotencyTableLiteral is the names of the API's idempotency table as
+// the HTTP runtime's idempotency::Table, laid out as rustfmt lays it out.
+func (o *APIOutput) IdempotencyTableLiteral() string {
+	t := o.IdempotencyTable
+	if t == nil {
+		t = &ir.IdempotencyTable{}
+	}
+	columns := [][2]string{
+		{"lookup", t.Lookup}, {"operation", t.Operation}, {"principal", t.Principal}, {"key", t.Key},
+		{"request_hash", t.RequestHash}, {"state", t.State}, {"status", t.Status}, {"body", t.Body},
+		{"started_at", t.StartedAt}, {"expires_at", t.ExpiresAt},
+	}
+	var b strings.Builder
+	b.WriteString("runtime::idempotency::Table {\n    table: " + rustString(t.Table) + ",\n    columns: runtime::idempotency::Columns {\n")
+	for _, column := range columns {
+		b.WriteString("        " + column[0] + ": " + rustString(column[1]) + ",\n")
+	}
+	b.WriteString("    },\n}")
+	return b.String()
 }
 
 // HasRateLimits reports whether a route the router mounts, a manual one
@@ -812,6 +882,11 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		OpenAPIJSON:           api.OpenAPISpecRaw,
 		PermissionCatalogJSON: api.PermissionCatalogJSON,
 	}
+	// apigen refused an @idempotent operation without the table of its
+	// keys (D140).
+	if api.HasIdempotent() {
+		output.IdempotencyTable = api.IdempotencyTable
+	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
 	// The runtime providers of the API's @providers slots and the crates
 	// its config lists (D159, D185).
@@ -845,6 +920,8 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 
 	namespaceSet := make(map[string]struct{})
 	webhookProviders := make(map[string]struct{})
+	// The @graphOperations sets the router serves (D138), by class.
+	graphSets := make(map[string]*GraphSetInfo)
 	var err error
 	for _, endpoint := range implemented {
 		// The Go router decrypts an encrypted operation's body with the
@@ -865,9 +942,6 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		}
 		if endpoint.FileDownload != nil && !endpoint.ManualRouteRegistration {
 			return nil, fmt.Errorf("rustrestgen: operation %s.%s answers a FileDownload; the Rust router answers JSON only yet (the Go and TypeScript routers answer the file, D81), declare it @manualRouteRegistration and answer the file in the service, or serve the API in Go or TypeScript; support follows", endpoint.Namespace, endpoint.Name)
-		}
-		if endpoint.Idempotent != nil {
-			return nil, fmt.Errorf("rustrestgen: operation %s.%s is @idempotent; the Rust router keeps no idempotency keys yet (the Go and TypeScript routers do, D140), and a route that ran a repeated call twice would break what the decorator says, so serve the API in Go or TypeScript, or drop the decorator and keep the keys in the implementation; support follows", endpoint.Namespace, endpoint.Name)
 		}
 		info := endpointInfo(endpoint, output.HasServiceCallers)
 		if info.WebhookProvider != "" {
@@ -901,6 +975,13 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 				output.UnservedTables = append(output.UnservedTables, UnservedTable{Operation: info.Namespace + "." + info.Name, Reason: unserved})
 			}
 		}
+		// A graph operation's handler runs it through the graph's facade
+		// (D138): its namespace has no method for it either.
+		if info.Behavior == nil && info.Table == nil {
+			if info.Graph, err = b.graphInfo(endpoint, info, graphSets); err != nil {
+				return nil, err
+			}
+		}
 		if !info.RouterServed() {
 			namespaceSet[info.Namespace] = struct{}{}
 		}
@@ -922,6 +1003,10 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		return nil, fmt.Errorf("rustrestgen: %s serves the user model's routes, which need its authDb's User table; no authDb with one was given", opts.SchemaName)
 	}
 
+	if output.HasGraphOperations() {
+		names := opts.Naming.OrDefault()
+		output.VersionGraphCrate, output.VersionGraphCrateIdent = names.VersionGraphRustCrate, names.VersionGraphRustCrateIdent()
+	}
 	output.Namespaces = rustapigen.SortedNamespaces(namespaceSet)
 	for provider := range webhookProviders {
 		output.WebhookProviders = append(output.WebhookProviders, provider)
@@ -987,6 +1072,7 @@ func endpointInfo(endpoint apigen.EndpointInfo, serviceStep bool) EndpointInfo {
 		RateLimit:          positive(endpoint.RateLimit),
 		PrincipalRateLimit: endpoint.PrincipalRateLimited(),
 		RateLimitBucket:    endpoint.RateLimitBucket(),
+		Idempotent:         endpoint.Idempotent,
 		BodyLimit:          positive(endpoint.BodyLimit),
 		Timeout:            positive(endpoint.Timeout),
 		ServiceCallers:     endpoint.ServiceCallers,
@@ -1084,6 +1170,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"apps.tmpl", "apps.rs", output.HasApps()},
 		{output.BehaviorsTemplate(), "behaviors.rs", output.HasBehaviors()},
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
+		{"graphs.tmpl", GraphsFile, output.HasGraphOperations()},
 		{"providers.tmpl", ProvidersFile, output.Providers != nil},
 	} {
 		path := filepath.Join("src", module.file)
@@ -1231,6 +1318,7 @@ func templateFuncs() template.FuncMap {
 		"rulesAdapterCrate":   func() string { return RulesAdapterCrate },
 		"rulesBehaviorsCrate": func() string { return RulesBehaviorsCrate },
 		"rulesSerdeVersion":   func() string { return RulesSerdeVersion },
+		"graphInput":          graphInput,
 	})
 }
 
@@ -1255,6 +1343,13 @@ func SetReplacePaths(output *APIOutput, paths naming.LocalPaths, outputDir strin
 		return fmt.Errorf("http runtime crate path: %w", err)
 	}
 	output.RuntimeDepPath = rel
+	if output.HasGraphOperations() {
+		// The graph operations run on the version graph's engine (D138),
+		// whose Postgres client the crate binds to its pool.
+		if output.VersionGraphDepPath, err = naming.RelPath(outputDir, paths.VersionGraphRust); err != nil {
+			return fmt.Errorf("version graph engine crate path: %w", err)
+		}
+	}
 	if output.Identity != nil {
 		if output.Identity.ScalarDepPath, err = naming.RelPath(outputDir, paths.ScalarRust); err != nil {
 			return fmt.Errorf("scalar crate path: %w", err)

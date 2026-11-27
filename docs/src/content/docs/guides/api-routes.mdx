@@ -1056,12 +1056,12 @@ pool of the API's database:
 | --- | --- | --- |
 | Go | `Config.IdempotencyStore`, an `idempotency.Store`: `idempotency.NewSQLStore(db, idempotency.Postgres, api.IdempotencyTable)`, over a `*sql.DB`; `idempotency.SQLite` for SQLite | `IdempotencyTable` in the API package |
 | TypeScript | `RouterOptions.idempotencyStore`, an `IdempotencyStore`: `postgresIdempotencyStore(pool, idempotencyTable)`, `sqliteIdempotencyStore(db, idempotencyTable)` for SQLite and D1, or `memoryIdempotencyStore()` in a test | `idempotencyTable` in the API package |
-| Rust | none yet: the build refuses to generate a Rust router for an API with an `@idempotent` operation | |
+| Rust | `Implementations.idempotency_store`, an `Arc<dyn idempotency::Store>`, which `Implementations::new` builds over `Deps.db`: `idempotency::PostgresStore::new(pool, &IDEMPOTENCY_TABLE)` with the runtime's `postgres` feature, `idempotency::SqliteStore::new(db, &IDEMPOTENCY_TABLE)` with its `sqlite` feature, or `idempotency::MemoryStore::new()` in a test | `IDEMPOTENCY_TABLE` in the API crate |
 
-The Go and TypeScript routers name a row and hash a request alike, and
-answer each case of the table above alike
-(`runtime/http/testdata/idempotency_parity.json`), so a Go server and a
-TypeScript server over one database share their keys.
+The Go, TypeScript and Rust routers name a row and hash a request alike,
+and answer each case of the table above alike
+(`runtime/http/testdata/idempotency_parity.json`), so servers in any of
+the three over one database share their keys.
 
 What the decorator is refused on, at `check`, each for the reason a
 repeat could not be answered as the first call was:
@@ -1083,9 +1083,10 @@ required where the operation requires it, the 409 and the 422, and the
 status. A generated SDK's method sends a
 key for each call
 ([Client SDKs](/superschematic/guides/client-sdks/#an-idempotency-key)).
-On the TypeScript server's MCP endpoint a tool call has no headers, so the
-tool of an `@idempotent` operation takes the key as an argument,
-`idempotencyKey`, which the endpoint sends to the route as the header
+On the MCP endpoint of a TypeScript or a Rust server a tool call has no
+headers, so the tool of an `@idempotent` operation takes the key as an
+argument, `idempotencyKey`, which the endpoint sends to the route as the
+header
 ([MCP tools](/superschematic/reference/mcp-tools/#a-key-for-a-call-that-runs-once)).
 
 ## Webhooks
@@ -3383,16 +3384,37 @@ buildRouter(implementations, {
 
 `RecipeGraph` is the facade the database's types package exports from
 `./versiongraph`, and `pgPool` is `@superschematic/versiongraph/postgres`'s.
-The database lists Postgres first: the facade runs on Postgres alone. A
-generated image does not build the version-graph core's WebAssembly
-module yet, so a stack's build writes this server no Dockerfile and says
-so; run it from the checkout or build its image from a Dockerfile of your
-own.
+The database lists Postgres first: the facade runs on Postgres alone. No
+published package ships the version-graph core's WebAssembly module yet,
+so the server's generated image builds it: a stage builds the module for
+`wasm32-unknown-unknown` from the core's crate beside the package the
+naming file's `[paths] versiongraph_typescript` names, and the build
+stage emits the package's `dist/` with the module in it. Without that
+key a stack's build writes this server no Dockerfile and says so.
 
-The Go and the Rust servers do not serve the set yet. Each operation
-stays a method of your implementation's interface, with the same route and
-types, to write over the graph's facade, and the build warns once for the
-set.
+The Go server serves the set too, from the module's `graphs.go`, through
+the graph's facade in the database's ORM. Its `Config` takes the ORM, which
+reads the root, its refs and its commits, and the facades, which
+`GraphsOf` builds from it. The generated server passes both:
+
+```go
+fixturegraphapi.RegisterRoutes(router, fixturegraphapi.Config{
+	DB:              db,
+	Graphs:          fixturegraphapi.GraphsOf(db),
+	Logger:          logger,
+	Implementations: implementations,
+})
+```
+
+The Rust server serves it from the crate's `src/graphs.rs`, through the
+graph's facade in the database's Rust types, over the pool
+`Implementations::new` takes. Each operation takes a connection of the
+pool and runs in one transaction on it, and the root, its refs and its
+commits are read through the database's repositories. The database's
+Rust types are generated, and it lists Postgres first.
+
+On every server the interface of your implementation has no method for a
+graph operation, and each answers the same problems.
 
 Each operation is an MCP tool, `recipe_branch`, `recipe_save` and the rest,
 with the title and the description the build gives it; a set whose

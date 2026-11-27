@@ -5772,8 +5772,11 @@ app.route('/api', engineMcp(engine, options));   // POST /api/namespaces/default
   (`@modelcontextprotocol/client`).
 - `tools/list` lists the visible tools of the tools document: the handle
   as the name, the title, the description, the arguments as `inputSchema`,
-  `annotations.readOnlyHint`, and `_meta` with the tool's guidance and its
-  invocation policy under the policy's key. The list is the caller's: a
+  `annotations` (D123): `readOnlyHint` for a tool that only reads,
+  `destructiveHint` for one that may write, since no engine tool says it
+  only adds, and `idempotentHint` false, its record's resolved
+  annotations when the document holds them; and `_meta` with the tool's
+  guidance and its invocation policy under the policy's key. The list is the caller's: a
   tool the policy refuses is not in it, nor, in an archived namespace, a
   tool that writes there. `define_schema` and the namespace tools
   (`list_namespaces`, `create_namespace`, `archive_namespace`,

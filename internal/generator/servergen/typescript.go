@@ -765,6 +765,11 @@ type TypeScriptDocker struct {
 	// repositories of no database whose fields are behaviors (D103).
 	Rules *tsRulesDocker
 
+	// VersionGraph is where the versiongraph stage builds the
+	// version-graph core's WebAssembly module from, nil when the server
+	// serves no version graph's operations (D138).
+	VersionGraph *tsVersionGraphDocker
+
 	// Runtime are the directories the image copies from the build stage:
 	// the workspace's root, then every package the server reaches outside
 	// it, each with the node_modules the install linked into it.
@@ -797,6 +802,22 @@ const RulesModule = "superschematic_rules_wasm.wasm"
 
 // Module is RulesModule, for the template.
 func (d *tsRulesDocker) Module() string { return RulesModule }
+
+// tsVersionGraphDocker is the version-graph runtime's npm package (D138),
+// TypeScript, whose dist/ the build stage emits with the WebAssembly
+// module the versiongraph stage builds in it, from the version-graph
+// core's crate beside the package, Crate, which reaches no crate by path.
+type tsVersionGraphDocker struct {
+	TypeScript string
+	Crate      string
+}
+
+// VersionGraphModule is the WebAssembly module of the version-graph core,
+// which the package's index.js loads from its dist/.
+const VersionGraphModule = "superschematic_versiongraph.wasm"
+
+// Module is VersionGraphModule, for the template.
+func (d *tsVersionGraphDocker) Module() string { return VersionGraphModule }
 
 // tsReserved are the names main.ts declares or imports beside the served
 // APIs' own: an API, database or client never takes one.
@@ -1770,11 +1791,11 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	if in.Paths.HTTPRuntimeTypeScript == "" {
 		return nil, "the naming file's [paths] http_runtime_typescript is unset, and the image builds the HTTP runtime's package from a checkout, since none is published yet; set it to a superschematic checkout's runtime/http/typescript", nil
 	}
-	if s.servesGraphs() {
+	if s.servesGraphs() && in.Paths.VersionGraphTypeScript == "" {
 		// A graph's facade loads the version-graph core's WebAssembly module,
-		// which no published package ships and no stage of the image
-		// builds yet.
-		return nil, fmt.Sprintf("the %s serves a version graph's operations (D138) through the version-graph package, %s, whose WebAssembly module no published package ships and the generated image does not build yet; run it from the checkout, or build its image from a Dockerfile of the project's own", s.Kind, s.Naming.VersionGraphNpmPackage), nil
+		// which no published package ships: the image builds it from the
+		// checkout the package lies in.
+		return nil, fmt.Sprintf("the %s serves a version graph's operations (D138) through the version-graph package, %s, whose WebAssembly module no published package ships, and the naming file's [paths] versiongraph_typescript, the package the image builds it beside, is unset; set it to a superschematic checkout's runtime/versiongraph/typescript", s.Kind, s.Naming.VersionGraphNpmPackage), nil
 	}
 	root, err := filepath.Abs(in.RepositoryRoot)
 	if err != nil {
@@ -1861,12 +1882,26 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 		d.ScalarWorkspace+"/Cargo.toml", d.ScalarWorkspace+"/Cargo.lock", d.ScalarWorkspace+"/crates")
 	if versionGraph := in.Paths.VersionGraphTypeScript; versionGraph != "" {
 		// The workspace's root overrides the version-graph runtime too, so
-		// an install reads its manifest, though no server imports it.
+		// an install reads its manifest, though the server may not import
+		// it.
 		vg, ok := rel(versionGraph)
 		if !ok {
 			return nil, outside("the version-graph runtime's TypeScript package", versionGraph), nil
 		}
-		d.Include = append(d.Include, vg+"/package.json")
+		if !s.servesGraphs() {
+			d.Include = append(d.Include, vg+"/package.json")
+		} else {
+			// The versiongraph stage builds the core's WebAssembly module
+			// from its crate beside the package, as the package's build does,
+			// and the build stage emits the package's dist/ with it, which
+			// the workspace's root overrides the package with (D138).
+			crate, ok := rel(filepath.Join(filepath.Dir(versionGraph), "rust"))
+			if !ok {
+				return nil, outside("the version-graph core's crate beside", versionGraph), nil
+			}
+			d.VersionGraph = &tsVersionGraphDocker{TypeScript: vg, Crate: crate}
+			d.Include = append(d.Include, vg, crate)
+		}
 	}
 	if rules := in.Paths.RulesTypeScript; rules != "" && !s.Rules {
 		// And the behaviors' core (D103), whose package the server does
@@ -1925,6 +1960,9 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	}
 	if d.Rules != nil {
 		d.Exclude = append(d.Exclude, d.Rules.TypeScript+"/dist")
+	}
+	if d.VersionGraph != nil {
+		d.Exclude = append(d.Exclude, d.VersionGraph.TypeScript+"/dist", d.VersionGraph.TypeScript+"/prebuilt")
 	}
 	return d, "", nil
 }

@@ -177,6 +177,10 @@ func AccountRechecksQueues(db *orm.Database, workers Workers, logger *zap.Logger
 		Fail:     deadlines.Fail,
 		Release:  deadlines.Release,
 		Prune:    deadlines.Prune,
+		// In drain mode the worker takes one slot, its first queue's, and
+		// waits for a message due soon (D145).
+		Slot:    deadlines.Slot,
+		NextDue: deadlines.NextDue,
 	})
 	events := db.AccountEventQueue()
 	queues = append(queues, worker.Queue{
@@ -215,6 +219,8 @@ func AccountRechecksQueues(db *orm.Database, workers Workers, logger *zap.Logger
 		Fail:     events.Fail,
 		Release:  events.Release,
 		Prune:    events.Prune,
+		Slot:     events.Slot,
+		NextDue:  events.NextDue,
 	})
 	return queues
 }

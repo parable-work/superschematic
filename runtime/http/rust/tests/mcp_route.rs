@@ -11,7 +11,7 @@ use serde_json::{json, Map, Value};
 use std::path::Path;
 use superschematic_http_runtime::mcp::{
     caller_of, outcome_of, problem_of, tool_request, with_confirmation_argument, ArgumentLocation,
-    CallOutcome, Content, RouteTool, CONFIRMATION_ARGUMENT,
+    CallOutcome, Content, RouteTool, ToolIdempotency, CONFIRMATION_ARGUMENT, IDEMPOTENCY_ARGUMENT,
 };
 
 /// A tool table the TypeScript API generator wrote, whose JSON a Rust
@@ -679,4 +679,92 @@ fn a_tool_that_asks_lists_the_argument_its_confirmation_comes_back_in() {
     let bare = with_confirmation_argument(&json!({"type": "object"}));
     assert_eq!(bare["properties"].as_object().map(Map::len), Some(1));
     assert_eq!(with_confirmation_argument(&json!(true)), json!(true));
+}
+
+/// An `@idempotent` operation's tool takes the call's key as an argument,
+/// `idempotencyKey`, required when the operation requires one, which goes
+/// to the route as its `Idempotency-Key`; the endpoint request's own key
+/// never does, and an operation with an argument of that name keeps it
+/// (D140), as the TypeScript runtime's `mcp-idempotency.test.ts` has it.
+#[test]
+fn an_idempotent_tools_key_argument_goes_to_the_route_as_its_header() {
+    let idempotent = |required: bool, arguments: &[(&str, &str, &str)]| {
+        let mut tool = tool("place_order", arguments);
+        tool.tool.input_schema = json!({"type": "object", "properties": {"sku": {"type": "string"}}, "required": ["sku"]});
+        tool.idempotent = Some(ToolIdempotency { required });
+        tool
+    };
+    let optional = idempotent(false, &[("sku", "body", "sku")]);
+    let listed = optional.listed().input_schema;
+    assert_eq!(listed["properties"][IDEMPOTENCY_ARGUMENT]["maxLength"], 255);
+    assert_eq!(listed["required"], json!(["sku"]));
+    assert_eq!(
+        idempotent(true, &[("sku", "body", "sku")])
+            .listed()
+            .input_schema["required"],
+        json!(["sku", IDEMPOTENCY_ARGUMENT])
+    );
+
+    let mut incoming = incoming();
+    incoming
+        .headers_mut()
+        .insert("idempotency-key", "the endpoint's".parse().unwrap());
+    let call = |arguments: Value| {
+        tool_request(
+            &optional,
+            &Method::POST,
+            "/api/orders",
+            &object(arguments),
+            &incoming,
+            "req-7",
+        )
+    };
+    let keyed = call(json!({"sku": "tea", IDEMPOTENCY_ARGUMENT: "order-7"})).unwrap();
+    assert_eq!(header(&keyed, "idempotency-key"), Some("order-7"));
+    assert_eq!(keyed.body().as_ref(), br#"{"sku":"tea"}"#);
+    let unkeyed = call(json!({"sku": "tea"})).unwrap();
+    assert_eq!(header(&unkeyed, "idempotency-key"), None);
+    for bad in [json!(7), json!(""), json!("k".repeat(256))] {
+        let problem = call(json!({"sku": "tea", IDEMPOTENCY_ARGUMENT: bad})).unwrap_err();
+        assert_eq!(
+            (problem["status"].as_u64(), problem["code"].as_str()),
+            (Some(400), Some("idempotency_key_invalid")),
+            "{problem}"
+        );
+    }
+    let unknown = call(json!({"sku": "tea", "extra": 1})).unwrap_err();
+    assert_eq!(
+        unknown["detail"],
+        r#"place_order takes sku, idempotencyKey, not "extra""#
+    );
+
+    // An argument of its own named idempotencyKey stays the operation's.
+    let own = idempotent(false, &[(IDEMPOTENCY_ARGUMENT, "body", "idempotencyKey")]);
+    assert!(own.idempotency().is_none());
+    let request = tool_request(
+        &own,
+        &Method::POST,
+        "/api/orders",
+        &object(json!({IDEMPOTENCY_ARGUMENT: "mine"})),
+        &incoming,
+        "req-7",
+    )
+    .unwrap();
+    assert_eq!(header(&request, "idempotency-key"), None);
+    assert_eq!(request.body().as_ref(), br#"{"idempotencyKey":"mine"}"#);
+    // A tool whose operation is not @idempotent takes no key.
+    let plain = tool("get_order", &[]);
+    let refused = tool_request(
+        &plain,
+        &Method::GET,
+        "/api/orders",
+        &object(json!({IDEMPOTENCY_ARGUMENT: "k"})),
+        &incoming,
+        "req-7",
+    )
+    .unwrap_err();
+    assert_eq!(
+        refused["detail"],
+        r#"get_order takes no arguments, not "idempotencyKey""#
+    );
 }

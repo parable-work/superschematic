@@ -20,6 +20,8 @@ http = "1"
 serde = { version = "1.0.228", features = ["derive"] }
 {{- else if .HasBehaviors }}
 serde = "{{ rulesSerdeVersion }}"
+{{- else if .HasGraphOperations }}
+serde = "1.0.228"
 {{- end }}
 serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
@@ -51,6 +53,11 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 {{- end }}
 {{- with .DatabaseTypesDependency }}
 {{ .Name }} = { path = "{{ .Path }}"{{ $.DependencyFeatures .Name }} }
+{{- end }}
+{{- if .HasGraphOperations }}
+# The version graph's engine (D138), whose Postgres client src/graphs.rs
+# binds to the API's pool.
+{{ .VersionGraphCrate }} = { path = "{{ .VersionGraphDepPath }}" }
 {{- end }}
 {{- with .Providers }}
 {{- range .Crates }}

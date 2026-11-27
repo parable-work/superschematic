@@ -637,19 +637,6 @@ func (r run) warnGoTableOperationsUnserved() error {
 	return nil
 }
 
-// warnGraphOperationsUnserved warns, once for each @graphOperations set of
-// the API, that the server of language writes no handlers for a version
-// graph's operations yet (D138): the TypeScript server serves them, and
-// on the Go and the Rust servers each stays a method of the
-// implementation's interface, to be written by hand over the graph's
-// generated facade.
-func (r run) warnGraphOperationsUnserved(language string) {
-	for _, set := range apigen.UnservedGraphSets(r.Schema) {
-		r.Warnf("%s: the %s server writes no handlers for %s, a @graphOperations set of %s's version graph (D138): its %d operations (%s) each stay a method of the implementation's interface, to be written by hand over the graph's facade, with the same routes and types; the TypeScript server serves them",
-			r.Config.Name, language, set.Set, set.Root, len(set.Operations), strings.Join(set.Operations, ", "))
-	}
-}
-
 // generateAPI dispatches API server generation by implementation language.
 func (r run) generateAPI() error {
 	if proto := r.Outputs.API.Protocol; proto != APIProtocolREST {
@@ -660,7 +647,6 @@ func (r run) generateAPI() error {
 		if err := r.warnGoTableOperationsUnserved(); err != nil {
 			return err
 		}
-		r.warnGraphOperationsUnserved("Go")
 		return r.generateGoAPI()
 	case APILanguageRust:
 		return r.generateRustAPI()
@@ -1301,6 +1287,23 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 	if err := output.SetDeps(deps); err != nil {
 		return nil, fmt.Errorf("generator: %w", err)
 	}
+	// Deps.go declares the derivers of tables, typed by the database's Go
+	// types (D146).
+	if err := refuseGoHeldDerivers(r.Schema, output.TableDerivers); err != nil {
+		return nil, err
+	}
+	if len(output.TableDerivers) > 0 {
+		fieldTypes := func(table string) (map[string]string, error) {
+			db, err := r.LoadDependency(deps.Database)
+			if err != nil {
+				return nil, err
+			}
+			return typegen.FieldTypes(db, typegen.Options{SchemaName: deps.Database, ModulePath: deps.DatabaseTypes, Naming: r.Options.Naming, Registry: r.Registry}, table, deps.DatabaseTypesAlias+".")
+		}
+		if err := output.SetDerivers(output.TableDerivers, fieldTypes); err != nil {
+			return nil, fmt.Errorf("generator: %w", err)
+		}
+	}
 	if output.UpstreamSchema != "" {
 		upstream, err := r.LoadDependency(output.UpstreamSchema)
 		if err != nil {
@@ -1352,7 +1355,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		}
 		return nil
 	}
-	if err := refuseGoDerivers(r.Schema); err != nil {
+	if err := refuseGoEngineDerivers(r.Schema, output.Engine); err != nil {
 		return deps, nil, err
 	}
 	if db, _, ok := r.Schema.Database(); ok {
@@ -1405,6 +1408,10 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 			if err := checkWorkerQueues(r.Schema, db, schema); err != nil {
 				return deps, nil, err
 			}
+		}
+		// A worker's messages and a deriver's fields are the database's Go
+		// types (D53, D146).
+		if len(r.Schema.Workers) > 0 || len(output.TableDerivers) > 0 {
 			deps.DatabaseTypes = r.Options.Naming.GoTypesModule(db)
 			deps.DatabaseTypesAlias = toGoPackageName(db)
 			output.AddIndirectModules([]string{deps.DatabaseTypes})
@@ -1706,19 +1713,24 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	// Deps.rs declares the derivers, typed by the engine database's Rust
-	// types (D74). A deriver of tables runs on a TypeScript API (D146).
-	if err := refuseRustTableDerivers(r.Schema, apiOutput.TableDerivers); err != nil {
+	// Deps.rs declares the derivers, typed by the database's Rust types:
+	// the engine database's (D74), or the database whose tables they fill
+	// (D146), one kind per API.
+	if err := refuseRustMixedDerivers(r.Schema, apiOutput.Engine, apiOutput.TableDerivers); err != nil {
 		return nil, nil, err
 	}
 	fieldTypes := func(schema string) (map[string]string, error) {
-		db, err := r.LoadDependency(apiOutput.Engine.Database)
+		database := rustDeps.Database
+		if apiOutput.Engine != nil {
+			database = apiOutput.Engine.Database
+		}
+		db, err := r.LoadDependency(database)
 		if err != nil {
 			return nil, err
 		}
 		return rustgen.FieldTypes(db, schema, rustrestgen.DatabaseTypesModule+"::")
 	}
-	if err := output.SetDerivers(apiOutput.Engine, fieldTypes); err != nil {
+	if err := output.SetDerivers(apiOutput.Engine, apiOutput.TableDerivers, fieldTypes); err != nil {
 		return nil, nil, fmt.Errorf("generator: %w", err)
 	}
 	if err := output.SetDeps(rustDeps); err != nil {
@@ -1754,7 +1766,8 @@ func (r run) rustAPI() (*rustrestgen.APIOutput, *envgen.ConfigOutput, error) {
 func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, error) {
 	var deps rustrestgen.DepsInfo
 	for _, b := range r.Schema.Buckets {
-		deps.Buckets = append(deps.Buckets, rustrestgen.DepsBucket{Service: b.Name, Field: rustrestgen.DepsField(b.Name)})
+		contentAddressed, maxBytes := r.contentBucket(b.Name)
+		deps.Buckets = append(deps.Buckets, rustrestgen.DepsBucket{Service: b.Name, Field: rustrestgen.DepsField(b.Name), ContentAddressed: contentAddressed, MaxBytes: maxBytes})
 	}
 	apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	for _, m := range r.Schema.MemoryStores {
@@ -1896,9 +1909,12 @@ func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 // crate is at apiDir, in deps when the API has an operation marked
 // @tableOperation (D106, D116): its handlers are served from the tables'
 // repositories, which the types crate's src/orm.rs holds. The Rust types
-// of db must be generated.
+// of db must be generated. An API with a @graphOperations set needs them
+// too (D138): its operations run through each graph's facade there, and
+// read its roots and refs through the repositories.
 func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
-	if !r.Schema.HasTableOperations() {
+	graphs := slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsGraphOperations() })
+	if !r.Schema.HasTableOperations() && !graphs {
 		return nil
 	}
 	if r.Options.DependencyConfig != nil {
@@ -1906,6 +1922,9 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 			outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
 			if err != nil {
 				return fmt.Errorf("generator: schema config for %s: %w", db, err)
+			}
+			if !outputs.TypesEnabled(LangRust) && !r.Schema.HasTableOperations() {
+				return fmt.Errorf("generator: the Rust server of %s serves the operations of a version graph of %s through its facade, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D138)", r.Config.Name, db, db, LangRust, db)
 			}
 			if !outputs.TypesEnabled(LangRust) {
 				return fmt.Errorf("generator: the Rust server of %s serves its @tableOperation operations from the repositories of %s, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D106, D116)", r.Config.Name, db, db, LangRust, db)
@@ -1941,7 +1960,6 @@ func (r run) generateRustAPI() error {
 		r.Warnf("%s: the Rust server writes no handler for %s, a @tableOperation (D106): %s; it stays a method of the implementation's interface, to be written by hand, with the same route and types",
 			r.Config.Name, op.Operation, op.Reason)
 	}
-	r.warnGraphOperationsUnserved("Rust")
 
 	dir := APIDir(r.Options.OutputRoot, r.Config.Name)
 	if err := rustrestgen.SetReplacePaths(output, r.Options.Paths, dir); err != nil {
