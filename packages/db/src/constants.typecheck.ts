@@ -34,8 +34,12 @@ type NoSuchField = Constants<Task, { fields: ["assignee"] }>;
 type NoSuchOneWay = Constants<Task, { fields: ["owner"]; oneWay: { retries: "up" } }>;
 // @ts-expect-error a field moves up or down
 type Sideways = Constants<Task, { fields: ["owner"]; oneWay: { urgent: "sideways" } }>;
-// @ts-expect-error Constants keeps at least its fields
-type NoFields = Constants<Task, { oneWay: { urgent: "up" } }>;
+// A table whose one rule is a field that only moves forward names no fields.
+export type ReadMark = Constants<Task, { oneWay: { urgent: "up" } }>;
+// @ts-expect-error Constants keeps a field or moves one
+type NoRule = Constants<Task, { permission: "tasks.admin" }>;
+// @ts-expect-error Constants keeps a field or moves one
+type Empty = Constants<Task, {}>;
 
 // An engine type's @behavior("Constants", ...) takes @superschematic/schema's
 // config, which has no oneWay.
@@ -46,4 +50,4 @@ export abstract class EngineStep {}
 export abstract class EngineNote {}
 
 export const checked: readonly unknown[] = [kept];
-export type Refused = NoSuchField | NoSuchOneWay | Sideways | NoFields;
+export type Refused = NoSuchField | NoSuchOneWay | Sideways | NoRule | Empty;

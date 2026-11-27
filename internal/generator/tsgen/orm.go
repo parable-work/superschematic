@@ -114,6 +114,22 @@ type ORMInfo struct {
 	SQLite *ORMSQLite
 }
 
+// RowFeatureMembers is the type of the members the database's ORM and
+// every transaction it opens hold beside its repositories (D154):
+// ReferencesMembers, AttachmentsMembers or both, joined by &, which orm.ts
+// passes as Orm's and OrmTx's second type argument; "" for a database
+// with neither.
+func (o *ORMInfo) RowFeatureMembers() string {
+	var members []string
+	if o.References != "" {
+		members = append(members, "ReferencesMembers")
+	}
+	if o.Attachments != "" {
+		members = append(members, "AttachmentsMembers")
+	}
+	return strings.Join(members, " & ")
+}
+
 // HearsChanges reports whether a table of the layout keeps a change queue
 // (D103), which orm.ts's comment then describes.
 func (o *ORMInfo) HearsChanges() bool {

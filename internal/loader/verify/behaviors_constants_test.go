@@ -48,9 +48,10 @@ func TestOneWayTypesAreTheCores(t *testing.T) {
 // its name, an audit field, a oneWay list, a Generic.Decimal, and a field
 // the core reads no value of (encrypted at rest, a list of date-times) in
 // fields or oneWay. The first problem alone is reported: fields in order,
-// then oneWay in the canonical config's order. The configSchema refuses a
-// direction that is neither up nor down and an empty oneWay, in the
-// registry's words.
+// then oneWay in the canonical config's order. fields may be left out
+// beside oneWay, a table's one rule, and a config that names no field in
+// either keeps nothing and is refused. The configSchema refuses a direction that is neither up
+// nor down and an empty oneWay, in the registry's words.
 func TestConstantsConfigIsHeldToTheTable(t *testing.T) {
 	const prefix = "type Task: behavior Constants config: "
 	constants := func(task map[string]any) map[string]any { return config(task, "Constants") }
@@ -115,6 +116,11 @@ func TestConstantsConfigIsHeldToTheTable(t *testing.T) {
 		{"a direction neither up nor down", oneWay(map[string]any{"urgent": "sideways"}),
 			`type "Task": behavior Constants config: jsonschema validation failed with 'superschematic://behaviors/Constants/config.json#'
 - at '/oneWay/urgent': value must be one of 'up', 'down'`},
+		{"a permission alone", func(_, task map[string]any) {
+			delete(constants(task), "fields")
+			delete(constants(task), "oneWay")
+			constants(task)["permission"] = "tasks.admin"
+		}, prefix + "fields: Constants keeps no field: name one in fields, or in oneWay one that moves one way"},
 		{"an empty oneWay", oneWay(map[string]any{}),
 			`type "Task": behavior Constants config: jsonschema validation failed with 'superschematic://behaviors/Constants/config.json#'
 - at '/oneWay': minProperties: got 0, want 1`},
@@ -136,6 +142,7 @@ func TestConstantsConfigIsHeldToTheTable(t *testing.T) {
 			constants(task)["fields"] = []any{"owner", "sponsorId"}
 		},
 		"no oneWay": func(_, task map[string]any) { delete(constants(task), "oneWay") },
+		"oneWay alone, a read mark that only moves forward": func(_, task map[string]any) { delete(constants(task), "fields") },
 		"a list of strings": func(_, task map[string]any) {
 			addField(task, map[string]any{"name": "tags", "typeRef": map[string]any{"name": "string", "isArray": true}})
 			constants(task)["fields"] = []any{"owner", "tags"}

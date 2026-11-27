@@ -626,8 +626,13 @@ export const key: PropertyDecorator = noopPropertyDecorator;
 export const unique: PropertyDecorator = noopPropertyDecorator;
 /** Joins the field into the table's trigram-indexed `search_text` column. */
 export const searchField: PropertyDecorator = noopPropertyDecorator;
-/** Stores the field as JSONB. */
-export const jsonField: PropertyDecorator = noopPropertyDecorator;
+/**
+ * Stores the field as JSONB; on a class, makes the class a JSON shape,
+ * never a table, whose every field that holds it is a JSONB column, as
+ * `@jsonField` from `@superschematic/schema` does. A class with no `@key`
+ * that only `@jsonField` fields (and other shapes) hold is one without it.
+ */
+export const jsonField: ClassDecorator & PropertyDecorator = (() => {}) as ClassDecorator & PropertyDecorator;
 
 /**
  * Marks a field that @source projections are expected to carry. A projection

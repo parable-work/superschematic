@@ -24,6 +24,20 @@ export type RelationOptions = { onDelete?: OnDeleteAction };
 // loader reads the actual value from the second type-argument node (mirroring
 // Validate<T, C>). No embed is added because nothing reads a `__relationOpts`.
 export type Relation<T, Opts extends RelationOptions = {}> = T & { readonly __relation: true };
+// A field of the table T that a behavior's config reads a value of (D103,
+// D104): one of T's own, a to-one relation named by the field that holds its
+// key, its name and Id (authorityId for authority: Relation<Authority>), as
+// the loader asks there, since a config reads the key, not the row it points
+// at. Any name, for a T that is any.
+export type FieldOf<T> = 0 extends 1 & T ? string : Exclude<Extract<keyof T, string>, RelationNameOf<T>> | RelationKeyOf<T>;
+// The names of T's to-one relations: authority for authority:
+// Relation<Authority> or Nullable<Relation<Authority>>.
+export type RelationNameOf<T> = {
+  [K in Extract<keyof T, string>]-?: NonNullable<T[K]> extends { readonly __relation: true } ? K : never;
+}[Extract<keyof T, string>];
+// The fields that hold the keys of T's to-one relations: authorityId for
+// authority.
+export type RelationKeyOf<T> = `${RelationNameOf<T>}Id`;
 // The rows of T whose relation points at this row.
 export type HasMany<T> = T[] & { readonly __hasMany: true };
 export type ManyToMany<T> = T[] & { readonly __manyToMany: true };
@@ -177,13 +191,16 @@ export type Reactions<T, C extends ReactionsOn<T>> = NonNullable<unknown>;
  * takes the schema package's config, which has no oneWay, and the build
  * refuses it there.
  */
-export interface ConstantsOn<T> {
-  /** The table's own fields that keep the value their create gives them. */
-  readonly fields: readonly Extract<keyof T, string>[];
+export type ConstantsOn<T> = ConstantsRules<T> & ({ readonly fields: readonly FieldOf<T>[] } | { readonly oneWay: ConstantsRules<T>["oneWay"] & {} });
+
+/** The members of ConstantsOn<T>, which names fields, oneWay or both. */
+export interface ConstantsRules<T> {
+  /** The table's own fields that keep the value their create gives them, one at least; left out beside oneWay, for a table whose one rule is a field that moves one way. */
+  readonly fields?: readonly FieldOf<T>[];
   /** The permission a caller needs to change them after the create, or move a oneWay field back; nobody may when absent. */
   readonly permission?: string;
   /** Fields that move one way after the create, unless the caller holds permission; clearing one is a move down. */
-  readonly oneWay?: { readonly [F in Extract<keyof T, string>]?: "up" | "down" };
+  readonly oneWay?: { readonly [F in FieldOf<T>]?: "up" | "down" };
 }
 
 /**
@@ -207,8 +224,8 @@ export interface StateRulesOn<T> {
 
 /** One state's rules under StateRulesOn<T>. */
 export interface StateRuleOn<T> {
-  readonly required?: readonly Extract<keyof T, string>[];
-  readonly frozen?: readonly Extract<keyof T, string>[] | "all";
+  readonly required?: readonly FieldOf<T>[];
+  readonly frozen?: readonly FieldOf<T>[] | "all";
   /**
    * The row's own fields that hold a subject (string, Identity.UUID or
    * Identity.UserID), createdBy among them, and seats of the table's Seats,
@@ -219,7 +236,7 @@ export interface StateRuleOn<T> {
    * change what it frees may write, or list it in Constants' fields, and
    * name a take permission for the seat.
    */
-  readonly by?: readonly (Extract<keyof T, string> | `seat:${string}`)[];
+  readonly by?: readonly (FieldOf<T> | `seat:${string}`)[];
 }
 
 /**
@@ -242,7 +259,7 @@ export interface ApprovalsOn<T> {
 /** One gate of ApprovalsOn<T>: @superschematic/schema's ApprovalsGate, the fields whose change consumes its sign-offs, and whether a sign-off names the version its signer read. */
 export interface ApprovalsGateOn<T> extends ApprovalsGate {
   /** The own fields whose change, by an update, consumes the gate's sign-offs; [] for none; absent, resetOnChange decides. */
-  readonly resetOn?: readonly Extract<keyof T, string>[];
+  readonly resetOn?: readonly FieldOf<T>[];
   /** signOff names the row's version its signer read, and a stale one is vetoed. */
   readonly pinned?: boolean;
 }
@@ -269,7 +286,7 @@ export type Approvals<T, C extends ApprovalsOn<T>> = NonNullable<unknown>;
  */
 export interface LeaseOn<T> extends Omit<LeaseConfig, "maxHoldField" | "sweepMs" | "directOn"> {
   /** A Generic.Int64 field of the table whose positive value overrides maxHoldMs for the row. */
-  readonly maxHoldField?: Extract<keyof T, string>;
+  readonly maxHoldField?: FieldOf<T>;
   /** The field whose Workflow onExpiry and escalate move, and in whose terminal states an expiry does not count; implied when the table has one Workflow, needed when it has several. */
   readonly status?: Extract<keyof T, string>;
   /** The engine's runner's: a table's lease expires at its own deadline, so a table's Lease takes none. */
@@ -324,7 +341,7 @@ export interface RetryClassOn {
 export interface RetriesOn<T> extends Omit<RetriesConfig, "classes" | "limitsField" | "resultField"> {
   readonly classes: { readonly [failure: string]: RetryClassOn | "terminal" };
   /** A Generic.JSON field of the table with the row's own caps. */
-  readonly limitsField?: Extract<keyof T, string>;
+  readonly limitsField?: FieldOf<T>;
   /** The field whose Workflow exhaustedState, from, retryInto and then name; implied when the table has one Workflow, needed when it has several. */
   readonly status?: Extract<keyof T, string>;
   /** The states an attempt starts in: a move into one waits for the row's retryAt and the window. */
@@ -336,7 +353,7 @@ export interface RetriesOn<T> extends Omit<RetriesConfig, "classes" | "limitsFie
   /** At most attempts recorded in any ms milliseconds before the next start waits. */
   readonly window?: { readonly attempts: number; readonly ms: number };
   /** An own field whose value keys every class's count: a new value starts them again. */
-  readonly keyField?: Extract<keyof T, string>;
+  readonly keyField?: FieldOf<T>;
   /** Writes through an update an operation makes, which waits for the core to run one (D103, step 4), so a table's Retries takes none. */
   readonly resultField?: never;
 }
@@ -364,7 +381,7 @@ export interface PresenceOn<T> {
   /** How long a row stays present after its create or its last beat, in milliseconds, at least 1000; with ttlByState, in each state it does not list. */
   readonly ttlMs: number;
   /** The field that holds the subject of the principal the row stands for (string, Identity.UUID or Identity.UserID), the only principal that may beat it; it does not change once set. */
-  readonly principalField: Extract<keyof T, string>;
+  readonly principalField: FieldOf<T>;
   /** Moves the row's Workflow status, through transition, when it is missed while the status is one of from. */
   readonly onMissed?: PresenceTransition;
   /** Moves the row's Workflow status, through transition, at a beat while the status is one of from. */
@@ -410,9 +427,9 @@ export interface BudgetOn<T> {
 /** One meter of BudgetOn<T>: @superschematic/schema's BudgetMeter, its fields and its scope named by the table's own, and its period. */
 export interface BudgetMeterOn<T> extends Omit<BudgetMeter, "limitField" | "reserveField" | "scope" | "reset"> {
   /** An integer field of the table that holds the row's limit; limit is the limit while it holds no value of at least 0. */
-  readonly limitField?: Extract<keyof T, string>;
+  readonly limitField?: FieldOf<T>;
   /** An integer field of the table whose positive value is the amount reserve takes, in place of reserve. */
-  readonly reserveField?: Extract<keyof T, string>;
+  readonly reserveField?: FieldOf<T>;
   /** A to-one relation of the table whose target, which implements Budget with the meter, is the enclosing scope. */
   readonly scope?: Extract<keyof T, string>;
   /** When used starts again at 0, in UTC: each hour, day, Monday, first of the month, or multiple of everyMs (whole minutes) from the epoch. */
@@ -453,7 +470,7 @@ export interface SeatsSeatOn<T> {
    * out of any input a caller who should not sit in the seat may write, or
    * list it in Constants' fields.
    */
-  readonly fromField?: Extract<keyof T, string>;
+  readonly fromField?: FieldOf<T>;
 }
 
 /** Seats' config on a table (D104): its seats, by name. */
@@ -704,7 +721,7 @@ export type PoolAvailability = "open" | "near" | "out";
 /** Pool's config on a table (D104): the field that ranks its members, how long a member is out when no time is named, how often an out member past its time is rechecked, and the permission markOut and reportRoom need. */
 export interface PoolOn<T> {
   /** The own number field whose value ranks the members, lowest first, ties by key. */
-  readonly order: Extract<keyof T, string>;
+  readonly order: FieldOf<T>;
   /** How long a member is out when markOut or a check names no time, in milliseconds, at least 1000; thirty minutes when absent. */
   readonly outForMs?: number;
   /** How often an out member past its outUntil is rechecked, in milliseconds, at least 1000; two minutes when absent. */
