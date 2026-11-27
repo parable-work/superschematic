@@ -4,19 +4,23 @@ import { envVars } from "@superschematic/schema-config";
 import {
   Authenticated,
   HttpMethod,
+  behaviorOperations,
+  behaviorWorker,
+  docs,
   hmacVerified,
+  mcp,
   publicRoute,
   requirePermission,
   rest,
   webhook
 } from "@superschematic/api";
-import { ShippingAddress } from "@acme/shop-db";
+import { Checkout, Refund, ShippingAddress } from "@acme/shop-db";
 
 // acmepay's keys, declared once, so every deployable whose config holds
 // them shares one secret of each per environment (stack-model 4.2): the
 // API key each call to acmepay carries, and the key acmepay signs its
-// webhooks with. Neither is ever in the engine's config, its document or
-// its log (D70).
+// webhooks with. Neither is ever in shop-db's tables, their behaviors'
+// configs or a log (D70).
 export abstract class PaymentsSecrets {
   ACMEPAY_API_KEY: Secret<string>;
   ACMEPAY_WEBHOOK_SECRET: Secret<string>;
@@ -29,7 +33,7 @@ export abstract class OrdersConfig extends PaymentsSecrets {
   ACMEPAY_URL: Default<string, "http://127.0.0.1:4250">;
 }
 
-// Where a checkout is in its Workflow (shop-db's Checkout).
+// Where a checkout is in its status Workflow (shop-db's Checkout).
 export enum CheckoutStatus {
   Cart = "cart",
   Held = "held",
@@ -43,7 +47,7 @@ export enum CheckoutStatus {
 export abstract class CheckoutLineView {
   productId: Identity.UUID;
   quantity: Generic.Int64;
-  // pending, held, committed, released or returned (Holds.items).
+  // pending, held, committed, released or returned (its Holds item).
   state: string;
   @display({ currency: "GBP" })
   unitPriceCents: Nullable<Generic.Int64>;
@@ -75,8 +79,9 @@ export abstract class StartCheckoutInput {
 }
 
 // What the shopper's page needs to pay at acmepay: the payment the
-// engine opened, acmepay's intent for it, and the client secret acmepay's
-// hosted fields take, so a card number never reaches the shop.
+// checkout's Payments opened, acmepay's intent for it, and the client
+// secret acmepay's hosted fields take, so a card number never reaches
+// the shop.
 export abstract class CheckoutPayment {
   attemptId: string;
   intentId: string;
@@ -104,7 +109,7 @@ export abstract class RefundView {
 }
 
 // The object an acmepay event is about: a payment intent, with the
-// engine's attempt it pays, or a refund, with the engine's refund it pays,
+// Payments attempt it pays, or a refund, with the Payments refund it pays,
 // and the shop's reference, the checkout's id, which shop-orders sent when
 // it made it.
 export abstract class AcmepayObject {
@@ -140,7 +145,9 @@ export abstract class PaymentEventReceipt {
 // which holds its units and its pickup slot, pay for it at acmepay, read
 // it, and ask for a refund once it is placed. Each operation takes the
 // caller's own checkout, or any for staff, and another customer's is not
-// found. Each calls shop-db's engine in-process, as shop-orders.
+// found. Each runs Checkout's behaviors through shop-db's repositories.
+// An agent pays for a checkout, or asks for a refund, only once a person
+// says yes: the tools of both ask (D70).
 export class Checkouts extends Authenticated {
   @rest(HttpMethod.POST, "checkouts/{id}/start")
   @requirePermission(["orders.write"])
@@ -150,6 +157,15 @@ export class Checkouts extends Authenticated {
 
   @rest(HttpMethod.POST, "checkouts/{id}/pay")
   @requirePermission(["orders.write"])
+  @docs({
+    title: "Pay for a checkout",
+    description: "Opens the held checkout's payment and acmepay's intent for it, which the shopper pays on acmepay's page.",
+    capability: "orders.checkouts.pay",
+    lifecycle: "active",
+    visibility: "public",
+    audience: "shoppers"
+  })
+  @mcp({ handle: "pay_checkout", invocationPolicy: "ask" })
   payCheckout(id: Identity.UUID): CheckoutPayment {
     throw new Error("schema declaration only");
   }
@@ -166,10 +182,37 @@ export class Checkouts extends Authenticated {
   // sign off before it is issued.
   @rest(HttpMethod.POST, "checkouts/{id}/refunds")
   @requirePermission(["orders.write"])
+  @docs({
+    title: "Ask for a refund",
+    description: "Asks for a refund of a placed checkout, which two members of staff sign off before acmepay makes it.",
+    capability: "orders.checkouts.refund",
+    lifecycle: "active",
+    visibility: "public",
+    audience: "shoppers"
+  })
+  @mcp({ handle: "request_refund", invocationPolicy: "ask" })
   requestRefund(id: Identity.UUID, input: RequestRefundInput): RefundView {
     throw new Error("schema declaration only");
   }
 }
+
+// A refund's sign-offs and its moves, for staff who hold refunds.approve
+// (D70, D103): Approvals' signOff, which counts two members of staff, not
+// the one who asked for it, before the move to approved, and the status
+// Workflow's transition, whose move into approved asks the checkout's
+// Payments for the refund. The build serves each, with no method of the
+// implementation's.
+@behaviorOperations(Refund)
+@requirePermission(["refunds.approve"])
+export abstract class RefundActions {}
+
+// Runs Checkout's deadlines and its change queue (D103): it expires a
+// checkout still held fifteen minutes on, or at the two-hour backstop
+// while a payment is in flight, which lets go of the units and the slot
+// it holds. A worker of shop-orders', with no method of the
+// implementation's.
+@behaviorWorker(Checkout)
+export abstract class CheckoutTimers {}
 
 // acmepay's events: its signature is checked before anything else
 // (D26), and each event is recorded on the checkout or the refund it is
