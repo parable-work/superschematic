@@ -473,6 +473,26 @@ Most are load errors; knowing them saves a build round-trip:
   SQL write of one is not refused, so an operator can repair a row, but
   it skips the behavior's rules: do not write one to move a state, in a
   migration, a seed or a handler.
+- A pattern the core's behaviors do not cover can be the project's own
+  behavior (D103's step 5): an abstract class marked `@declaresBehavior`
+  from `@superschematic/db`, in the directory `behaviors` names in
+  `superschematic.toml`, named `<prefix>.<Name>`, with the Rust crate
+  that runs it on the core (`crate`) or its declarative `rules` (below).
+  A table implements it with
+  `implements Behavior<typeof Rating, Movie, { ... }>`, and the build
+  writes the project's rules crate (`rules/rust/<schema>`), whose archive
+  a Go server links in the stock one's place. Write the class's bodies as
+  abstract signatures: a class declares and never implements. The
+  extension guide's "A behavior declared by a class" lists its form.
+- An extension's behavior whose rules are a count or an average over a
+  sub-table, a guard over the row and the caller, a counter, a move or a
+  field kept or frozen needs no Rust: state them in its class's
+  `@declaresBehavior({ rules })`, or its declaration's `rules` (D103's
+  step 5), which the behaviors' core interprets, as acme.Rating's class
+  `examples/acme-schematic/ext/rating.behavior.ts` does. Reach for a
+  crate only for what the vocabulary has no rule for (loops, expressions,
+  deadlines, events, contracts); the reference page "Declarative
+  behaviors" lists it.
 - A status no writer may move out of order, and that needs no permission
   (a ledger entry, a payment, a run), is an enum field with a
   `@stateMachine` on its class, from `@superschematic/schema` (D118), not
@@ -771,6 +791,26 @@ Most are load errors; knowing them saves a build round-trip:
   `{ from: "review"; to: "done"; by: ["seat:accountable"] }`. Calls are
   `seats.takeSeat({ seat, subject? })`, `leaveSeat` and the read
   `listSeats`; a repeat answers `unchanged: true`.
+- When a table repeats one of the core's bundles, implement the bundle
+  rather than wiring its parts by hand (D103, step 5): `implements
+  Reservation<Booking, { resource: "room"; interval: { start: "startsAt";
+  end: "endsAt" }; amount: "priceCents"; currency: "GBP" }>` for a booking
+  that holds a Calendar's time and waits for its payment; `Barrier<Rollout,
+  { rows: "Agent"; link: "rollout"; timeoutMs: 300000; releasePermission:
+  "rollouts.release" }>` for a row that waits for its related rows to
+  finish; `Mailbox<Message, { ttlMs: 30000; takePermission: "messages.take"
+  }>` for a message a taker leases, the table declaring `createdBy`; and
+  `Assignment<Problem, { take: "problems.take"; assign: "problems.assign"
+  }>` for one assignee, named `seat:assignee` in a `by`. In the data forms
+  write `"bundles": [{ "name": "Reservation", "settings": { ... } }]`. The
+  loader expands a bundle into its parts, each named as the use it is
+  (`status`, `holds_state`, the `holds` and `payments` operations), so do
+  not also write a part, or declare the field a part is anchored on (the
+  build refuses both). A Barrier is released once every row is ready,
+  at its timeout, or by a go-ahead from a caller who holds
+  `releasePermission`: its gate exempts those two (Rollups'
+  `exemptions`).
+  `superschematic format` writes the bundle, not its parts.
 - When a row's status should follow what an outside system reports (a
   sandbox at its provider, a deployment at its platform, a payment at its
   processor), type a field as a Reconcile beside the Workflow field rather

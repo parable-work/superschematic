@@ -19,7 +19,7 @@
 //!
 //! The operations ([`crate`] says each one's documents): `handler_run`,
 //! `handler_route`, `handler_respond`, `handler_events`, `handler_tool`,
-//! `handler_bridge`, `handler_core` and `handler_layout`.
+//! `handler_bridge`, `handler_core`, `handler_layout` and `handler_declare`.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -160,6 +160,13 @@ export!(
     handler_layout,
     Op::Layout
 );
+export!(
+    /// `declare`: declarative behaviors' declaration files (D103's step 5),
+    /// which the handler runs from then on, to the names of every one it
+    /// runs.
+    handler_declare,
+    Op::Declare
+);
 
 /// Releases an output document.
 ///
@@ -236,6 +243,7 @@ mod tests {
             handler_tool,
             handler_bridge,
             handler_core,
+            handler_declare,
         ] {
             let (code, text) = invoke(export, b"{not json");
             assert_eq!(code, HANDLER_ERROR, "{text}");

@@ -2492,6 +2492,8 @@ or implements Derived and Provenance
 ([Fields a model fills, and who set each](#fields-a-model-fills-and-who-set-each)),
 or Stock, Calendar, Holds and Payments
 ([Units and time a claim holds, and what it owes](#units-and-time-a-claim-holds-and-what-it-owes)),
+or a bundle of them, Reservation, Barrier, Mailbox or Assignment
+([Bundles: behaviors with their wiring preset](#bundles-behaviors-with-their-wiring-preset)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue, its change queue and its
 event queue are tables beside it, and its operations change them through
@@ -3935,7 +3937,12 @@ this one (`link`), and a function:
 - `gatedStates` names states of the table's one Workflow. A transition
   into one is refused as `not_held` until every rollup that gates it
   holds, whoever asks, with the rollup and its counts in the veto's
-  details. A rollup reads the rows that relate to the row 500 at a time,
+  details. A gating rollup's `exemptions` let a move through though it
+  does not hold (D104's Barrier): a caller's who holds `permission`, and
+  the move each of `deadlines`, deadlines of the table's one Timers whose
+  `then` moves into a gated state, makes as it falls due. The core holds
+  each named deadline to the Timers config at define. An engine type
+  refuses `exemptions`. A rollup reads the rows that relate to the row 500 at a time,
   up to 10,000; past that the value is `{ "over": true }` and its gate
   does not hold.
 - Rollups keeps no column. A read of the row computes its values through
@@ -4435,3 +4442,147 @@ the ledger stop agreeing, so do not write them by hand.
 What a table does not have yet: `Stock.low` is computed at a read, so a
 list does not filter on it; a Payments event applies once per table and
 provider, where the engine applied it once per namespace.
+
+### Bundles: behaviors with their wiring preset
+
+A bundle implements existing behaviors with the wiring between them
+preset, and exposes only the settings that vary (D103). It defines no
+rules of its own. A table implements a bundle as it implements a
+behavior, the table first and its settings second:
+
+```ts
+// bookings-db
+import { AutoGenerate, Relation, Reservation, key } from "@superschematic/db";
+
+export abstract class Booking
+  implements
+    Reservation<Booking, {
+      resource: "room";
+      interval: { start: "startsAt"; end: "endsAt" };
+      amount: "priceCents";
+      currency: "GBP";
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  guest: string;
+  startsAt: Temporal.DateTime;
+  endsAt: Temporal.DateTime;
+  priceCents: Generic.Int64;
+  room: Nullable<Relation<Room>>;
+}
+```
+
+The loader expands a bundle into its parts, and each part is a use of
+the table, as if the table had written it. The verification pass, the
+behaviors' core and every generator meet the parts alone. The booking
+above gets the same columns, sub-tables, queues and operations as a
+table that writes `Holds`, `Payments` and `Timers` in its implements
+clause and `status: Workflow<{ ... }>` as a field.
+
+A part is named as the use it is. A part the table implements is named
+for its behavior: the columns `holds_state` and `payments_due`, the
+sub-table `booking_holds_items`, and the operations `holdsRetakeHolds`,
+`paymentsOpenPayment` and `timersResetTimer` of a
+`@behaviorOperations(Booking)` set. A part anchored on a field is named
+for the field the bundle gives it: `status`, `status_entered_at` and
+`statusTransition`. No column, table or operation is named for the
+bundle. A table that implements a bundle does not also
+implement one of its parts, or declare a field a part is anchored on:
+the build refuses both, naming the bundle.
+
+The data forms name the bundle and its settings, and the loader expands
+them from the registry's declaration of the bundle, alike:
+
+```json
+{
+  "name": "Booking",
+  "role": "DBTable",
+  "bundles": [
+    {
+      "name": "Reservation",
+      "settings": { "resource": "room", "interval": { "start": "startsAt", "end": "endsAt" }, "amount": "priceCents", "currency": "GBP" }
+    }
+  ],
+  "fields": []
+}
+```
+
+`superschematic format` writes a bundle in place of its parts, in every
+format. The core's bundles:
+
+| Bundle | Parts | Settings |
+| --- | --- | --- |
+| `Reservation` | `Holds` (`slot` on the resource, `takeOn: ["held"]`, `commitOn: ["booked"]`, `releaseOn: ["expired", "cancelled"]`), `Payments` (`require: { booked: "paid" }`, `voidOn` the two ends, `record` needs `payments.record`), `Timers` (`holdExpiry`, fifteen minutes after `held`, moves to `expired`), `Workflow` on `status` (`draft`, `held`, `booked`, `expired`, `cancelled`) | `resource`, `interval` (`start`, `end`), `amount`, `currency`, each required |
+| `Barrier` | `Rollups` (`ready`: `all` of `rows` through `link` finished with `success`, gating `released`, exempting `releasePermission` and the `timeout` deadline), `Timers` (`timeout`, `timeoutMs` after `waiting`, moves to `released`), `Workflow` on `status` (`waiting`, `released`, `cancelled`; the release needs `releasePermission`) | `rows`, `link`, `timeoutMs`, `releasePermission`, each required |
+| `Mailbox` | `StateRules` (`taken` freezes every own field), `Lease` (`onExpiry` moves a taken message back to `queued`), `Workflow` on `status` (`queued`, `urgent`, `taken`, `sent`, `canceled`, `failed`; the sender's moves are `by: ["createdBy"]`) | `ttlMs`, Lease's; `takePermission`, Lease's `acquirePermission`; both optional |
+| `Assignment` | `Seats` (one seat, `assignee`, `max: 1`, `onFull: "refuse"`) | `take`, `assign`, both optional |
+
+A setting the table leaves out leaves out the member of the part that
+reads it: `Assignment<Chore, {}>` seats a caller who holds no permission,
+and nobody seats another.
+
+`Reservation`'s resource implements `Calendar`, whose hours, time zone
+and capacity are the resource's own, so the bundle does not set them. A
+booking that enters `held` takes the resource's time, `booked` waits
+until the payment is captured, and the deadline moves a booking still
+`held` to `expired`, which lets the time go.
+
+`Barrier` is released once every row that points at it has finished
+with the outcome `success`, at the timeout, or by a person's go-ahead.
+Its gate exempts the deadline's move and a caller who holds
+`releasePermission` (Rollups' `exemptions`), so the timeout and a
+go-ahead release it whether its rows are ready or not; the deadline's
+fire is recorded `moved` in `Timers.deadlines`. A caller without the
+permission is held by the gate, and Workflow refuses its release too. A
+barrier no row points at is ready. The table's `@behaviorWorker` holds
+`releasePermission`, or its fire is recorded `forbidden`.
+
+`Mailbox`'s table declares `createdBy`, an own field that holds the
+sender's subject. A take is your API's: a declared query of the oldest
+waiting message, `lease.acquire`, and the move to `taken` with the token
+as Lease's precondition. While a message is `taken`, another principal's
+write is refused by Lease, and every own field is frozen. The lease's
+expiry, an abandon or a release moves a taken message back to `queued`.
+
+`Assignment`'s seat is `assignee`: name it in a Workflow transition's or
+a StateRules state's `by` as `seat:assignee`. Its calls are Seats':
+`seats.takeSeat({ seat: "assignee" })`, `leaveSeat` and `listSeats`.
+
+A bundle of your own is a type alias in a schema file, generic in the
+table and its settings, whose type is `Bundle<Parts, Fields>`. `Parts`
+is a tuple of the behaviors the table implements, each its carrier with
+the alias's table and a config. `Fields` is an object type of the
+behaviors it anchors on fields, by field. A config reads a setting as
+`S["name"]`, written in place, and the reader substitutes the table's
+settings through the checker:
+
+```ts
+import { Bundle, StateRules, Workflow, type FieldOf } from "@superschematic/db";
+
+type Reviewed<T, S extends { reviewer: FieldOf<T> }> = Bundle<
+  [StateRules<T, { states: { review: { frozen: "all"; by: [S["reviewer"]] } } }>],
+  {
+    status: Workflow<{
+      states: ["draft", "review", "approved"];
+      transitions: [{ from: "draft"; to: "review" }, { from: "review"; to: "approved"; by: [S["reviewer"]] }];
+    }>;
+  }
+>;
+
+export abstract class Proposal implements Reviewed<Proposal, { reviewer: "reviewer" }> {
+  // ...
+}
+```
+
+The alias is no type of the schema. TypeScript alone reads a bundle of
+your own: the data forms have no declaration of it, so `superschematic
+format` writes its parts as the table's own uses. A config reads the
+table only as a carrier's first type argument; a part that reads `T`
+otherwise, and a tuple element whose setting the table leaves out, are
+refused.
+
+What a bundle does not have yet: an extension cannot register one;
+`Assignment`'s guard on another principal's Lease `acquire`, which reads
+its seat, waits for the declarative vocabulary's `caller` operand; and a
+bundle is not yet written as a class.

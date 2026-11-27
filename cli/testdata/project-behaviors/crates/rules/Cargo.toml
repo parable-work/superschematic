@@ -1,0 +1,9 @@
+# The crate whose hooks run the project's behaviors, notes.Rating and
+# notes.Flag, on the behaviors' core (D103's step 5): the project's rules
+# crate the build writes depends on it here. The CLI's test builds no Rust,
+# so it holds this manifest alone.
+[package]
+name = "notes-rules"
+version = "0.0.0"
+edition = "2021"
+publish = false

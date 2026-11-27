@@ -1,0 +1,493 @@
+{
+  "name": "fixture-mailbox-db",
+  "kind": "DB",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "description": "Any valid JSON value: object, array, primitive, or null",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "GenericJSON",
+        "json_schema": "any",
+        "python": "Any",
+        "rust": "serde_json::Value",
+        "sql": "JSONB",
+        "typescript": "JSONValue"
+      },
+      "hasCustomValidate": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "TemporalDateTime",
+        "json_schema": "string",
+        "python": "datetime.datetime",
+        "rust": "chrono::DateTime\u003cchrono::Utc\u003e",
+        "sql": "TIMESTAMPTZ",
+        "typescript": "JSDate"
+      },
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "Message": {
+      "name": "Message",
+      "owner": "src/messages.schema.ts",
+      "comment": "A message an agent takes in turn (D104, D103's step 5): a Mailbox whose\ntaker holds the message's lease for thirty seconds at a time, a take\nneeding messages.take. Its sender, whom createdBy holds, makes it urgent,\nputs it back and cancels it while it waits.",
+      "role": "DBTable",
+      "behaviors": [
+        {
+          "name": "StateRules",
+          "implements": true,
+          "config": {
+            "states": {
+              "taken": {
+                "frozen": "all"
+              }
+            }
+          },
+          "bundle": "Mailbox"
+        },
+        {
+          "name": "Lease",
+          "implements": true,
+          "config": {
+            "acquirePermission": "messages.take",
+            "onExpiry": {
+              "from": [
+                "taken"
+              ],
+              "transition": "queued"
+            },
+            "ttlMs": 30000
+          },
+          "bundle": "Mailbox"
+        },
+        {
+          "name": "Workflow",
+          "field": "status",
+          "config": {
+            "initial": "queued",
+            "outcomes": {
+              "canceled": "neutral",
+              "failed": "failure"
+            },
+            "states": [
+              "queued",
+              "urgent",
+              "taken",
+              "sent",
+              "canceled",
+              "failed"
+            ],
+            "transitions": [
+              {
+                "by": [
+                  "createdBy"
+                ],
+                "from": "queued",
+                "to": "urgent"
+              },
+              {
+                "by": [
+                  "createdBy"
+                ],
+                "from": "urgent",
+                "to": "queued"
+              },
+              {
+                "by": [
+                  "createdBy"
+                ],
+                "from": "queued",
+                "to": "canceled"
+              },
+              {
+                "by": [
+                  "createdBy"
+                ],
+                "from": "urgent",
+                "to": "canceled"
+              },
+              {
+                "from": "queued",
+                "to": "taken"
+              },
+              {
+                "from": "urgent",
+                "to": "taken"
+              },
+              {
+                "from": "taken",
+                "to": "sent"
+              },
+              {
+                "from": "taken",
+                "to": "failed"
+              },
+              {
+                "from": "taken",
+                "to": "queued"
+              }
+            ]
+          },
+          "bundle": "Mailbox"
+        }
+      ],
+      "bundles": [
+        {
+          "name": "Mailbox",
+          "settings": {
+            "takePermission": "messages.take",
+            "ttlMs": 30000
+          }
+        }
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "key": true,
+          "autoGenerated": true
+        },
+        {
+          "name": "body",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "createdBy",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "leaseHolder",
+          "description": "The subject of the principal that holds the lease; absent when the instance is free.",
+          "typeRef": {
+            "name": "string"
+          },
+          "behavior": {
+            "use": "Lease",
+            "behavior": "Lease",
+            "field": "holder"
+          }
+        },
+        {
+          "name": "leaseToken",
+          "description": "The fencing token. It advances at every acquire, release and expiry, and a write under the lease presents it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "behavior": {
+            "use": "Lease",
+            "behavior": "Lease",
+            "field": "token"
+          }
+        },
+        {
+          "name": "leaseAcquiredAt",
+          "description": "When the lease was acquired, in epoch milliseconds; absent when the instance is free.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "behavior": {
+            "use": "Lease",
+            "behavior": "Lease",
+            "field": "acquiredAt"
+          }
+        },
+        {
+          "name": "leaseRenewedAt",
+          "description": "Its acquire or its last heartbeat, in epoch milliseconds; absent when the instance is free.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "behavior": {
+            "use": "Lease",
+            "behavior": "Lease",
+            "field": "renewedAt"
+          }
+        },
+        {
+          "name": "leaseExpiresAt",
+          "description": "When the lease expires unless it is renewed, in epoch milliseconds; absent when the instance is free.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "behavior": {
+            "use": "Lease",
+            "behavior": "Lease",
+            "field": "expiresAt"
+          }
+        },
+        {
+          "name": "leaseExpiries",
+          "description": "How many leases have expired or been abandoned since the last resetExpiries.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "behavior": {
+            "use": "Lease",
+            "behavior": "Lease",
+            "field": "expiries"
+          }
+        },
+        {
+          "name": "leaseEnded",
+          "description": "How and when the last lease ended (reason and at); absent while one is held.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "behavior": {
+            "use": "Lease",
+            "behavior": "Lease",
+            "field": "ended"
+          }
+        },
+        {
+          "name": "status",
+          "description": "The state the instance is in.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "behavior": {
+            "use": "status",
+            "behavior": "Workflow",
+            "field": "status",
+            "value": true
+          }
+        },
+        {
+          "name": "statusEnteredAt",
+          "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "behavior": {
+            "use": "status",
+            "behavior": "Workflow",
+            "field": "enteredAt"
+          }
+        }
+      ],
+      "optimistic": true
+    },
+    "MessageDeadline": {
+      "name": "MessageDeadline",
+      "owner": "src/messages.schema.ts",
+      "comment": "The deadlines Message's behaviors arm, one message per row, use and deadline, due when it falls due (D103).",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "rowKey",
+          "description": "The key of the Message row the deadline is armed on.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "useId",
+          "description": "The id of the use that armed it: its anchor field, or the behavior's name for a use the table implements.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "description": "The deadline's name, the use's own.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "at",
+          "description": "When it was armed to fall due, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "payload",
+          "description": "What the use armed it with, which its deadline hook reads.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "rowKey",
+            "useId",
+            "name"
+          ],
+          "unique": true,
+          "where": "state IN ('ready', 'claimed')",
+          "origin": "behavior"
+        },
+        {
+          "keys": [
+            "rowKey"
+          ],
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorQueue": {
+        "row": "Message",
+        "kind": "deadlines",
+        "behaviors": [
+          "Lease"
+        ]
+      },
+      "queue": {
+        "retain": "0s"
+      }
+    },
+    "MessageLeaseDirectives": {
+      "name": "MessageLeaseDirectives",
+      "owner": "src/messages.schema.ts",
+      "comment": "One row per directive sent to the holder of the row's lease, keyed by its number in the lease: the token it was sent under, what it asks, its data, the dedupeKey it was sent with, who sent it and when, and when the holder acknowledged it. Every end of a lease deletes its directives, so none reaches the next holder.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "message",
+          "description": "The Message row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Message"
+          },
+          "required": true,
+          "relation": {
+            "type": "Message",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "number",
+          "description": "The directive's number in its lease, from 1 in the order they were sent, in ten digits zero-padded so the key's order is theirs.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "token",
+          "description": "The lease's token it was sent under.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "name",
+          "description": "What the directive asks.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "data",
+          "description": "Its data.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        },
+        {
+          "name": "dedupeKey",
+          "description": "The key it was sent with, when it was.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "sentBy",
+          "description": "The subject of the caller who sent it, or of the principal a behavior's call ran for.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "sentAt",
+          "description": "When it was sent, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "acknowledgedAt",
+          "description": "When the holder acknowledged it; absent while heartbeats deliver it.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "message",
+            "number"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Message",
+        "use": "Lease",
+        "behavior": "Lease",
+        "table": "directives",
+        "key": "number",
+        "rowField": "message"
+      }
+    }
+  }
+}

@@ -131,6 +131,10 @@ func MergeWith(doc *Document, schema *ir.Schema, owner string, reg *registry.Reg
 			fail("type %q: %s", def.Name, err)
 			continue
 		}
+		if err := ir.CanonicalizeBundles(def.Bundles); err != nil {
+			fail("type %q: %s", def.Name, err)
+			continue
+		}
 		schema.Types[def.Name] = def
 	}
 
@@ -356,6 +360,7 @@ func isEmptyTSForwardDeclaration(def *ir.TypeDef) bool {
 		def.Extends == "" &&
 		len(def.Implements) == 0 &&
 		len(def.Behaviors) == 0 &&
+		len(def.Bundles) == 0 &&
 		def.Display == nil &&
 		def.RawHeritage == nil &&
 		def.User == nil &&

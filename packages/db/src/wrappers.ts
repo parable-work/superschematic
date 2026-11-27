@@ -797,6 +797,13 @@ export type RollupOn =
       readonly gatedStates?: readonly string[];
       /** The outcomes a linked row's terminal state must have to count; every outcome when absent. */
       readonly outcomes?: readonly WorkflowOutcome[];
+      /**
+       * The moves into the gated states the gate lets through though the
+       * rollup does not hold (D104's Barrier): a caller's who holds
+       * permission, and the move each named deadline of the table's Timers
+       * makes as it falls due, its then moving into a gated state.
+       */
+      readonly exemptions?: { readonly permission?: string; readonly deadlines?: readonly string[] };
     });
 
 /** Rollups' config on a table (D104's step 4): the rollups, by name. */

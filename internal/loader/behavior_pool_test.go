@@ -117,7 +117,7 @@ func TestPoolFixturesLoad(t *testing.T) {
 	if want := []string{
 		"AccountActions.poolMarkOut account/{id}/pool/mark-out (id,input) account_pool_mark_out Pool accounts.pool",
 		"AccountActions.poolReportRoom account/{id}/pool/report-room (id,input) account_pool_report_room Pool accounts.pool",
-		"AccountActions.poolPick account/pool/pick (input) account_pool_pick Pool accounts.pool table",
+		"AccountActions.poolPick account/pool/pick (input) account_pool_pick Pool  table",
 		"AccountActions.budgetReserve account/{id}/budget/reserve (id,input) account_budget_reserve Budget accounts.observe",
 		"AccountActions.budgetCheckReserve account/{id}/budget/check-reserve (id,input) account_budget_check_reserve Budget accounts.observe",
 		"AccountActions.budgetRecordUsage account/{id}/budget/record-usage (id,input) account_budget_record_usage Budget accounts.observe",

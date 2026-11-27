@@ -238,6 +238,31 @@ impl Runtime {
         })
     }
 
+    /// The host whose core and declarations run the declarative behaviors
+    /// (D103's step 5) of declaration files, each whole, after the core's
+    /// own: a project whose compiler registers them, so its publish plans
+    /// their columns and sub-tables, serves them through the core here. A
+    /// file the vocabulary does not read, one that names a behavior the
+    /// core implements, and two files of one name that differ are refused
+    /// as `invalid_argument`.
+    pub fn declaring(mut self, declarations: &[Value]) -> Result<Self, Refusal> {
+        let refused = |reason: String| Refusal::invalid_argument(format!("declarations: {reason}"));
+        let core = Arc::new(
+            superschematic_rules_behaviors::core_declaring(declarations).map_err(refused)?,
+        );
+        let declared = Arc::new(Declarations::ported_with(declarations).map_err(refused)?);
+        self.store.core = core.clone();
+        self.store.declarations = declared.clone();
+        self.core = core;
+        self.declarations = declared;
+        Ok(self)
+    }
+
+    /// The core the host runs.
+    pub fn core(&self) -> &Core {
+        &self.core
+    }
+
     /// The host with the binaries a publish runs.
     pub fn with_binaries(mut self, binaries: Binaries) -> Self {
         self.binaries = binaries;

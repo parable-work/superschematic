@@ -21,7 +21,7 @@
 //! writes of the rows that point at its row too. Workflow's transitions name
 //! who makes them, and a move to the state a row is in may answer as no
 //! change, in step 1 of D104's ([`subjects`] is how a field names a
-//! subject). [`Constants`], [`StateRules`] and [`Approvals`], in step 2 of
+//! subject). Constants, StateRules and [`Approvals`], in step 2 of
 //! D104's order of the work, each with its upgrade: fields that move one
 //! way, who may change a frozen field, and gates whose sign-offs a change
 //! of chosen fields consumes and that pin the version their signer read.
@@ -100,6 +100,16 @@
 //! a shared table keyed by the name's normalized form, which a create gives
 //! the behavior (the declaration's `fromCreate`) and a removed alias or a
 //! delete frees ([`superschematic_rules::Cx::delete_shared`]).
+//! [`Declarative`], D103's step 5: a behavior with no Rust of its own,
+//! whose declaration file states its rules in a fixed vocabulary this
+//! crate interprets (conditions in the ORM's filter grammar with the
+//! caller as an operand, Constants' and StateRules' field rules, guards,
+//! an operation's effects, reactions and fields derived from a sub-table),
+//! one value per file a host hands its core ([`core_declaring`]).
+//! Constants and StateRules are two (step 5's question, D104): the core
+//! runs each from its registered declaration, whose `rules` hand the
+//! vocabulary's field rules ([`Constants`], [`StateRules`]) the use's
+//! config.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -134,6 +144,7 @@ pub mod capacity;
 pub mod comments;
 pub mod constants;
 pub mod currency;
+pub mod declarative;
 mod declared;
 pub mod dependencies;
 pub mod derived;
@@ -175,6 +186,7 @@ pub use constants::{
     Constants, ConstantsConfig, ConstantsOneWay, OneWayDirection, OneWayKind, ONE_WAY_BOOLEANS,
     ONE_WAY_NUMBERS,
 };
+pub use declarative::{is_declarative, Declarative, DeclarativeConfig};
 pub use dependencies::{BlockerRecord, Dependencies, DependenciesConfig};
 pub use derived::{Derived, DerivedConfig, DerivedField};
 pub use holds::{Holds, HoldsConfig};
@@ -294,8 +306,8 @@ pub fn core() -> Core {
     Core::new()
         .with(Workflow)
         .with(Reactions)
-        .with(Constants)
-        .with(StateRules)
+        .with(registered(constants::DECLARATION))
+        .with(registered(staterules::DECLARATION))
         .with(Approvals)
         .with(Timers)
         .with(Lease)
@@ -320,6 +332,55 @@ pub fn core() -> Core {
         .with(Recurrence)
         .with(Blueprint)
         .with(Aliased)
+}
+
+// registered is a behavior of the core whose registered declaration states
+// its rules (D103's step 5): Constants and StateRules, which the core runs
+// as declarations, their rules the vocabulary's field rules. A file that
+// does not read is a defect of this crate, which its tests catch.
+fn registered(text: &str) -> Declarative {
+    Declarative::from_text(text).unwrap_or_else(|reason| panic!("a core declaration: {reason}"))
+}
+
+/// The declarative behaviors (D103's step 5) of declaration files a host
+/// hands the core, each parsed and its rules checked
+/// ([`Declarative::from_document`]), in order. A file the vocabulary does
+/// not read, one that names a behavior [`core`] registers, and two files
+/// of one name that differ are refused with the reason; a file given twice
+/// is one behavior.
+pub fn declaratives(documents: &[serde_json::Value]) -> Result<Vec<Declarative>, String> {
+    let mut out: Vec<Declarative> = Vec::new();
+    for document in documents {
+        let declared = Declarative::from_document(document)?;
+        if NAMES.contains(&declared.name()) {
+            return Err(format!(
+                "behavior {}: the core implements it, and a declaration cannot replace it",
+                declared.name()
+            ));
+        }
+        match out.iter().find(|known| known.name() == declared.name()) {
+            Some(known) if known.document() == declared.document() => continue,
+            Some(_) => {
+                return Err(format!(
+                    "behavior {}: two declarations of it differ",
+                    declared.name()
+                ))
+            }
+            None => out.push(declared),
+        }
+    }
+    Ok(out)
+}
+
+/// [`core`] with the declarative behaviors of declaration files a host
+/// hands it ([`declaratives`]), after the core's own, in order: what a
+/// host runs a project whose behaviors include declared ones on.
+pub fn core_declaring(documents: &[serde_json::Value]) -> Result<Core, String> {
+    let mut core = core();
+    for declared in declaratives(documents)? {
+        core.push(declared);
+    }
+    Ok(core)
 }
 
 #[cfg(test)]

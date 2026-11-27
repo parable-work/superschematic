@@ -668,6 +668,20 @@ and the hooks it needs, each with a default:
 `GuardRequest`, `Change`, `Heard` and `ValidationRequest` are open, so a hook matches
 the cases it handles with a fallback arm.
 
+A behavior may be declared with no Rust of its own (D103's step 5): its
+declaration file's `rules` state its rules in a fixed vocabulary, and
+`superschematic_rules_behaviors::Declarative` is one `Behavior` that
+interprets them, one value per declaration
+(`Declarative::from_document(&file)`, checked against the file). A host
+hands its core the files whole (`core_declaring(&files)`, the bindings'
+`declare`). The vocabulary's conditions, field rules, guards, effects,
+reactions and derived fields are the reference page's
+(`docs/src/content/docs/reference/declarative-behaviors.md`). Its
+Constants and StateRules rules are each behavior's own hooks, handed the
+part of the use's config each reads through `View::with_config` and
+`Cx::with_config`, which a view or a context of one use makes for another
+config the use's own holds.
+
 Every hook returns `Hook<T>`, a `Result<T, Stop>`, and passes on with `?`
 every `Stop` it does not make itself. A hook runs on one row, the command's
 or one a call reached. A `View` (guards, validation) reads: `config()`,
@@ -1227,6 +1241,14 @@ none, and a write's image (`ImageColumns`) leaves it out, so no hearing
 rule hears it. `behaviorlayout.AuditFields` is the Go form. A relation, a
 list or another audit field (`updatedBy`, `deletedBy`, the audit times) is
 not in it.
+
+A layout whose tables compose a declarative behavior (D103's step 5)
+holds each one's declaration file whole, once, by name, in `declarations`
+beside `types`. An adapter hands them to its core before it checks the
+layout's specs: TypeScript's through `RulesCore.declare`, Go's through a
+core that is a `rules.Declarer` (Native's), and a Rust host builds its
+core with `core_declaring(&layout.declarations)`. A layout whose uses name
+none has no `declarations`.
 
 A layout of a table with neither is as it was. A sub-table's `row` is the
 column holding the row's key, which binds as the row table's key binds; its

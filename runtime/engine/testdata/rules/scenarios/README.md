@@ -100,6 +100,41 @@ writes them, and `test/corpus.test.ts` does not list them.
   a removed alias taken by another row; `resolve`, a call of the table as
   a whole; a delete that frees the row's names; and the define refusals.
   No engine implements Aliased.
+- `core-bundles.json` (D103, step 5): the core's bundles, each a table
+  whose uses are the parts the loader expands the bundle into, which
+  `internal/loader`'s `TestBundleScenariosAreTheLoadersParts` holds the
+  defines to. Reservation: a booking's hold of its room's time as it
+  enters held, Payments holding booked until it is paid, the commit, a
+  second hold of the time unavailable, the Timers deadline that expires a
+  hold and lets the time go, and a cancellation. Barrier: Rollups' gate,
+  which holds a caller without the release permission until every agent
+  is ready, and its exemptions, which let the deadline's release at the
+  timeout and a go-ahead by the permission's holder through before then;
+  a release once every agent is ready; and a cancelled rollout's
+  deadline skipped. Mailbox: the
+  sender's moves by `createdBy`, the taker's permission and lease, the
+  token presented with the move to taken, StateRules' freeze, the
+  lease's expiry back to queued and a send. Assignment: one seat of one
+  subject, a take refused while it is full, `seat:assignee` on the
+  Workflow, and an assign of another. No engine implements a bundle.
+- `core-declarative.json` (D103, step 5): the declarative vocabulary over
+  test.Votes, a behavior whose declaration states its rules and which no
+  Rust implements (`../declarations/test.Votes.behavior.json`): a vote that
+  upserts the caller's row of a sub-table, its parameter held to the
+  config's maxScore; fields derived from the rows as a count, a sum, an
+  average, a highest, a lowest and a filtered count; guards over the row,
+  the Workflow's status and the caller; a counter; an operation's move;
+  two reactions heard from the change queue; the field rules Constants
+  and StateRules have; and the define refusals. Its `declarations` lists
+  the declaration files, from this directory, which the replay hands the
+  core and the transcript holds whole. The acme example keeps acme.Rating's
+  cases the same way (`examples/acme-schematic/testdata/rules/acme-rating.json`),
+  whose transcript is `../acme-rating.transcript.json`.
+
+Constants and StateRules are declarative behaviors of the core itself
+(step 5's question): their registered declarations state rules that read
+the use's config, and the files that compose them replay on the core that
+runs them from those declarations.
 
 A step's answer holds what the replayer compares: a record's id, `data`
 and `behaviors`, an operation's result, an event's kind and change, and a
@@ -125,7 +160,9 @@ A test behavior a file composes is the test kit's fixture
 `runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/schedules_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/pool_scenarios.rs`,
-`runtime/engine/rust/rules-testkit/tests/aliased_scenarios.rs` and
+`runtime/engine/rust/rules-testkit/tests/aliased_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/bundles_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/declarative_scenarios.rs` and
 `runtime/engine/rust/rules-testkit/tests/comments_scenarios.rs` replay each file on
 the reference host, and `runtime/engine/rust/rules-testkit/tests/transcript.rs` writes each
 one's transcript to `../<name>.transcript.json` with

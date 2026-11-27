@@ -14,7 +14,8 @@ import (
 // @optimistic that use implies, and so do the sub-tables, the deadline
 // queue, the change queue and the event queue a table's behaviors keep, and
 // the queues and events a @behaviorWorker is given (D103, D104), with the
-// types of those events, which carry an Origin. The declarations stay, so
+// types of those events, which carry an Origin, and the uses a bundle adds
+// for the bundle a table lists (D103, step 5). The declarations stay, so
 // a written schema file expands to the
 // same IR when it is read back. schema itself is not modified.
 func withoutExpansion(schema *ir.Schema) *ir.Schema {
@@ -111,6 +112,11 @@ func typeHasExpansion(td *ir.TypeDef) bool {
 	if td.Optimistic && !td.Versioned && len(td.TableBehaviors()) > 0 {
 		return true
 	}
+	for _, use := range td.Behaviors {
+		if use.FromBundle() {
+			return true
+		}
+	}
 	for _, fd := range td.Fields {
 		if fd.Origin != "" || fd.Owned() {
 			return true
@@ -138,6 +144,20 @@ func typeHasExpansion(td *ir.TypeDef) bool {
 // again.
 func authoredType(td *ir.TypeDef) *ir.TypeDef {
 	copied := *td
+	// A bundle the table lists is written in place of its parts, which
+	// reading it back adds again (D103, step 5); the parts of one the
+	// project declares in TypeScript, which the data forms cannot name,
+	// are written as the table's own uses.
+	copied.Behaviors = nil
+	for _, use := range td.Behaviors {
+		if use.FromBundle() {
+			if _, listed := td.Bundle(use.Bundle); listed {
+				continue
+			}
+			use.Bundle = ""
+		}
+		copied.Behaviors = append(copied.Behaviors, use)
+	}
 	copied.Fields = nil
 	owned := false
 	for _, fd := range td.Fields {

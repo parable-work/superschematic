@@ -298,7 +298,14 @@ func RegisterCore(reg *registry.Registry) error {
 			RendersFieldBehaviors: true,
 			Generate: func(c registry.GenerateContext) error {
 				r := run{c}
-				return r.measure("output.engine-rust", r.generateProjectEngine)
+				if err := r.measure("output.engine-rust", r.generateProjectEngine); err != nil {
+					return err
+				}
+				// And the project's rules crate of a DB schema whose
+				// tables compose a behavior a class or an extension
+				// declares with its crate (D103's step 5), beside it,
+				// which claims no directory either.
+				return r.measure("output.rules-rust", r.generateRulesCore)
 			},
 		},
 		{

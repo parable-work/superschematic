@@ -275,6 +275,55 @@ describe.skipIf(rulesCore === undefined)('the host loop on the core', () => {
     expect(await readRow(host(iso.store), 'Order', key)).toEqual({ own: {}, owned: { status: { enteredAt: 1234 } }, version: 1 });
   });
 
+  test("a layout's declarations are handed to the core before its check, once, and a declarative behavior then runs on the table (D103 step 5)", async () => {
+    const tally = {
+      name: 'test.Tally',
+      fields: [{ name: 'count', type: 'Generic.Int64' }],
+      operations: [{ name: 'add', paramsSchema: { type: 'object', additionalProperties: false }, resultSchema: { type: 'object' }, writes: true }],
+      rules: {
+        operations: { add: { effects: [{ adjust: { count: 1 } }], result: { count: { field: 'count' } } } },
+        derived: {},
+      },
+    };
+    const counter: RulesLayout = {
+      types: {
+        Counter: {
+          type: 'Counter',
+          table: 'counter',
+          key: { field: 'id', column: 'id', type: 'Identity.UUID' },
+          version: '_version',
+          own: [],
+          uses: [
+            {
+              id: 'test.Tally',
+              behavior: 'test.Tally',
+              member: 'testTally',
+              fields: [{ name: 'count', field: 'testTallyCount', column: 'test_tally_count', type: 'Generic.Int64' }],
+              operations: [{ name: 'add', writes: true }],
+            },
+          ],
+          spec: { name: 'Counter', uses: [{ behavior: 'test.Tally', anchor: 'type' }] },
+        },
+      },
+      declarations: [tally],
+    };
+    const handed: (readonly object[])[] = [];
+    const declaring: RulesCore = {
+      run: (s, c, a) => rulesCore!.run(s, c, a),
+      check: specs => rulesCore!.check!(specs),
+      declare: declarations => (handed.push(declarations), rulesCore!.declare!(declarations)),
+    };
+    const { store, recorded } = memoryStore('postgres', { c0: '2', v: '1' });
+    const h: RulesHost = { core: declaring, layout: counter, store, request: () => 'req' };
+    const add: CoreCommand = { caller: alice, now: 2000, request: 'r2', action: { kind: 'operation', key, useId: 'test.Tally', operation: 'add', params: {} } };
+    for (let i = 0; i < 2; i++) {
+      expect(await runOperation(h, 'Counter', key, 'test.Tally', 'add', {}, alice)).toEqual({ count: 3 });
+    }
+    expect(handed).toEqual([[tally]]);
+    expect(recorded.applied.at(-1)?.[0]?.text).toContain('"test_tally_count" = $');
+    expect((await execute(h, 'Counter', add)).result).toEqual({ count: 3 });
+  });
+
   test("a layout's spec the core refuses refuses every command on its type, checked once", async () => {
     const broken: RulesLayout = { types: { Order: { ...layout.types.Order!, spec: { name: 'Order', uses: [{ behavior: 'Workflow', config: { states: [] }, anchor: { field: 'status' } }] } } } };
     let checks = 0;

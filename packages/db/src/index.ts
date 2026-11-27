@@ -141,6 +141,17 @@ export type {
   WorkflowConfig,
   WorkflowTransitionOn,
 } from "./wrappers";
+export type {
+  Assignment,
+  AssignmentSettings,
+  Barrier,
+  BarrierSettings,
+  Bundle,
+  Mailbox,
+  MailboxSettings,
+  Reservation,
+  ReservationSettings,
+} from "./bundles";
 export type { IdempotencyKeys, RoleSeed, User, UserConfig, UserRole } from "./user";
 export type { Mergeable } from "./mergeable";
 export { seedRoles } from "./user";
@@ -156,3 +167,22 @@ export type { ConversationsPart, PartyOptions } from "./parties";
 export type { AttachmentsOptions, ReferencesOptions } from "./rowrefs";
 export { searchable } from "./search";
 export type { SearchableOptions } from "./search";
+export { computed, declaresBehavior, fromCreate, perReader, subTable, valueField, volatile } from "./behaviorclass";
+export type {
+  Behavior,
+  BehaviorCrate,
+  BehaviorField,
+  Capacity,
+  Const,
+  DeclarativeRules,
+  DeclaresBehaviorOptions,
+  Hears,
+  Integer,
+  JsonSchema,
+  Names,
+  OneOf,
+  Open,
+  RowKey,
+  SubTableOptions,
+  Supply,
+} from "./behaviorclass";

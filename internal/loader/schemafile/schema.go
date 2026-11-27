@@ -122,6 +122,10 @@ func generateDefinition(reg *registry.Registry) ([]byte, error) {
 		return nil, err
 	}
 
+	if err := closeBundles(defs, reg); err != nil {
+		return nil, err
+	}
+
 	if err := behaviorWorkerQueue(defs); err != nil {
 		return nil, err
 	}
@@ -509,6 +513,68 @@ func closeBehaviors(defs map[string]any, reg *registry.Registry) error {
 		def["allOf"] = branches
 	}
 	defs["BehaviorRef"] = def
+	return nil
+}
+
+// closeBundles replaces the reflected $defs/BundleRef, whose settings are
+// any JSON, with one closed to the registry's bundles (D103, step 5): name
+// is one of the registered names, and each bundle's settings are checked
+// against its settings schema, as a behavior's config is against its
+// config schema. A bundle without a settings schema takes none, which the
+// empty closed object expresses; one whose schema rejects {} makes the
+// key required. With no bundle registered a type's bundles list takes no
+// entry (maxItems 0) and name has no enum.
+func closeBundles(defs map[string]any, reg *registry.Registry) error {
+	if _, ok := defs["BundleRef"]; !ok {
+		return fmt.Errorf("generated schema is missing the BundleRef definition")
+	}
+	typeProps, err := propertiesOf(defs, "TypeDef")
+	if err != nil {
+		return err
+	}
+	list, ok := typeProps["bundles"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("$defs/TypeDef has no bundles property")
+	}
+	bundles := reg.Bundles()
+	names := make([]any, 0, len(bundles))
+	branches := make([]any, 0, len(bundles))
+	for _, b := range bundles {
+		names = append(names, b.Name)
+		settings := any(closedObject(nil))
+		if len(b.SettingsSchema) > 0 {
+			if err := json.Unmarshal(b.SettingsSchema, &settings); err != nil {
+				return fmt.Errorf("bundle %s settingsSchema: %w", b.Name, err)
+			}
+		}
+		then := map[string]any{"properties": map[string]any{"settings": settings}}
+		if b.SettingsRequired() {
+			then["required"] = []any{"settings"}
+		}
+		branches = append(branches, map[string]any{
+			"if":   map[string]any{"properties": map[string]any{"name": map[string]any{"const": b.Name}}},
+			"then": then,
+		})
+	}
+	name := map[string]any{"type": "string"}
+	if len(names) > 0 {
+		name["enum"] = names
+	} else {
+		list["maxItems"] = 0
+	}
+	def := map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []any{"name"},
+		"properties": map[string]any{
+			"name":     name,
+			"settings": map[string]any{},
+		},
+	}
+	if len(branches) > 0 {
+		def["allOf"] = branches
+	}
+	defs["BundleRef"] = def
 	return nil
 }
 

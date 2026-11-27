@@ -3,8 +3,8 @@
 // reached through the JSON C ABI of superschematic-rules-wasm's native
 // build, and the one host loop every Go caller runs it through.
 //
-// The binding (RunJSON, DeclarationsJSON, CheckJSON, ExpandJSON and Expand,
-// and Native's Core over them) sends one JSON document through the C ABI and reads one back. The
+// The binding (RunJSON, DeclarationsJSON, CheckJSON, ExpandJSON, Expand,
+// DeclareJSON and Declare, and Native's Core over them) sends one JSON document through the C ABI and reads one back. The
 // contract's types mirror the core's JSON as @superschematic/rules's
 // contract.ts does, every value of the core's own (a config, a parameter,
 // an own or owned value) held as json.RawMessage, so a number keeps its
@@ -68,6 +68,46 @@ func DeclarationsJSON() ([]byte, error) {
 // null or a refusal per spec.
 func CheckJSON(input []byte) ([]byte, error) {
 	return call(opCheck, input)
+}
+
+// DeclareJSON is rules_declare: {"declarations": [file]}, the declaration
+// files of declarative behaviors (D103's step 5), each whole, to
+// {"declared": [name]}, every declarative behavior the core runs since.
+func DeclareJSON(input []byte) ([]byte, error) {
+	return call(opDeclare, input)
+}
+
+// Declare hands the native core the declaration files of declarative
+// behaviors (D103's step 5): behaviors whose declarations state their rules
+// in the vocabulary the core interprets, which no Rust implements. The
+// process's core runs them from then on, after its own, and Native's
+// Declarations lists their files after its own. It returns the name of
+// every declarative behavior the core runs. A file the vocabulary does not
+// read, one that names a behavior the core implements, and a second file of
+// a declared name that differs are an *Error of code invalid_input; a file
+// declared again is one behavior.
+func Declare(files ...json.RawMessage) ([]string, error) {
+	if files == nil {
+		files = []json.RawMessage{}
+	}
+	in, err := json.Marshal(struct {
+		Declarations []json.RawMessage `json:"declarations"`
+	}{files})
+	if err != nil {
+		return nil, fmt.Errorf("rules: encode the declarations: %w", err)
+	}
+	out, err := DeclareJSON(in)
+	declared.forget()
+	if err != nil {
+		return nil, err
+	}
+	var answer struct {
+		Declared []string `json:"declared"`
+	}
+	if err := json.Unmarshal(out, &answer); err != nil {
+		return nil, fmt.Errorf("rules: decode the core's declare: %w", err)
+	}
+	return answer.Declared, nil
 }
 
 // ExpandJSON is rules_expand: a recurrence (D152) to its dated
@@ -152,6 +192,7 @@ const (
 	opDeclarations
 	opCheck
 	opExpand
+	opDeclare
 )
 
 // call runs one operation of the core on a JSON input and returns its
@@ -177,6 +218,8 @@ func call(o op, in []byte) ([]byte, error) {
 		code = C.rules_check(inPtr, inLen, &outPtr, &outLen)
 	case opExpand:
 		code = C.rules_expand(inPtr, inLen, &outPtr, &outLen)
+	case opDeclare:
+		code = C.rules_declare(inPtr, inLen, &outPtr, &outLen)
 	default:
 		return nil, fmt.Errorf("rules: unknown operation %d", o)
 	}
@@ -217,6 +260,14 @@ type Core interface {
 	Check(specs []TypeSpec) ([]*Refusal, error)
 }
 
+// Declarer is a core that runs declarative behaviors (D103's step 5) once
+// it is handed their declaration files: Native's, whose Declare is the
+// package's. The adapter hands a layout's declarations to a core that is
+// one before it checks the layout's specs.
+type Declarer interface {
+	Declare(files ...json.RawMessage) ([]string, error)
+}
+
 // Native is the core the static archive holds, with every behavior ported
 // so far registered. The archive builds it once per process, the first
 // time any operation runs, and every goroutine shares it; each call is a
@@ -227,6 +278,12 @@ func Native() Core {
 }
 
 type nativeCore struct{}
+
+// Declare is the package's Declare: the process's native core runs the
+// files' behaviors from then on.
+func (nativeCore) Declare(files ...json.RawMessage) ([]string, error) {
+	return Declare(files...)
+}
 
 // runInput is rules_run's input document.
 type runInput struct {
@@ -251,12 +308,37 @@ func (nativeCore) Run(spec TypeSpec, command Command, answers Answers) (Step, er
 	return step, nil
 }
 
-// declarations are the archive's declaration files, read once: they are
-// the documents the archive was built with, which no call changes.
-var declarations = sync.OnceValues(DeclarationsJSON)
+// declared holds the archive's declaration files, read once and again
+// after a Declare, which adds the files of the behaviors it declares.
+var declared declarationsCache
+
+type declarationsCache struct {
+	mu   sync.Mutex
+	text []byte
+}
+
+func (c *declarationsCache) read() ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.text != nil {
+		return c.text, nil
+	}
+	out, err := DeclarationsJSON()
+	if err != nil {
+		return nil, err
+	}
+	c.text = out
+	return out, nil
+}
+
+func (c *declarationsCache) forget() {
+	c.mu.Lock()
+	c.text = nil
+	c.mu.Unlock()
+}
 
 func (nativeCore) Declarations() ([]Declaration, error) {
-	out, err := declarations()
+	out, err := declared.read()
 	if err != nil {
 		return nil, err
 	}

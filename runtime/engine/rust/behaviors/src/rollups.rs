@@ -670,6 +670,12 @@ impl Behavior for Rollups {
         let mut parsed = Vec::new();
         for name in js_keys(rollups) {
             let entry = &rollups[name];
+            // A gate's exemptions are a table's Rollups' (D104's Barrier).
+            if entry.get("exemptions").is_some() {
+                return Err(Error::config(format!(
+                    "rollup {name} names exemptions, which a table's Rollups takes: an engine type's gate holds every move into a state it gates"
+                )));
+            }
             let text = |key: &str| {
                 entry
                     .get(key)

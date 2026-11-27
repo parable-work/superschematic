@@ -1230,12 +1230,27 @@ func TestRulesBehaviorsAreTheTranscripts(t *testing.T) {
 		}
 		var transcript struct {
 			Behaviors []string `json:"behaviors"`
+			// Declarations are the declarative behaviors' files (D103's
+			// step 5), whose names follow the core's own.
+			Declarations []struct {
+				Name string `json:"name"`
+			} `json:"declarations"`
 		}
 		if err := json.Unmarshal(data, &transcript); err != nil {
 			t.Fatalf("%s: %v", file, err)
 		}
-		if !slices.Equal(transcript.Behaviors, RulesBehaviors) {
-			t.Errorf("%s records the behaviors %v, and RulesBehaviors is %v", filepath.Base(file), transcript.Behaviors, RulesBehaviors)
+		declared := len(transcript.Declarations)
+		if declared > len(transcript.Behaviors) {
+			t.Fatalf("%s declares %d behaviors and records %d", filepath.Base(file), declared, len(transcript.Behaviors))
+		}
+		own := transcript.Behaviors[:len(transcript.Behaviors)-declared]
+		for i, declaration := range transcript.Declarations {
+			if got := transcript.Behaviors[len(own)+i]; got != declaration.Name {
+				t.Errorf("%s records %s where it declares %s", filepath.Base(file), got, declaration.Name)
+			}
+		}
+		if !slices.Equal(own, RulesBehaviors) {
+			t.Errorf("%s records the behaviors %v, and RulesBehaviors is %v", filepath.Base(file), own, RulesBehaviors)
 		}
 	}
 	reg := New(naming.Default())
@@ -1250,7 +1265,8 @@ func TestRulesBehaviorsAreTheTranscripts(t *testing.T) {
 
 // BehaviorListens reads the tables a Reactions use hears through a relation
 // of theirs, in rule order, each once: an allTerminal and an anyTerminal
-// rule over one link are one listen; any other behavior, and a config that
+// rule over one link are one listen, read through the listen references
+// of its declaration (D103's step 5); any other behavior, and a config that
 // does not read, listens to none (D103).
 func TestBehaviorListens(t *testing.T) {
 	config := json.RawMessage(`{"rules": [
@@ -1260,14 +1276,15 @@ func TestBehaviorListens(t *testing.T) {
 		{"when": {"anyTerminal": {"schema": "Milestone", "link": "owner", "outcomes": ["failure"]}}, "then": {"transition": "failed"}}
 	]}`)
 	want := []BehaviorListen{{Type: "Task", Link: "project"}, {Type: "Milestone", Link: "owner"}}
-	if got := BehaviorListens("Reactions", config); !slices.Equal(got, want) {
+	reg := New(naming.Default())
+	if got := reg.BehaviorListens("Reactions", config); !slices.Equal(got, want) {
 		t.Errorf("BehaviorListens = %+v, want %+v", got, want)
 	}
 	for _, tc := range []struct {
 		name   string
 		config string
 	}{{"Timers", `{"deadlines": {}}`}, {"Reactions", ``}, {"Reactions", `[1]`}, {"Reactions", `{"rules": [{"when": {"enters": "a"}}]}`}} {
-		if got := BehaviorListens(tc.name, json.RawMessage(tc.config)); len(got) != 0 {
+		if got := reg.BehaviorListens(tc.name, json.RawMessage(tc.config)); len(got) != 0 {
 			t.Errorf("BehaviorListens(%s, %s) = %+v, want none", tc.name, tc.config, got)
 		}
 	}

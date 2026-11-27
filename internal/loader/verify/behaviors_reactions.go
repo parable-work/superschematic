@@ -49,8 +49,10 @@ type reactionsTerminal struct {
 // implements to the table and the tables of its database (D103), in the
 // core's words where the core has them (superschematic_rules_behaviors::
 // reactions), each problem `type <T>: behavior Reactions config: <reason>`
-// and, like the core, the first reported: the status, then each changes
-// rule's field, then each holds and revised rule, which wait for step 4,
+// and, like the core, the first reported: the status, which its
+// declaration's references state and configReferencesHold holds first
+// (D103's step 5), then each changes rule's field, then each holds and
+// revised rule, which wait for step 4,
 // then each rule's read of the status, then each rule's cross-table facts,
 // its when's linking table and relation and its then's target. These are
 // the rules of Reactions' config that read the IR, which the build checks
@@ -79,10 +81,8 @@ func checkReactionsConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef,
 	if len(workflows) > 0 {
 		listed = strings.Join(workflows, ", ")
 	}
-	if config.Status != nil && !slices.Contains(workflows, *config.Status) {
-		fail("status %q is not a Workflow of the type (its Workflows: %s)", *config.Status, listed)
-		return
-	}
+	// Reactions' references held the status (D103's step 5): it names a
+	// Workflow of the type.
 	for i, rule := range config.Rules {
 		if rule.When.Changes == nil {
 			continue

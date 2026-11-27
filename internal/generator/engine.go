@@ -10,6 +10,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/enginedoc"
 	"github.com/parable-work/superschematic/internal/generator/projectengine"
+	"github.com/parable-work/superschematic/internal/generator/rulescore"
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
@@ -325,6 +326,43 @@ func (r run) generateProjectEngine() error {
 		return fmt.Errorf("generator: engine crate for %s: %w", r.Config.Name, err)
 	}
 	r.Done("engine-rust", dir)
+	return nil
+}
+
+// generateRulesCore writes the project's rules crate of a DB schema whose
+// tables compose a behavior a class or an extension declares with the Rust
+// crate that runs it on the core (D103's step 5) into rules/rust/<schema>
+// (internal/generator/rulescore), and removes the one an earlier build
+// wrote when the schema needs none now. A composed behavior whose crate
+// the project does not hold leaves no core that can run the schema, and
+// the log says so.
+func (r run) generateRulesCore() error {
+	if r.Schema.Kind != ir.SchemaKindDB {
+		return nil
+	}
+	dir := RulesDir(r.Options.OutputRoot, LangRust, r.Config.Name)
+	crate, why, err := rulescore.Build(r.Schema, rulescore.Options{
+		SchemaName:     r.Config.Name,
+		Registry:       r.Registry,
+		Naming:         r.Options.Naming,
+		RepositoryRoot: r.Options.RepositoryRoot,
+		Paths:          r.Options.Paths,
+		Dir:            dir,
+		RustVersion:    servergen.RustVersion,
+	})
+	if err != nil {
+		return fmt.Errorf("generator: rules crate for %s: %w", r.Config.Name, err)
+	}
+	if crate == nil {
+		if why != "" {
+			r.Logf("  - rules-rust: %s\n", why)
+		}
+		return rulescore.RemoveStale(dir)
+	}
+	if err := crate.Write(dir); err != nil {
+		return fmt.Errorf("generator: rules crate for %s: %w", r.Config.Name, err)
+	}
+	r.Done("rules-rust", dir)
 	return nil
 }
 

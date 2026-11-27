@@ -156,7 +156,9 @@ func TestCatalogListsTheConstantsPermissionUnderAnUpdate(t *testing.T) {
 	if got, want := operationsOf(catalog, "tasks.admin"), []string{"TaskAdminReassignTaskHandler"}; !slices.Equal(got, want) {
 		t.Errorf("tasks.admin is needed by %v, want %v", got, want)
 	}
-	if got, want := operationsOf(catalog, "tasks.review"), []string{"TaskApprovalsListSignOffsHandler", "TaskApprovalsSignOffHandler", "TaskApprovalsWithdrawSignOffHandler"}; !slices.Equal(got, want) {
+	// Approvals' declaration says signOff checks a gate's permission, and
+	// withdrawSignOff and listSignOffs none (D103's step 5).
+	if got, want := operationsOf(catalog, "tasks.review"), []string{"TaskApprovalsSignOffHandler"}; !slices.Equal(got, want) {
 		t.Errorf("tasks.review is needed by %v, want %v", got, want)
 	}
 

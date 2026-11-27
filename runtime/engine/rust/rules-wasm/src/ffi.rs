@@ -20,11 +20,14 @@
 //! call from any number of threads at once, all of which run one core.
 //!
 //! The operations ([`crate`] says each one's documents): `rules_run`,
-//! `rules_declarations`, `rules_check` and `rules_expand`.
+//! `rules_declarations`, `rules_check`, `rules_expand` and `rules_declare`,
+//! which [`crate::export_rules_abi`] defines over a core: the stock core's,
+//! at this crate's root, with its default `abi` feature, or a project's
+//! (D103's step 5), at its rules crate's.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use crate::{error_document, run_json, Op};
+use crate::{error_document, Op};
 
 /// The output is the operation's result.
 pub const RULES_OK: i32 = 0;
@@ -34,10 +37,15 @@ pub const RULES_ERROR: i32 = 1;
 /// length; nothing was written.
 pub const RULES_BAD_ARGUMENTS: i32 = 2;
 
+/// Runs op on its input through run, a core's [`crate::run_json_on`], and
+/// writes its output document through the out pointers: the body of each
+/// `rules_<op>` export.
+///
 /// # Safety
 /// `in_ptr` must point to `in_len` readable bytes (it may be null when
 /// `in_len` is 0), and `out_ptr` and `out_len` must be valid for writes.
-unsafe fn call(
+pub unsafe fn call_with(
+    run: fn(Op, &[u8]) -> (String, bool),
     op: Op,
     in_ptr: *const u8,
     in_len: usize,
@@ -57,13 +65,12 @@ unsafe fn call(
     // first built poisons it, and every later call answers internal too).
     // On wasm32-unknown-unknown it aborts the module instead, which the
     // host reports as the instance's trap.
-    let (document, ok) =
-        catch_unwind(AssertUnwindSafe(|| run_json(op, input))).unwrap_or_else(|_| {
-            (
-                error_document("internal", &format!("{} panicked", op.name())),
-                false,
-            )
-        });
+    let (document, ok) = catch_unwind(AssertUnwindSafe(|| run(op, input))).unwrap_or_else(|_| {
+        (
+            error_document("internal", &format!("{} panicked", op.name())),
+            false,
+        )
+    });
     let (ptr, len) = into_raw(document.into_bytes());
     out_ptr.write_unaligned(ptr);
     out_len.write_unaligned(len);
@@ -80,14 +87,6 @@ fn into_raw(bytes: Vec<u8>) -> (*mut u8, usize) {
     (Box::into_raw(bytes).cast::<u8>(), len)
 }
 
-/// # Safety
-/// `ptr` and `len` must come from one [`into_raw`] call, not yet released.
-unsafe fn free_raw(ptr: *mut u8, len: usize) {
-    if !ptr.is_null() {
-        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)));
-    }
-}
-
 /// A zeroed buffer of `len` bytes, released with [`dealloc`].
 pub fn alloc(len: usize) -> *mut u8 {
     into_raw(vec![0; len]).0
@@ -99,97 +98,179 @@ pub fn alloc(len: usize) -> *mut u8 {
 /// `ptr` and `len` must come from [`alloc`] or from an operation's output,
 /// and must not have been released.
 pub unsafe fn dealloc(ptr: *mut u8, len: usize) {
-    free_raw(ptr, len)
+    if !ptr.is_null() {
+        drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(ptr, len)));
+    }
 }
 
-/// `run`: `{"spec", "command", "answers"?}` to the core's step.
-///
-/// # Safety
-/// The input must be readable for `in_len` bytes, and the out pointers
-/// valid for writes.
-#[no_mangle]
-pub unsafe extern "C" fn rules_run(
-    in_ptr: *const u8,
-    in_len: usize,
-    out_ptr: *mut *mut u8,
-    out_len: *mut usize,
-) -> i32 {
-    call(Op::Run, in_ptr, in_len, out_ptr, out_len)
+/// Defines the ABI's exports (`rules_run`, `rules_declarations`,
+/// `rules_check`, `rules_expand`, `rules_declare`, `rules_free`, and on
+/// wasm32 `rules_alloc` and `rules_dealloc`) at the root of the crate it
+/// is invoked in, over the core `core()` builds once, the first time an
+/// operation runs, whose behaviors' declaration files `declarations()`
+/// gives in the core's order, and the declarative behaviors a `declare`
+/// adds to it (D103's step 5), with which it builds the core again
+/// ([`crate::Rules`]). The stock crate invokes it over
+/// `superschematic_rules_behaviors::core` with its `abi` feature; a
+/// project's rules crate over its own core, the core's behaviors and its
+/// crates' (D103's step 5), depending on this crate without that feature,
+/// so the two never export one name twice.
+#[macro_export]
+macro_rules! export_rules_abi {
+    (core = $core:path, declarations = $declarations:path $(,)?) => {
+        static __RULES: ::std::sync::LazyLock<$crate::Rules> = ::std::sync::LazyLock::new(|| {
+            $crate::Rules::new($core, $declarations().into_iter().collect())
+        });
+
+        fn __rules_run(op: $crate::Op, input: &[u8]) -> (::std::string::String, bool) {
+            $crate::run_json_on(&__RULES, op, input)
+        }
+
+        /// `run`: `{"spec", "command", "answers"?}` to the core's step.
+        ///
+        /// # Safety
+        /// The input must be readable for `in_len` bytes, and the out
+        /// pointers valid for writes.
+        #[no_mangle]
+        pub unsafe extern "C" fn rules_run(
+            in_ptr: *const u8,
+            in_len: usize,
+            out_ptr: *mut *mut u8,
+            out_len: *mut usize,
+        ) -> i32 {
+            $crate::ffi::call_with(
+                __rules_run,
+                $crate::Op::Run,
+                in_ptr,
+                in_len,
+                out_ptr,
+                out_len,
+            )
+        }
+
+        /// `declarations`: any input to the registered behaviors'
+        /// declaration files.
+        ///
+        /// # Safety
+        /// As [`rules_run`].
+        #[no_mangle]
+        pub unsafe extern "C" fn rules_declarations(
+            in_ptr: *const u8,
+            in_len: usize,
+            out_ptr: *mut *mut u8,
+            out_len: *mut usize,
+        ) -> i32 {
+            $crate::ffi::call_with(
+                __rules_run,
+                $crate::Op::Declarations,
+                in_ptr,
+                in_len,
+                out_ptr,
+                out_len,
+            )
+        }
+
+        /// `check`: `{"specs", "caller"?, "now"?}` to each spec's define
+        /// check.
+        ///
+        /// # Safety
+        /// As [`rules_run`].
+        #[no_mangle]
+        pub unsafe extern "C" fn rules_check(
+            in_ptr: *const u8,
+            in_len: usize,
+            out_ptr: *mut *mut u8,
+            out_len: *mut usize,
+        ) -> i32 {
+            $crate::ffi::call_with(
+                __rules_run,
+                $crate::Op::Check,
+                in_ptr,
+                in_len,
+                out_ptr,
+                out_len,
+            )
+        }
+
+        /// `expand`: a recurrence (D152) to its dated occurrences.
+        ///
+        /// # Safety
+        /// As [`rules_run`].
+        #[no_mangle]
+        pub unsafe extern "C" fn rules_expand(
+            in_ptr: *const u8,
+            in_len: usize,
+            out_ptr: *mut *mut u8,
+            out_len: *mut usize,
+        ) -> i32 {
+            $crate::ffi::call_with(
+                __rules_run,
+                $crate::Op::Expand,
+                in_ptr,
+                in_len,
+                out_ptr,
+                out_len,
+            )
+        }
+
+        /// `declare`: declarative behaviors' declaration files (D103's
+        /// step 5), which the core runs from then on, to the names of
+        /// every one it runs.
+        ///
+        /// # Safety
+        /// As [`rules_run`].
+        #[no_mangle]
+        pub unsafe extern "C" fn rules_declare(
+            in_ptr: *const u8,
+            in_len: usize,
+            out_ptr: *mut *mut u8,
+            out_len: *mut usize,
+        ) -> i32 {
+            $crate::ffi::call_with(
+                __rules_run,
+                $crate::Op::Declare,
+                in_ptr,
+                in_len,
+                out_ptr,
+                out_len,
+            )
+        }
+
+        /// Releases an output document.
+        ///
+        /// # Safety
+        /// `ptr` and `len` must be an output of one `rules_<op>` call, not
+        /// yet released.
+        #[no_mangle]
+        pub unsafe extern "C" fn rules_free(ptr: *mut u8, len: usize) {
+            $crate::ffi::dealloc(ptr, len)
+        }
+
+        /// Allocates `len` bytes of linear memory for an input or the out
+        /// slots.
+        #[cfg(target_arch = "wasm32")]
+        #[no_mangle]
+        pub extern "C" fn rules_alloc(len: usize) -> *mut u8 {
+            $crate::ffi::alloc(len)
+        }
+
+        /// Releases memory from `rules_alloc`.
+        ///
+        /// # Safety
+        /// `ptr` and `len` must come from one `rules_alloc` call, not yet
+        /// released.
+        #[cfg(target_arch = "wasm32")]
+        #[no_mangle]
+        pub unsafe extern "C" fn rules_dealloc(ptr: *mut u8, len: usize) {
+            $crate::ffi::dealloc(ptr, len)
+        }
+    };
 }
 
-/// `declarations`: any input to the registered behaviors' declaration
-/// files.
-///
-/// # Safety
-/// As [`rules_run`].
-#[no_mangle]
-pub unsafe extern "C" fn rules_declarations(
-    in_ptr: *const u8,
-    in_len: usize,
-    out_ptr: *mut *mut u8,
-    out_len: *mut usize,
-) -> i32 {
-    call(Op::Declarations, in_ptr, in_len, out_ptr, out_len)
-}
-
-/// `check`: `{"specs", "caller"?, "now"?}` to each spec's define check.
-///
-/// # Safety
-/// As [`rules_run`].
-#[no_mangle]
-pub unsafe extern "C" fn rules_check(
-    in_ptr: *const u8,
-    in_len: usize,
-    out_ptr: *mut *mut u8,
-    out_len: *mut usize,
-) -> i32 {
-    call(Op::Check, in_ptr, in_len, out_ptr, out_len)
-}
-
-/// `expand`: a recurrence (D152) to its dated occurrences.
-///
-/// # Safety
-/// As [`rules_run`].
-#[no_mangle]
-pub unsafe extern "C" fn rules_expand(
-    in_ptr: *const u8,
-    in_len: usize,
-    out_ptr: *mut *mut u8,
-    out_len: *mut usize,
-) -> i32 {
-    call(Op::Expand, in_ptr, in_len, out_ptr, out_len)
-}
-
-/// Releases an output document.
-///
-/// # Safety
-/// `ptr` and `len` must be an output of one `rules_<op>` call, not yet
-/// released.
-#[no_mangle]
-pub unsafe extern "C" fn rules_free(ptr: *mut u8, len: usize) {
-    free_raw(ptr, len)
-}
-
-/// Allocates `len` bytes of linear memory for an input or the out slots.
-#[cfg(target_arch = "wasm32")]
-#[no_mangle]
-pub extern "C" fn rules_alloc(len: usize) -> *mut u8 {
-    alloc(len)
-}
-
-/// Releases memory from `rules_alloc`.
-///
-/// # Safety
-/// `ptr` and `len` must come from one `rules_alloc` call, not yet released.
-#[cfg(target_arch = "wasm32")]
-#[no_mangle]
-pub unsafe extern "C" fn rules_dealloc(ptr: *mut u8, len: usize) {
-    free_raw(ptr, len)
-}
-
-#[cfg(test)]
+#[cfg(all(test, feature = "abi"))]
 mod tests {
     use super::*;
+    use crate::{rules_check, rules_declarations, rules_expand, rules_free, rules_run};
 
     type Export = unsafe extern "C" fn(*const u8, usize, *mut *mut u8, *mut usize) -> i32;
 
