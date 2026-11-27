@@ -328,7 +328,12 @@ symbols for it, and a step on another engine than the last waits until the
 wall clock is past every instant the scenario has shown, which keeps apart
 the readings of engines on one database (one reopened on another's file).
 So two readings are two instants, and an instant that appears twice in a
-scenario is one reading, which the symbols keep. In a scenario that read the
+scenario is one reading, which the symbols keep. A replayer whose engines
+each read a strict clock of their own waits the same way, before a step on
+another engine than the last and before it opens one, whatever their
+databases, until the wall clock is past every instant the last one read:
+without the wait a second engine can read an instant the first has read,
+and two symbols stand for one value. In a scenario that read the
 wall clock, a number is written `{{time:N}}` when it is an integer in the
 wall clock's span, from a day before its first reading in the scenario to
 400 days after its last, in epoch milliseconds, or in epoch microseconds
