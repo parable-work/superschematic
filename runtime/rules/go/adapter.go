@@ -169,6 +169,11 @@ type ExecuteOptions struct {
 	// columns sorted by name. Nil: the change set's own fields, converted
 	// by the layout.
 	OwnColumns map[string]any
+	// NowColumns are the columns an update of the command's own row sets
+	// to the database's clock (stampNow), after its own columns: the
+	// updatedAt a repository stamps, which then comes from the clock its
+	// insert's default read, whatever the host's says.
+	NowColumns []string
 	// SoftDelete are the columns a delete of the command's own row sets in
 	// place of deleting it, by column, as the store binds them, fenced on
 	// the version as the delete would be.
@@ -1171,7 +1176,8 @@ func live(table *Table) string {
 // a row the change set deletes is left out, and each sub-table row write
 // is held to change one row; a deleted row's events are written. The
 // command's own row binds its own columns from opts.OwnColumns when the
-// caller encoded them. A create of a key the table holds is refused as
+// caller encoded them, and an update of it sets opts.NowColumns to the
+// database's clock. A create of a key the table holds is refused as
 // conflict; an event of a row whose table keeps no event queue, and a kind
 // of write the adapter does not know, refuse the command as internal.
 func statementsOf(ctx context.Context, host Host, typeName string, command Command, changes *ChangeSet, opts *ExecuteOptions, claim *Claim) ([]Statement, error) {
@@ -1255,9 +1261,14 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 			if err != nil {
 				return nil, err
 			}
-			sets := make([]string, 0, len(own)+len(owned)+1)
+			sets := make([]string, 0, len(own)+len(owned)+len(opts.NowColumns)+1)
 			for _, a := range append(own, owned...) {
 				sets = append(sets, quote(a.column)+" = "+bind(a.value))
+			}
+			if mine {
+				for _, column := range opts.NowColumns {
+					sets = append(sets, quote(column)+" = "+stampNow(dialect))
+				}
 			}
 			// The version moves on with every write, the core's own: on
 			// Postgres @optimistic's trigger sets it to the same value.
@@ -1456,6 +1467,17 @@ func sortedAssignments(columns map[string]any) []assignment {
 		out[i] = assignment{name, columns[name]}
 	}
 	return out
+}
+
+// stampNow is the database's clock as an update stamps a row with it,
+// sqlutil's StampNow: on Postgres the statement's time, later than every
+// earlier statement of its transaction and so than the row's insert; on
+// SQLite its 'now', the statement's, in the form of its default.
+func stampNow(dialect Dialect) string {
+	if dialect == DialectSQLite {
+		return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+	}
+	return "statement_timestamp()"
 }
 
 // ownColumns is the own columns a write sets: the caller's encoded columns

@@ -223,8 +223,9 @@ func (r *ShipmentRepository) corePatch(update *ShipmentUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and ShipmentUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and ShipmentUpdate holds none.
 func (r *ShipmentRepository) updateColumns(ctx context.Context, update *ShipmentUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Reference != nil {

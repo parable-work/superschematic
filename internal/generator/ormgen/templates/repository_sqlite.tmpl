@@ -189,7 +189,7 @@ var {{ $v }} = &sqliteTable{
 		returning:           {{ goRawString .SQLite.Statements.Returning }},
 		updateMany:          {{ goRawString .SQLite.Statements.UpdateMany }},
 		{{- if .SQLite.HasUpdatedAt }}
-		updatedAt:           {{ goRawString .SQLite.Statements.UpdatedAt }},
+		updatedAt:           {{ goRawString (filled .SQLite.Statements.UpdatedAt) }},
 		{{- end }}
 		{{- if .SQLite.UpdatedBy }}
 		updatedBy:           {{ goRawString .SQLite.Statements.UpdatedBy }},
@@ -1223,13 +1223,18 @@ func (r *{{ $repo }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		if err != nil {
 			return err
 		}
+		{{- if not (.HasField "updatedAt") }}
 		if len(patch) == 0 && len(columns) == 0 {
 			return fmt.Errorf("no fields to update")
 		}
+		{{- end }}
 		if columns, err = {{ $v }}.coreColumns(columns); err != nil {
 			return err
 		}
-		if err := rules.RunUpdate(ctx, sqliteRulesHost(tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}); err != nil {
+		{{- if .HasField "updatedAt" }}
+		// updated_at takes the database's clock, as UpdateOne's statement stamps it.
+		{{- end }}
+		if err := rules.RunUpdate(ctx, sqliteRulesHost(tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns{{ if .HasField "updatedAt" }}, NowColumns: []string{ {{- printf "%q" (.FieldColumn "updatedAt") -}} }{{ end }}{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}); err != nil {
 			return behaviorNotFound(err, {{ printf "%q" .TypeName }}, id)
 		}
 		out, err = (&{{ $repo }}{db: r.db, tx: tx}).GetOne(ctx, id, nil)

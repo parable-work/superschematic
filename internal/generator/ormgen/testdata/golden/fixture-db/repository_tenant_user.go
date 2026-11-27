@@ -1730,9 +1730,7 @@ func (r *TenantUserRepository) upsertRow(ctx context.Context, input *types.Tenan
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 		// Set updated_by
 
@@ -1935,8 +1933,7 @@ func (r *TenantUserRepository) upsertBatches(ctx context.Context, inputs []*type
 			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			assignments = append(assignments, "updated_at = statement_timestamp()")
 		}
 		query := fmt.Sprintf(
 			`INSERT INTO tenant_user (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "created_at", "updated_at", "id", "tenant_id", "display_name", "deleted_at", "deleted_by", "_version", (xmax = 0) AS _inserted`,
@@ -2318,9 +2315,7 @@ func (r *TenantUserRepository) updateOne(ctx context.Context, id types.IdentityU
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 
@@ -2429,9 +2424,7 @@ func (r *TenantUserRepository) UpdateMany(ctx context.Context, filter *TenantUse
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 

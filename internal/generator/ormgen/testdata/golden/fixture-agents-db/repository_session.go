@@ -269,8 +269,9 @@ func (r *SessionRepository) corePatch(update *SessionUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and SessionUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and SessionUpdate holds none.
 func (r *SessionRepository) updateColumns(ctx context.Context, update *SessionUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Device != nil {

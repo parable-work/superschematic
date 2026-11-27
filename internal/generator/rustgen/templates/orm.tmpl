@@ -464,6 +464,7 @@ pub mod postgres {
                 let own_columns = orm::postgres::core_columns(client, table, &update.columns).await?;
                 let options = adapter::ExecuteOptions {
                     own_columns: Some(own_columns),
+                    now_columns: update.now,
                     preconditions: update.preconditions.cloned().unwrap_or_default(),
                     ..Default::default()
                 };
@@ -520,6 +521,7 @@ pub mod postgres {
                 let own_columns = orm::postgres::core_columns(client, table, &operation.columns).await?;
                 let options = adapter::ExecuteOptions {
                     own_columns: Some(own_columns),
+                    now_columns: operation.now,
                     preconditions: operation.preconditions.cloned().unwrap_or_default(),
                     ..Default::default()
                 };
@@ -859,6 +861,7 @@ pub mod sqlite {
             let table = update.table;
             let options = adapter::ExecuteOptions {
                 own_columns: Some(orm::sqlite::core_columns(table, &update.columns)?),
+                now_columns: update.now,
                 preconditions: update.preconditions.cloned().unwrap_or_default(),
                 ..Default::default()
             };
@@ -904,6 +907,7 @@ pub mod sqlite {
             let table = operation.table;
             let options = adapter::ExecuteOptions {
                 own_columns: Some(orm::sqlite::core_columns(table, &operation.columns)?),
+                now_columns: operation.now,
                 preconditions: operation.preconditions.cloned().unwrap_or_default(),
                 ..Default::default()
             };

@@ -209,14 +209,14 @@ describe.skipIf(dsn === '')('fences', () => {
     await recorded.delivery.upsertMany([{ id, address: '5 Main St' }], ['id'], ['address']);
     await recorded.courier.updateOne(ada.id, { name: 'Ada L.' });
     expect(statements).toEqual([
-      'UPDATE delivery SET address = $1, courier_id = $2, updated_at = $3, plan_version = delivery.plan_version + 1 WHERE id = $4' + returning,
-      'UPDATE delivery SET note = $1, updated_at = $2 WHERE id = $3' + returning,
-      'UPDATE delivery SET address = $1, proof = $2, note = NULL, updated_at = $3, plan_version = delivery.plan_version + 1, run_version = delivery.run_version + 1 WHERE id = $4' + returning,
-      'UPDATE delivery SET address = $1, plan_version = $2, attempts = $3, updated_at = $4, run_version = delivery.run_version + 1 WHERE id = $5' + returning,
-      'UPDATE delivery SET attempts = $1, updated_at = $2, run_version = delivery.run_version + 1 WHERE delivery.id = $3 AND delivery.plan_version = $4',
+      'UPDATE delivery SET address = $1, courier_id = $2, updated_at = statement_timestamp(), plan_version = delivery.plan_version + 1 WHERE id = $3' + returning,
+      'UPDATE delivery SET note = $1, updated_at = statement_timestamp() WHERE id = $2' + returning,
+      'UPDATE delivery SET address = $1, proof = $2, note = NULL, updated_at = statement_timestamp(), plan_version = delivery.plan_version + 1, run_version = delivery.run_version + 1 WHERE id = $3' + returning,
+      'UPDATE delivery SET address = $1, plan_version = $2, attempts = $3, updated_at = statement_timestamp(), run_version = delivery.run_version + 1 WHERE id = $4' + returning,
+      'UPDATE delivery SET attempts = $1, updated_at = statement_timestamp(), run_version = delivery.run_version + 1 WHERE delivery.id = $2 AND delivery.plan_version = $3',
       // An insert writes each default the input leaves unset, the counters' 0 among them.
-      'INSERT INTO delivery (id, address, plan_version, attempts, run_version) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET proof = $6, updated_at = $7, run_version = delivery.run_version + 1' + returning + ', (xmax = 0) AS _inserted',
-      'INSERT INTO delivery (id, address, plan_version, attempts, run_version) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET address = EXCLUDED.address, updated_at = $6, plan_version = delivery.plan_version + 1' + returning + ', (xmax = 0) AS _inserted',
+      'INSERT INTO delivery (id, address, plan_version, attempts, run_version) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET proof = $6, updated_at = statement_timestamp(), run_version = delivery.run_version + 1' + returning + ', (xmax = 0) AS _inserted',
+      'INSERT INTO delivery (id, address, plan_version, attempts, run_version) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (id) DO UPDATE SET address = EXCLUDED.address, updated_at = statement_timestamp(), plan_version = delivery.plan_version + 1' + returning + ', (xmax = 0) AS _inserted',
       'UPDATE courier SET "name" = $1 WHERE id = $2 RETURNING "id", "name"',
     ]);
     expect(await counters(id)).toEqual([4, 4]);

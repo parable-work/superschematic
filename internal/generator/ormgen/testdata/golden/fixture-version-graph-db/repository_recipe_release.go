@@ -1898,9 +1898,7 @@ func (r *RecipeReleaseRepository) upsertRow(ctx context.Context, input *types.Re
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 		// Set updated_by
 		if update.UpdatedBy != nil {
@@ -2114,8 +2112,7 @@ func (r *RecipeReleaseRepository) upsertBatches(ctx context.Context, inputs []*t
 			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			assignments = append(assignments, "updated_at = statement_timestamp()")
 			if HasUserID(ctx) {
 				values = append(values, GetUserID(ctx))
 				assignments = append(assignments, fmt.Sprintf("updated_by = $%d", len(values)))
@@ -2498,9 +2495,7 @@ func (r *RecipeReleaseRepository) updateOne(ctx context.Context, id types.Identi
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 	if update.UpdatedBy != nil {
@@ -2611,9 +2606,7 @@ func (r *RecipeReleaseRepository) UpdateMany(ctx context.Context, filter *Recipe
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 	if update.UpdatedBy != nil {
