@@ -72,6 +72,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		// The calendar (D152, D188): a date source and a Recurrence's
 		// occurrences source, on Postgres alone, which orm::calendar reads.
 		{service: "fixture-recurrence-db", core: true, sqlite: true},
+		// Events and notifications (D153, D191): each table's events and
+		// what it is to the notifier, in the Postgres definition, which
+		// orm::notify reads.
+		{service: "fixture-notifications-db", core: true},
 	}
 
 	for _, tc := range cases {

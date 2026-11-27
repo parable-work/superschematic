@@ -57,12 +57,9 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 	got := rustFindings(db, Input{RustOutput: "outputs.types.rust"})
 	want := []string{
 		"type Agent: @agents (D158)",
-		"type Identity: @channelIdentities (D153)",
-		"type Notice: @notifier (D153)",
 		"type RunRequest: @runRequests (D157)",
 		"type Tenant: @party (D157)",
 		"type Thread: @conversations (D157)",
-		"type Ticket: @event (D153)",
 	}
 	if len(got) != len(want) {
 		t.Fatalf("the Rust types' findings are %d, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
@@ -77,8 +74,9 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 	}
 	// The Rust types write Recurrence through the core, and serve an
 	// audience, references and attachments (D185), a calendar source and
-	// a search index (D188).
-	served := []string{"Chore", "Folder", "Page", "Report", "Visit", "Article"}
+	// a search index (D188), and events, the notifier's tables and the
+	// channel identities (D191).
+	served := []string{"Chore", "Folder", "Page", "Report", "Visit", "Article", "Ticket", "Notice", "Identity"}
 	for _, finding := range got {
 		for _, name := range served {
 			if strings.Contains(finding, "type "+name+":") {
@@ -86,8 +84,8 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 			}
 		}
 	}
-	if err := RefuseRustTypes(db); err == nil || !strings.Contains(err.Error(), "type Ticket: @event (D153)") {
-		t.Errorf("RefuseRustTypes = %v, want the event refused", err)
+	if err := RefuseRustTypes(db); err == nil || !strings.Contains(err.Error(), "type Tenant: @party (D157)") {
+		t.Errorf("RefuseRustTypes = %v, want the party refused", err)
 	}
 
 	// A Rust server: a provider of no Rust crate and autonomy, and its
@@ -108,19 +106,19 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 	for _, want := range []string{
 		"type provider relay-a: a provider of no Rust crate (providers/relay-a declares it in its package.json alone",
 		"type Tickets.closeTicket: @autonomy (D158)",
-		"type platform-db.Ticket: @event (D153)",
+		"type platform-db.Tenant: @party (D157)",
 	} {
 		if !strings.Contains(joined, want) || !strings.Contains(joined, "is served by the TypeScript runtime alone so far, and platform-api builds Rust (outputs.api.language: rust)") {
 			t.Errorf("the Rust server's findings lack %s:\n%s", want, joined)
 		}
 	}
-	for _, name := range []string{"listTickets", "Folder", "Config", "relay-b", "Chore", "Visit", "Article"} {
+	for _, name := range []string{"listTickets", "Folder", "Config", "relay-b", "Chore", "Visit", "Article", "Ticket", "Notice", "Identity"} {
 		if strings.Contains(joined, name+":") {
 			t.Errorf("the Rust server refuses %s, which it serves:\n%s", name, joined)
 		}
 	}
-	if err := RefuseRustServer(api, db); err == nil || !strings.Contains(err.Error(), "type platform-db.Ticket: @event (D153)") {
-		t.Errorf("RefuseRustServer = %v, want the event refused", err)
+	if err := RefuseRustServer(api, db); err == nil || !strings.Contains(err.Error(), "type platform-db.Tenant: @party (D157)") {
+		t.Errorf("RefuseRustServer = %v, want the party refused", err)
 	}
 	if err := RefuseRustServer(ir.NewSchema("plain-api", ir.SchemaKindAPI)); err != nil {
 		t.Errorf("RefuseRustServer of a plain API = %v", err)
