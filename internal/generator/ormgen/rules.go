@@ -105,6 +105,10 @@ type RepositoryOperation struct {
 	// scope schema: its method takes no key, and runs as a command without
 	// a row (rules.RunTableOperation).
 	Table bool
+	// Writes is an operation that writes, as the core's declaration has
+	// it: on a row of a held table (D156, D180) its caller must reach the
+	// row to write it, and to read it for one that writes nothing.
+	Writes bool
 }
 
 // MethodDoc is the doc comment of the operation's method: its
@@ -810,6 +814,7 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 				Result:         result,
 				ResultIsStruct: isStruct,
 				Table:          op.Table,
+				Writes:         op.Writes,
 			})
 		}
 		ru.Enums, ru.Structs = b.enums, b.structs
