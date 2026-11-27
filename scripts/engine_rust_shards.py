@@ -36,14 +36,16 @@ from pathlib import Path
 WORKSPACE = Path(__file__).resolve().parent.parent / "runtime" / "engine" / "rust"
 
 # The shards that name their targets, by fnmatch patterns over the
-# integration test target names. The test kit's corpus replays; the
-# behaviors' core's transcripts and the test kit's tests of the core
-# behaviors; the test kit's tests of the rest. Balanced on the engine-rust
-# job's own timings: about nine, nine and six minutes of tests, and four
-# for rest, which also lints.
+# integration test target names. The test kit's replay of the scenario
+# corpus, one test of seven minutes; the behaviors' core's transcripts; the
+# test kit's tests of the core behaviors, with its replay of the HTTP
+# corpus; the test kit's tests of the rest. Balanced on the engine-rust
+# job's own timings: seven, five, six and a half and five minutes of
+# tests, and four for rest.
 NAMED = {
-    "replay": ["replay", "http_replay"],
-    "core": ["transcript", "core_*"],
+    "replay": ["replay"],
+    "transcript": ["transcript"],
+    "core": ["core_*", "http_replay"],
     "behaviors": ["behavior_*", "commerce_*", "replicas_*", "workqueue_*"],
 }
 

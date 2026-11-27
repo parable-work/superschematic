@@ -50,8 +50,9 @@ class TestPartition(unittest.TestCase):
     def test_every_name_is_in_exactly_one_shard(self):
         shards = engine_rust_shards.partition(NAMES)
         self.assertEqual(sorted(name for names in shards.values() for name in names), NAMES)
-        self.assertEqual(shards["replay"], ["http_replay", "replay"])
-        self.assertEqual(shards["core"], ["core_links", "transcript"])
+        self.assertEqual(shards["replay"], ["replay"])
+        self.assertEqual(shards["transcript"], ["transcript"])
+        self.assertEqual(shards["core"], ["core_links", "http_replay"])
         self.assertEqual(shards["behaviors"], ["behavior_reach", "commerce_holds", "replicas_runner", "workqueue_lease"])
 
     def test_what_no_pattern_matches_is_in_rest(self):
@@ -60,7 +61,7 @@ class TestPartition(unittest.TestCase):
         self.assertEqual(engine_rust_shards.partition(NAMES)["rest"], ["abi", "core", "job", "postgres", "sqlite"])
 
     def test_a_pattern_that_matches_nothing_is_refused(self):
-        with self.assertRaisesRegex(ValueError, "matches no test target .*replay: http_replay"):
+        with self.assertRaisesRegex(ValueError, "matches no test target .*core: http_replay"):
             engine_rust_shards.partition([name for name in NAMES if name != "http_replay"])
 
     def test_a_name_in_two_shards_is_refused(self):
@@ -76,8 +77,8 @@ class TestPartition(unittest.TestCase):
 class TestCommands(unittest.TestCase):
     def test_a_named_shard_runs_its_targets_over_the_whole_workspace(self):
         self.assertEqual(
-            engine_rust_shards.commands("replay", NAMES),
-            [["cargo", "test", "--workspace", "--all-features", "--test", "http_replay", "--test", "replay"]],
+            engine_rust_shards.commands("core", NAMES),
+            [["cargo", "test", "--workspace", "--all-features", "--test", "core_links", "--test", "http_replay"]],
         )
 
     def test_rest_runs_the_unit_tests_and_the_doc_tests_too(self):
