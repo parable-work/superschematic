@@ -245,13 +245,34 @@ export interface GrantAuthenticatorOptions {
 /**
  * The router's Authenticator for grants (D156): a request whose
  * Authorization is `Bearer grant_...` runs as the grant's holder, a party
- * or an agent run, with its role's permissions and the grant's reach;
- * every other request is inner's to establish. The grant is read on every
- * call, so a grant that ended, by its date or its target's state, or was
- * revoked is refused 401 unauthorized at the very next call, as an unknown
- * token is.
+ * or any other holder but an agent run, with its role's permissions and
+ * the grant's reach; every other request is inner's to establish. The
+ * grant is read on every call, so a grant that ended, by its date or its
+ * target's state, or was revoked is refused 401 unauthorized at the very
+ * next call, as an unknown token is. A grant an agent run holds is the
+ * run's token, which the agent dispatcher's authenticator alone resolves
+ * (agents.authenticator, D194): it narrows the run's permissions to whom
+ * it acts for and its reach to a party's paths, and holds its calls to its
+ * autonomy. Here it is refused 401, since as its grant's bare holder the
+ * run would act with its role's permissions, neither narrowed nor gated.
  */
 export function grantAuthenticator(options: GrantAuthenticatorOptions): Authenticator {
+  return grantAuthenticatorOf(options, false);
+}
+
+/**
+ * grantAuthenticator that resolves an agent run's token too, as its
+ * grant's bare holder: the agent dispatcher's alone (agents.ts's
+ * principalOf, D194), which narrows what it answers. The package does not
+ * export it.
+ *
+ * @internal
+ */
+export function grantAuthenticatorAdmittingRuns(options: GrantAuthenticatorOptions): Authenticator {
+  return grantAuthenticatorOf(options, true);
+}
+
+function grantAuthenticatorOf(options: GrantAuthenticatorOptions, admitsRuns: boolean): Authenticator {
   const db = system(options.orm);
   const grants = accessRepository(db, 'grants');
   const roles = accessRepository(db, 'roles');
@@ -266,6 +287,8 @@ export function grantAuthenticator(options: GrantAuthenticatorOptions): Authenti
     // A calendar feed's token reads its feed alone (D152): a leaked feed URL
     // is no credential of any route.
     if (grant.targetType === 'CalendarFeed' || grant.targetType.startsWith('CalendarFeed;')) throw unauthorized("A calendar feed's token reads its feed alone");
+    // An agent run's token is the dispatcher's to resolve (D194).
+    if (!admitsRuns && grant.holderKind === 'agent') throw unauthorized("An agent run's token is resolved by the agent dispatcher's authenticator alone");
     const ended = await grantEnded(db, grant, options.now?.() ?? new Date());
     if (ended !== undefined) throw unauthorized(`The grant has ${ended === 'not started' ? 'not started' : 'ended'}`);
     const role = await roles.findOne({ name: { eq: grant.role } });
