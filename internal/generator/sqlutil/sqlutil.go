@@ -3,9 +3,12 @@
 package sqlutil
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -86,7 +89,9 @@ var indexPurposeName = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 // PostgreSQL truncates identifiers past 63 bytes, which silently collapses two
 // distinct indexes into one name. Rather than pack or hash a name to fit, an
 // overlong result is a schema error: the author picks a purpose name, which
-// reads better than any suffix the generator could derive.
+// reads better than any suffix the generator could derive. An index an
+// expansion adds, which no author can name, is shortened instead
+// (GeneratedIndexNameIn, D200).
 func IndexName(tableName string, keys []string, purpose string, unique bool) (string, error) {
 	parts := make([]string, len(keys))
 	for i, key := range keys {
@@ -137,6 +142,47 @@ func indexName(tableName string, keys, columns []string, purpose string, unique 
 			name, tableName, len(name), PostgresIdentifierLimit)
 	}
 	return name, nil
+}
+
+// GeneratedIndexNameIn is IndexNameIn of an index an expansion adds to
+// td, a behavior's sub-table index among them (ir.IndexDef.Origin): no
+// author can give it a purpose name, so a default name over PostgreSQL's
+// limit is shortened (ShortIdentifier) instead of refused. Any other
+// problem is IndexNameIn's.
+func GeneratedIndexNameIn(td *ir.TypeDef, keys []string, purpose string, unique bool) (string, error) {
+	name, err := IndexNameIn(td, keys, purpose, unique)
+	if err == nil || purpose != "" {
+		return name, err
+	}
+	parts := make([]string, 0, 2+len(keys))
+	parts = append(parts, "idx", TableName(td))
+	for _, key := range keys {
+		column := ColumnNameOf(key)
+		if f := FieldNamed(td, key); f != nil && f.SQLName != "" {
+			column = f.SQLName
+		}
+		parts = append(parts, column)
+	}
+	return ShortIdentifier(strings.Join(parts, "_")), nil
+}
+
+// ShortIdentifier fits a generated identifier to PostgreSQL's 63 bytes in a
+// fixed way: one that fits is itself; a longer one keeps its first bytes,
+// whole characters only, and ends in an underscore and the first eight hex
+// digits of the SHA-256 of the whole name. The same name always shortens
+// to the same identifier, and two long names that share their first bytes
+// stay apart.
+func ShortIdentifier(name string) string {
+	if len(name) <= PostgresIdentifierLimit {
+		return name
+	}
+	sum := sha256.Sum256([]byte(name))
+	suffix := "_" + hex.EncodeToString(sum[:4])
+	keep := PostgresIdentifierLimit - len(suffix)
+	for keep > 0 && !utf8.RuneStart(name[keep]) {
+		keep--
+	}
+	return strings.TrimRight(name[:keep], "_") + suffix
 }
 
 // IndexKeyMatches reports whether an @index key (a field name) resolves to

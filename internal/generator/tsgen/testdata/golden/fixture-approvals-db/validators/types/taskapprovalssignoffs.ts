@@ -7,12 +7,14 @@ import {
   addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
-import { expectString } from '../primitives';
+import { expectBoolean, expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import { ParseError } from '../errors';
 import type { TaskApprovalsSignOffs, JSDate, Task } from '../../types';
 
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
+
+import { validateGenericJSONRequired, validateGenericJSON } from '../scalars/generic_json';
 
 import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
 
@@ -64,6 +66,37 @@ export function validateTaskApprovalsSignOffs(value: TaskApprovalsSignOffs | nul
 
   expectString(errors, "subject", value.subject);
 
+  expectString(errors, "kind", value.kind);
+
+  expectString(errors, "actingFor", value.actingFor);
+
+  expectString(errors, "actingForKind", value.actingForKind);
+
+  expectString(errors, "agent", value.agent);
+
+  if (value.signedInAt !== null && value.signedInAt !== undefined) {
+    const [valid, fieldErrors] = validateTemporalDateTime(value.signedInAt);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "signedInAt", fieldErrors);
+    }
+  }
+
+  expectBoolean(errors, "userVerified", value.userVerified);
+
+  if (value.held !== null && value.held !== undefined) {
+    const [valid, fieldErrors] = validateGenericJSON(value.held);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "held", fieldErrors);
+    }
+  }
+
+  if (value.values !== null && value.values !== undefined) {
+    const [valid, fieldErrors] = validateGenericJSON(value.values);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "values", fieldErrors);
+    }
+  }
+
   expectString(errors, "note", value.note);
 
   if (value.at !== null && value.at !== undefined) {
@@ -101,6 +134,14 @@ const TaskApprovalsSignOffsKnownFields = new Set<string>([
   'number',
   'state',
   'subject',
+  'kind',
+  'actingFor',
+  'actingForKind',
+  'agent',
+  'signedInAt',
+  'userVerified',
+  'held',
+  'values',
   'note',
   'at',
   'consumedAt',
@@ -197,6 +238,10 @@ export function parseTaskApprovalsSignOffsFromJSON(input: unknown): TaskApproval
     task: obj.task != null
       ? parseTaskFromJSON(obj.task)
       : (obj.task as unknown as Task),
+
+    signedInAt: obj.signedInAt != null
+      ? (parseTemporalDateTimeFromLib(obj.signedInAt as string) as JSDate)
+      : (obj.signedInAt as unknown as JSDate | null),
 
     at: obj.at != null
       ? (parseTemporalDateTimeFromLib(obj.at as string) as JSDate)

@@ -173,6 +173,14 @@ export interface CoreCaller {
   readonly standsIn?: boolean;
   /** The subject the caller acts for (D77), which Provenance records (D73). */
   readonly actingFor?: string;
+  /** What the caller is (D156): user, party, agent or extension; absent reads as user. */
+  readonly kind?: string;
+  /** The kind of the subject it acts for; absent reads as user. */
+  readonly actingForKind?: string;
+  /** The Agent whose run the caller is (D158, D200). */
+  readonly agent?: string;
+  /** How the host verified the caller for this call (D200), which an Approvals requirement's proof reads. */
+  readonly assurance?: { readonly signedInAt?: number; readonly userVerified?: boolean };
 }
 
 /** What a command does, tagged by kind. Open: execute refuses a kind it does not know as internal. */
