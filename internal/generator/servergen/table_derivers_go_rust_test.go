@@ -159,6 +159,45 @@ func TestGoRustTableDeriverEntrypointsGolden(t *testing.T) {
 	}
 }
 
+// TestAGoDeriverOfAHeldTableBuilds: a Go API's deriver of a table that
+// keeps its rows to an audience (@audience, D156) builds, as one of any
+// other table does (D146): held-go-api's FillNotes fills the summary of
+// fixture-audience-behaviors-db's Note, and its Derivers declare the
+// method. The build refused it while the Go behaviors' core read the
+// table's effective audience as one UUID (D180); ormgen's
+// TestHeldBehaviorTablesOnPostgres runs the deriver's loop over the table.
+func TestAGoDeriverOfAHeldTableBuilds(t *testing.T) {
+	const db, api = "fixture-audience-behaviors-db", "held-go-api"
+	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fixture{reg: reg, schemas: map[string]*ir.Schema{}, configs: map[string]*schemaconfig.SchemaConfig{}}
+	for name, root := range map[string]string{db: tsBehaviorsServicesRoot, api: tablesDeriverRoot} {
+		schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(root, name), loader.WithRegistry(reg))
+		if err != nil {
+			t.Fatalf("load %s: %v", name, err)
+		}
+		f.schemas[name], f.configs[name] = schema, cfg
+	}
+	enabled := map[string]any{"enabled": true}
+	f.configs[db].Outputs = map[string]any{
+		"types": map[string]any{"go": enabled},
+		"sql":   map[string]any{"dialects": []any{"postgres"}},
+	}
+	repoRoot := t.TempDir()
+	f.build(t, repoRoot, tablesDeriverPaths(repoRoot), db, api)
+	deps, err := os.ReadFile(filepath.Join(repoRoot, "schemas", "dist", "api", api, "deps.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"FillNotes", "NoteSummary(ctx context.Context"} {
+		if !strings.Contains(string(deps), want) {
+			t.Errorf("held-go-api's deps.go has no %s:\n%s", want, deps)
+		}
+	}
+}
+
 // TestGoRustTableDeriversOfTheStack: the stack resolves each deriver of
 // tables on the local target's deriver platform in its API's language, a
 // process of its own, with FillAll filling every table of the database that
