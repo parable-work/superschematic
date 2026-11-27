@@ -66,3 +66,30 @@ func refuseNotifierOnSQLite(schema *ir.Schema, sqlite bool) error {
 	}
 	return fmt.Errorf("rustgen: %s lists the sqlite dialect, and the notifier (D153) runs on Postgres alone so far; build it for postgres alone (D191)", schema.Name)
 }
+
+// rustParty is orm::PartyDefinition: the field a @party table's parties
+// are named by (D157).
+type rustParty struct {
+	Title string `json:"title,omitempty"`
+}
+
+// partiesOfTable is what td is to D157 and D158, as tsgen writes them into
+// orm.ts (party, conversations, agents): its @party with its title, its
+// @conversations part, and its @agents part (D193).
+func partiesOfTable(td *ir.TypeDef) (*rustParty, string, string) {
+	if td == nil {
+		return nil, "", ""
+	}
+	var party *rustParty
+	if td.Party != nil {
+		party = &rustParty{Title: td.Party.Title}
+	}
+	conversations, agents := "", ""
+	if td.Conversations != nil {
+		conversations = td.Conversations.Part
+	}
+	if td.Agents != nil {
+		agents = td.Agents.Part
+	}
+	return party, conversations, agents
+}
