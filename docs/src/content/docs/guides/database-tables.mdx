@@ -1235,8 +1235,10 @@ file of the sub-table still names it, so a statement that deletes the
 files of one object releases it once. Of a statement that deletes a
 holder and a row it points at, a cleared message may name the holder
 the same statement deleted, which its worker finds gone. Go's and Rust's
-repositories on SQLite read neither sub-table yet, so a service that lists
-`sqlite` and declares either takes TypeScript's types alone.
+repositories on SQLite read neither sub-table yet: a service that lists
+`sqlite` and declares either builds with Go's types, whose `References()`
+and `Attachments()` there answer `ErrSQLiteUnsupported`
+([Go on SQLite](#go-on-sqlite)), and is refused with Rust's.
 
 ### References and backlinks
 
@@ -2263,14 +2265,17 @@ repositories refuse its `upsertMany` there.
 A filter reaches through a one-to-many relation by its name, as on
 Postgres (D180), so a row rule's path through one holds on SQLite too. The
 repositories on SQLite keep to no audience, grants or access log, and
-write no references or attachments: the build refuses a DB service that
-lists `sqlite` and enables the Go types for an `@audience`,
-`@accessGrants`, `@accessLog`, `@references` or `@attachments` table,
-naming the decorator and the table
-([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)).
-The SQLite database and its transactions carry `References()` and
-`Attachments()` (D184), which a table's `Comments` gives a database too,
-and each of their calls answers `ErrSQLiteUnsupported`.
+write no references or attachments. A DB service that lists `sqlite` and
+declares an `@audience`, `@accessGrants`, `@accessLog`, `@references` or
+`@attachments` table builds all the same, its TypeScript repositories
+serving them there
+([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)),
+and the Go ORM, which a DB service always gets, refuses each call they
+touch on SQLite with `ErrSQLiteUnsupported`, naming why: every table's
+repository of a database whose reads keep to a caller (an audience or
+grants), the access log's repository, and the `References()` and
+`Attachments()` of the SQLite database and its transactions (D184), which
+a table's `Comments` gives a database too.
 
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a

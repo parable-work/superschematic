@@ -14,8 +14,8 @@ import (
 // none of it, and a read, a route or a queue the TypeScript runtime serves
 // would silently be missing. Per-record access (D156) is served: an
 // @audience table's reads and writes, row rules through relations, grants,
-// reveal and the access log. An audience on SQLite is refused for every
-// language but TypeScript (refuseSQLiteReaders, D182). References and
+// reveal and the access log. An audience on SQLite is refused for Rust's
+// types (refuseSQLiteReaders, D182). References and
 // attachments (D154, D185) are served on Postgres, and the runtime
 // providers of an API's @providers slots (D159, D185), each a provider
 // crate the server links. So are Recurrence and the calendar (D152) and
