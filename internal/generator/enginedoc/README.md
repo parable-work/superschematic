@@ -1,7 +1,7 @@
 # Engine document
 
-A type of a DB schema that composes a behavior is an engine type (D58 in
-`docs/DECISIONS.md`). Its instances are the engine's, kept in the engine's
+A type of a DB schema that composes a behavior is an engine type (D58).
+Its instances are the engine's, kept in the engine's
 own tables, so the `sql` and `orm` generators leave it out: it gets no
 table, no repository and no step in a migration plan (D27). The engine
 document is what a server puts into the engine for the DB service's

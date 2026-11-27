@@ -1,7 +1,7 @@
 # engine-notes
 
 A notes server on `@superschematic/engine`, which runs a schema with no
-generated code (D16 in `docs/DECISIONS.md`). A note moves from draft
+generated code (D16). A note moves from draft
 through review to published, collects comments and keeps its revisions,
 and a reader can propose a change for an editor to approve. The docs
 site's engine guide (`docs/src/content/docs/guides/engine.mdx`) walks

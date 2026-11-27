@@ -1,7 +1,7 @@
 # Engine work queue
 
-The engine work queue is claimable work for the engine (D16 in
-`docs/DECISIONS.md`), its crate `rust/` and the npm package
+The engine work queue is claimable work for the engine (D16),
+its crate `rust/` and the npm package
 `@superschematic/engine-workqueue` (`typescript/`): behaviors that
 make a schema's instances work a principal takes, holds and gives back.
 The core declares them under bare names (`internal/registry/behaviors`,

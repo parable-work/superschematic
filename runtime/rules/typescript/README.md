@@ -1,7 +1,7 @@
 # The behaviors' core (TypeScript)
 
-`@superschematic/rules` is the pure core of the behaviors (D103 in
-`docs/DECISIONS.md`) for TypeScript: `superschematic-rules` with every
+`@superschematic/rules` is the pure core of the behaviors (D103, #587)
+for TypeScript: `superschematic-rules` with every
 behavior ported onto it (`superschematic-rules-behaviors`), built for
 `wasm32-unknown-unknown` from `runtime/engine/rust/rules-wasm`, and run over
 its JSON contract (`src/contract.ts`; `runtime/engine/rust/rules/README.md`

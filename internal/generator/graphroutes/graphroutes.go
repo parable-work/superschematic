@@ -1,5 +1,5 @@
 // Package graphroutes describes a version graph as its routes serve it
-// (D138 in docs/DECISIONS.md): the member kinds of a graph a
+// (D138, #592): the member kinds of a graph a
 // @graphOperations set serves, each with the members of its row, the
 // content fields a typed upsert of the generated facade writes. The
 // loader's expansion types the rows from it (internal/loader/graphops),

@@ -1,7 +1,7 @@
 # engine-jobs
 
 A job runner on `@superschematic/engine` and
-`@superschematic/engine-workqueue` (D16 in `docs/DECISIONS.md`). Workers
+`@superschematic/engine-workqueue` (D16). Workers
 claim jobs in priority order and hold them under leases they renew; a
 failed attempt is retried by its failure class; each claim reserves CPU
 seconds from the job's budget; an operator cancels a running job with a

@@ -86,7 +86,7 @@ By making a contribution to this project, I certify that:
 | [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
 | [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `embedded`, `pulumi`), `topcoat`, and example extensions and projects |
 | [`agent/`](agent/), [`.claude-plugin/`](.claude-plugin/) | The agent skill for building with superschematic, and the marketplace that publishes it (D76) |
-| [`docs/`](docs/) | The docs site, the open decisions and the design documents |
+| [`docs/`](docs/) | The docs site and the design documents |
 | [`scripts/`](scripts/) | The build and release scripts: superscalar's and the Rust cores' static archives, the engine's addon, release archives and tags, and the scrub check |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
@@ -121,14 +121,10 @@ install` at a version refuses them; build from a checkout, or download a
 release's `superschematic_<version>_<platform>.tar.gz`.
 
 [`docs/extension-model.md`](docs/extension-model.md) is the design of the
-extension seam, [`docs/stack-model.md`](docs/stack-model.md) the design of
-stacks and deploys, and [`docs/DECISIONS.md`](docs/DECISIONS.md) holds
-the decisions that are not built yet. Code, commits and the docs cite
-decisions by number (D1, D2, ...). A decision leaves the file once it is
-built, and the code, the docs site and the commit that built it are its
-record from then on. Every entry up to D119 is in the file at commit
-e8e685a51: `git show e8e685a51:docs/DECISIONS.md`.
-[`docs/README.md`](docs/README.md) covers writing docs pages.
+extension seam and [`docs/stack-model.md`](docs/stack-model.md) the
+design of stacks and deploys. Decisions are GitHub issues ("Decisions"
+under "Rules"). [`docs/README.md`](docs/README.md) covers writing docs
+pages.
 
 ## Toolchain
 
@@ -475,6 +471,25 @@ breaking change.
 
 Plain ASCII in source, docs and commit messages. Keep comments and docs short
 and concrete.
+
+### Decisions
+
+- A decision is a GitHub issue labeled `decision`. Code, commits and the
+  docs cite it by its issue number (`#612`).
+- Its body says what is decided, the alternatives not taken, what is
+  built (Built) and what is not (Left).
+- A change that builds part of a decision edits the issue's Left. A
+  change that builds all of it closes the issue: its pull request says
+  `Closes #n`.
+- A change that reverses a decision, built or not, opens a new issue that
+  names the old one.
+- Decisions from before the move to issues keep their D-numbers (D1,
+  D2, ...) in code, commits and docs, and their issues' titles start with
+  them. D1 to D119 are in the file the decisions lived in at commit
+  e8e685a51: `git show e8e685a51:docs/DECISIONS.md`.
+- Write an issue in the style of the docs (`docs/README.md`): plain ASCII,
+  short declarative sentences, decisions in a table beside the
+  alternatives not taken.
 
 ## Releases
 

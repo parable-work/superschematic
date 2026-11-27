@@ -2,7 +2,7 @@
 
 The identity descriptor tells an identity store which tables hold a
 schema's users, their sessions, credentials, roles and role grants, and
-which column of each plays which part (D50 in `docs/DECISIONS.md`). The
+which column of each plays which part (D50). The
 DB build writes one for each schema with a `User` table. Package
 `identitydesc` builds it from the expanded IR; the Go types write it as
 `identity/<schema>.json` in the Go types module and as the constant

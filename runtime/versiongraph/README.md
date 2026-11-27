@@ -2,7 +2,7 @@
 
 The version-graph core composes, merges, diffs, hashes and validates trees
 of versioned rows, and makes the order keys that place a row among its
-siblings (D17, D19, D32 and D137 in `docs/DECISIONS.md`). It is one Rust crate
+siblings (D17, D19, D32 and D137). It is one Rust crate
 with no IO, clock or randomness. Its operations take one JSON document and
 return one. A graph descriptor tells it which columns of each kind's rows
 play which role, so it holds no per-kind code.

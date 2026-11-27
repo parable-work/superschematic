@@ -369,7 +369,7 @@ Node.js and Bun; elsewhere pass `readFile`.
 ## Identity
 
 `@superschematic/http-runtime/identity` is the TypeScript runtime of the
-core user model (D50 in `docs/DECISIONS.md`), the sibling of the Go
+core user model (D50), the sibling of the Go
 runtime's `identity` package, held to the same parity vectors
 (`runtime/http/testdata/identity_parity.json`, whose harness
 `runtime/http/testdata/README.md` states).

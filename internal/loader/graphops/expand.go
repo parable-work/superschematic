@@ -1,5 +1,5 @@
-// Package graphops adds a version graph's operations to an API (D138 in
-// docs/DECISIONS.md). An API marks a class with no members
+// Package graphops adds a version graph's operations to an API
+// (D138, #592). An API marks a class with no members
 // @graphOperations(Root, { ... }), from @superschematic/api, naming a
 // @versionGraph table of its database:
 //
