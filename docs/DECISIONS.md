@@ -3186,7 +3186,7 @@ allow.
 | `IndexSearch` runs in a transaction of its own on the host and embeds after it commits, as `indexSearch` and Rust's `index_search` do. | The caller's transaction, which would hold the share lock across the model's call. |
 | Embeddings re-rank through `providers.SearchEmbeddingsOf`, which refuses at once a model provider that implements no `providers.ModelEmbedder` (D184), telling it by its type, where Rust asks the provider to embed nothing. A search's `Embedder` is an interface, with `EmbedderFunc`, so a test or an app gives its own. | Asking at the first search, which would fail one late. |
 | The Go worker no longer cancels a claim in flight at a stop: it runs the claim to its answer within its own timeout and releases what it claimed, whose handlers never start. Cancelling it could leave messages the database had claimed with no handler until their lease ran out, as D188 found in Rust; a test that stops its worker between fires runs into it. | Starting the claimed handlers at the stop, which the grace then waits for. |
-| A Go server whose database lists `sqlite` first is refused Recurrence and a calendar source (`verify.GoServerSQLiteErr`, which the generator calls with the database's dialects), as rustrestgen refuses a Rust server; `@searchable` on SQLite stays the loader's refusal for every language. | Serving the calendar on SQLite, D152's left for every language. |
+| A Go server whose database lists `sqlite` first is refused Recurrence, a calendar source and a `@searchable` table (`verify.GoServerSQLiteErr`, which the generator calls with the database's dialects for every Go server over a database), Recurrence and the calendar as rustrestgen refuses a Rust server. Search is refused here too, since the loader lets a database's TypeScript and Go types declare `@searchable` on SQLite (D186), where the TypeScript repositories alone search, and `crosstable` ranks by Postgres statements. | Serving the calendar on SQLite, D152's left for every language. |
 
 Built: the refusals of D180 lose `@calendarSource`, Recurrence and
 `@searchable` (`verify/go_features.go`), and gain the sealed title and
@@ -3208,7 +3208,11 @@ runs D155's six cases through the Go repositories and `crosstable`, a
 party's and an agent run's grants among them, with embeddings through a
 model provider and `ReindexSearch`.
 `TestAGoServerOnSQLiteRefusesRecurrenceAndTheCalendar` holds the
-refusal. The guides' Go sections.
+refusal, and `TestGoServerSQLiteErrRefusesSearch` and
+`TestAGoServerOverASQLiteDatabaseRefusesSearch` hold its search: a Go
+server over a sqlite-first database whose only feature is a `@searchable`
+table is refused, through the generator's Deps as through the check, and
+one over a postgres-first database is not. The guides' Go sections.
 
 Left:
 

@@ -656,6 +656,8 @@ found, err := crosstable.SearchTables(ctx, db.CrossTables(), crosstable.Caller{P
 `crosstable.SearchRoutes` serves `GET /api/search` as an `http.Handler`,
 and `SearchMCPTool` with `CallSearchTool` the MCP tool; an app mounts the
 handler on its router. `ReindexSearch` builds every row's index row again.
+A Go server whose database lists `sqlite` first is refused a `@searchable`
+table, since `crosstable` ranks by Postgres statements alone.
 
 Search across tables is Postgres alone: the build refuses `@searchable` in
 a service that lists `sqlite`.
@@ -3963,8 +3965,8 @@ router.Mount("/api/calendar", crosstable.CalendarRoutes(crosstable.CalendarRoute
 `CallCalendarTool` answers the MCP tool `CalendarMCPTool` describes, and
 `IssueFeed`, `RotateFeed` and `RevokeFeed` are the feed's operations; the
 ORM's `AuthenticateGrant` refuses a feed's token on every other route. A
-Go server whose database lists `sqlite` first is refused Recurrence and a
-calendar source, and one whose calendar source is titled by an
+Go server whose database lists `sqlite` first is refused Recurrence, a
+calendar source and search, and one whose calendar source is titled by an
 `Encrypted<T>` field is refused it.
 
 ### A pool of members
