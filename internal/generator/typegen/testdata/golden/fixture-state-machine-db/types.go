@@ -183,7 +183,7 @@ func validateIdentityUUIDValue(value IdentityUUID, required bool) (bool, []Valid
 // the database guards nothing of it, and the types still say which step
 // follows which.
 type SignOff struct {
-	Step SignOffStep `json:"step"`
+	Step SignOffStep `json:"step,omitzero"`
 
 	Note string `json:"note,omitempty"`
 }
@@ -458,13 +458,13 @@ type Ticket struct {
 
 	Subject string `json:"subject"`
 
-	State TicketState `json:"state"`
+	State TicketState `json:"state,omitzero"`
 
 	Review *ReviewOutcome `json:"review,omitempty"`
 
 	Escalation *Escalation `json:"escalation,omitempty"`
 
-	AccountStatus AccountStatus `json:"accountStatus"`
+	AccountStatus AccountStatus `json:"accountStatus,omitzero"`
 
 	SignOff *SignOff `json:"signOff,omitempty"`
 

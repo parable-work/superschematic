@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D201 is the highest so far.
+  the highest number any branch has used. D202 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -3518,3 +3518,34 @@ Left:
   D158's, with TypeScript's, which D189 carries).
 - A Rust types crate's own deadline worker: a schedule's deadline that
   starts a run fires in the Rust server's behavior worker alone (D188).
+
+## D202. A Go value leaves out a required enum it never set, so Go decodes what Go encodes (D53 amended)
+
+A Go enum's decoder refuses a string the enum lacks, "" included, as the
+Rust and Python readers do (D53). A required enum field is a plain Go
+string type, so a value that never set it holds "", and the encoder wrote
+`"stage": ""`. Go then refused its own output. The common case is an
+object nested in another one with only its key set, as a related row
+read by id alone is: encoding that row and decoding it again failed, in
+a cache, a snapshot, a clone or a replay.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A required enum field of one value (not a list, a map, a pointer or an input wrapper) has `omitzero`. An unset value leaves its key out. No reader takes "" for a member, so no reader loses a value it could read. | Decoding "" as the zero value, which takes an invalid string for a value and keeps writing a string every other reader refuses. A pointer for every required enum, which changes every caller. Leaving the related row out of the encoding, which each caller would have to do for itself. |
+| The absent key decodes as every absent key does: a field with a `@default` takes its default, and a field without one stays "", which `Validate` reports as required. So an unset enum with a default does not come back unset. A related row read by id alone comes back with its defaulted enums set to their defaults; its other fields besides the key were never read either, so a caller reads only its key. | Keeping "" for a defaulted enum, which Go again refuses to decode. Encoding a row read by id alone as its key only, which needs the ORM to mark such rows and a change to the Go types' API: exact, and a decision of its own. |
+| The decoder keeps refusing "" and every other string the enum lacks. | Reading an absent and an empty key alike, which D53 refuses. |
+
+Settled. An unset required enum is never on the wire. A hash a caller
+takes over Go's own JSON of a value with an unset required enum changes
+once; a hash a reader in another language takes over its typed value
+does not, since that reader refused the "" before.
+
+Built: `FieldInfo.OmitsUnsetEnum` (`internal/generator/typegen/typegen.go`)
+and the tag in `templates/types.tmpl`. The test:
+`TestRequiredEnumLeavesOutItsUnsetValue` runs the generated code: an
+unset required enum is not written; without a default it decodes back
+unset and `Validate` names it, with one it decodes as the default; a
+nested object with unset enums survives the trip; a set value, an
+optional enum and a list encode as before; and "" is still refused.
+
+Left: nothing of its own.
