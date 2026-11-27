@@ -49,10 +49,9 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
   prefix, with a layout, a nav and an index, each page under its
   operation's route controls, and, for an app that loads Topcoat's
   runtime, lists whose filter updates them in place ([Pages](#pages)).
-  Beside them it pages the engine's types, when the API's database is an
-  engine database ([Engine pages](#engine-pages)), and signs a caller in
-  and out and administers the users and roles, when its users are the
-  core user model's ([Sign-in and admin pages](#sign-in-and-admin-pages)).
+  Beside them it signs a caller in and out and administers the users and
+  roles, when its users are the core user model's ([Sign-in and admin
+  pages](#sign-in-and-admin-pages)).
 - shows an amount whose field names its currency, `@display({ currency })`,
   as money, `GBP 4.50`, and takes it in a form as a decimal
   ([Money](#money)).
@@ -116,10 +115,10 @@ the views, which are built on records. Pages are off by default:
 `pages: { enabled: true, prefix: "/console" }` turns them on, and they
 need the records, the forms and the views ([Pages](#pages)); `live: true`
 beside them renders each list with a filter through a shard ([Live
-lists](#live-lists)). Beside `enabled`, `engine: false` leaves out the
-[engine pages](#engine-pages), and `identity: false` the [sign-in and
-admin pages](#sign-in-and-admin-pages); `identity: { signUp: true }`
-adds a sign-up page. Both are on by default wherever they apply.
+lists](#live-lists)). Beside `enabled`, `identity: false` leaves out the
+[sign-in and admin pages](#sign-in-and-admin-pages), which are on by
+default wherever they apply, and `identity: { signUp: true }` adds a
+sign-up page.
 
 The crate needs the Rust server. A service whose server is in another
 language skips `outputs.topcoat` and logs why, so one config can serve a Go
@@ -162,9 +161,9 @@ pages_prefix = { "shop-orders" = "/console/orders", "shop-catalog" = "/console/c
 
 `pages_live = true` beside `pages_prefix` makes the lists of the pages it
 turns on live, as `pages.live` would ([Live lists](#live-lists));
-`pages_engine = false` and `pages_identity = false` turn off the engine
-pages and the identity pages, and `pages_identity = { sign_up = true }`
-adds sign-up. Without a `pages_prefix` the table refuses each of them.
+`pages_identity = false` turns off the identity pages, and
+`pages_identity = { sign_up = true }` adds sign-up. Without a
+`pages_prefix` the table refuses each of them.
 
 An app that links two crates registers each one's pages, layout and
 index at its prefix, so the table refuses one path for several services,
@@ -237,38 +236,6 @@ cover an operation's, so pages and the JSON API agree.
 The app must name the crate, by `use`-ing an item of it. Topcoat discovers
 items through the linker, and a crate the app never names is not linked.
 
-### The engine
-
-When the API's database is an engine database, a DB service whose types
-compose behaviors (D58), the crate keeps the engine in-process on SQLite.
-`engine::open(path)` opens it on a SQLite file, created if absent, with
-the database's engine document (its Rust types' `ENGINE_DOCUMENT`), the
-access policy its config sets (`engine::POLICY`) and the behaviors of the
-core or of the project's engine crate, and defines and publishes the
-document's schemas. The setup method then takes the engine, mounts its
-routes, its event stream and its MCP endpoint at `/engine/{*rest}`, each
-request's caller the one the API's `Authenticator` establishes, and keeps
-it in the router's context (`Setup::engine`), which a page calls in-process on
-the blocking pool:
-
-```rust
-let engine = notes_api_topcoat::engine::open("notes.engine.db")?;
-Router::builder()
-    .discover()
-    .notes_api(implementations, authenticator, engine)
-    .build()
-```
-
-The crate depends on the engine's crates at the naming file's `[paths]
-engine_rust` and `engine_behaviors_rust`; without them it mounts no
-engine, and the build says so. `<service>_without_api` (below) takes the
-engine too and keeps it for the pages, but mounts none of its routes, as
-it mounts no JSON API.
-
-With the pages on, the console pages the engine's types too, each
-instance's behaviors in panels and its operations as forms ([Engine
-pages](#engine-pages)).
-
 ### Several services in one app
 
 `[extension.topcoat] services` lists the services one Topcoat app hosts
@@ -329,26 +296,23 @@ pub async fn serve(parts: <api crate>::apps::<App>Parts) -> std::io::Result<()>
 
 which the app's generated entrypoint calls once it has built the parts
 as the API's server builds its own: the API's `deps`, its
-`implementations`, the `engine` of an engine database, open on the
-stack's database, and `addr`, every interface at `PORT`. The core writes
+`implementations`, and `addr`, every interface at `PORT`. The core writes
 no Topcoat code for it, and a binary that does not link this extension
 refuses to build the stack: run `superschematic-topcoat`.
 
 For an API that declares an app, the crate gains
 `<service>_with_parts(parts)` and `<service>_with_parts_and_api(parts)`,
 which take any app's parts (through `AppParts`, which each `<App>Parts`
-converts into) and set the crate up from them: the implementations, the
-engine the entrypoint opened, in place of `engine::open` on SQLite, and,
+converts into) and set the crate up from them: the implementations, and,
 when the API authenticates with the identity runtime,
 `IdentityPageAuthenticator::of(&parts.implementations)`. An API whose
 users are its own passes its `PageAuthenticator` after the parts.
-`_with_parts` serves the pages alone, which call the API and the engine
-in-process, as `<service>_without_api` does: a stack exposes an app apart
-from its API, so the app's address does not serve an API the stack keeps
-internal. `_with_parts_and_api` mounts the JSON API at `/api` and the
-engine's routes at `/engine` too, as `<service>` does, for an app whose
-API the stack exposes as well. `serve` binds `parts.addr` and hands the
-listener to `topcoat::serve`:
+`_with_parts` serves the pages alone, which call the API in-process, as
+`<service>_without_api` does: a stack exposes an app apart from its API,
+so the app's address does not serve an API the stack keeps internal.
+`_with_parts_and_api` mounts the JSON API at `/api` too, as `<service>`
+does, for an app whose API the stack exposes as well. `serve` binds
+`parts.addr` and hands the listener to `topcoat::serve`:
 
 ```rust
 pub async fn serve(parts: BackofficeParts) -> std::io::Result<()> {
@@ -366,9 +330,10 @@ into the output root's `impl/` with its paths re-based, and its image
 takes in every crate it reaches by path, this one among them. The image
 carries no asset bundle yet, so a live list is a GET form there.
 acme's `examples/acme-shop/apps/backoffice` is such an app over
-`shop-stock`, with its pages under `/stock` and the engine console over
-`shop-db` at `/stock/engine`; `superschematic-topcoat stack dev
-schemas/services/shop-stack` runs it beside `shop-stock`'s server.
+`shop-stock`, with its pages under `/stock`, where staff receive stock
+through the receive form on `/stock/stock/{productId}`;
+`superschematic-topcoat stack dev schemas/services/shop-stack` runs it
+beside `shop-stock`'s server.
 
 ## Users and sessions
 
@@ -1752,125 +1717,6 @@ Router::builder()
 
 An app that does not load it leaves `live` off, so it registers no shard
 it cannot use.
-
-### Engine pages
-
-When the crate mounts an engine ([The engine](#the-engine)), its pages
-are on and a route of the API authenticates a caller, `engine_pages`
-serves the engine's types under `<prefix>/engine` (D44, amended):
-
-| Page | Path |
-| --- | --- |
-| The types the caller may read (the engine's `capabilities`) | `<prefix>/engine` |
-| A type's instances, a page at a time, and its schema-scope operations | `<prefix>/engine/{schema}` |
-| An instance: its own fields, a section per behavior, then the operations no section shows | `<prefix>/engine/{schema}/{id}` |
-| A read-only operation's GET, which renders its result on the page, and a write's POST, then 303 | `.../operations/{operation}`, the type's or the instance's |
-
-Every page calls the engine in-process on the blocking pool, as the
-page's caller: the principal the `PageAuthenticator` gives, mapped as
-`engine::routes` maps a request's (`Principal::new(subject,
-permissions).with_claims(claims)`), so the engine's policy decides what a
-page reads and does. No page acts as the system principal: no caller is
-401. The API's `@rateLimit` and `@timeout` do not apply. Every POST
-passes the console's own cross-origin check before the engine is
-called, trusting no other origin, not even the identity config's
-`trustedOrigins`, so a post another site sent is 403 `cross_origin`
-whatever the `PageAuthenticator` and the origin policy let through. What a page reads renders on the
-server; no procedure hands it to the browser.
-
-A page reads the type's describe document. Its `display` names the type
-and gives a list's columns: the title field, linked, else the id, then
-the summary fields, own or qualified (`Stock.available`). A list pages by
-the engine's cursor, with `back` and a size form of 10, 50 and 200 as
-the console's lists have ([A paged list](#a-paged-list)). An instance's
-own amount shows as money ([Money](#money)) in the currency its field's
-`@display` names, else its type's one `Finance.Currency` field's, which
-the describe document's `fields` give with each field's scalar in its
-`instance` schema. The nav and
-the index gain Engine when the caller may read a type, and the trail
-names an instance by its title field, else its noun and id.
-
-An operation's form is built at run time from its `params` JSON Schema:
-a string a text input, an integer or a number a number input, each with
-its bounds, an enum or a boolean a select, and anything else a JSON
-textarea, each control named by the bare parameter. A form that writes
-an instance sends a hidden `expectedSeq`, the instance's seq when its
-page was read. An operation is offered as the engine's tool manifest
-offers it to the caller, by each tool's `mcp.hiddenBy`: one the type
-lacks, or the deployment hides (`deployment`, from
-`outputs.engine.tools.hidden`), is 404, one the policy refuses
-(`policy`) or that writes in an archived namespace (`archived`) is 403
-with the engine's reason, and one the engine hides from MCP alone, for a
-handle MCP would refuse (`handle`), is offered. The engine asks the
-policy of that one too, so a caller it refuses has no form. A hidden
-tool whose causes the console does not know, or that lists none, is
-refused: the console fails closed.
-
-| The engine refuses | The page answers |
-| --- | --- |
-| A parameter (`OperationParams`) | 422, each issue at its control |
-| A behavior's veto | 409, `<code>: <reason>` as the form's message |
-| A stale `expectedSeq` | 409, the form as sent |
-| A missing instance or operation | 404, on its own page |
-| Anything else it refuses | its status and message |
-| An error that is no refusal | 500, "The engine failed to answer" |
-
-`engine_panels::panel(cx, behavior, describe, record)` renders the
-section of a behavior the crate knows: Workflow, Approvals and Branches
-(`core_shows` names the operations each shows), and Stock, Calendar,
-Holds and Payments (`commerce_shows`). A panel shows only the operations
-the page offers the caller, and its amounts through `money_text`. Any
-other behavior gets the generic panel,
-`<section class="ss-panel" data-behavior="X">`: its fields as the read
-returns them, and its operations as forms. An operation a panel does not
-show is a generic form under the panels, so each one the caller is
-offered has a form once.
-
-- **Workflow**: the state by its display label, a button for each move
-  the display labels out of it, and a "Move to" select of the others, a
-  move whose permission the caller lacks left out.
-- **Approvals**: each gate's sign-offs against its count, who signed, and
-  the caller's sign-off or withdrawal, when their permissions cover the
-  gate's and the gate does not exclude its creator. Entering the gated
-  state consumes its sign-offs, so a gate the instance entered or passed
-  says so: "Met: it entered Approved with its 2 sign-offs."
-- **Branches**: the refs, primary first (`?ref=`), a ref's commits 50 at
-  a time (`?skip=`), a diff of two of them (`?from=&to=`, at most 200
-  rows), the release log, and the writes as `engine_pages::operation_form`
-  with the refs and versions filled in: branch, save, commit, seal,
-  rebase, revert, merge and discard. A tagged commit's release is a
-  button in its row.
-- **Stock**: on hand, held, available and low, the receive, adjust and
-  count forms, each with the page's `expectedSeq`,
-  and the movements 20 at a time (`?movements=`).
-- **Calendar**: the time zone, the capacity, the hours as a week, the
-  closures, and the bookings between `bookingsFrom` and `bookingsTo` (UTC,
-  both days, a week from today by default), 20 at a time.
-- **Holds**: the state, the items with their unit prices, and the total,
-  "Mixed currencies" when it is null and "Nothing priced" when no item
-  has a price.
-- **Payments**: due, authorized, captured, refunded, outstanding and
-  overpaid, in its currency, the state and the attempts. A refund
-  instance links to what it refunds; an instance another type refunds
-  through Approvals links to that type; any other holds `refundPayment`'s
-  form, in minor units, whose idempotency key is made as the form
-  renders.
-
-`pages.engine: false` (`pages_engine = false`) turns the engine pages
-off. The build log says why a crate whose pages and engine are on has
-none:
-
-```
-  - topcoat: no engine pages at /console/engine: no route of the API authenticates a caller, and a page calls the engine only as its caller, whom the engine's policy admits
-  - topcoat: no engine pages at /engine/engine: the path is under /engine, where the crate mounts the engine's own routes
-  - topcoat: no engine pages at /console/engine: the API's own collection engine is served there
-```
-
-The acme shop's console pages `shop-db`'s `Inventory`, `CollectionPoint`,
-`Checkout` and `Refund` at `/console/engine`; its
-`topcoat/tests/back_office.rs` receives stock, reads a pickup point's
-week, shows a checkout's holds and payment as money, and signs a refund
-off twice before it moves to approved.
 
 ### Sign-in and admin pages
 
