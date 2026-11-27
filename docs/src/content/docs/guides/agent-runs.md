@@ -14,7 +14,7 @@ stop switch ends every run in flight.
 
 | Built | Not built yet |
 | --- | --- |
-| `@agents("<part>")` on the orchestration's tables, which the build fills | the Go runtime; SQLite and D1 |
+| `@agents("<part>")` on the orchestration's tables, which the build fills | SQLite and D1 |
 | run requests on a queue from routes, assignments, schedules, principals and inbound messages | a real container platform's sandbox provider and a model API's provider |
 | the run's token as a grant per target row, acting for its principal, its paths narrowed to a party's grant | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
 | autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | |
@@ -22,7 +22,8 @@ stop switch ends every run in flight.
 | budgets per agent and in total, warnings, pauses; stop switches | |
 | asking in a row's thread, with a follow-up row at the deadline | |
 | redacted transcripts in a bucket; credentials that stay in the sandbox | |
-| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | a generated Rust server that does the same |
+| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | a generated Go server that builds the dispatcher into its `Deps`, and a Rust server that does the same; `@autonomy` in a Go server, which serves no MCP endpoint |
+| the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres | |
 | the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres | |
 
 D158 and D183 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
@@ -259,6 +260,60 @@ inbound message reach the model marked untrusted, and the run counts them.
 
 A transcript is kept 30 days after its run ends (`transcriptRetentionDays`);
 `prune` deletes it from the bucket. The run row stays.
+
+## In Go
+
+The Go HTTP runtime's `agents` package is the same dispatcher, on
+Postgres (D192), with D183's trust and narrowed paths. The generated Go
+ORM of a database with the `@agents` tables and the notifier writes
+`orchestration.go`: the orchestration's tables by part with their columns,
+each table's behaviors' uses, and the requests queue, and
+`Database.Orchestration()`, the host the dispatcher runs through. A table
+that composes behaviors (the runs' Lease, Retries and Workflow, the
+controls' Budget) or is `@versioned` (the definitions) is written through
+its repository, and its behaviors' operations run through the core; the
+policies and approvals by statements over their columns. The dispatcher
+is built first, then given the notifier and the inbound path, which take
+its reply actions, its requests and its send approval:
+
+```go
+host := db.Orchestration()
+dispatcher, err := agents.New(host, agents.Options{
+	Endpoint:    "https://app.example.test/api/agents",
+	Providers:   deps.Providers,
+	Tools:       tools,
+	Search:      &crosstable.SearchOptions{},
+	Transcripts: transcripts,
+})
+notifier, err := notify.New(host, notify.Options{Providers: deps.Providers, Agents: dispatcher, Replies: map[string]map[string]notify.ReplyAction{"approval.requested": dispatcher.ReplyActions()}})
+dispatcher.SetNotifier(notifier)
+in, err := inbound.New(host, inbound.Options{Notifier: notifier, Providers: deps.Providers, Approve: dispatcher})
+dispatcher.SetInbound(in)
+
+// The agent routes, under the endpoint's path.
+mux.Handle("/api/agents/", dispatcher.Routes(agents.RoutesOptions{}))
+// The requests queue's worker, and the run requests queue's.
+runs, err := in.RunQueue(dispatcher.HandleRunRequest)
+err = worker.RunAll(ctx, []worker.Queue{dispatcher.WorkerQueue(), runs}, options)
+```
+
+A tool of the app is an `agents.Tool`: its class, its mode, the
+permission it needs, and its `Run`, which a `ToolContext` is given, a
+context that acts as the run's principal (`Ctx`) in a transaction of the
+database (`Tx`, the ORM's `TxInterface`). The run's principal
+(`PrincipalOf`) carries the run, the agent, the definition's version and
+the trust beside the permissions, as Go's `access.Principal` holds none of
+them. Each call to the agent routes runs its work to its end whether or
+not the instance stays, so a run a call cancels is not left half done. A
+run's token on the app's own routes goes through `Authenticator`, in place
+of `session.GrantAuthenticator`, which refuses one: the route runs as the
+run's principal, narrowed as above, and each call is held to the run's
+autonomy first, so an entered sender's write answers 428 until someone
+approves it. The
+sandbox's side is `providers.RunAgentInstance`. A Go server is refused an
+operation's `@autonomy`, which holds an agent run's calls of the API's MCP
+tools, since it serves no MCP endpoint; `MCPGate` is that gate for the day
+one does.
 
 ## In Rust
 

@@ -1619,9 +1619,7 @@ func (r *LineItemRepository) upsertRow(ctx context.Context, input *types.LineIte
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("\"updatedAt\" = $%d", paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, "\"updatedAt\" = statement_timestamp()")
 
 		// Set updated_by
 
@@ -1850,8 +1848,7 @@ func (r *LineItemRepository) upsertBatches(ctx context.Context, inputs []*types.
 			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf("\"updatedAt\" = $%d", len(values)))
+			assignments = append(assignments, "\"updatedAt\" = statement_timestamp()")
 		}
 		query := fmt.Sprintf(
 			`INSERT INTO "lineItem" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "amountCents", "postedOn", "memo", "externalId", "categoryId", "createdAt", "updatedAt", "deletedAt", (xmax = 0) AS _inserted`,
@@ -2253,9 +2250,7 @@ func (r *LineItemRepository) UpdateOne(ctx context.Context, id types.IdentityUUI
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("\"updatedAt\" = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "\"updatedAt\" = statement_timestamp()")
 
 	// Set updated_by
 
@@ -2392,9 +2387,7 @@ func (r *LineItemRepository) UpdateMany(ctx context.Context, filter *LineItemFil
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("\"updatedAt\" = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "\"updatedAt\" = statement_timestamp()")
 
 	// Set updated_by
 

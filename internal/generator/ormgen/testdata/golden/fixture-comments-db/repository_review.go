@@ -753,8 +753,9 @@ func (r *ReviewRepository) corePatch(update *ReviewUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and ReviewUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and ReviewUpdate holds none.
 func (r *ReviewRepository) updateColumns(ctx context.Context, update *ReviewUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Title != nil {

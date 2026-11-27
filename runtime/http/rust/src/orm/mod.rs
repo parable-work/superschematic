@@ -1366,8 +1366,12 @@ pub struct CoreUpdate<'a> {
     /// as a create's are.
     pub fields: Values,
     /// The own columns as the update binds them, by unquoted column, a
-    /// `None` setting NULL, with `updated_at` and `updated_by`.
+    /// `None` setting NULL, with `updated_by`.
     pub columns: CoreColumns,
+    /// The unquoted columns the core's update of the row sets to the
+    /// database's clock: `updated_at`, which its insert's default stamped
+    /// from that clock too.
+    pub now: Vec<String>,
     /// The caller's preconditions.
     pub preconditions: Option<&'a Values>,
     /// Who the command runs as.
@@ -1450,10 +1454,12 @@ pub struct CoreOperation<'a> {
     pub operation: &'a str,
     /// The operation's parameters, in their wire form.
     pub params: Value,
-    /// The stamps the operation's write of the row sets, by unquoted
-    /// column: `updated_at`, and `updated_by` when the repositories act as
-    /// a user.
+    /// The stamps the operation's write of the row binds, by unquoted
+    /// column: `updated_by` when the repositories act as a user.
     pub columns: CoreColumns,
+    /// The unquoted columns the operation's write of the row sets to the
+    /// database's clock: `updated_at`.
+    pub now: Vec<String>,
     /// The caller's preconditions.
     pub preconditions: Option<&'a Values>,
     /// Who the command runs as.

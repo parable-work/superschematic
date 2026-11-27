@@ -260,8 +260,9 @@ func (r *CompanyRepository) corePatch(update *CompanyUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and CompanyUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and CompanyUpdate holds none.
 func (r *CompanyRepository) updateColumns(ctx context.Context, update *CompanyUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.City != nil {

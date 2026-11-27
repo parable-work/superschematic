@@ -48,6 +48,16 @@ import (
 // which raises, routes, delivers, escalates and reads replies. The loader
 // refuses the notifier on SQLite for every language (checkNotifications).
 //
+// Parties, the inbound path and conversations (D157) and the agent
+// dispatcher (D158), with D183's trust and narrowed paths, are served on
+// Postgres (D192): the generated ORM of a database with them hosts the
+// HTTP runtime's inbound and agents packages through the notifier's host,
+// so a database with them and no notifier is refused, and the loader
+// refuses them on SQLite for every language (checkParties, checkAgents),
+// which GoServerSQLiteErr holds too. An operation's @autonomy stays
+// refused: it holds an agent run's calls of the API's MCP tools, and a Go
+// server serves no MCP endpoint (D81, D116).
+//
 // The Rust and SQLite ports refuse their own in files of their own; a
 // later Go workstream that serves one of these removes its line here.
 //
@@ -80,12 +90,13 @@ func GoServerDatabaseErr(api, db *ir.Schema) error {
 
 // GoServerSQLiteErr is the refusal of the features of db, the database of
 // api, a Go server, that a Go server on a database that lists sqlite
-// first does not serve (D187), or nil: a table that composes Recurrence,
-// whose operations and deadline worker the Go adapter runs on Postgres,
-// a calendar source, and a @searchable table, which the crosstable
-// package reads and ranks with Postgres statements alone. The generator
-// calls it with the database's dialects for every Go server over a
-// database.
+// first does not serve (D187, D192), or nil: a table that composes
+// Recurrence, whose operations and deadline worker the Go adapter runs on
+// Postgres, a calendar source, and a @searchable table, which the
+// crosstable package reads and ranks with Postgres statements alone, and
+// the parties' and agents' tables, which the inbound path and the
+// dispatcher read by Postgres's statements. The generator calls it with
+// the database's dialects for every Go server over a database.
 func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 	if api == nil || db == nil || len(dialects) == 0 || dialects[0] != registry.SQLDialectSQLite {
 		return nil
@@ -105,16 +116,14 @@ func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 		if td.Searchable != nil {
 			features = append(features, name+": @searchable")
 		}
+		for _, mark := range orchestrationMarks(td) {
+			features = append(features, name+": "+mark)
+		}
 	}
 	if len(features) == 0 {
 		return nil
 	}
-	return fmt.Errorf("the Go server of %s is over %s, whose DB service lists sqlite first, and serves %s on Postgres alone so far (D152, D155, D187); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", api.Name, db.Name, strings.Join(features, ", "), db.Name)
-}
-
-// goUnserved is the refusal of one feature in a Go output.
-func goUnserved(r *Result, file, where, feature, decision string) {
-	r.errorf(file, "%s does not serve %s yet (%s, D180): a TypeScript server does; serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\"), or leave the feature out", where, feature, decision)
+	return fmt.Errorf("the Go server of %s is over %s, whose DB service lists sqlite first, and serves %s on Postgres alone so far (D152, D155, D157, D158, D187, D192); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", api.Name, db.Name, strings.Join(features, ", "), db.Name)
 }
 
 // checkGoTables refuses the table features of schema, a Go server's
@@ -125,33 +134,56 @@ func checkGoTables(schema *ir.Schema, where string, r *Result) {
 		if td == nil {
 			continue
 		}
-		on := func(feature string) string { return fmt.Sprintf("%s on %s", feature, td.Name) }
 		for i, source := range td.CalendarSources {
 			if fd := sqlutil.FieldNamed(td, source.Title); fd != nil && fd.EncryptedAtRest {
 				r.errorf(td.Owner, "%s does not serve @calendarSource %s titled by %s, an Encrypted<T> field (D152, D187): the Go calendar reads a title from its column, sealed; title it by a plain field, or serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\")", where, ir.CalendarSourceName(td, i), source.Title)
 			}
 		}
-		if td.Party != nil {
-			goUnserved(r, td.Owner, where, on("@party"), "D157")
-		}
-		if td.Conversations != nil {
-			goUnserved(r, td.Owner, where, on("@conversations"), "D157")
-		}
-		if td.RunRequests != nil {
-			goUnserved(r, td.Owner, where, on("@runRequests"), "D157")
-		}
-		if td.Agents != nil {
-			goUnserved(r, td.Owner, where, on("@agents"), "D158")
+	}
+	// The inbound path and the dispatcher run through the notifier's host
+	// (D192), which a database with no dispatch queue has none of.
+	if schema.NotifierTable(ir.NotifierDispatch) == nil {
+		for _, name := range sortedTypeNames(schema.Types) {
+			td := schema.Types[name]
+			if td == nil {
+				continue
+			}
+			if marks := orchestrationMarks(td); len(marks) > 0 {
+				r.errorf(td.Owner, "%s serves %s on %s through the notifier's host (D190, D192), and the database declares no @notifier(\"dispatch\") queue: declare the notifier's tables, or serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\")", where, marks[0], td.Name)
+				return
+			}
 		}
 	}
+}
+
+// orchestrationMarks are td's marks of D157's parties and conversations
+// and D158's agents.
+func orchestrationMarks(td *ir.TypeDef) []string {
+	var out []string
+	if td.Party != nil {
+		out = append(out, "@party")
+	}
+	if td.Conversations != nil {
+		out = append(out, "@conversations")
+	}
+	if td.RunRequests != nil {
+		out = append(out, "@runRequests")
+	}
+	if td.Agents != nil {
+		out = append(out, "@agents")
+	}
+	return out
 }
 
 // checkGoOperations refuses the features of schema, an API's, its Go
 // server does not serve: a runtime provider its config lists whose
 // directory holds no Go module (D159, D184), which a Go server cannot
-// link, and an operation's @autonomy (D158). Provider slots are served
-// (D184): the server imports each listed provider's module and builds
-// its Providers into Deps.
+// link, and an operation's @autonomy (D158, D183), which holds an agent
+// run's calls of the API's MCP tools, and a Go server serves no MCP
+// endpoint (D81, D116); the agents package's MCPGate is the gate for the
+// day it does (D192). Provider slots are served (D184): the server
+// imports each listed provider's module and builds its Providers into
+// Deps.
 func checkGoOperations(schema *ir.Schema, where string, r *Result) {
 	for _, p := range schema.Providers {
 		if p != nil && p.Module == "" {
@@ -164,7 +196,7 @@ func checkGoOperations(schema *ir.Schema, where string, r *Result) {
 		}
 		for _, op := range set.Operations {
 			if op != nil && op.Autonomy != nil {
-				goUnserved(r, schema.Name, where, fmt.Sprintf("@autonomy on %s.%s", set.Name, op.Name), "D158")
+				r.errorf(schema.Name, "%s does not serve @autonomy on %s.%s yet (D158, D183, D192): it holds an agent run's calls of the API's MCP tools, and a Go server serves no MCP endpoint (D81, D116); serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\"), or leave the @autonomy out", where, set.Name, op.Name)
 			}
 		}
 	}

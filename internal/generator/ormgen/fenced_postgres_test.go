@@ -73,10 +73,10 @@ func TestFenceBumps(t *testing.T) {
 		sets   []string
 		want   []string
 	}{
-		{deliveryFences, []string{"address = $1", "updated_at = $2"}, []string{plan}},
+		{deliveryFences, []string{"address = $1", "updated_at = statement_timestamp()"}, []string{plan}},
 		{deliveryFences, []string{"courier_id = NULL"}, []string{plan}},
 		{deliveryFences, []string{"proof = EXCLUDED.proof", "address = EXCLUDED.address"}, []string{plan, run}},
-		{deliveryFences, []string{"note = $1", "updated_at = $2"}, nil},
+		{deliveryFences, []string{"note = $1", "updated_at = statement_timestamp()"}, nil},
 		{deliveryFences, []string{"address = $1", "plan_version = $2", "attempts = $3"}, []string{run}},
 		{deliveryFences, []string{"plan_version = $1"}, nil},
 		{deliveryFences, nil, nil},

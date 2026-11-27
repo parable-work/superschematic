@@ -88,8 +88,10 @@ type TableStatements struct {
 	// Update sets %s on the row whose key is $%d. VersionFence follows it
 	// for a write fenced on _version $%d, Live for a soft-deletable table,
 	// and Returning last. UpdateMany sets %s on the rows of the WHERE %s.
-	// UpdatedAt and UpdatedBy are the assignments an update stamps. On a
-	// table with a @fenced field, the assignments %s of Update, UpdateMany
+	// UpdatedAt and UpdatedBy are the assignments an update stamps:
+	// UpdatedAt the database's clock (StampNow), which takes no parameter
+	// and which a repository fills as it fills any statement, and UpdatedBy
+	// the acting user, $%d. On a table with a @fenced field, the assignments %s of Update, UpdateMany
 	// and Upsert end with the bump of each fence they advance (D119,
 	// TableModel.FenceBumps), which the repository that fills them adds.
 	Update       string
@@ -389,6 +391,35 @@ func (d tableDialect) numbered() string {
 	return d.clauses.Placeholder
 }
 
+// PostgresStampNow and SQLiteStampNow are the database's clock as an
+// update stamps a row's updatedAt with it (StampNow).
+const (
+	PostgresStampNow = "statement_timestamp()"
+	SQLiteStampNow   = sqliteNow
+)
+
+// StampNow is the database's clock as an update stamps a row's updatedAt
+// with it, on Postgres if not sqlite: the time of the statement, the
+// value an insert's default gives createdAt and updatedAt being the
+// database's too, so a row's times come from one clock whatever the
+// host's reads, and no update stamps a row earlier than its insert. The
+// statement's time is later than every earlier statement of its
+// transaction, where now() is the transaction's start, and every row one
+// statement writes takes the same; SQLite's 'now' is the statement's
+// already, in the form of its default, RFC 3339 in UTC to the
+// millisecond.
+func StampNow(sqlite bool) string {
+	if sqlite {
+		return SQLiteStampNow
+	}
+	return PostgresStampNow
+}
+
+// stampNow is StampNow in the dialect, as a statement's format writes it.
+func (d tableDialect) stampNow() string {
+	return strings.ReplaceAll(StampNow(d.sqlite), "%", "%%")
+}
+
 // TableStatementsOf writes the statements of table on Postgres.
 func TableStatementsOf(table *TableModel) TableStatements {
 	return tableStatements(table, tableDialect{clauses: PostgresClauses()})
@@ -478,7 +509,7 @@ func tableStatements(table *TableModel, d tableDialect) TableStatements {
 		VersionFence:     " AND " + VersionColumn + " = " + n,
 		Returning:        " RETURNING " + list,
 		UpdateMany:       "UPDATE " + t + " SET %s%s",
-		UpdatedAt:        strings.Replace(d.clauses.Set, "%s", table.AuditQuoted(AuditUpdatedAt), 1),
+		UpdatedAt:        table.AuditQuoted(AuditUpdatedAt) + AssignmentInfix + d.stampNow(),
 		UpdatedBy:        strings.Replace(d.clauses.Set, "%s", table.AuditQuoted(AuditUpdatedBy), 1),
 		Version:          "SELECT " + VersionColumn + " FROM " + t + " WHERE " + key + " = " + p(1),
 	}
@@ -645,6 +676,12 @@ func (s TableStatements) AllStatements() []NamedStatement {
 		{"version", s.Version}, {"nearest", s.Nearest},
 		{"stale", s.Stale}, {"reseal", s.Reseal},
 	}
+}
+
+// Filled is statement, one that takes no argument, as a runtime fills it:
+// each %% read as %.
+func Filled(statement string) string {
+	return strings.ReplaceAll(statement, "%%", "%")
 }
 
 // CheckFormat reports a statement that holds a verb other than %s, %d and
