@@ -296,15 +296,16 @@ path for when the store is unavailable.
   `@projection` whose rows a write withdraws takes `replica: false`. The
   TypeScript ORM has no replica.
 - **Search, calendars, notifications, parties and agents are declared;
-  a TypeScript server wires them.** Each is Postgres alone, with no Go
-  or Rust server yet, and the generated server mounts none of their
-  routes or workers: call the helpers the guide names
+  a TypeScript server wires them.** Each is Postgres alone, and the
+  generated server mounts none of their routes or
+  workers: call the helpers the guide names
   (`@superschematic/http-runtime/postgres`: `searchTables`,
   `readCalendar`, `createNotifier`, `createInbound`, `createAgents`) from
   your server, rather than building any of them from tables of your own.
-  A Go server serves search, Recurrence and the calendar too, through the
-  Go schema runtime's `crosstable` package over the ORM's `CrossTables()`
-  (D187).
+  A Go and a Rust server serve search, Recurrence and the calendar too,
+  through the Go schema runtime's `crosstable` package over the ORM's
+  `CrossTables()` (D187) and the Rust runtime's `orm::search_tables` and
+  `orm::calendar` (D188).
   - One search over many tables, ranked, holding each caller's access:
     `@searchable<T>({ title, body?, scope?, queue })`, `searchTables`
     (D155; `guides/database-tables/#search-across-tables`).

@@ -383,6 +383,11 @@ impl Tables {
         &self.pool
     }
 
+    /// The keys of the database's `Encrypted<T>` fields, when given.
+    pub fn keys(&self) -> Option<&Arc<dyn FieldKeys>> {
+        self.keys.as_ref()
+    }
+
     /// The definition of the database's tables.
     pub fn definition(&self) -> Result<&'static Definition, Error> {
         (self.definition)()
@@ -605,6 +610,66 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     pub async fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
         self.runner().reencrypt(batch).await
     }
+
+    /// The conditions that keep a read of the table's rows to what the
+    /// repositories' caller sees (D156), each value appended to `args` and
+    /// each column qualified by the table: an `@audience` table's audience,
+    /// and for a caller with grants the rows they reach, `FALSE` for a
+    /// table none reaches. None for repositories opened for no caller. What
+    /// a read across tables holds a table's rows to, as a search does with
+    /// an `EXISTS` back to the table (D155, D188), the TypeScript
+    /// repositories' `conditions(null, args, offset)`.
+    pub fn conditions(&self, args: &mut Vec<Bound>) -> Result<Vec<String>, Error> {
+        self.plan.read_conditions(self.table, args)
+    }
+}
+
+/// Runs `sql` on `client` with `args` bound, each as the text of the type
+/// Postgres gave its parameter, and answers each row's columns in order as
+/// a repository reads a column: a UUID in base62, a decimal as its text.
+/// What a read across tables runs its own statement through (D152, D155,
+/// D188), with the conditions of [`Repository::conditions`] among its
+/// values.
+pub async fn query_rows<C: GenericClient + Sync>(
+    client: &C,
+    sql: &str,
+    args: &[Bound],
+) -> Result<Vec<Vec<Value>>, Error> {
+    let prepared = client
+        .prepare_cached(sql)
+        .await
+        .map_err(|err| failure(sql, &err))?;
+    if prepared.params().len() != args.len() {
+        return Err(Error::Definition(format!(
+            "the statement takes {} values, and {} were bound: {sql}",
+            prepared.params().len(),
+            args.len()
+        )));
+    }
+    let params = args
+        .iter()
+        .zip(prepared.params())
+        .map(|(bound, ty)| {
+            param_text(&bound.value, ty, bound.marks.json)
+                .map(Text)
+                .map_err(Error::Invalid)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    let rows = client
+        .query(&prepared, &refs)
+        .await
+        .map_err(|err| failure(sql, &err))?;
+    rows.iter()
+        .map(|row| {
+            (0..row.len())
+                .map(|i| {
+                    cell(row, i, &Column::default())
+                        .map_err(|err| Error::Definition(format!("{sql}: {err}")))
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// The Rust types a typed repository reads and writes, which it holds
