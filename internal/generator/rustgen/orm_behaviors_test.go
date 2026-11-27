@@ -93,6 +93,14 @@ func TestRepositoriesTypeEachBehaviorOperation(t *testing.T) {
 // postgres/create.sql.
 func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
 	t.Helper()
+	runBehaviorRepositoriesWith(t, fixture, name, source, false)
+}
+
+// runBehaviorRepositoriesWith is runBehaviorRepositories, the test crate
+// depending on the HTTP runtime's checkout as well when runtime is set,
+// for a test that runs the runtime's own loops over the repositories.
+func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, runtime bool) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping the behavior tables' cargo test in -short mode")
 	}
@@ -166,7 +174,7 @@ func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
 		t.Fatalf("the HTTP runtime's lockfile: %v", err)
 	}
 	for file, content := range map[string]string{
-		"Cargo.toml":            fmt.Sprintf(ormBehaviorsManifest, output.CrateName, filepath.ToSlash(typesDir)),
+		"Cargo.toml":            fmt.Sprintf(ormBehaviorsManifest, output.CrateName, filepath.ToSlash(typesDir), runtimeDependency(runtime, paths.HTTPRuntimeRust)),
 		"Cargo.lock":            string(lock),
 		"src/lib.rs":            "//! The behavior tables' repositories: see tests/.\n",
 		"create.sql":            sqliteDDL,
@@ -218,10 +226,20 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt"] }
 db = { package = %q, path = %q, features = ["postgres", "sqlite"] }
-
+%s
 # Its own workspace, so no manifest above the test's directory claims it.
 [workspace]
 `
+
+// runtimeDependency is the test crate's dependency on the HTTP runtime's
+// checkout at dir, with its postgres feature, when runtime is set, and
+// nothing otherwise.
+func runtimeDependency(runtime bool, dir string) string {
+	if !runtime {
+		return ""
+	}
+	return fmt.Sprintf("superschematic-http-runtime = { path = %q, features = [\"postgres\"] }\n", filepath.ToSlash(dir))
+}
 
 // TestRepositoriesBindNoCoreWithoutTheBehaviorsCrates: a build whose
 // naming file names neither of the unpublished crates the binding depends

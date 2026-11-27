@@ -39,7 +39,7 @@ pub struct Deps {
     /// server's service credential.
     pub deps_rust_pricing: schemas_deps_rust_pricing_sdk::DepsRustPricingSdk,
     /// deps-media, a bucket the API lists: private object storage it puts,
-    /// gets, deletes and lists objects in, and signs URLs for (D54).
+    /// gets, heads, deletes and lists objects in, and signs URLs for (D54).
     pub deps_media: Arc<dyn Bucket>,
     /// deps-cache, a memory store the API lists (D75): channels and keys
     /// every replica shares and may lose, which its generated definitions

@@ -862,6 +862,10 @@ type CategoryFilter struct {
 	Name      *StringFilter
 	Kind      *StringFilter
 	CreatedAt *DateTimeFilter
+	// LineItems keeps the rows that some live LineItem row the filter
+	// finds points at by its category (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LineItems *LineItemFilter
 	// ReferencedByLineItemCategory filters on the presence or absence of a
 	// LineItem whose category points at this row.
 	ReferencedByLineItemCategory *ReferencedByFilter
@@ -1125,6 +1129,17 @@ func (f *CategoryFilter) conditions(args *[]interface{}, paramOffset int) []stri
 				conditions = append(conditions, `"budgetCategory"."createdAt" IS NOT NULL`)
 			}
 		}
+	}
+	if f.LineItems != nil {
+		before := len(*args)
+		through := f.LineItems.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `"lineItem"."deletedAt" IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"budgetCategory".id IN (SELECT "lineItem"."categoryId" FROM "lineItem"%s)`, where))
 	}
 	if f.ReferencedByLineItemCategory != nil {
 		probe := `SELECT 1 FROM "lineItem" WHERE "lineItem"."categoryId" = "budgetCategory".id`

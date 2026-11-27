@@ -339,7 +339,7 @@ export type { Revealable } from './secret.js';
 
 // The generated repositories (D79): the tables a DB's types package
 // describes in its ./orm entry, whose createOrm calls ormOf over a pool.
-export { MergeError, NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, TooManyRowsError, fill, ormDialect, ormOfRuntime } from './orm.js';
+export { MergeError, NoUserError, NotFoundError, ORM_MEMBERS, PageKeyError, READ_METHODS, TooManyRowsError, fill, ormDialect, ormOfRuntime } from './orm.js';
 export { ormOf, POSTGRES_ORM_RUNTIME } from './orm-postgres.js';
 // Per-record access (D156): the predicate that keeps a read of an
 // @audience table to what a caller sees, which a read across tables
@@ -493,7 +493,10 @@ export {
   DEFAULT_TRANSCRIPT_RETENTION_DAYS,
   createAgents,
   defaultAutonomy,
+  effectiveAutonomy,
+  narrowReaches,
   paramsHash,
+  trustOf,
   type AgentRunRequest,
   type AgentSandboxTool,
   type AgentTool,
@@ -506,6 +509,7 @@ export {
   type GateOutcome,
   type OperationClass,
   type PrincipalRef,
+  type RunTrust,
   type TranscriptEntry,
   type TranscriptStore,
 } from './agents.js';

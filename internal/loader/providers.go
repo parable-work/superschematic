@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -18,20 +20,22 @@ import (
 // slots of its @envVars class (D159).
 
 // providerManifest is the "superschematic": {"provider": {...}} object of
-// a provider package's package.json.
+// a provider package's package.json, or the
+// [package.metadata.superschematic.provider] table of a provider crate's
+// Cargo.toml (D185).
 type providerManifest struct {
-	Name       string                          `json:"name"`
-	Implements string                          `json:"implements"`
-	Operations []string                        `json:"operations"`
-	Config     map[string]providerManifestItem `json:"config"`
-	Role       []string                        `json:"role"`
+	Name       string                          `json:"name" toml:"name"`
+	Implements string                          `json:"implements" toml:"implements"`
+	Operations []string                        `json:"operations" toml:"operations"`
+	Config     map[string]providerManifestItem `json:"config" toml:"config"`
+	Role       []string                        `json:"role" toml:"role"`
 }
 
 // providerManifestItem is one setting of a provider's config.
 type providerManifestItem struct {
-	Secret   bool   `json:"secret"`
-	Optional bool   `json:"optional"`
-	Doc      string `json:"description"`
+	Secret   bool   `json:"secret" toml:"secret"`
+	Optional bool   `json:"optional" toml:"optional"`
+	Doc      string `json:"description" toml:"description"`
 }
 
 // loadProviders reads each runtime provider package cfg lists, relative to
@@ -46,12 +50,18 @@ func loadProviders(servicePath string, schema *ir.Schema, cfg *schemaconfig.Sche
 	}
 	if cfg != nil && len(cfg.Providers) > 0 {
 		names := map[string]string{}
+		// A schema loaded before, which a load may hand back, holds the
+		// providers it read then.
+		schema.Providers = nil
 		for _, dir := range cfg.Providers {
 			p, err := ReadRuntimeProvider(filepath.Join(servicePath, filepath.FromSlash(dir)))
 			if err != nil {
 				return fmt.Errorf("%s: providers: %s: %w", schema.Name, dir, err)
 			}
 			p.Path = dir
+			if p.Dir, err = filepath.Abs(filepath.Join(servicePath, filepath.FromSlash(dir))); err != nil {
+				return fmt.Errorf("%s: providers: %s: %w", schema.Name, dir, err)
+			}
 			if other, dup := names[p.Name]; dup {
 				return fmt.Errorf("%s: providers %s and %s are both named %s; an environment names a provider by its name, so each is named once (D159)", schema.Name, other, dir, p.Name)
 			}
@@ -62,14 +72,48 @@ func loadProviders(servicePath string, schema *ir.Schema, cfg *schemaconfig.Sche
 	return checkProviderSlots(schema)
 }
 
-// ReadRuntimeProvider reads the runtime provider the package in dir
-// declares in its package.json and checks it against its interface's
-// contract (ir.RuntimeProvider.Check). Its Path is left empty.
+// ReadRuntimeProvider reads the runtime provider the directory dir holds
+// and checks it against its interface's contract
+// (ir.RuntimeProvider.Check). Its Path is left empty. The directory holds
+// a TypeScript package whose package.json declares it under
+// "superschematic": {"provider": ...} (D159), a Rust crate whose
+// Cargo.toml declares it under [package.metadata.superschematic.provider]
+// (D185), or both, which then declare one provider.
 func ReadRuntimeProvider(dir string) (*ir.RuntimeProvider, error) {
+	fromPackage, err := readPackageProvider(dir)
+	if err != nil {
+		return nil, err
+	}
+	fromCrate, err := readCrateProvider(dir)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case fromPackage == nil && fromCrate == nil:
+		return nil, fmt.Errorf("no package.json or Cargo.toml in %s; a provider is a package whose package.json declares it, or a crate whose Cargo.toml does (D159, D185)", dir)
+	case fromPackage == nil:
+		return fromCrate, nil
+	case fromCrate == nil:
+		return fromPackage, nil
+	}
+	same := *fromCrate
+	same.Package, same.Crate = fromPackage.Package, ""
+	a, _ := json.Marshal(fromPackage)
+	b, _ := json.Marshal(&same)
+	if !bytes.Equal(a, b) {
+		return nil, fmt.Errorf("%s: package %s and crate %s declare different providers (%s and %s); a directory that holds both declares one provider in each (D185)", dir, fromPackage.Package, fromCrate.Crate, a, b)
+	}
+	fromPackage.Crate = fromCrate.Crate
+	return fromPackage, nil
+}
+
+// readPackageProvider reads the provider dir's package.json declares, or
+// nil for a directory with none.
+func readPackageProvider(dir string) (*ir.RuntimeProvider, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "package.json"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("no package.json in %s; a provider is a package whose package.json declares it", dir)
+			return nil, nil
 		}
 		return nil, err
 	}
@@ -91,10 +135,69 @@ func ReadRuntimeProvider(dir string) (*ir.RuntimeProvider, error) {
 	if err := dec.Decode(&m); err != nil {
 		return nil, fmt.Errorf("package %s: superschematic.provider: %w; it takes name, implements, operations, config and role", pkg.Name, err)
 	}
+	p := m.provider()
+	p.Package = pkg.Name
+	if err := p.Check(); err != nil {
+		return nil, err
+	}
+	p.Normalize()
+	return p, nil
+}
+
+// readCrateProvider reads the provider dir's Cargo.toml declares under
+// [package.metadata.superschematic.provider] (D185), or nil for a
+// directory with no Cargo.toml.
+func readCrateProvider(dir string) (*ir.RuntimeProvider, error) {
+	path := filepath.Join(dir, "Cargo.toml")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var manifest struct {
+		Package struct {
+			Name     string `toml:"name"`
+			Metadata struct {
+				Superschematic struct {
+					Provider *toml.Primitive `toml:"provider"`
+				} `toml:"superschematic"`
+			} `toml:"metadata"`
+		} `toml:"package"`
+	}
+	meta, err := toml.Decode(string(data), &manifest)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	name := manifest.Package.Name
+	if manifest.Package.Metadata.Superschematic.Provider == nil {
+		return nil, fmt.Errorf("crate %s declares no provider; its Cargo.toml names the interface it implements under [package.metadata.superschematic.provider] (name, implements, ...) (D185)", name)
+	}
+	var m providerManifest
+	if err := meta.PrimitiveDecode(*manifest.Package.Metadata.Superschematic.Provider, &m); err != nil {
+		return nil, fmt.Errorf("crate %s: package.metadata.superschematic.provider: %w", name, err)
+	}
+	for _, key := range meta.Undecoded() {
+		if len(key) > 4 && key[0] == "package" && key[1] == "metadata" && key[2] == "superschematic" && key[3] == "provider" {
+			return nil, fmt.Errorf("crate %s: package.metadata.superschematic.provider: unknown key %s; it takes name, implements, operations, config and role", name, key)
+		}
+	}
+	p := m.provider()
+	p.Crate = name
+	if err := p.Check(); err != nil {
+		return nil, err
+	}
+	p.Normalize()
+	return p, nil
+}
+
+// provider is the runtime provider the manifest declares, its settings
+// sorted by key.
+func (m providerManifest) provider() *ir.RuntimeProvider {
 	p := &ir.RuntimeProvider{
 		Name:       m.Name,
 		Implements: m.Implements,
-		Package:    pkg.Name,
 		Operations: append([]string(nil), m.Operations...),
 		Role:       append([]string(nil), m.Role...),
 	}
@@ -107,11 +210,7 @@ func ReadRuntimeProvider(dir string) (*ir.RuntimeProvider, error) {
 		item := m.Config[key]
 		p.Config = append(p.Config, ir.ProviderConfigKey{Key: key, Secret: item.Secret, Optional: item.Optional})
 	}
-	if err := p.Check(); err != nil {
-		return nil, err
-	}
-	p.Normalize()
-	return p, nil
+	return p
 }
 
 // checkProviderSlots checks each provider slot of the schema's config: a

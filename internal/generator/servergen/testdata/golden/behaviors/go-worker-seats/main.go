@@ -18,7 +18,11 @@
 // SIGINT it claims no more, lets the running handlers finish for 8s,
 // cancels the rest and gives their messages back, and exits 0. When the
 // environment names an OTLP endpoint (OTEL_EXPORTER_OTLP_ENDPOINT), it exports
-// a span per message (D67).
+// a span per message (D67). When the platform runs it in drain mode
+// (WORKER_MODE is drain, D145), it takes one of WORKER_SLOTS locks named for
+// its first queue as it starts, exiting 0 at once when none is free, and
+// exits 0 once none of its queues held or found a message for
+// WORKER_IDLE_SECONDS and none falls due within five minutes.
 package main
 
 import (
@@ -92,6 +96,12 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return err
 	}
+	// In drain mode, which the platform sets (WORKER_MODE), the worker
+	// takes a slot and exits once its queues are empty (D145).
+	drain, err := worker.DrainFromEnv()
+	if err != nil {
+		return err
+	}
 	queues := fixtureseatsapi.SandboxDeadlinesQueues(fixtureSeatsDb, logger)
 	names := make([]string, len(queues))
 	for i, q := range queues {
@@ -99,7 +109,7 @@ func run(logger *zap.Logger) error {
 	}
 	logger.Info("worker started", zap.String("api", "fixture-seats-api"), zap.String("class", "SandboxDeadlines"),
 		zap.Strings("queues", names), zap.Int("concurrency", concurrency))
-	return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger})
+	return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger, Drain: drain})
 }
 
 // connect builds the pool of the database field named field, which the

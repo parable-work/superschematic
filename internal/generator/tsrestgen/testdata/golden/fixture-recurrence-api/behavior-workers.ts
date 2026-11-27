@@ -21,11 +21,13 @@ written, and handed to the project's Workers method of its use and kind
 with the database's repositories in a transaction that first spends the
 claim (runEvent), as the worker, so the method's writes and the
 completion commit together or not at all, and its rejection fails the
-message. The worker's main runs each queue with runWorker; the queue's
+message. The worker's main runs its queues with runWorkers; each queue's
 complete does nothing, since the handler completes the message in the
 transaction that runs it. A message the handler fails is due again after
 the queue's backoff, and dead once its retries are spent. nextDue tells a
-run that drains, a wake's on Workers (D151), when the next falls due.
+run that drains, a wake's on Workers (D151) or a worker's in drain mode
+(D145), when the next falls due, and slot takes the lock a worker in drain
+mode holds while it runs, its first queue's for them all (runWorkers).
 */
 
 import type { Pool } from 'pg';
@@ -48,7 +50,7 @@ const filingDeadlinesCaller: CoreCaller = { subject: 'fixture-recurrence-api/Fil
  * completion, as filingDeadlinesCaller, and each event handed to the method of
  * workers its use and kind name (filingDeadlinesEvent), with the repositories in
  * the transaction that spends its claim, as the worker. The worker's main
- * runs each with runWorker.
+ * runs them with runWorkers.
  */
 export function filingDeadlinesQueues(pool: Pool, orm: FixtureRecurrenceDbOrm, workers: Workers, logger?: Logger): WorkerQueue[] {
   const deadlines = postgresQueue(pool, filingDeadlineQueue);
@@ -75,6 +77,7 @@ export function filingDeadlinesQueues(pool: Pool, orm: FixtureRecurrenceDbOrm, w
       release: (id, token) => deadlines.release(id, token),
       prune: limit => deadlines.prune(limit),
       nextDue: () => deadlines.nextDue(),
+      slot: slots => deadlines.slot(slots),
     },
     {
       name: changes.name,
@@ -96,6 +99,7 @@ export function filingDeadlinesQueues(pool: Pool, orm: FixtureRecurrenceDbOrm, w
       release: (id, token) => changes.release(id, token),
       prune: limit => changes.prune(limit),
       nextDue: () => changes.nextDue(),
+      slot: slots => changes.slot(slots),
     },
     {
       name: events.name,
@@ -108,7 +112,7 @@ export function filingDeadlinesQueues(pool: Pool, orm: FixtureRecurrenceDbOrm, w
           handle: async (signal: AbortSignal) => {
             const run = await orm
               .withBehaviorCaller(filingDeadlinesCaller)
-              .transaction(tx => tx.filing.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => filingDeadlinesEvent(workers, tx, claim.message, signal)));
+              .transaction(tx => tx.filing.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => filingDeadlinesEvent(workers, tx as FixtureRecurrenceDbTx, claim.message, signal)));
             if (!run.ran) logger?.info('event ran nothing', { message: claim.id, why: run.why });
           },
         })),
@@ -119,6 +123,7 @@ export function filingDeadlinesQueues(pool: Pool, orm: FixtureRecurrenceDbOrm, w
       release: (id, token) => events.release(id, token),
       prune: limit => events.prune(limit),
       nextDue: () => events.nextDue(),
+      slot: slots => events.slot(slots),
     },
   ];
 }

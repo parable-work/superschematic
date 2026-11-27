@@ -14,21 +14,17 @@ import (
 // write references and attachments: the Go and Rust repositories on SQLite
 // would read every row and none of the sub-tables. So a DB service that
 // lists sqlite and declares one of them takes the types of TypeScript
-// alone, until the Go and Rust repositories serve them there. Rust's types
-// are refused @references and @attachments on every dialect
-// (rust_features.go, D181), so this leaves them to that check, and holds
-// Rust to an audience on SQLite alone, which D181 serves on Postgres.
+// alone, until the Go and Rust repositories serve them there. The Rust
+// repositories serve an audience (D181) and references and attachments
+// (D185) on Postgres alone, so Rust is held to all three on SQLite.
 
 // sqliteReaders are the languages each feature is not refused for here on
 // SQLite: those whose repositories serve it there, and those another check
 // refuses it for on every dialect.
 var sqliteReaders = map[string][]string{
 	"@audience":    {registry.LangTypeScript},
-	"@references":  {registry.LangTypeScript, registry.LangRust},
-	"@attachments": {registry.LangTypeScript, registry.LangRust},
-	// The search index on SQLite (D186), which only the TypeScript runtime
-	// searches; Rust's types refuse @searchable on every dialect.
-	"@searchable": {registry.LangTypeScript, registry.LangRust},
+	"@references":  {registry.LangTypeScript},
+	"@attachments": {registry.LangTypeScript},
 }
 
 // refuseSQLiteReaders refuses decorator on td in a DB service that lists the

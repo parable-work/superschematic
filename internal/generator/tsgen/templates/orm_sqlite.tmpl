@@ -71,8 +71,11 @@ export const {{.Const}}: TableDefinition = {
     {{.Name}}: {{jsonString .SQL}},
 {{- end}}
   },
-{{- if .SoftDelete}}
+{{- if or .SoftDelete .LiveRoot}}
   softDelete: true,
+{{- end}}
+{{- if .ReadOnly}}
+  readOnly: true,
 {{- end}}
 {{- if .HistoryActor}}
   historyActor: true,

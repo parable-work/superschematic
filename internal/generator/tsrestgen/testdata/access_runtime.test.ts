@@ -288,6 +288,18 @@ describe('the access of fixture-access-api', () => {
     expect(calls[0]).toMatchObject({ principalKind: 'party', operation: 'listRequests' });
   });
 
+  test("a role whose path is * reaches every row of the table, the grant's target among them", async () => {
+    await orm.asSystem().role.createOne({ name: 'auditor', permissions: ['contracts.read'], reaches: ['Contract:*'] } as never);
+    const issued = await issueGrant(orm.asSystem(), { holder: uuid(0xd1), holderKind: 'party', role: 'auditor', targetType: 'Contract', targetId: contractA.id });
+    try {
+      expect(await status('GET', `/api/contracts/${contractA.id}`, issued.token)).toBe(200);
+      expect(await status('GET', `/api/contracts/${contractB.id}`, issued.token)).toBe(200);
+    } finally {
+      // Ended here, so the later reads of the active grants hold none of it.
+      await revokeGrant(orm, issued.grant.id as string);
+    }
+  });
+
   test('an expired or revoked grant is refused on the very next call', async () => {
     const system = orm.asSystem();
     // Revoked.
@@ -337,6 +349,30 @@ describe('the access of fixture-access-api', () => {
     expect(reveals[0]).toMatchObject({ principal: ADMIN_ID, principalKind: 'user', operation: 'getContract', targetType: 'Contract', targetId: contractA.id, field: 'terms' });
     // A grant's holder whose role holds no reveal sees it masked.
     expect((await ok('GET', `/api/contracts/${contractA.id}`, token)).terms).toBe('[secret]');
+  });
+
+  test('the grants and the access log list through the routes the build serves over views of them', async () => {
+    const ACCESS_ADMIN = `${ADMIN_ID}:access.admin`;
+    expect(await status('GET', '/api/access/grants', OWNER)).toBe(403);
+    expect(await status('GET', '/api/access/log', OWNER)).toBe(403);
+    // Every grant the table holds, the ended and the revoked among them,
+    // without its token's hash, which GrantView leaves out.
+    const grants = await items('/api/access/grants', ACCESS_ADMIN);
+    const stored = (await orm.asSystem().grant.findMany({}, { count: false, limit: 1000 })).rows;
+    expect(grants.map(grant => grant.id).sort()).toEqual(stored.map(grant => grant.id).sort());
+    expect(grants.map(grant => grant.holder)).toEqual(expect.arrayContaining([uuid(0xc1), uuid(0xc2), uuid(0xc3), uuid(0xc4)]));
+    expect(grants.filter(grant => 'tokenHash' in grant)).toEqual([]);
+    expect(grants.find(grant => grant.holder === uuid(0xc2))).toMatchObject({ holderKind: 'party', role: 'tenant', targetType: 'Contract', targetId: contractA.id });
+    expect(grants.find(grant => grant.holder === uuid(0xc2)).revokedAt).not.toBeNull();
+    expect(grants.find(grant => grant.holder === uuid(0xc1)).revokedAt).toBeNull();
+    // The access log lists every row the table holds: the reveal and the
+    // party's calls among them.
+    const log = await items('/api/access/log', ACCESS_ADMIN);
+    expect(log.map(row => row.id).sort()).toEqual((await logRows()).map(row => row.id).sort());
+    expect(log.filter(row => row.kind === 'reveal')).toEqual([
+      expect.objectContaining({ principal: ADMIN_ID, principalKind: 'user', operation: 'getContract', targetType: 'Contract', targetId: contractA.id, field: 'terms' }),
+    ]);
+    expect(log.filter(row => row.kind === 'grantCall' && row.principal === uuid(0xc1)).length).toBeGreaterThan(0);
   });
 
   test("a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused", async () => {

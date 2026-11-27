@@ -551,6 +551,10 @@ dependency is `*`, and `@superschematic/versiongraph` is unpublished until
 the first tag, so until then set this key whenever a schema declares a
 graph. Without it `bun install` fails with a 404, and since the generated
 types packages form one Bun workspace, it fails for every package in it.
+The image of a TypeScript server that serves a version graph's
+operations (`@graphOperations`) builds the core's WebAssembly module from
+the crate beside this package, `../rust`, so the build context holds
+both; unset, the server gets no Dockerfile.
 
 ### `paths.versiongraph_rust`
 

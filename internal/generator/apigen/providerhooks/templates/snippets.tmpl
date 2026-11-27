@@ -84,4 +84,4 @@ func afterDecryptStep(string) runtimerouting.Middleware {
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
 {{ define "callerImports" }}{{ end }}
-{{ define "callerPrincipal" }}""{{ end }}
+{{ define "callerPrincipal" }}runtimesession.Caller{}{{ end }}

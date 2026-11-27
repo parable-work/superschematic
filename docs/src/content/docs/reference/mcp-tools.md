@@ -570,7 +570,7 @@ whose `@mcp` is visible, as the engine lists its tools.
 | `name` | the `@mcp` handle |
 | `title`, `description` | the `@docs` title and description |
 | `inputSchema` | the tool's `parameters` in `tools/schema.json` |
-| `annotations.readOnlyHint` | `true` when the `@docs` replay mode is `read_only` |
+| `annotations` | the tool's resolved record in `tools/schema.json` (D123): `readOnlyHint`, `destructiveHint` and `idempotentHint`, as [above](#what-the-api-generator-checks) |
 | `_meta` | the declared `_meta`, the guidance under `superschematic/operation-guidance`, and the invocation policy under its key |
 
 A hidden or unclassified operation is no tool: it is not listed, and a
@@ -811,11 +811,10 @@ operation takes the key of the call as an argument, `idempotencyKey`
 An `Idempotency-Key` header on the endpoint's own request is not a
 call's, and does not reach the route. An operation with an argument of
 its own named `idempotencyKey` keeps it as its argument: its tool then
-carries no key. The argument is the endpoint's, which the TypeScript
-server serves: the tool documents (`tools/schema.json`) do not list it
-yet, and an operation's `@docs` does not get `replayMode: "idempotent"`
-from the decorator. A Rust API with an `@idempotent` operation is not
-generated.
+carries no key. The argument is the endpoint's, which the TypeScript and
+the Rust servers serve: the tool documents (`tools/schema.json`) do not
+list it yet, and an operation's `@docs` does not get
+`replayMode: "idempotent"` from the decorator.
 
 ### A Rust API's endpoint
 

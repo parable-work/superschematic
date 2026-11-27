@@ -330,7 +330,8 @@ mod open {
             let get = tool("get_order");
             assert_eq!(get["title"], "Get an order");
             assert_eq!(get["description"], "Returns one order by its identifier.");
-            assert_eq!(get["annotations"]["readOnlyHint"], true);
+            // The hints are the tool's resolved record (D123).
+            assert_eq!(get["annotations"], json!({"readOnlyHint": true, "destructiveHint": false, "idempotentHint": false}));
             assert_eq!(get["_meta"]["ui"]["resourceUri"], "ui://orders/detail");
             assert_eq!(get["_meta"]["invocationPolicy"], "auto");
             assert_eq!(
@@ -339,7 +340,11 @@ mod open {
             );
             assert!(get["inputSchema"]["properties"]["confirmationToken"].is_null());
             let update = tool("update_order");
-            assert_eq!(update["annotations"]["readOnlyHint"], false);
+            assert_eq!(update["annotations"], json!({"readOnlyHint": false, "destructiveHint": true, "idempotentHint": false}));
+            assert_eq!(
+                tool("open_return")["annotations"],
+                json!({"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true})
+            );
             assert_eq!(update["_meta"]["invocationPolicy"], "ask");
             assert_eq!(update["inputSchema"]["properties"]["confirmationToken"]["type"], "string");
             assert_eq!(tool("list_orders")["inputSchema"]["required"], json!(["statuses"]));

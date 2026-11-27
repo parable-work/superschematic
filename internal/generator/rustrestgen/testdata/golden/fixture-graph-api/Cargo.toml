@@ -1,0 +1,20 @@
+[package]
+name = "schemas-fixture-graph-api-api"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.99.0"
+
+[dependencies]
+async-trait = "0.1.89"
+axum = { version = "0.8.9", features = ["json", "matched-path"] }
+http = "1"
+serde = "1.0.228"
+serde_json = "1.0.149"
+tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
+tracing = { version = "0.1.41", default-features = false, features = ["std"] }
+superschematic-http-runtime = { path = "../../../../runtime/http/rust", features = ["postgres"] }
+schemas-fixture-graph-api-types = { path = "../../types/rust/fixture-graph-api" }
+schemas-fixture-version-graph-db-types = { path = "../../types/rust/fixture-version-graph-db", features = ["postgres"] }
+# The version graph's engine (D138), whose Postgres client src/graphs.rs
+# binds to the API's pool.
+superschematic-versiongraph-engine = { path = "../../../../runtime/versiongraph/rust-engine" }

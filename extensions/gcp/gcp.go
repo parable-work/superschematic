@@ -238,8 +238,9 @@ func (e Extension) Register(r *registry.Registry) error {
 			Name:      CloudRunDeriver,
 			Extension: Name,
 			Kind:      ir.DeployableDeriver,
-			// In its API's language, TypeScript or Rust (D74).
-			Languages: []string{registry.APILanguageTypeScript, registry.APILanguageRust},
+			// In its API's language, TypeScript or Rust (D74), or Go for a
+			// deriver of tables (D146).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			Settings:  json.RawMessage(cloudRunPoolSettings),
 			NameOf:    serviceName,
 			AddressOf: func(registry.PlatformContext) any { return nil },

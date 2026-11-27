@@ -39,6 +39,11 @@
 //! exits 0. It serves no port, and builds no identity service and no router
 //! (D53, D65). When the environment names an OTLP endpoint
 //! (`OTEL_EXPORTER_OTLP_ENDPOINT`), it exports a span per message (D67).
+//! When the platform runs it in drain mode (WORKER_MODE is drain, D145), it
+//! takes one of WORKER_SLOTS locks named for its first queue as it starts,
+//! exiting 0 at once when none is free, and exits 0 once none of its queues
+//! held or found a message for WORKER_IDLE_SECONDS and none falls due within
+//! five minutes.
 {{- if $w.Emits }}
 //!
 //! The API's implementation is the crate at the naming file's
@@ -122,11 +127,15 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
     let concurrency = worker::concurrency_from_env(CONCURRENCY)?;
 {{ rustMacro "tracing::info" (printf "api = %s" (rustString $api.Service)) (printf "class = %s" (rustString $w.Name)) (printf "queues = %s" (rustString $w.QueueNames)) "concurrency" (rustString "worker started") }}
+    // In drain mode, which the platform sets (WORKER_MODE), the worker
+    // takes a slot and exits once its queues are empty (D145).
+    let drain = worker::drain_from_env()?;
     let options = Options {
         concurrency,
         grace: GRACE,
         idle: worker::DEFAULT_IDLE,
         prune_every: worker::DEFAULT_PRUNE_EVERY,
+        drain,
     };
 {{- range $w.Queues }}
 {{- if .Events }}
@@ -146,13 +155,27 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
 {{- if eq (len $w.Queues) 1 }}
 {{- $q := index $w.Queues 0 }}
-    worker::run_worker({{ $w.QueueVar $q }}, {{ $w.HandlerVar $q }}, options, shutdown).await?;
+    let worked = worker::run_worker({{ $w.QueueVar $q }}, {{ $w.HandlerVar $q }}, options, shutdown).await;
+    // The wakes its handlers' commands sent are answered before it ends
+    // (D145, D151).
+    wake::settled().await;
+    worked?;
 {{- else }}
+{{- $first := index $w.Queues 0 }}
+    // The queues run together: in drain mode one slot for them all, and
+    // they stop together, once none was busy for the idle time (D145).
+    let group = worker::Group::new(&shutdown);
+    if !group.take_slot(&{{ $w.QueueVar $first }}, options).await? {
+        return Ok(());
+    }
     let ran = tokio::join!(
 {{- range $w.Queues }}
-        worker::run_worker({{ $w.QueueVar . }}, {{ $w.HandlerVar . }}, options, shutdown.clone()),
+        group.run({{ $w.QueueVar . }}, {{ $w.HandlerVar . }}, options),
 {{- end }}
     );
+    // The wakes its handlers' commands sent are answered before it ends
+    // (D145, D151).
+    wake::settled().await;
 {{- range $i, $q := $w.Queues }}
     ran.{{ $i }}?;
 {{- end }}

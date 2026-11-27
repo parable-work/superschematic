@@ -32,7 +32,7 @@ use superschematic_http_runtime::memorystore;
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::stackconfig::{self, Database, Service};
 use superschematic_http_runtime::telemetry::{self, Defaults};
-use superschematic_http_runtime::Shutdown;
+use superschematic_http_runtime::{wake, Shutdown};
 
 use schemas_rs_pricing_sdk as rs_pricing_sdk;
 use schemas_rs_stock_api as rs_stock_api;
@@ -126,6 +126,8 @@ async fn run() -> Result<(), Failure> {
         "job started"
     );
     let ran = telemetry::job("PlaceRestockOrders", jobs.place_restock_orders(shutdown)).await;
+    // The wakes its enqueues sent are answered before the job ends (D145).
+    wake::settled().await;
     // Each memory store closes once the job ends.
     rs_cache_store.close().await;
     ran

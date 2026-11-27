@@ -1,0 +1,24 @@
+# A credential provider over a password manager's service (D159, D185):
+# the Rust port of providers/vault-broker.
+[package]
+name = "vault-broker"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[package.metadata.superschematic.provider]
+name = "vault-broker"
+implements = "credentials"
+
+[package.metadata.superschematic.provider.config]
+URL = { description = "The password manager's service API." }
+TOKEN = { secret = true, description = "A service account token the password manager limits to the vaults below." }
+VAULTS = { description = "The vaults a run may use, comma-separated; every other is refused here as well." }
+
+[dependencies]
+async-trait = "0.1.89"
+superschematic-http-runtime = { path = "../../../../runtime/http/rust" }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

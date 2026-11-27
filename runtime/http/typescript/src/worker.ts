@@ -263,13 +263,77 @@ const silent: Logger = {
 };
 
 /**
+ * When the claim loops of one worker in drain mode were last busy, and how
+ * many of their handlers run (D145): a claim that found a message, a
+ * handler that started and one that settled each make them busy, so the
+ * queues of a behavior worker are idle together or not at all.
+ */
+interface Quiet {
+  last: number;
+  running: number;
+}
+
+/**
  * Claims and handles queue's messages until options.signal aborts, then
  * stops as the module says: it claims no more, lets the running handlers
  * finish within the grace, and releases the messages of those that do not.
  * It resolves once it stopped, to what it did (WorkerRun), and rejects only
  * for a queue it cannot run.
  */
-export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Promise<WorkerRun> {
+export function runWorker(queue: WorkerQueue, options: WorkerOptions): Promise<WorkerRun> {
+  return runQueue(queue, options, { last: Date.now(), running: 0 });
+}
+
+/**
+ * Runs the queues of one worker together, as Go's worker.RunAll does: a
+ * behavior worker's (D103), one claim loop per behavior queue of its
+ * table, each with runWorker's loop and the same options. It resolves once
+ * every one stopped, to what each did, in the order given. In drain mode
+ * (D145) the queues are one worker's: it takes one slot for them all, of
+ * the first queue that has slot, and resolves at once, running none, when
+ * every one is taken; and the queues stop together, once none of them was
+ * busy for the drain's idle time. A queue that rejects stops the others at
+ * once, and runWorkers rejects with its error once they stopped.
+ */
+export async function runWorkers(queues: readonly WorkerQueue[], options: WorkerOptions): Promise<WorkerRun[]> {
+  if (queues.length === 0) throw new Error('worker: no queue to run');
+  const stop = new AbortController();
+  if (options.signal.aborted) stop.abort();
+  else options.signal.addEventListener('abort', () => stop.abort(), { once: true });
+  let releaseSlot: (() => Promise<void>) | undefined;
+  const drain = options.drain;
+  const first = queues.find(queue => queue.slot !== undefined);
+  if (drain !== undefined && first?.slot !== undefined) {
+    const slots = Math.max(1, Math.floor(drain.slots ?? 1));
+    releaseSlot = await first.slot(slots);
+    if (releaseSlot === undefined) {
+      (options.logger ?? silent).child({ queue: first.name }).info('every slot of the queue is taken: the workers that hold them drain it', { slots });
+      return queues.map(() => ({ handled: 0, failed: 0, released: 0, backlog: false }));
+    }
+  }
+  const quiet: Quiet = { last: Date.now(), running: 0 };
+  try {
+    const runs = await Promise.allSettled(
+      queues.map(async queue => {
+        const { slot: _slot, ...claims } = queue;
+        try {
+          return await runQueue(claims, { ...options, signal: stop.signal }, quiet);
+        } catch (error) {
+          stop.abort();
+          throw error;
+        }
+      })
+    );
+    const failed = runs.find((run): run is PromiseRejectedResult => run.status === 'rejected');
+    if (failed !== undefined) throw failed.reason;
+    return runs.map(run => (run as PromiseFulfilledResult<WorkerRun>).value);
+  } finally {
+    await releaseSlot?.().catch(() => undefined);
+  }
+}
+
+/** runWorker over queue, its idle clock quiet, which a worker's other queues share. */
+async function runQueue(queue: WorkerQueue, options: WorkerOptions, quiet: Quiet): Promise<WorkerRun> {
   if (!(queue.leaseSeconds > 0)) throw new Error(`worker: queue ${queue.name} has a lease of ${queue.leaseSeconds}s; it is positive`);
   const concurrency = Math.max(1, Math.floor(options.concurrency ?? 1));
   const graceMs = options.graceMs !== undefined && options.graceMs > 0 ? options.graceMs : DEFAULT_GRACE_MS;
@@ -310,14 +374,13 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
       return { handled: 0, failed: 0, released: 0, backlog: false };
     }
   }
-  // When the worker was last busy: a claim that found a message, a handler
-  // that started and one that settled each make it so.
-  let busy = Date.now();
-
+  // When the worker was last busy, quiet.last: a claim that found a
+  // message, a handler that started and one that settled each make it so.
   const start = (message: WorkerMessage): void => {
     const h: Handling = { message, started: Date.now(), released: false };
     running.set(message.id, h);
-    busy = Date.now();
+    quiet.last = Date.now();
+    quiet.running++;
     h.done = (async () => {
       let extending: Promise<void> = Promise.resolve();
       const timer = setInterval(
@@ -341,7 +404,8 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
       clearInterval(timer);
       await extending;
       await finish(h, failed, error);
-      busy = Date.now();
+      quiet.last = Date.now();
+      quiet.running--;
       freed();
     })();
   };
@@ -470,7 +534,7 @@ export async function runWorker(queue: WorkerQueue, options: WorkerOptions): Pro
     failingSince = undefined;
     lastClaimFull = messages.length > 0 && messages.length >= free;
     for (const message of messages) start(message);
-    if (drain !== undefined && messages.length === 0 && running.size === 0 && Date.now() - busy >= drainIdleMs) {
+    if (drain !== undefined && messages.length === 0 && running.size === 0 && quiet.running === 0 && Date.now() - quiet.last >= drainIdleMs) {
       // A message that falls due within the horizon, a delayed one or a
       // retry, is waited for: the claim after the wait takes it.
       const dueInMs = await untilNextDue();

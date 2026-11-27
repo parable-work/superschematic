@@ -32,6 +32,10 @@
 //!
 //! `{{.Type}}` holds the released rows of `{{.ReleasedOf}}`, which the graph's
 //! release owns (D139): its repository reads them and has no write.
+{{- if .LiveRoot}} Its
+//! reads leave out the rows of a soft-deleted root, unless they include
+//! deleted rows, and a restore of the root sees them again.
+{{- end}}
 {{- end}}
 {{- end}}
 {{- if .BindsRules}}
@@ -322,6 +326,11 @@ pub mod postgres {
     use super::*;
 
     pub use orm::postgres::{deadpool_postgres, tokio_postgres};
+{{- if or .ORM.References .ORM.Attachments}}
+    // What the references and attachments of the database's rows read and
+    // answer (D154).
+    pub use orm::rowfeatures;
+{{- end}}
 {{- if .BindsRules}}
     use orm::postgres::CoreClient;
     use rules::adapter;
@@ -661,6 +670,32 @@ pub mod postgres {
         pub fn untyped(&self) -> &orm::postgres::Repositories<'a, C> {
             &self.0
         }
+{{- if .ORM.References}}
+
+        /// The references of the database's rows, and the rows that point at a
+        /// row, each held to what the repositories' caller reads (D154): `add`,
+        /// `remove`, `of` and `referenced_by`. `add` runs in a transaction.
+        pub fn references(&self) -> Result<rowfeatures::References<'_, 'a, C>, orm::Error>
+        where
+            C: orm::postgres::CoreClient,
+        {
+            self.0.references()
+        }
+{{- end}}
+{{- if .ORM.Attachments}}
+
+        /// The files of the database's rows (D154): a direct upload `begin`
+        /// signs and `complete` checks, `list`, `get`, `download`, `caption`,
+        /// `detach`, `file` onto another row, `release`, and a file
+        /// processor's `pending` and `processed`. `begin`, `file` and `release`
+        /// run in a transaction.
+        pub fn attachments(&self) -> Result<rowfeatures::Attachments<'_, 'a, C>, orm::Error>
+        where
+            C: orm::postgres::CoreClient,
+        {
+            self.0.attachments()
+        }
+{{- end}}
 {{range .ORM.Tables}}
         /// The repository of `{{.Type}}`{{if .ReadOnly}}, which only reads: the graph's
         /// release owns the rows (D139){{end}}.

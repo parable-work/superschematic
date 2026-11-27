@@ -5,6 +5,7 @@ import {
   PRUNE_BATCH,
   runFiring,
   runWorker,
+  runWorkers,
   WAKE_HORIZON_MS,
   WAKE_IDLE_MS,
   workerConcurrency,
@@ -518,5 +519,84 @@ describe('runFiring (D151)', () => {
     expect(firing.backlog).toEqual([]);
     expect(WAKE_IDLE_MS).toBe(2_000);
     expect(WAKE_HORIZON_MS).toBe(10_000);
+  });
+});
+
+describe('runWorkers (D103, D145)', () => {
+  const never = new AbortController().signal;
+
+  test("a worker's queues in drain mode take one slot for them all, of the first that has one, and stop together once all were idle", async () => {
+    const locks = new Slots();
+    const others = new Slots();
+    const quiet = new FakeQueue(60);
+    const busy = new FakeQueue(60);
+    let let_go: () => void = () => {};
+    busy.add(
+      'held',
+      () =>
+        new Promise<void>(resolve => {
+          let_go = resolve;
+        })
+    );
+    const idleMs = 60;
+    // The first queue takes no slot: the second's is the worker's.
+    const queues = (): WorkerQueue[] => [quiet.queue(), { ...busy.queue(), slot: locks.slot }, { ...new FakeQueue(60).queue(), slot: others.slot }];
+    let stopped = false;
+    const done = runWorkers(queues(), { signal: never, idleMs: 5, drain: { idleMs } }).then(runs => {
+      stopped = true;
+      return runs;
+    });
+    await waitFor("the held message's claim", () => busy.ready.length === 0);
+    expect(locks.held).toBe(1);
+    expect(others.asked).toEqual([]);
+    await sleep(3 * idleMs);
+    // The empty queue is still claimed from while another's handler runs.
+    expect(stopped).toBe(false);
+    quiet.add('late', async () => {});
+    await waitFor('the message of the queue that was empty', () => quiet.completed.length === 1);
+
+    // A second start finds the slot taken and runs none of its queues.
+    const { lines, logger } = logs();
+    const second = new FakeQueue(60);
+    second.add('n', async () => {});
+    const began = Date.now();
+    const none = await runWorkers([second.queue(), { ...busy.queue(), slot: locks.slot }], { signal: never, idleMs: 5, logger, drain: { idleMs: 60_000 } });
+    expect(Date.now() - began).toBeLessThan(10_000);
+    expect(none).toEqual([
+      { handled: 0, failed: 0, released: 0, backlog: false },
+      { handled: 0, failed: 0, released: 0, backlog: false },
+    ]);
+    expect(second.ready).toHaveLength(1);
+    expect(lines.map(line => line.msg)).toEqual(['every slot of the queue is taken: the workers that hold them drain it']);
+
+    let_go();
+    const runs = await done;
+    expect(runs.map(run => run.handled)).toEqual([1, 1, 0]);
+    expect(locks.held).toBe(0);
+    expect(locks.asked).toEqual([1, 1]);
+  });
+
+  test('a queue that rejects stops the others at once, and runWorkers rejects with its error', async () => {
+    const failing = new FakeQueue(60);
+    failing.claimErrors = 1_000;
+    const running = new FakeQueue(60);
+    const began = Date.now();
+    await expect(runWorkers([running.queue(), failing.queue()], { signal: never, idleMs: 5, drain: { idleMs: 50 } })).rejects.toThrow('every claim of queue Fake failed');
+    expect(Date.now() - began).toBeLessThan(10_000);
+    await expect(runWorkers([], { signal: never })).rejects.toThrow('no queue to run');
+  });
+
+  test('out of drain mode it takes no slot and runs every queue until its signal aborts', async () => {
+    const locks = new Slots();
+    const a = new FakeQueue(60);
+    const b = new FakeQueue(60);
+    a.add('a', async () => {});
+    b.add('b', async () => {});
+    const stop = new AbortController();
+    const done = runWorkers([{ ...a.queue(), slot: locks.slot }, b.queue()], { signal: stop.signal, idleMs: 5 });
+    await waitFor('both messages', () => a.completed.length === 1 && b.completed.length === 1);
+    stop.abort();
+    await done;
+    expect(locks.asked).toEqual([]);
   });
 });

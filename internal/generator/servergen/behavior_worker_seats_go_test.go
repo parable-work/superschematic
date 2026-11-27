@@ -70,7 +70,7 @@ func TestGoBehaviorWorkerEntrypointOfSandboxDeadlines(t *testing.T) {
 	main := planGoBehaviorWorker(t, goSeatsAPI(), goSeatsWorkerGoldenRoot, "seats-stack", "SandboxDeadlines", "fixture-seats-db")
 	for _, want := range []string{
 		"queues := fixtureseatsapi.SandboxDeadlinesQueues(fixtureSeatsDb, logger)",
-		"return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger})",
+		"return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger, Drain: drain})",
 	} {
 		if !strings.Contains(main, want) {
 			t.Errorf("main.go holds no %q:\n%s", want, main)

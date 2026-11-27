@@ -173,6 +173,7 @@ func runFields() ([]*ir.FieldDef, []ir.IndexDef) {
 		optional("actingForKind", "string", "The kind of principal the run acts for: user or party; null for a run that acts for itself."),
 		optional("actingFor", "string", "Whom the run acts for: a user's id, or a party row's key."),
 		optional("actingForTable", "string", "The party's table."),
+		optional("trust", "string", "The trust of the inbound message the run answers (D157, D183): verified, or entered for a sender whose identity was entered by hand or whose message the dispatcher could not read, whose every operation but a read asks; null for a run no message started."),
 		required("targets", jsonScalar, "The run's scope: the rows its token names, each { table, key }."),
 		optional("grants", jsonScalar, "The grants the run's token is, by id (D156); revoked when the run ends."),
 		optional("instance", "string", "The sandbox instance the run runs in."),

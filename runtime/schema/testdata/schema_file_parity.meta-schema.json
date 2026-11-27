@@ -1167,9 +1167,10 @@
             "properties": {
               "config": {
                 "additionalProperties": false,
+                "minProperties": 1,
                 "properties": {
                   "fields": {
-                    "description": "The type's own top-level fields, by JSON key, that keep the value their create gives them.",
+                    "description": "The type's own top-level fields, by JSON key, that keep the value their create gives them. A table's Constants may leave it out beside oneWay, its one rule a field that moves one way; a config keeps or moves one field at least.",
                     "items": {
                       "minLength": 1,
                       "type": "string"
@@ -1197,9 +1198,6 @@
                     "type": "string"
                   }
                 },
-                "required": [
-                  "fields"
-                ],
                 "type": "object"
               }
             },

@@ -99,8 +99,9 @@ func mcpToolsOf(t *testing.T, dir string) []MCPTool {
 // tools of the tool documents the SDK generators write (sdkgen's golden
 // tools/schema.json for fixture-mcp), as the engine lists its tools: the
 // handle as the name, the @docs title and description, the documents'
-// parameters as the input schema, a read-only hint from the replay mode,
-// and _meta with the guidance and the invocation policy. A hidden or
+// parameters as the input schema, the annotations of the tool's record
+// there (D123), and _meta with the guidance and the invocation policy. A
+// hidden or
 // unclassified operation is no tool. Each argument goes where the route
 // reads it.
 func TestMCPToolsAreTheToolDocuments(t *testing.T) {
@@ -139,8 +140,8 @@ func TestMCPToolsAreTheToolDocuments(t *testing.T) {
 		if got, want := compactJSON(t, tool.InputSchema), compactJSON(t, mustJSON(t, want.Parameters)); got != want {
 			t.Errorf("%s's input schema is not tools/schema.json's parameters:\n got %s\nwant %s", tool.Name, got, want)
 		}
-		if readOnly := want.Replay != nil && want.Replay.Mode == "read_only"; tool.Annotations.ReadOnlyHint != readOnly {
-			t.Errorf("%s readOnlyHint = %v, want %v", tool.Name, tool.Annotations.ReadOnlyHint, readOnly)
+		if resolved := want.MCP.Annotations; resolved == nil || tool.Annotations != (MCPToolAnnotations{ReadOnlyHint: resolved.ReadOnlyHint, DestructiveHint: resolved.DestructiveHint, IdempotentHint: resolved.IdempotentHint}) {
+			t.Errorf("%s's annotations = %+v, want its record's %+v", tool.Name, tool.Annotations, resolved)
 		}
 		if tool.Meta["invocationPolicy"] != want.MCP.Invocation.Value || tool.Meta[apigen.DefaultToolGuidanceKey] == nil {
 			t.Errorf("%s _meta = %v, want the guidance and policy %q", tool.Name, tool.Meta, want.MCP.Invocation.Value)
@@ -310,6 +311,53 @@ func TestMCPToolsConfirmByTheBuildsPolicy(t *testing.T) {
 	})
 	if want := `MCP tool update_order of fixture-mcp asks the person before it runs (confirm "always"), and takes an argument confirmationToken, which carries the call's confirmation token (D93); rename the argument`; err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("Generate = %v, want it refused saying %q", err, want)
+	}
+}
+
+// TestMCPToolsCarryAutonomy: a tool's record carries its operation's
+// @autonomy (D158, D183), the class and the mode, which an agent run's
+// mcpGate reads; a tool whose operation declares none carries none, and
+// the gate holds it as an internal write.
+func TestMCPToolsCarryAutonomy(t *testing.T) {
+	outDir := t.TempDir()
+	output := generateMCPFixture(t, mcpFixture(t, func(schema *ir.Schema) {
+		for _, set := range schema.OperationSets {
+			for _, op := range set.Operations {
+				switch op.Name {
+				case "updateOrder":
+					op.Autonomy = &ir.OperationAutonomy{Class: ir.AgentClassMoneyMovement}
+				case "getOrder":
+					op.Autonomy = &ir.OperationAutonomy{Class: ir.AgentClassRead, Mode: ir.AutonomyTell}
+				}
+			}
+		}
+	}))
+	if err := WriteAPI(output, outDir); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, tool := range mcpToolsOf(t, outDir) {
+		got[tool.Name] = "none"
+		if tool.Autonomy != nil {
+			got[tool.Name] = tool.Autonomy.Class + "/" + tool.Autonomy.Mode
+		}
+	}
+	for name, want := range map[string]string{"update_order": "moneyMovement/", "get_order": "read/tell"} {
+		if got[name] != want {
+			t.Errorf("%s's autonomy = %q, want %q (all: %v)", name, got[name], want, got)
+		}
+	}
+	for name, autonomy := range got {
+		if name != "update_order" && name != "get_order" && autonomy != "none" {
+			t.Errorf("%s declares no @autonomy, and its record says %s", name, autonomy)
+		}
+	}
+	source, err := os.ReadFile(filepath.Join(outDir, MCPFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "\"autonomy\": {\n      \"class\": \"moneyMovement\"\n    }"; !strings.Contains(string(source), want) {
+		t.Errorf("mcp.ts lacks %s:\n%s", want, source)
 	}
 }
 

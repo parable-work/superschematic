@@ -432,7 +432,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Name:      DeriverPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableDeriver,
-			Languages: []string{registry.APILanguageTypeScript, registry.APILanguageRust},
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			NameOf:    serverName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerDeriver,
