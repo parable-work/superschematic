@@ -27,6 +27,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/migrateplan/lower"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -55,6 +56,17 @@ type Context struct {
 	// catalog also names the npm package an extension's namespace is
 	// imported from (registry.NpmPackageCatalog). Nil is the core catalog.
 	Scalars registry.ScalarCatalog
+
+	// Tables writes a General document's type that composes a behavior on
+	// the type, D16's @behavior form, as the table it publishes as in
+	// runtime and compiled mode (D117, internal/migrateplan/lower), which
+	// format --to=ts does to a file: a class with a key, a behavior whose
+	// declaration names a value field as that field's type (`status:
+	// Workflow<{ ... }>`), and every other behavior one the class
+	// implements. The file then belongs to a DB service. Without it, as a
+	// General service is written whole, the type keeps @behavior, which a
+	// General service holds.
+	Tables bool
 }
 
 // Write renders a document as TypeScript schema source.
@@ -63,10 +75,19 @@ func Write(doc *schemafile.Document) ([]byte, error) {
 }
 
 // WriteContext renders a document as TypeScript schema source with
-// service-level context for cross-file references.
+// service-level context for cross-file references, and with ctx.Tables a
+// General document's types that compose behaviors on the type as the
+// tables they publish as.
 func WriteContext(doc *schemafile.Document, ctx *Context) ([]byte, error) {
 	if ctx == nil {
 		ctx = &Context{}
+	}
+	if ctx.Tables {
+		lowered, err := lower.Document(doc, lower.CoreValues())
+		if err != nil {
+			return nil, err
+		}
+		doc = lowered
 	}
 	e := &emitter{
 		doc:        doc,
