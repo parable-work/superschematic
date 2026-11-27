@@ -17,7 +17,9 @@ the core owns.
   capabilities over the operation table (routesOf, capabilitiesOf).
 - IdentityStore, with SqlIdentityStore over Postgres (postgresIdentityStore,
   over pg) and SQLite (sqliteIdentityStore, over node:sqlite or
-  bun:sqlite), built from the schema's identity descriptor.
+  bun:sqlite, and sqlDatabaseIdentityStore, over the SqlDatabase of a file
+  a server's repositories share, D116), built from the schema's identity
+  descriptor.
 - IdentityService, every session, administration and API key operation;
   identityAuthenticator, the router's Authenticator over it; and
   identityRouterOptions, the router options a generated router and the
@@ -89,7 +91,7 @@ export { SqlIdentityStore } from './sqlstore.js';
 export type { SqlDialect, SqlParam, SqlRow, SqlRunner, SqlStatement, SqlWork } from './sqlstore.js';
 export { postgresIdentityStore, postgresRunner } from './postgres.js';
 export type { PgPool, PgQueryConfig, PgQueryable } from './postgres.js';
-export { bunSqlite, nodeSqlite, sqliteIdentityStore, sqliteRunner } from './sqlite.js';
+export { bunSqlite, nodeSqlite, sqlDatabaseIdentityStore, sqlDatabaseRunner, sqliteIdentityStore, sqliteRunner } from './sqlite.js';
 export type { SqliteClient, SqliteModuleDatabase, SqliteModuleStatement, SqliteValue } from './sqlite.js';
 export { IdentityErrorCode } from './errors.js';
 export {

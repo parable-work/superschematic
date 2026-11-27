@@ -26,6 +26,11 @@ import (
 // read them. A Rust server whose database lists sqlite first is refused
 // Recurrence and the calendar by rustrestgen, which knows the database's
 // dialect; the loader refuses @searchable on SQLite for every language.
+// Events and notifications (D153) are served on Postgres (D191): the
+// Postgres definition carries each table's events and what it is to the
+// notifier, and the runtime's notify module raises, routes, delivers and
+// reads replies over them. The loader refuses the notifier on SQLite for
+// every language, and rustgen refuses it for a crate that lists sqlite.
 //
 // A DB service's Rust types are refused for a table feature; a Rust server
 // for a listed provider with no Rust crate, an @autonomy operation, and
@@ -43,11 +48,10 @@ type RustFeature struct {
 }
 
 // RustTableFeatures are the features of schema's tables a Rust types crate
-// does not carry (D181), sorted by type: @event, @notifier and
-// @channelIdentities (D153), @party, @conversations and @runRequests
-// (D157), and @agents (D158). A Rust server is refused the same table
-// features (server); none is a server's alone since D188 served
-// Recurrence.
+// does not carry (D181), sorted by type: @party, @conversations and
+// @runRequests (D157), and @agents (D158). A Rust server is refused
+// the same table features (server); none is a server's alone since
+// D188 served Recurrence.
 func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
 	_ = server
 	if schema == nil {
@@ -58,15 +62,6 @@ func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
 		td := schema.Types[name]
 		add := func(feature string) {
 			out = append(out, RustFeature{Owner: td.Owner, Type: td.Name, Feature: feature})
-		}
-		if len(td.Events) > 0 {
-			add("@event (D153)")
-		}
-		if td.Notifier != nil {
-			add("@notifier (D153)")
-		}
-		if td.ChannelIdentities != nil {
-			add("@channelIdentities (D153)")
 		}
 		if td.Party != nil {
 			add("@party (D157)")

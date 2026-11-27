@@ -426,9 +426,13 @@ server's does
 ([Start an implementation](/superschematic/guides/api-routes/#start-an-implementation)).
 `deps.ts` declares `Deps`, which holds the API's `config` when it has
 one, a `pg` Pool `db` for its database (its `authDb`, or its one DB
-dependency), and `orm`, the database's generated repositories, when the
-database has tables and TypeScript types
-([Database tables](/superschematic/guides/database-tables/#typescript)),
+dependency), or a `SqlDatabase`, D1's interface, for one that lists sqlite
+first, and `orm`, the database's generated repositories on that dialect,
+when the database has tables and TypeScript types
+([Database tables](/superschematic/guides/database-tables/#typescript)):
+`createOrm` over the pool, and `createOrm` of its `./orm/sqlite` entry over
+a SQLite file, and on Cloudflare Workers over a D1 binding
+([On SQLite and D1](/superschematic/guides/database-tables/#on-sqlite-and-d1)),
 a TypeScript SDK client of each API it `calls` (`shopApi`
 for `shop-api`), a `Bucket` for each bucket it lists (a `ContentBucket`
 for one that names its objects by their content), a `MemoryStore` for

@@ -50,7 +50,7 @@ import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackag
 import { errorHandler, notFoundHandler } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hono';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
 {{- if .Identity }}
-import { parseIdentityConfigJSON, postgresIdentityStore, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
+import { parseIdentityConfigJSON, {{ join .IdentityStoreImports ", " }}, type IdentityConfig } from '{{ .Naming.HTTPRuntimeNpmPackage }}/identity';
 {{- end }}
 {{- if .PostgresDatabases }}
 import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres, ping } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
@@ -58,7 +58,7 @@ import type { Pool } from 'pg';
 {{- end }}
 {{- if .SQLiteDatabases }}
 import { ping as pingSqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
-import { openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
+import { openSqlite, {{ if .SQLiteFieldKeys }}parseFieldKeys, {{ end }}sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
 {{- end }}
 {{- if .Engines }}
 import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/server';
@@ -187,6 +187,22 @@ async function main(): Promise<void> {
 {{- end }}
 {{- end }}
   ];
+{{- range .Databases }}
+{{- if .Store }}
+{{- if .SQLite }}
+
+  // The identity store of the user model in {{ .Service }} (D50), over the
+  // same SQLite file, whose turns it takes with the repositories (D116),
+  // for every API that authenticates its users against it.
+  const {{ .Store }} = sqlDatabaseIdentityStore({{ .Var }}, {{ .Descriptor }});
+{{- else }}
+
+  // The identity store of the user model in {{ .Service }} (D50), over the
+  // same pool, for every API that authenticates its users against it.
+  const {{ .Store }} = postgresIdentityStore({{ .Var }}, {{ .Descriptor }});
+{{- end }}
+{{- end }}
+{{- end }}
 {{- else if .Databases }}
 
   // One pool per database, shared by every API on it. A pool connects when

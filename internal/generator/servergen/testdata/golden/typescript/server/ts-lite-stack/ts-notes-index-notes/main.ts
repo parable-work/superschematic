@@ -32,6 +32,7 @@ import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import { noteWrittenQueue } from '@schemas/ts-notes-db-types/queues';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
+import { createOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm/sqlite';
 
 /** How long a stopping worker lets its running handlers finish. */
 const GRACE_MS = 2 * 1000;
@@ -60,6 +61,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   const tsNotesDeps: tsNotesApi.Deps = {
     config: tsNotesConfig,
     db: tsNotesDbDatabase,
+    orm: createTsNotesDbOrm(tsNotesDbDatabase),
     logger: logger.child({ api: 'ts-notes' }),
   };
   const workers = await construct('ts-notes', 'workers', () => tsNotesImpl.createWorkers(tsNotesDeps));

@@ -560,7 +560,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		Postgres:          !opts.NoPostgres,
 	}
 	if opts.SQLite {
-		out.SQLite = &ORMSQLite{Clauses: sqlutil.SQLiteClauses().AllClauses()}
+		out.SQLite = &ORMSQLite{Clauses: sqlutil.SQLiteClauses().AllClauses(), JSONClauses: sqlutil.SQLiteJSONClauses().AllJSONClauses()}
 	}
 	out.Const = lowerFirst(out.Name) + "Orm"
 	if rules != nil {

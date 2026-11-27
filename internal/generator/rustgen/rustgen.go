@@ -357,6 +357,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if err := verify.RefuseRustTypes(schema); err != nil {
 		return nil, fmt.Errorf("rustgen: %w", err)
 	}
+	if err := refuseNotifierOnSQLite(schema, opts.SQLite); err != nil {
+		return nil, err
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}

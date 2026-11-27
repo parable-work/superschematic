@@ -1,4 +1,4 @@
-import { decodeJSONText, formatDuration } from './queue-core.js';
+import { decodeJSONText, formatDuration, parseDuration } from './queue-core.js';
 import { intervalText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
 import { uuidFromDb, uuidToDb } from './uuid.js';
 import { parseGenericDecimalStrict } from 'superscalar/scalars';
@@ -298,9 +298,23 @@ const INTERVAL_PARTS: ReadonlyArray<readonly [string, bigint]> = [
   ['seconds', 1_000_000n],
 ];
 
-/** An INTERVAL, as its text or as pg's parsed object, as its duration's canonical text. */
+/**
+ * An INTERVAL, as its text or as pg's parsed object, as its duration's
+ * canonical text. On SQLite a duration is that canonical text already, as
+ * the Go, TypeScript and Rust repositories write it there (D182).
+ */
 function decodeInterval(value: unknown): string {
-  if (typeof value === 'string') return formatDuration(parseInterval(value));
+  if (typeof value === 'string') {
+    try {
+      return formatDuration(parseInterval(value));
+    } catch (error) {
+      try {
+        return formatDuration(parseDuration(value));
+      } catch {
+        throw error;
+      }
+    }
+  }
   if (typeof value !== 'object' || value === null) throw new Error(`${JSON.stringify(value)} is no INTERVAL`);
   const parts = value as Record<string, unknown>;
   let micros = 0n;

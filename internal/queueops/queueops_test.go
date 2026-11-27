@@ -9,6 +9,8 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden documents")
@@ -39,32 +41,128 @@ var goldenRequests = map[string]Request{
 }
 
 // TestGoldenDocuments writes each golden request's document and compares
-// it with testdata/golden, which -update rewrites.
+// it with testdata/golden, which -update rewrites, and the same request's
+// document of SQLite's statements, with the message's columns of the
+// fixture's queue, with testdata/golden/sqlite, which the runner's tests
+// run on a SQLite file and on D1 (D68).
 func TestGoldenDocuments(t *testing.T) {
+	schema := queueFixture(t)
+	opts := sqlgen.Options{SchemaName: "fixture-queue-db"}
 	for name, req := range goldenRequests {
 		t.Run(name, func(t *testing.T) {
 			got, err := Document(req)
 			if err != nil {
 				t.Fatal(err)
 			}
-			path := filepath.Join("testdata", "golden", name+".json")
-			if *update {
-				if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(path, got, 0o644); err != nil {
-					t.Fatal(err)
-				}
-				return
+			checkGolden(t, filepath.Join("testdata", "golden", name+".json"), got)
+
+			req.Dialect = SQLite
+			if req.Message, err = MessageColumns(schema, opts, req.Queue); err != nil {
+				t.Fatal(err)
 			}
-			want, err := os.ReadFile(path)
+			got, err = Document(req)
 			if err != nil {
-				t.Fatalf("%v (go test ./internal/queueops -run TestGoldenDocuments -update writes it)", err)
+				t.Fatal(err)
 			}
-			if string(got) != string(want) {
-				t.Errorf("%s differs from what Document writes; -update rewrites it:\n%s", path, got)
-			}
+			checkGolden(t, filepath.Join("testdata", "golden", "sqlite", name+".json"), got)
 		})
+	}
+}
+
+// queueFixture loads fixture-queue-db, whose queues the golden documents
+// name.
+func queueFixture(t *testing.T) *ir.Schema {
+	t.Helper()
+	schema, err := loader.LoadService(filepath.Join("..", "loader", "tsreader", "testdata", "services", "fixture-queue-db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return schema
+}
+
+// checkGolden compares got with the golden file at path, which -update
+// rewrites.
+func checkGolden(t *testing.T, path string, got []byte) {
+	t.Helper()
+	if *update {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, got, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (go test ./internal/queueops -update writes it)", err)
+	}
+	if string(got) != string(want) {
+		t.Errorf("%s differs from what this package writes; -update rewrites it:\n%s", path, got)
+	}
+}
+
+// TestSQLiteCreateSQL writes fixture-queue-db's SQLite create.sql, the
+// plan from an empty database to its SQLite model, into
+// testdata/golden/sqlite, where the runner's tests, which do not import
+// the compiler, read the tables the SQLite documents run on.
+func TestSQLiteCreateSQL(t *testing.T) {
+	model, err := sqlmigrate.BuildModel(queueFixture(t), sqlgen.Options{SchemaName: "fixture-queue-db"}, sqlmigrate.SQLite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	script, err := sqlmigrate.CreateSQL(model)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkGolden(t, filepath.Join("testdata", "golden", "sqlite", "create.sql"), []byte(script))
+}
+
+// TestSQLiteDocuments holds what the SQLite documents differ by from
+// Postgres's (D68): they name their dialect, list a message by its
+// columns, each JSON column nested and none of the columns every queue
+// keeps, and take the IDs as a JSON array; a drop's states are a drop's.
+// A Postgres document takes no message columns, and no document takes a
+// dialect it has no statements of.
+func TestSQLiteDocuments(t *testing.T) {
+	schema := queueFixture(t)
+	opts := sqlgen.Options{SchemaName: "fixture-queue-db"}
+	message, err := MessageColumns(schema, opts, "OrderPlaced")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, c := range message {
+		names = append(names, c.Name+":"+c.Holds)
+	}
+	if got, want := strings.Join(names, " "), "order_id: placed_at: priority: quantity: note: ship_to:json tags:json"; got != want {
+		t.Errorf("OrderPlaced's message columns are %s, want %s", got, want)
+	}
+	if _, err := MessageColumns(schema, opts, "Order"); err == nil || !strings.Contains(err.Error(), "declares no queue Order") {
+		t.Errorf("Order, which is no queue: %v", err)
+	}
+	req := goldenRequests["drop"]
+	req.Dialect, req.Message = SQLite, message
+	doc, err := Document(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"dialect": "sqlite"`, `json_each(?1)`, `'tags', CASE WHEN json_valid(q.\"tags\") THEN json(q.\"tags\") ELSE q.\"tags\" END`, `json_array_length(?1)`} {
+		if !strings.Contains(string(doc), want) {
+			t.Errorf("the SQLite drop's document holds no %s:\n%s", want, doc)
+		}
+	}
+	if strings.Contains(string(doc), "'state'") || strings.Contains(string(doc), "'updated_at'") {
+		t.Errorf("the SQLite listing holds a column every queue keeps:\n%s", doc)
+	}
+	req = goldenRequests["dead"]
+	req.Message = message
+	if _, err := Document(req); err == nil || !strings.Contains(err.Error(), "on Postgres reads the message's columns from its row") {
+		t.Errorf("a Postgres document with message columns: %v", err)
+	}
+	req.Message, req.Dialect = nil, "mysql"
+	if _, err := Document(req); err == nil || !strings.Contains(err.Error(), `dialect "mysql" is not postgres or sqlite`) {
+		t.Errorf("a document of another dialect: %v", err)
 	}
 }
 
@@ -76,12 +174,9 @@ func TestGoldenDocuments(t *testing.T) {
 // many it enqueued. A queue no trigger enqueues has no statement, and a
 // name that is no queue is refused.
 func TestBackfillDocument(t *testing.T) {
-	schema, err := loader.LoadService(filepath.Join("..", "loader", "tsreader", "testdata", "services", "fixture-queue-db"))
-	if err != nil {
-		t.Fatal(err)
-	}
+	schema := queueFixture(t)
 	opts := sqlgen.Options{SchemaName: "fixture-queue-db"}
-	statements, err := BackfillStatements(schema, opts, "OrderChanged")
+	statements, err := BackfillStatements(schema, opts, "OrderChanged", Postgres)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,31 +184,33 @@ func TestBackfillDocument(t *testing.T) {
 		!strings.HasSuffix(statements[0], "RETURNING 1\n)\nSELECT count(*) FROM enqueued") {
 		t.Fatalf("the backfill of OrderChanged:\n%s", strings.Join(statements, "\n---\n"))
 	}
-	if none, err := BackfillStatements(schema, opts, "StockChecked"); err != nil || len(none) != 0 {
+	if none, err := BackfillStatements(schema, opts, "StockChecked", Postgres); err != nil || len(none) != 0 {
 		t.Fatalf("StockChecked, which no trigger enqueues: %q, %v", none, err)
 	}
-	if _, err := BackfillStatements(schema, opts, "Order"); err == nil || !strings.Contains(err.Error(), "declares no queue Order") {
+	if _, err := BackfillStatements(schema, opts, "Order", Postgres); err == nil || !strings.Contains(err.Error(), "declares no queue Order") {
 		t.Fatalf("Order, which is no queue: %v", err)
 	}
-
 	got, err := Document(Request{Service: "fixture-queue-db", Queue: "OrderChanged", Operation: Backfill, Backfills: statements, Keys: []string{"order_id"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join("testdata", "golden", "backfill.json")
-	if *update {
-		if err := os.WriteFile(path, got, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	want, err := os.ReadFile(path)
+	checkGolden(t, filepath.Join("testdata", "golden", "backfill.json"), got)
+
+	// On SQLite, one row of each order, the first by the line's key, and
+	// a row of 1 per message, which the runner adds up.
+	lite, err := BackfillStatements(schema, opts, "OrderChanged", SQLite)
 	if err != nil {
-		t.Fatalf("%v (go test ./internal/queueops -run TestBackfillDocument -update writes it)", err)
+		t.Fatal(err)
 	}
-	if string(got) != string(want) {
-		t.Errorf("%s differs from what Document writes; -update rewrites it:\n%s", path, got)
+	if len(lite) != 1 || !strings.Contains(lite[0], `row_number() OVER (PARTITION BY src."order_id" ORDER BY src."id")`) ||
+		!strings.Contains(lite[0], `WHERE src."product_id" IS NOT NULL`) || !strings.HasSuffix(lite[0], "\nRETURNING 1") || strings.Contains(lite[0], "WITH") {
+		t.Fatalf("the SQLite backfill of OrderChanged:\n%s", strings.Join(lite, "\n---\n"))
 	}
+	got, err = Document(Request{Service: "fixture-queue-db", Queue: "OrderChanged", Operation: Backfill, Backfills: lite, Keys: []string{"order_id"}, Dialect: SQLite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkGolden(t, filepath.Join("testdata", "golden", "sqlite", "backfill.json"), got)
 }
 
 // TestDocumentRefuses holds Document to what each operation takes.

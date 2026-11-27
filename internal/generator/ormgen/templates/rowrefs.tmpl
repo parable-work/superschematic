@@ -211,3 +211,69 @@ func (h rowFeaturesHost) Visible(ctx context.Context, typeName string, keys []st
 	}
 	return out, nil
 }
+{{- if .SQLite }}
+
+// sqliteRowFeaturesHost is the host the references and attachments run
+// through on SQLite, which refuses every statement: the Go ORM serves them
+// on Postgres alone (D184), and the loader refuses a sqlite service's Go
+// types for @references and @attachments (D182), so on SQLite each call
+// of References and Attachments answers ErrSQLiteUnsupported, naming why,
+// as a repository SQLite does not hold does.
+type sqliteRowFeaturesHost struct{}
+
+func (sqliteRowFeaturesHost) refused() error {
+	return fmt.Errorf("%w: references and attachments, which the Go repositories run on Postgres alone (D184)", ErrSQLiteUnsupported)
+}
+
+func (h sqliteRowFeaturesHost) Query(context.Context, string, ...any) ([]rowrefs.Row, error) {
+	return nil, h.refused()
+}
+
+func (h sqliteRowFeaturesHost) Exec(context.Context, string, ...any) (int64, error) {
+	return 0, h.refused()
+}
+
+func (h sqliteRowFeaturesHost) Visible(context.Context, string, []string) (map[string]bool, error) {
+	return nil, h.refused()
+}
+
+func (h sqliteRowFeaturesHost) Transaction(context.Context, func(rowrefs.Host) error) error {
+	return h.refused()
+}
+
+func (sqliteRowFeaturesHost) ActingUser(context.Context) (string, bool) { return "", false }
+
+func (sqliteRowFeaturesHost) Caller(context.Context) (access.Principal, bool) {
+	return access.Principal{}, false
+}
+
+func (sqliteRowFeaturesHost) NotFound(message string) error {
+	return fmt.Errorf("%w: %s", ErrNotFound, message)
+}
+{{- if .RowFeatures.References }}
+
+// References is refused on SQLite: each of its members answers
+// ErrSQLiteUnsupported (sqliteRowFeaturesHost).
+func (db *SQLiteDatabase) References() *rowrefs.References {
+	return rowrefs.NewReferences(sqliteRowFeaturesHost{}, rowFeatures.References)
+}
+
+// References is refused on SQLite, in the transaction too.
+func (tx *SQLiteTx) References() *rowrefs.References {
+	return rowrefs.NewReferences(sqliteRowFeaturesHost{}, rowFeatures.References)
+}
+{{- end }}
+{{- if .RowFeatures.Attachments }}
+
+// Attachments is refused on SQLite: each of its members answers
+// ErrSQLiteUnsupported (sqliteRowFeaturesHost).
+func (db *SQLiteDatabase) Attachments() *rowrefs.Attachments {
+	return rowrefs.NewAttachments(sqliteRowFeaturesHost{}, rowFeatures.Attachments, rowFeatures.References)
+}
+
+// Attachments is refused on SQLite, in the transaction too.
+func (tx *SQLiteTx) Attachments() *rowrefs.Attachments {
+	return rowrefs.NewAttachments(sqliteRowFeaturesHost{}, rowFeatures.Attachments, rowFeatures.References)
+}
+{{- end }}
+{{- end }}

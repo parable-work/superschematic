@@ -129,6 +129,73 @@ pub(crate) struct UpsertPlan {
     pub(crate) sealing: Values,
 }
 
+/// An upsert of many rows (D89): its batches, in the inputs' order, each
+/// as many rows as one statement binds the parameters of.
+pub(crate) struct UpsertManyPlan<'a> {
+    pub(crate) batches: Vec<UpsertBatch>,
+    /// Whether the update sets a field: a row a statement did not return
+    /// is then deleted, unless only if changed left it.
+    pub(crate) sets: bool,
+    /// The encrypted columns the update takes from each input, which a
+    /// second statement seals under the key of the row it updates (D89).
+    pub(crate) sealing: Vec<&'a Column>,
+    /// The unique key, and its columns in its fields' order, by whose
+    /// values a returned row is matched to its input.
+    pub(crate) key: &'a UniqueKey,
+    pub(crate) key_columns: Vec<&'a Column>,
+}
+
+/// A batch of an upsert of many rows.
+pub(crate) struct UpsertBatch {
+    /// The batch's inputs, by their index among the upsert's.
+    pub(crate) inputs: Vec<usize>,
+    /// Each input's value of the key as text (`key_text`), or none for one
+    /// that leaves a column of it unset, whose key the database writes.
+    pub(crate) keys: Vec<Option<String>>,
+    /// Each input's cells of the key's columns, by which the rows the
+    /// statements left are read back; none as for `keys`.
+    pub(crate) key_cells: Vec<Option<Vec<Bound>>>,
+    /// The read of the rows that hold the batch's keys, before its
+    /// statements, on a dialect whose upsert does not say whether it
+    /// inserted; none when no input sets the key.
+    pub(crate) before: Option<Statement>,
+    /// The statements, each with the inputs whose rows it writes, by their
+    /// place in the batch: one on Postgres, one per set of columns the
+    /// inputs set on a dialect whose VALUES take no DEFAULT.
+    pub(crate) statements: Vec<(Statement, Vec<usize>)>,
+}
+
+/// The text a key column's value matches by: a UUID in base62, whichever
+/// form it was written in, a string as it is, and any other value its JSON;
+/// none for null.
+pub(crate) fn key_text(column: &Column, value: &Value) -> Option<String> {
+    match value {
+        Value::Null => None,
+        Value::String(text) if column.uuid => {
+            Some(parse_uuid(text).map_or_else(|| text.clone(), uuid_to_base62))
+        }
+        Value::String(text) => Some(text.clone()),
+        other => Some(other.to_string()),
+    }
+}
+
+/// The text a row's value of a key matches by, its columns' `key_text`s
+/// joined; none when one of them is null, which no unique index holds.
+pub(crate) fn row_key_text(columns: &[&Column], row: &Values) -> Option<String> {
+    let mut parts = Vec::with_capacity(columns.len());
+    for column in columns {
+        parts.push(key_text(
+            column,
+            row.get(&column.name).unwrap_or(&Value::Null),
+        )?);
+    }
+    Some(parts.join("\u{1f}"))
+}
+
+/// The most parameters an upsert's update stamps beside its rows:
+/// updatedAt and updatedBy (`sqlutil.UpsertStamps`).
+const UPSERT_STAMPS: usize = 2;
+
 /// An upsert of a table that composes behaviors (D103, D116): the read of
 /// whether a row holds the key, before the core's create or update.
 pub(crate) struct CoreUpsertPlan {
@@ -1702,6 +1769,304 @@ impl<'a> Plan<'a> {
             held,
             sealing,
         })
+    }
+
+    /// An upsert of many rows (D89): each input inserted, or, when a row
+    /// holds its value of the unique key `on`, each field `fields` names,
+    /// by member or by field, set to the value the input would have
+    /// inserted, its default or NULL for one it leaves unset; the stamps
+    /// and fences as an update's. A batch is as many rows as one statement
+    /// binds the parameters of, or `options.batch`. On a dialect whose
+    /// VALUES take no DEFAULT, SQLite's, a batch is a statement per set of
+    /// columns its inputs set, and the rows that hold its keys are read
+    /// before them, which say which rows each inserted. Two inputs of one
+    /// batch that hold one key are refused before anything runs, as
+    /// Postgres refuses to change a row twice in one statement.
+    pub(crate) fn upsert_many(
+        &self,
+        inputs: &[Values],
+        on: &[&str],
+        fields: &[&str],
+        options: super::UpsertManyOptions,
+    ) -> Result<UpsertManyPlan<'a>, Error> {
+        let table = self.table;
+        if table.behaviors.is_some() {
+            return Err(invalid(format!(
+                "upsert_many of {}: a table that composes behaviors upserts through the core (D103), a row at a time: upsert each with upsert_one",
+                table.name
+            )));
+        }
+        let c = &self.definition.clauses;
+        if c.set_excluded.is_empty() || c.excluded.is_empty() || self.definition.max_parameters == 0
+        {
+            return Err(Error::Definition(format!(
+                "upsert_many of {}: the definition carries no upsert of many rows; regenerate the types crate",
+                table.name
+            )));
+        }
+        let name = on.join(",");
+        let key = self.unique_key(&name)?;
+        if key.rows.is_empty() {
+            return Err(invalid(format!(
+                "upsert_many of {} on {name}, a unique index over an expression, cannot read back the rows it leaves as they were or match the rows it returns to its inputs by their columns; upsert on another key, or with upsert_one alone",
+                table.name
+            )));
+        }
+        let settable = |column: &&Column| !column.key && column.audit.is_none() && !column.internal;
+        for named in fields {
+            let found = table
+                .columns
+                .iter()
+                .find(|column| column.name == *named || column.field == *named);
+            if !found.is_some_and(|column| settable(&column)) {
+                return Err(invalid(format!(
+                    "upsert_many of {} sets the fields an update sets, not {named:?}",
+                    table.name
+                )));
+            }
+        }
+        // In UpdateOne's order, whatever the order `fields` names them in:
+        // the fields, then the relations' keys.
+        let named = |column: &&Column| {
+            fields
+                .iter()
+                .any(|named| column.name == *named || column.field == *named)
+        };
+        let chosen: Vec<&'a Column> = table
+            .columns
+            .iter()
+            .filter(|column| column.relation.is_none())
+            .chain(
+                table
+                    .columns
+                    .iter()
+                    .filter(|column| column.relation.is_some()),
+            )
+            .filter(settable)
+            .filter(named)
+            .collect();
+        let (sealing, plain): (Vec<&'a Column>, Vec<&'a Column>) =
+            chosen.into_iter().partition(|column| column.encrypted);
+        if options.batch == Some(0) {
+            return Err(invalid(format!(
+                "upsert_many writes 1 or more {} rows a statement, not 0",
+                table.name
+            )));
+        }
+        let order = self.insert_order();
+        let most = ((self.definition.max_parameters - UPSERT_STAMPS) / order.len().max(1)).max(1);
+        let batch = options.batch.unwrap_or(most).min(most);
+        let key_columns = self.key_columns(&name)?;
+
+        let mut rows = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            self.known_members(input, "upsert")?;
+            let sealed = self.sealed(self.stamped(input)?, "upsert")?;
+            let mut cells = Vec::with_capacity(order.len());
+            for column in &order {
+                cells.push(self.insert_value(&sealed, column)?);
+            }
+            rows.push(cells);
+        }
+        let key_at: Vec<usize> = key_columns
+            .iter()
+            .map(|column| {
+                order
+                    .iter()
+                    .position(|c| std::ptr::eq(*c, *column))
+                    .ok_or_else(|| {
+                        Error::Definition(format!(
+                            "{}'s unique key {name} has a column no insert writes",
+                            table.name
+                        ))
+                    })
+            })
+            .collect::<Result<_, _>>()?;
+
+        let mut batches = Vec::new();
+        for (start, chunk) in rows.chunks(batch).enumerate() {
+            let start = start * batch;
+            let mut keys = Vec::with_capacity(chunk.len());
+            let mut key_cells = Vec::with_capacity(chunk.len());
+            for (i, cells) in chunk.iter().enumerate() {
+                let held: Option<Vec<Bound>> = key_at.iter().map(|&at| cells[at].clone()).collect();
+                let text = match &held {
+                    Some(bounds) => {
+                        let mut parts = Vec::with_capacity(bounds.len());
+                        for (column, bound) in key_columns.iter().zip(bounds) {
+                            parts.push(key_text(column, &bound.value));
+                        }
+                        parts
+                            .into_iter()
+                            .collect::<Option<Vec<_>>>()
+                            .map(|parts| parts.join("\u{1f}"))
+                    }
+                    None => None,
+                };
+                if let Some(text) = &text {
+                    if let Some(first) = keys
+                        .iter()
+                        .position(|k: &Option<String>| k.as_ref() == Some(text))
+                    {
+                        return Err(invalid(format!(
+                            "upsert_many of {}: inputs {} and {} of one statement hold one {name}, and an upsert changes a row once",
+                            table.name,
+                            start + first,
+                            start + i
+                        )));
+                    }
+                }
+                keys.push(text);
+                key_cells.push(held);
+            }
+            // One statement on a dialect whose VALUES take DEFAULT, else
+            // one per set of columns the inputs set, in the order the
+            // sets first appear.
+            let mut groups: Vec<(Vec<bool>, Vec<usize>)> = Vec::new();
+            for (i, cells) in chunk.iter().enumerate() {
+                let set: Vec<bool> = if c.default.is_empty() {
+                    cells.iter().map(Option::is_some).collect()
+                } else {
+                    Vec::new()
+                };
+                match groups.iter_mut().find(|(s, _)| *s == set) {
+                    Some((_, members)) => members.push(i),
+                    None => groups.push((set, vec![i])),
+                }
+            }
+            let mut statements = Vec::with_capacity(groups.len());
+            for (_, members) in groups {
+                let group: Vec<&Vec<Option<Bound>>> = members.iter().map(|&i| &chunk[i]).collect();
+                statements.push((
+                    self.upsert_rows(&order, &group, key, &plain, options.only_if_changed)?,
+                    members,
+                ));
+            }
+            let before = match self.definition.dialect {
+                Dialect::Sqlite => self.rows_of_keys(key, key_cells.iter().flatten())?,
+                Dialect::Postgres => None,
+            };
+            batches.push(UpsertBatch {
+                inputs: (start..start + chunk.len()).collect(),
+                keys,
+                key_cells,
+                before,
+                statements,
+            });
+        }
+        Ok(UpsertManyPlan {
+            batches,
+            sets: !plain.is_empty(),
+            sealing,
+            key,
+            key_columns,
+        })
+    }
+
+    /// The upsert of `rows`, each a cell per column of `order`: the insert
+    /// of the columns any row sets, DEFAULT for a cell one leaves unset,
+    /// and on a conflict on `key` each of `fields` set from the row it
+    /// would have inserted, with the stamps and the fences; or, when it
+    /// sets none, an update that compares nothing, which leaves each row a
+    /// key holds as it is. Its WHERE holds the live rows, and, only if
+    /// changed, those whose `fields` differ from the row's.
+    fn upsert_rows(
+        &self,
+        order: &[&'a Column],
+        rows: &[&Vec<Option<Bound>>],
+        key: &UniqueKey,
+        fields: &[&'a Column],
+        only_if_changed: bool,
+    ) -> Result<Statement, Error> {
+        let c = &self.definition.clauses;
+        let inserted: Vec<bool> = (0..order.len())
+            .map(|i| rows.iter().any(|row| row[i].is_some()))
+            .collect();
+        let columns: Vec<&str> = order
+            .iter()
+            .zip(&inserted)
+            .filter(|(_, inserted)| **inserted)
+            .map(|(column, _)| column.column.as_str())
+            .collect();
+        let mut args = Vec::new();
+        let mut tuples = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut cells = Vec::with_capacity(columns.len());
+            for (cell, inserted) in row.iter().zip(&inserted) {
+                if !inserted {
+                    continue;
+                }
+                match cell {
+                    Some(bound) => {
+                        args.push(bound.clone());
+                        cells.push(self.placeholder(args.len())?);
+                    }
+                    None => cells.push(c.default.clone()),
+                }
+            }
+            tuples.push(format!("({})", cells.join(", ")));
+        }
+        let mut assignments = Vec::with_capacity(fields.len() + 2);
+        let mut current = Vec::with_capacity(fields.len());
+        let mut next = Vec::with_capacity(fields.len());
+        for column in fields {
+            assignments.push(fill(&c.set_excluded, &[&column.column, &column.column])?);
+            current.push(column.qualified.clone());
+            next.push(fill(&c.excluded, &[&column.column])?);
+        }
+        let s = &self.table.statements;
+        let mut conditions = Vec::new();
+        if self.table.soft_delete {
+            conditions.push(s.live_condition.clone());
+        }
+        if assignments.is_empty() {
+            assignments.push(key.keep.clone());
+            conditions.push(c.never.clone());
+        } else {
+            self.stamp(&mut assignments, &Values::new(), &mut args)?;
+            self.advance(&mut assignments);
+            if only_if_changed {
+                conditions.push(fill(&c.changed, &[&current.join(", "), &next.join(", ")])?);
+            }
+        }
+        let sql = fill(
+            &s.upsert,
+            &[
+                &columns.join(", "),
+                &tuples.join(", "),
+                &key.conflict,
+                &assignments.join(", "),
+                &self.where_of(&conditions),
+            ],
+        )?;
+        Ok(Statement { sql, args })
+    }
+
+    /// The read of the rows that hold the keys of `keys`, each the cells
+    /// of a unique key's columns, among the rows the key's index holds;
+    /// none for no key.
+    pub(crate) fn rows_of_keys<'k>(
+        &self,
+        key: &UniqueKey,
+        keys: impl Iterator<Item = &'k Vec<Bound>>,
+    ) -> Result<Option<Statement>, Error> {
+        let mut args = Vec::new();
+        let mut tuples = Vec::new();
+        for cells in keys {
+            let mut placeholders = Vec::with_capacity(cells.len());
+            for cell in cells {
+                args.push(cell.clone());
+                placeholders.push(self.placeholder(args.len())?);
+            }
+            tuples.push(format!("({})", placeholders.join(", ")));
+        }
+        if tuples.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(Statement {
+            sql: fill(&key.rows, &[&tuples.join(", ")])?,
+            args,
+        }))
     }
 
     /// A delete of the live row whose key is `key`: a soft-deletable

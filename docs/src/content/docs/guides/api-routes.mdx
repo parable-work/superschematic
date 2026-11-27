@@ -2130,7 +2130,7 @@ authority it reads the grant from on every call. The grants are the ORM's:
 
 A row rule's path (`by: ["unit.contract.parties.party"]`) is one filter of
 the row through the relations; the Go filters reach through a one-to-many
-relation by its name (`Parties`). A view's field under
+relation by its name (`Parties`), on Postgres and on SQLite. A view's field under
 `@decrypted({ permission })` is masked for a caller without it, and each
 value opened for one with it is recorded in the access log in the
 operation's transaction. A route of an API whose database has an
@@ -2145,6 +2145,14 @@ and `@attachments`, `@searchable`, `@party`, `@conversations` and
 `@runRequests`, `@agents`, provider slots and `@autonomy`. Serve such an
 API in TypeScript (`outputs.api.language: "TYPESCRIPT"`). A database keeps
 its Go types, which its Go ORM, always generated, needs.
+
+The Go ORM's repositories on SQLite keep to no audience, grants or access
+log yet: they would read every row for a caller with grants, and the
+server would record its calls in no log. So a DB service that lists
+`sqlite` and enables the Go types is refused for an `@audience`,
+`@accessGrants` or `@accessLog` table, naming the decorator and the table.
+The TypeScript repositories serve all three on SQLite (D182); the Rust
+types are refused for them there as the Go types are.
 
 ### In the Rust server
 
@@ -2180,21 +2188,21 @@ checked. A row rule's path and `@decrypted({ permission })` are served by
 the generated table operations, as in TypeScript.
 
 The Rust outputs refuse, at build time, the platform features they do not
-serve yet: `@event`, `@notifier`, `@channelIdentities`, `@party`,
-`@conversations`, `@runRequests` and `@agents` on a table of a DB service
-with Rust types, and on a Rust server `@autonomy` and a provider with no
-Rust crate. References and attachments and the runtime providers are
-served (D185), and so are Recurrence, the calendar and search across
-tables, on Postgres (D188): a Rust server whose database lists `sqlite`
-first is refused Recurrence and a calendar source.
+serve yet: `@party`, `@conversations`, `@runRequests` and `@agents` on a
+table of a DB service with Rust types, and on a Rust server `@autonomy`
+and a provider with no Rust crate. References and attachments and the
+runtime providers are served (D185), and so are Recurrence, the calendar
+and search across tables, on Postgres (D188): a Rust server whose database
+lists `sqlite` first is refused Recurrence and a calendar source. Events,
+the notifier's tables and the channel identities are served on Postgres
+too (D191), through the runtime's `orm::notify`.
 
 ### What access does not do yet
 
 | Not built | Until then |
 | --- | --- |
 | the Go and Rust repositories' audience on SQLite | a service that lists `sqlite` and declares an audience builds TypeScript's types alone |
-| a generated TypeScript server whose database lists `sqlite` first serving table operations | pass `orm: createOrm(db)` of the database's `./orm/sqlite` entry in the router's options |
-| grants and the access log on the Go and Rust servers' SQLite | the Go and Rust servers serve them on Postgres |
+| the Go and Rust repositories' grants and access log on SQLite | a service that lists `sqlite` and declares either builds TypeScript's types alone; the Go and Rust servers serve them on Postgres |
 | a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists only the active grants, and a declared query of them | `activeGrants` in the TypeScript runtime, or a `@tableOperation` over a view of every grant |
@@ -2341,8 +2349,10 @@ the Rust crate depends on `superschematic-rules-adapter` and
 with behavior operations builds only in a checkout that sets `[paths]
 rules_adapter_rust` and `rules_behaviors_rust`
 ([Naming](/superschematic/reference/naming/#pathsrules_adapter_rust)). The
-TypeScript repositories run on Postgres alone, so a database that lists
-`sqlite` first has no behavior operations on a TypeScript server yet. A
+TypeScript repositories run a table's behaviors on SQLite and D1 too, over
+the rules module's SQLite store (D182), so a TypeScript server over a
+database that lists `sqlite` first serves its behavior operations through
+`Deps.orm`, the repositories of the database's `./orm/sqlite` entry. A
 Rust server there runs them in a transaction of the SQLite file's writing
 connection (D116), and a write that waits past the busy timeout for it is
 a 503 the caller may try again.
@@ -2652,7 +2662,7 @@ one, and nothing that hears them runs until a worker does. An API that serves
 gets a warning; declare one on that API or on another over the same
 database. The worker claims on Postgres, as every worker does. A
 TypeScript one over a database that lists `sqlite` first is refused, as
-the TypeScript repositories run behaviors on Postgres alone. On
+a TypeScript behavior worker claims its queues on Postgres alone. On
 Cloudflare Workers a TypeScript one drains its table's queues at each
 firing of a Cron Trigger, and a deadline or an event due before the next
 firing wakes it through its Workflow
