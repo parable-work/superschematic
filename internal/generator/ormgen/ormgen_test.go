@@ -94,6 +94,10 @@ const revisionsFixture = "fixture-revisions-db"
 // marks a shared table's, none with a repository.
 const commentsFixture = "fixture-comments-db"
 
+// sqliteReferencesFixture holds references, attachments and an audience,
+// generated with its repositories on SQLite (D182, #611).
+const sqliteReferencesFixture = "fixture-references-db"
+
 // derivedProvenanceFixture is the DB fixture whose Ticket implements
 // Derived and Provenance beside its status Workflow and whose Article
 // implements Derived (D73 on D103's step 4): their operations under
@@ -158,7 +162,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 	// tables.
 	var loadOpts []loader.Option
 	var reg *registry.Registry
-	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture || svc == mergeFixture || svc == blueprintFixture || svc == aliasedFixture {
+	if svc == workflowFixture || svc == timersFixture || svc == reactionsFixture || svc == approvalsFixture || svc == agentsFixture || svc == seatsFixture || svc == schedulesFixture || svc == poolFixture || svc == stepsFixture || svc == numberingFixture || svc == revisionsFixture || svc == commentsFixture || svc == derivedProvenanceFixture || svc == commerceFixture || svc == calendarFixture || svc == paymentsFixture || svc == mergeFixture || svc == blueprintFixture || svc == aliasedFixture || svc == sqliteReferencesFixture {
 		reg = registry.New(naming.Default())
 		loadOpts = append(loadOpts, loader.WithRegistry(reg))
 	}
@@ -175,7 +179,7 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 		// claims on SQLite too; it, fixture-ledger-db, the tables both
 		// ORMs are held to, and fixture-workflow-db, whose writes run
 		// through the behaviors' core, have repositories on SQLite (D116).
-		SQLite:   svc == queueFixture || svc == tableParityFixture || svc == workflowFixture,
+		SQLite:   svc == queueFixture || svc == tableParityFixture || svc == workflowFixture || svc == sqliteReferencesFixture,
 		Registry: reg,
 		Clock:    codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
@@ -294,6 +298,14 @@ func TestWriteORMGolden(t *testing.T) {
 		// Comments(), every writing one beside the row, no repository of a
 		// sub-table or of the shared table, no upserts, and no queue.
 		{commentsFixture, []string{"repository_review.go", "repository_ticket.go", "rowrefs.go", "rules.go"}},
+		// References, attachments and an audience on SQLite (D154, D156,
+		// D182, #611): rowrefs.go's host on the SQLite database, which
+		// rowrefs writes SQLite's statements through, and access_sqlite.go,
+		// which holds the repositories on SQLite to the caller.
+		{sqliteReferencesFixture, []string{
+			"access.go", "access_sqlite.go", "queues.go", "queues_sqlite.go", "repository_note.go", "repository_ticket.go",
+			"rowrefs.go", "rules.go", "sqlite.go", "sqlite_note.go", "sqlite_ticket.go",
+		}},
 		// Tables of Derived and Provenance (D73 on D103's step 4): their
 		// operations under Derived() and Provenance(), Derived's of the
 		// table as a whole taking no key, no repository of a sub-table, no

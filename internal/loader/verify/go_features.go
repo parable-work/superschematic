@@ -24,10 +24,12 @@ import (
 // their plain repositories: the triggers and the core keep what each
 // feature writes, whichever ORM writes the row, and a TypeScript server
 // serves the feature. What would serve it wrongly is a Go server, which is
-// refused. That holds on Postgres; on SQLite, where the Go ORM keeps no
-// audience and no trigger keeps references and attachments, a database's
-// Go types are refused for them (sqlite_features.go, D182). Per-record access itself (D156) is served (D180), and an
-// audience on SQLite is refused for every language (checkAudience).
+// refused. That holds on SQLite too: the SQLite DDL's triggers keep an
+// audience, references and files whichever ORM writes the row (D182), and
+// the Go repositories there keep their reads to an audience and grants and
+// serve references, attachments and the access log as on Postgres
+// (sqlite_features.go, #611). Per-record access itself (D156) is served
+// (D180).
 //
 // Recurrence and the calendar (D152) and search across tables (D155) are
 // served on Postgres (D187): a Go server runs a Recurrence's operations,
@@ -101,6 +103,13 @@ func GoServerDatabaseErr(api, db *ir.Schema) error {
 // Since D189 the loader serves the notifier, the parties and the agents on
 // SQLite in TypeScript, so this is the Go server's own refusal of them. The generator calls it with
 // the database's dialects for every Go server over a database.
+//
+// Per-record access (an @audience table, @accessGrants and @accessLog) and
+// references and attachments are not refused: the Go repositories serve
+// them on SQLite as on Postgres (#611, part 1 of Go on SQLite). The
+// behaviors' core in SQLite transactions with Recurrence, the calendar and
+// search over FTS5 (part 2, as D186), and the notifier, the parties and
+// the dispatcher (part 3, as D189) each lift their own lines here.
 func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 	if api == nil || db == nil || len(dialects) == 0 || dialects[0] != registry.SQLDialectSQLite {
 		return nil

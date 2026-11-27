@@ -185,6 +185,28 @@ func TestGoServerSQLiteErrRefusesTheNotifier(t *testing.T) {
 	}
 }
 
+// TestGoServerSQLiteErrServesAccessAndRowFeatures: a Go server over a
+// database that lists sqlite first is not refused an @audience table,
+// grants, the access log, references or attachments, which the Go
+// repositories serve on SQLite as on Postgres (#611); beside them, a
+// feature the Go server serves on Postgres alone is still named, and they
+// are not.
+func TestGoServerSQLiteErrServesAccessAndRowFeatures(t *testing.T) {
+	api := ir.NewSchema("app-api", ir.SchemaKindAPI)
+	db := ir.NewSchema("app-db", ir.SchemaKindDB)
+	db.Types["Folder"] = &ir.TypeDef{Name: "Folder", Role: ir.RoleDBTable, Audience: &ir.AudienceDef{}, RowReferences: &ir.RowReferencesDef{}, Attachments: &ir.AttachmentsDef{}}
+	db.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
+	db.Types["AccessEntry"] = &ir.TypeDef{Name: "AccessEntry", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
+	if err := GoServerSQLiteErr(api, db, []string{"sqlite"}); err != nil {
+		t.Fatalf("access and row features on sqlite: %v", err)
+	}
+	db.Types["Note"] = &ir.TypeDef{Name: "Note", Role: ir.RoleDBTable, Searchable: &ir.SearchableDef{}}
+	err := GoServerSQLiteErr(api, db, []string{"sqlite"})
+	if err == nil || !strings.Contains(err.Error(), "serves Note: @searchable on Postgres alone") || strings.Contains(err.Error(), "Folder") {
+		t.Fatalf("search beside them on sqlite: %v", err)
+	}
+}
+
 func TestGoServerSQLiteErrRefusesSearch(t *testing.T) {
 	api := ir.NewSchema("app-api", ir.SchemaKindAPI)
 	db := ir.NewSchema("app-db", ir.SchemaKindDB)

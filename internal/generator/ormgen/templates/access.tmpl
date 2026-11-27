@@ -576,6 +576,12 @@ func ActiveGrants(ctx context.Context, db grantRepositories, filter access.Activ
 // an unknown token is, with an error that wraps access.ErrGrantRefused. A
 // calendar feed's token reads its feed alone (D152).
 func (db *Database) AuthenticateGrant(ctx context.Context, token string, now time.Time) (access.GrantAuthentication, error) {
+	return authenticateGrant(ctx, db, token, now)
+}
+
+// authenticateGrant is AuthenticateGrant through db, the repositories of
+// either dialect (D182, #611).
+func authenticateGrant(ctx context.Context, db grantRepositories, token string, now time.Time) (access.GrantAuthentication, error) {
 	ctx = AsSystem(ctx)
 	hash := types.CryptoSHA256(access.GrantTokenHash(token))
 	found, err := db.Get{{ .Access.Grants }}Repository().FindOne(ctx, &{{ .Access.Grants }}Filter{TokenHash: &StringFilter{Eq: (*string)(&hash)}}, nil)
