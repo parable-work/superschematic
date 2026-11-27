@@ -9,7 +9,6 @@ import { Validate, behavior } from "@superschematic/schema";
   ],
   outcomes: { failed: "failure" },
 })
-@behavior("Links", { links: { parent: { schema: "projects" } } })
 @behavior("Reactions", {
   rules: [
     { when: { enters: "doing" }, then: { link: "parent", transition: "doing" } },

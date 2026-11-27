@@ -9,7 +9,6 @@ import { behavior } from "@superschematic/schema";
 })
 @behavior("Constants", { fields: ["step", "topic"] })
 @behavior("Dependencies")
-@behavior("Links", { links: { batch: { schema: "batches", required: true } } })
 export abstract class Step {
   step: string;
   title?: string;

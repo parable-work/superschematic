@@ -173,7 +173,7 @@ func TestReactionsChecks(t *testing.T) {
 		}, "type Task: behavior Reactions config: rule 1: when.holds names rollup allDone: a rule that hears a rollup waits for Rollups on the core (D103's order of the work, step 4)"},
 		{"revised", func(_, _, task map[string]any) {
 			reactionsRules(task, []any{rule(changes("title"), moveTo("done")), rule(map[string]any{"revised": map[string]any{"link": "project"}}, moveTo("done"))})
-		}, "type Task: behavior Reactions config: rule 2: when.revised names link project: a rule that hears a revision or a release waits for Revisions and Branches on the core (D103's order of the work, step 4)"},
+		}, "type Task: behavior Reactions config: rule 2: when.revised names link project: a rule that hears a revision or a release waits for the core to hear one on a table: a release is a @versioned table's since Branches folded into @versioned (D103), and the core reads no version graph"},
 		{"the status of several Workflows", func(_, _, task map[string]any) {
 			secondWorkflow(task)
 			reactionsRules(task, []any{rule(changes("title"), linkTo("project", "done")), rule(enters("done"), linkTo("project", "done"))})

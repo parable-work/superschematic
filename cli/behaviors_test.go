@@ -329,13 +329,12 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	require.NoError(t, json.Unmarshal([]byte(schemaOut), &def))
 	assert.Equal(t, []string{"Aliased", "Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering", "Payments", "Pool", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Recurrence", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}, def.Defs.BehaviorRef.Properties.Name.Enum)
 
-	// Dependencies and Links, whose configs name other schemas, load in both
-	// forms to the same IR; the loader resolves none of those names.
+	// Dependencies, whose config names other schemas, loads in both forms to
+	// the same IR; the loader resolves none of those names.
 	crossJSON := load(filepath.Join(loaderTestdata, "fixture-cross-instance-json")).Types["Task"]
-	require.Len(t, crossJSON.Behaviors, 3)
-	assert.Equal(t, []string{"Workflow", "Dependencies", "Links"}, []string{crossJSON.Behaviors[0].Name, crossJSON.Behaviors[1].Name, crossJSON.Behaviors[2].Name})
+	require.Len(t, crossJSON.Behaviors, 2)
+	assert.Equal(t, []string{"Workflow", "Dependencies"}, []string{crossJSON.Behaviors[0].Name, crossJSON.Behaviors[1].Name})
 	assert.JSONEq(t, `{"schemas": ["tasks", "documents"], "gatedStates": ["done"]}`, string(crossJSON.Behaviors[1].Config))
-	assert.JSONEq(t, `{"links": {"spec": {"schema": "documents", "pinned": true}, "parent": {"schema": "tasks"}, "project": {"schema": "projects", "required": true}}}`, string(crossJSON.Behaviors[2].Config))
 	assert.Equal(t, crossJSON, load(filepath.Join(tsreaderTestdata, "fixture-cross-instance")).Types["Task"])
 
 	// Rollups, whose config names the tasks' project link, loads in both
@@ -350,25 +349,16 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 		"tasksFinished": {"schema": "tasks", "link": "project", "function": "all", "gatedStates": ["done"]}}}`, string(rollupsJSON.Behaviors[1].Config))
 	assert.Equal(t, rollupsJSON, load(filepath.Join(tsreaderTestdata, "fixture-rollups")).Types["Project"])
 
-	// Search, whose config names the type's own fields, loads in both forms
-	// to the same IR; the engine checks the names and their types.
-	searchJSON := load(filepath.Join(loaderTestdata, "fixture-search-json")).Types["Note"]
-	require.Len(t, searchJSON.Behaviors, 1)
-	assert.Equal(t, "Search", searchJSON.Behaviors[0].Name)
-	assert.JSONEq(t, `{"fields": ["title", "body"], "weights": {"title": 3},
-		"vectors": {"dimensions": 384, "model": "minilm-l6", "permission": "notes.embed"}}`, string(searchJSON.Behaviors[0].Config))
-	assert.Equal(t, searchJSON, load(filepath.Join(tsreaderTestdata, "fixture-search")).Types["Note"])
-
 	// Reactions, whose rules name a link, a schema and outcomes of a
 	// Workflow's terminal states, loads in both forms to the same IR.
 	reactionsJSON := load(filepath.Join(loaderTestdata, "fixture-reactions-json")).Types["Project"]
-	require.Len(t, reactionsJSON.Behaviors, 3)
-	assert.Equal(t, "Reactions", reactionsJSON.Behaviors[2].Name)
+	require.Len(t, reactionsJSON.Behaviors, 2)
+	assert.Equal(t, "Reactions", reactionsJSON.Behaviors[1].Name)
 	assert.JSONEq(t, `{"states": ["todo", "doing", "done", "failed"], "transitions": [{"from": "todo", "to": "doing"}, {"from": "doing", "to": "done"}, {"from": "doing", "to": "failed"}],
 		"outcomes": {"failed": "failure"}}`, string(reactionsJSON.Behaviors[0].Config))
 	assert.JSONEq(t, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "parent", "transition": "doing"}},
 		{"when": {"allTerminal": {"schema": "projects", "link": "parent", "outcomes": ["success"]}}, "then": {"transition": "done"}},
-		{"when": {"anyTerminal": {"schema": "projects", "link": "parent", "outcomes": ["failure"]}}, "then": {"transition": "failed"}}]}`, string(reactionsJSON.Behaviors[2].Config))
+		{"when": {"anyTerminal": {"schema": "projects", "link": "parent", "outcomes": ["failure"]}}, "then": {"transition": "failed"}}]}`, string(reactionsJSON.Behaviors[1].Config))
 	assert.Equal(t, reactionsJSON, load(filepath.Join(tsreaderTestdata, "fixture-reactions")).Types["Project"])
 
 	// Constants and Variants, whose configs name the type's fields and the
@@ -381,20 +371,6 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	assert.JSONEq(t, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult", "review": "ReviewResult"}}`, string(variantsJSON["Step"].Behaviors[1].Config))
 	for _, name := range []string{"Step", "VerifyResult", "Check", "ReviewResult"} {
 		assert.Equal(t, variantsJSON[name], variantsTS[name], name)
-	}
-
-	// Branches, whose config names the document's other types and their
-	// fields, loads in both forms to the same IR; the engine checks those
-	// names, and derives the graph's descriptor from them, when the schema
-	// is defined.
-	branchesJSON := load(filepath.Join(loaderTestdata, "fixture-branches-json")).Types
-	branchesTS := load(filepath.Join(tsreaderTestdata, "fixture-branches")).Types
-	require.Len(t, branchesJSON["Recipe"].Behaviors, 1)
-	assert.JSONEq(t, `{"kinds": {"step": {"type": "Step", "order": "position", "units": {"timings": "keyed"}, "retentionDays": 365},
-		"ingredient": {"type": "Ingredient", "parent": {"key": "stepKey", "of": "step"}}, "cover": {"type": "Cover", "singleton": true}},
-		"sweep": {"intervalMs": 3600000, "abandonAfter": 2592000000}}`, string(branchesJSON["Recipe"].Behaviors[0].Config))
-	for _, name := range []string{"Recipe", "Step", "Ingredient", "Cover"} {
-		assert.Equal(t, branchesJSON[name], branchesTS[name], name)
 	}
 
 	// StateRules, whose config names states of the type's Workflow and the
@@ -417,13 +393,12 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 		string(approvalsJSON.Behaviors[1].Config))
 	assert.Equal(t, approvalsJSON, load(filepath.Join(tsreaderTestdata, "fixture-approvals")).Types["Expense"])
 
-	// Numbering, whose config names a link of the type's Links config,
-	// loads in both forms to the same IR; the engine checks its format and
-	// the link when the schema is defined.
+	// Numbering, whose scope names a link the loader leaves unresolved,
+	// loads in both forms to the same IR.
 	numberingJSON := load(filepath.Join(loaderTestdata, "fixture-numbering-json")).Types["Invoice"]
-	require.Len(t, numberingJSON.Behaviors, 2)
-	assert.Equal(t, []string{"Links", "Numbering"}, []string{numberingJSON.Behaviors[0].Name, numberingJSON.Behaviors[1].Name})
-	assert.JSONEq(t, `{"format": "INV-{yyyy}-{seq:4}", "scope": {"link": "project"}, "reset": "yearly"}`, string(numberingJSON.Behaviors[1].Config))
+	require.Len(t, numberingJSON.Behaviors, 1)
+	assert.Equal(t, "Numbering", numberingJSON.Behaviors[0].Name)
+	assert.JSONEq(t, `{"format": "INV-{yyyy}-{seq:4}", "scope": {"link": "project"}, "reset": "yearly"}`, string(numberingJSON.Behaviors[0].Config))
 	assert.Equal(t, numberingJSON, load(filepath.Join(tsreaderTestdata, "fixture-numbering")).Types["Invoice"])
 
 	// Timers, whose deadlines name the type's Workflow states and a
@@ -438,23 +413,22 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 		"sweepMs": 60000, "permission": "requests.timers"}`, string(timersJSON.Behaviors[1].Config))
 	assert.Equal(t, timersJSON, load(filepath.Join(tsreaderTestdata, "fixture-timers")).Types["Request"])
 
-	// Lease, Assignment, Queue, Budget and Retries, whose configs name the
-	// type's fields and Workflow states, load in both forms to the same IR;
-	// the engine checks those names when the schema is defined.
+	// Lease, Assignment, Budget and Retries, whose configs name the type's
+	// fields and Workflow states, load in both forms to the same IR; the
+	// engine checks those names when the schema is defined.
 	jobsJSON := load(filepath.Join(loaderTestdata, "fixture-workqueue-json")).Types["Job"]
-	require.Len(t, jobsJSON.Behaviors, 6)
+	require.Len(t, jobsJSON.Behaviors, 5)
 	jobBehaviors := make([]string, 0, len(jobsJSON.Behaviors))
 	for _, b := range jobsJSON.Behaviors {
 		jobBehaviors = append(jobBehaviors, b.Name)
 	}
-	assert.Equal(t, []string{"Workflow", "Lease", "Assignment", "Queue", "Budget", "Retries"}, jobBehaviors)
+	assert.Equal(t, []string{"Workflow", "Lease", "Assignment", "Budget", "Retries"}, jobBehaviors)
 	assert.JSONEq(t, `{"ttlMs": 30000, "maxHoldField": "timeLimitMs", "onExpiry": {"transition": "queued", "from": ["running"]}, "maxExpiries": 3,
 		"escalate": {"transition": "failed", "from": ["running"]}, "overridePermission": "jobs.override"}`, string(jobsJSON.Behaviors[1].Config))
 	assert.JSONEq(t, `{"permission": "jobs.assign"}`, string(jobsJSON.Behaviors[2].Config))
-	assert.JSONEq(t, `{"claim": {"from": ["queued"], "to": "running"}, "priorityField": "priority", "match": ["topic"]}`, string(jobsJSON.Behaviors[3].Config))
-	assert.JSONEq(t, `{"meters": {"cpuSeconds": {"limit": 3600, "reserve": 600, "reset": "daily"}}, "limitPermission": "jobs.budget"}`, string(jobsJSON.Behaviors[4].Config))
+	assert.JSONEq(t, `{"meters": {"cpuSeconds": {"limit": 3600, "reserve": 600, "reset": "daily"}}, "limitPermission": "jobs.budget"}`, string(jobsJSON.Behaviors[3].Config))
 	assert.JSONEq(t, `{"classes": {"timeout": {"attempts": 3}, "invalidOutput": {"attempts": 2}, "rejected": "terminal"}, "totalAttempts": 4,
-		"exhaustedState": "failed"}`, string(jobsJSON.Behaviors[5].Config))
+		"exhaustedState": "failed"}`, string(jobsJSON.Behaviors[4].Config))
 	assert.Equal(t, jobsJSON, load(filepath.Join(tsreaderTestdata, "fixture-workqueue")).Types["Job"])
 
 	// Presence and Blueprint, whose configs name the type's fields and
@@ -488,15 +462,15 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	}
 	assert.Equal(t, []string{"Stock"}, behaviorNames("Inventory"))
 	assert.Equal(t, []string{"Calendar"}, behaviorNames("CollectionPoint"))
-	assert.Equal(t, []string{"Workflow", "Links", "Holds", "Timers", "Payments", "Reactions", "Numbering", "StateRules"}, behaviorNames("Checkout"))
-	assert.Equal(t, []string{"Workflow", "Approvals", "Links", "Numbering", "StateRules", "Payments", "Reactions"}, behaviorNames("Refund"))
+	assert.Equal(t, []string{"Workflow", "Holds", "Timers", "Payments", "Reactions", "Numbering", "StateRules"}, behaviorNames("Checkout"))
+	assert.Equal(t, []string{"Workflow", "Approvals", "Numbering", "StateRules", "Payments", "Reactions"}, behaviorNames("Refund"))
 	assert.JSONEq(t, `{"price": {"field": "priceCents", "currency": "GBP"}, "lowAt": {"field": "reorderAt"}, "maxPerHold": 99, "backorder": false,
 		"permission": "stock.adjust"}`, string(commerceJSON["Inventory"].Behaviors[0].Config))
 	assert.JSONEq(t, `{"holds": {"lines": {"each": {"field": "lines", "target": "inventoryId"}, "schema": "Inventory", "quantity": {"field": "quantity"}},
 		"pickup": {"link": "counter", "interval": {"start": "pickupAt", "durationMs": 900000}}},
-		"takeOn": ["held"], "commitOn": ["placed"], "releaseOn": ["expired", "cancelled"], "maxItems": 50}`, string(commerceJSON["Checkout"].Behaviors[2].Config))
+		"takeOn": ["held"], "commitOn": ["placed"], "releaseOn": ["expired", "cancelled"], "maxItems": 50}`, string(commerceJSON["Checkout"].Behaviors[1].Config))
 	assert.JSONEq(t, `{"amount": {"field": "amountCents"}, "currency": "GBP", "refundOf": {"link": "order"}, "issueOn": ["approved"],
-		"record": {"permission": "payments.record"}}`, string(commerceJSON["Refund"].Behaviors[5].Config))
+		"record": {"permission": "payments.record"}}`, string(commerceJSON["Refund"].Behaviors[4].Config))
 	for _, name := range []string{"Inventory", "CollectionPoint", "Checkout", "CheckoutLine", "Refund"} {
 		assert.Equal(t, commerceJSON[name], commerceTS[name], name)
 	}

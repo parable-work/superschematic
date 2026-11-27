@@ -513,20 +513,24 @@ docs:
 
 # The core with no extension linked (CORE_BIN) builds a DB, an API and a
 # General service from the fixture corpus, and loads fixture-behaviors-json,
-# fixture-cross-instance-json, fixture-rollups-json, fixture-search-json,
-# fixture-reactions-json, fixture-variants-json, fixture-branches-json,
-# fixture-staterules-json, fixture-numbering-json, fixture-approvals-json,
-# fixture-timers-json, fixture-workqueue-json, fixture-commerce-json,
-# fixture-derived-json and the TypeScript fixture-seats-db,
-# fixture-schedules-db and fixture-pool-db, whose types and tables compose
-# the core's behaviors (D10, D104): --emit-ir carries all thirty-two, Seats,
-# Reconcile, Schedules and Pool on their tables, and json-schema admits
-# them; fixture-commerce-currency-json
-# holds a commerce currency in a Finance.Currency own field (D70). The
-# engine runs the first eleven documents with its own behaviors in
-# runtime/engine/typescript/test/core-behaviors.test.ts, the work-queue
-# package runs fixture-workqueue-json in
-# runtime/engine-workqueue/typescript/test/package.test.ts, and the
+# fixture-cross-instance-json, fixture-rollups-json, fixture-reactions-json,
+# fixture-variants-json, fixture-staterules-json, fixture-numbering-json,
+# fixture-approvals-json, fixture-timers-json, fixture-workqueue-json,
+# fixture-commerce-json, fixture-derived-json and the TypeScript
+# fixture-seats-db, fixture-schedules-db and fixture-pool-db, whose types
+# and tables compose the core's behaviors (D10, D104): --emit-ir carries all
+# twenty-eight, Seats, Reconcile, Schedules and Pool on their tables, and
+# json-schema admits them, and Links, Search, Queue and Branches too, whose
+# declarations stay registered though the build refuses them (D103 folds
+# them into schema features); fixture-commerce-currency-json holds a
+# commerce currency in a Finance.Currency own field (D70). The engine runs
+# the first nine documents with its own behaviors in
+# runtime/engine/typescript/test/core-behaviors.test.ts, and the work-queue
+# package fixture-workqueue-json in
+# runtime/engine-workqueue/typescript/test/package.test.ts, each fixture
+# that composed a folded behavior as the engine's copy of it as it was
+# (runtime/engine/testdata/documents, with fixture-search-json and
+# fixture-branches-json, which the loader no longer has), and the
 # commerce package's suites (runtime/engine-commerce/typescript) run its
 # behaviors on the addon. It builds
 # fixture-behaviors-json, a General schema, and fixture-engine-db-json,
@@ -548,13 +552,9 @@ cli-smoke: $(CORE_BIN)
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-rollups-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(CORE_BIN) build internal/loader/testdata/services/fixture-search-json --emit-ir --out /tmp/superschematic-cli-smoke \
-		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-reactions-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-variants-json --emit-ir --out /tmp/superschematic-cli-smoke \
-		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
-	@$(CORE_BIN) build internal/loader/testdata/services/fixture-branches-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-staterules-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>>/tmp/superschematic-cli-smoke/behaviors-ir.json
@@ -581,10 +581,13 @@ cli-smoke: $(CORE_BIN)
 	@grep -q '"name": "Finance.Currency"' /tmp/superschematic-cli-smoke/commerce-currency-ir.json \
 		|| { echo "cli-smoke: the commerce currency fixture's IR names no Finance.Currency"; exit 1; }
 	@$(CORE_BIN) json-schema >/tmp/superschematic-cli-smoke/schema-file.json
-	@for b in Workflow Comments Revisions Dependencies Links Rollups Search Reactions Constants Variants Branches StateRules Approvals Numbering Timers Derived Provenance \
-		Lease Assignment Queue Presence Blueprint Budget Retries Stock Calendar Holds Payments Seats Reconcile Schedules Pool; do \
+	@for b in Workflow Comments Revisions Dependencies Rollups Reactions Constants Variants StateRules Approvals Numbering Timers Derived Provenance \
+		Lease Assignment Presence Blueprint Budget Retries Stock Calendar Holds Payments Seats Reconcile Schedules Pool; do \
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
+	@for b in Links Search Queue Branches; do \
+		grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
+			|| { echo "cli-smoke: json-schema does not admit $$b, whose declaration stays registered"; exit 1; }; done
 
 # examples/migrations: plans its DB service from v1 to v2 for Postgres and
 # SQLite with the core alone, gates the plans on their hazards, and applies
