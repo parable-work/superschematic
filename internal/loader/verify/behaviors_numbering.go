@@ -15,6 +15,10 @@ import (
 // carries on a field (D56, D103's step 4).
 const numberingBehavior = "Numbering"
 
+// aliasedBehavior is the name of the core's Aliased, which a table carries
+// on a field whose value a create gives (D147).
+const aliasedBehavior = "Aliased"
+
 // numberingTokens names the tokens a Numbering format may hold, in the
 // core's words.
 const numberingTokens = "{seq}, {seq:N} (N from 1 to 10), {yyyy} and {yy}"

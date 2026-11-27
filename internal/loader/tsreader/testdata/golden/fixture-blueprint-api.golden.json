@@ -1,0 +1,39 @@
+{
+  "name": "fixture-blueprint-api",
+  "kind": "API",
+  "imports": [
+    {
+      "package": "@schemas/fixture-blueprint-db",
+      "types": [
+        "Batch",
+        "Job"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "name": "fixture-blueprint-db",
+      "kind": "DB"
+    }
+  ],
+  "operationSets": [
+    {
+      "name": "BatchActions",
+      "comment": "A batch's Workflow, for any signed-in caller (D149). Blueprint declares\nno operation: a batch's create stamps its jobs.",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Batch"
+      },
+      "auth": true
+    },
+    {
+      "name": "JobActions",
+      "comment": "A job's Workflow and its blockers, for any signed-in caller: a move to\nrunning waits for the jobs of the steps before it (D149).",
+      "operations": [],
+      "behaviorOperations": {
+        "type": "Job"
+      },
+      "auth": true
+    }
+  ]
+}

@@ -61,11 +61,13 @@ func Write(doc *schemafile.Document) ([]byte, error) {
 var rawJSONKeys = map[string]bool{"extensions": true, "documents": true}
 
 // expandRawJSON rewrites the values under "extensions" and "documents"
-// mappings, and the "config" of each entry of a type's "behaviors" list,
-// from the byte sequences yaml.v3 emits for json.RawMessage into the YAML
-// values the reader expects. A mapping is rewritten only when every entry
-// is a byte sequence, and a config only when it is one, so a definition
-// that happens to be named "extensions" or "behaviors" is left alone.
+// mappings, the "config" of each entry of a type's "behaviors" list and
+// the "settings" of each entry of its "bundles" list, from the byte
+// sequences yaml.v3 emits for json.RawMessage into the YAML values the
+// reader expects. A mapping is rewritten only when every entry is a byte
+// sequence, and a config or settings only when it is one, so a definition
+// that happens to be named "extensions", "behaviors" or "bundles" is left
+// alone.
 func expandRawJSON(node *yaml.Node) error {
 	if node == nil {
 		return nil
@@ -91,7 +93,14 @@ func expandRawJSON(node *yaml.Node) error {
 			continue
 		}
 		if key.Value == "behaviors" && value.Kind == yaml.SequenceNode {
-			if err := expandBehaviorConfigs(value); err != nil {
+			if err := expandEntryJSON(value, "config", "behavior"); err != nil {
+				return err
+			}
+			continue
+		}
+		// A bundle's settings are a json.RawMessage too (D103, step 5).
+		if key.Value == "bundles" && value.Kind == yaml.SequenceNode {
+			if err := expandEntryJSON(value, "settings", "bundle"); err != nil {
 				return err
 			}
 			continue
@@ -103,9 +112,10 @@ func expandRawJSON(node *yaml.Node) error {
 	return nil
 }
 
-// expandBehaviorConfigs rewrites the config of every behavior entry, a
-// json.RawMessage, into the YAML value it holds.
-func expandBehaviorConfigs(list *yaml.Node) error {
+// expandEntryJSON rewrites member of every entry of list, a
+// json.RawMessage, into the YAML value it holds: a behavior's config, or
+// a bundle's settings. what names the entry for an error.
+func expandEntryJSON(list *yaml.Node, member, what string) error {
 	for _, item := range list.Content {
 		if item.Kind != yaml.MappingNode {
 			continue
@@ -117,8 +127,8 @@ func expandBehaviorConfigs(list *yaml.Node) error {
 			}
 		}
 		for key, value := range mappingPairs(item) {
-			if key.Value == "config" && isByteSequence(value) {
-				if err := replaceWithJSON(value, "behavior", name); err != nil {
+			if key.Value == member && isByteSequence(value) {
+				if err := replaceWithJSON(value, what, name); err != nil {
 					return err
 				}
 			}

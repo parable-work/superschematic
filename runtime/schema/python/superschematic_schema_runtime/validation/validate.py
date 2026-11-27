@@ -16,7 +16,7 @@ from ..errors import (
 )
 from .registry import ScalarValidatorRegistry, create_default_scalar_validator_registry
 from .resolver import resolve_schema
-from .types import FieldDef, ScalarDef, Schema, SchemaInput, TypeDef, json_shape_of
+from .types import FieldDef, ScalarDef, Schema, SchemaInput, TypeDef, UnionDef, json_shape_of
 
 
 _BUILTIN_SCALARS = frozenset({"String", "Int", "Float", "Boolean", "ID"})
@@ -670,8 +670,49 @@ def _validate_array_field(
             )
 
 
+def _validate_variant_value(
+    schema: Schema,
+    type_def: TypeDef,
+    union: UnionDef,
+    key: str,
+    data: dict[str, Any],
+    value: Any,
+    errors: ValidationErrors,
+    registry: ScalarValidatorRegistry,
+) -> None:
+    """Validate the value of a field of a variant union (D149) at ``key`` as
+    the member its sibling names, as every generated validator does.
+
+    "variant" while the sibling, ``union.by``'s field of ``type_def``,
+    holds no string the union's arms map; "type" for a value that is no
+    object; and otherwise the member's errors under ``key``.
+    """
+    by_key = union.by
+    for sibling in type_def.fields:
+        if sibling.name == union.by:
+            by_key = sibling.json_key or sibling.name
+    by = data.get(by_key)
+    member = union.arms.get(by) if isinstance(by, str) else None
+    if member is None:
+        append_field_error(
+            errors,
+            key,
+            ValidationError(validator="variant", message=f"holds a value its {by_key} names no member for"),
+        )
+        return
+    if not _is_object(value):
+        append_field_error(
+            errors, key, ValidationError(validator="type", message="expected an object")
+        )
+        return
+    nested = schema.types.get(member)
+    if nested is not None:
+        _add_nested_errors(errors, key, _validate_type_def(schema, nested, value, registry))
+
+
 def _validate_field(
     schema: Schema,
+    type_def: TypeDef,
     field: FieldDef,
     data: dict[str, Any],
     errors: ValidationErrors,
@@ -688,6 +729,11 @@ def _validate_field(
                 key,
                 ValidationError(validator="required", message=f"{field.name} is required."),
             )
+        return
+
+    union = schema.unions.get(field.type_ref.name)
+    if union is not None and union.by and not field.type_ref.is_array:
+        _validate_variant_value(schema, type_def, union, key, data, value, errors, registry)
         return
 
     if field.type_ref.is_array:
@@ -731,7 +777,7 @@ def _validate_type_def(
 ) -> ValidationErrors:
     errors = new_validation_errors()
     for field in type_def.fields:
-        _validate_field(schema, field, data, errors, registry)
+        _validate_field(schema, type_def, field, data, errors, registry)
     return errors
 
 

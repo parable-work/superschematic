@@ -31,8 +31,8 @@ use super::run::{Client, Runner};
 use super::{
     row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
     CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error,
-    FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertOptions, Upserted,
-    Values, WriteOptions,
+    FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertManyOptions,
+    UpsertOptions, Upserted, Values, WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -383,6 +383,18 @@ impl Tables {
         &self.pool
     }
 
+    /// The keys of the database's `Encrypted<T>` fields, when given.
+    pub fn keys(&self) -> Option<&Arc<dyn FieldKeys>> {
+        self.keys.as_ref()
+    }
+
+    /// What runs the behaviors of the tables that compose them, when
+    /// given: what a write across tables of its own (a reply's action,
+    /// D191) opens its repositories with.
+    pub fn rules(&self) -> Option<&Arc<PoolRules>> {
+        self.rules.as_ref()
+    }
+
     /// The definition of the database's tables.
     pub fn definition(&self) -> Result<&'static Definition, Error> {
         (self.definition)()
@@ -546,6 +558,24 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
         self.runner().upsert_one(input, on, update, options).await
     }
 
+    /// Inserts each of `inputs`, or, when a row already holds its value of
+    /// the unique key `on`, sets on that row each field `fields` names to
+    /// the value the input would have inserted (D89), a statement a batch,
+    /// and answers each input's row and what the upsert did with it, in
+    /// order. More rows than a batch take a statement each, which the
+    /// caller's transaction holds together. Two inputs of one batch that
+    /// hold one key are refused before it runs, and a table that composes
+    /// behaviors upserts a row at a time with [`Repository::upsert_one`].
+    pub async fn upsert_many(
+        &self,
+        inputs: &[Values],
+        on: &[&str],
+        fields: &[&str],
+        options: UpsertManyOptions,
+    ) -> Result<Vec<Upserted<Values>>, Error> {
+        self.runner().upsert_many(inputs, on, fields, options).await
+    }
+
     /// Deletes the live row whose key is `key`, stamping it on a
     /// soft-deletable table; [`Error::NotFound`] when there is none.
     pub async fn delete_one(&self, key: &Value, options: &WriteOptions) -> Result<(), Error> {
@@ -558,6 +588,27 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     /// its sub-table rows and its queues' messages (D103).
     pub async fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
         self.runner().hard_delete_one(key).await
+    }
+
+    /// Folds the row `from` into the row `into`, in a savepoint of the
+    /// caller's transaction (D147): for each relation of the schema that
+    /// references the table it deletes the rows a unique index of their
+    /// table would refuse once repointed, stamping one deleted where the
+    /// index holds live rows alone, repoints the rest, moves an Aliased
+    /// field's aliases and names, and then deletes `from` as `delete_one`
+    /// does. It answers the rows repointed and deleted by table.
+    /// [`Error::NotFound`] when either is no live row; [`Error::Merge`]
+    /// when they are one row, or when `into` references `from` through a
+    /// relation of the table to itself; [`Error::NoUser`] when it stamps a
+    /// row deleted and no user acts; [`Error::Invalid`] for a table that
+    /// does not implement Mergeable, and for a client outside a
+    /// transaction.
+    pub async fn merge_into(
+        &self,
+        from: &Value,
+        into: &Value,
+    ) -> Result<super::MergeResult, Error> {
+        self.runner().merge_into(from, into).await
     }
 
     /// Runs `operation` of the behavior under `member`, the use's field
@@ -605,6 +656,66 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     pub async fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
         self.runner().reencrypt(batch).await
     }
+
+    /// The conditions that keep a read of the table's rows to what the
+    /// repositories' caller sees (D156), each value appended to `args` and
+    /// each column qualified by the table: an `@audience` table's audience,
+    /// and for a caller with grants the rows they reach, `FALSE` for a
+    /// table none reaches. None for repositories opened for no caller. What
+    /// a read across tables holds a table's rows to, as a search does with
+    /// an `EXISTS` back to the table (D155, D188), the TypeScript
+    /// repositories' `conditions(null, args, offset)`.
+    pub fn conditions(&self, args: &mut Vec<Bound>) -> Result<Vec<String>, Error> {
+        self.plan.read_conditions(self.table, args)
+    }
+}
+
+/// Runs `sql` on `client` with `args` bound, each as the text of the type
+/// Postgres gave its parameter, and answers each row's columns in order as
+/// a repository reads a column: a UUID in base62, a decimal as its text.
+/// What a read across tables runs its own statement through (D152, D155,
+/// D188), with the conditions of [`Repository::conditions`] among its
+/// values.
+pub async fn query_rows<C: GenericClient + Sync>(
+    client: &C,
+    sql: &str,
+    args: &[Bound],
+) -> Result<Vec<Vec<Value>>, Error> {
+    let prepared = client
+        .prepare_cached(sql)
+        .await
+        .map_err(|err| failure(sql, &err))?;
+    if prepared.params().len() != args.len() {
+        return Err(Error::Definition(format!(
+            "the statement takes {} values, and {} were bound: {sql}",
+            prepared.params().len(),
+            args.len()
+        )));
+    }
+    let params = args
+        .iter()
+        .zip(prepared.params())
+        .map(|(bound, ty)| {
+            param_text(&bound.value, ty, bound.marks.json)
+                .map(Text)
+                .map_err(Error::Invalid)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let refs: Vec<&(dyn ToSql + Sync)> = params.iter().map(|p| p as &(dyn ToSql + Sync)).collect();
+    let rows = client
+        .query(&prepared, &refs)
+        .await
+        .map_err(|err| failure(sql, &err))?;
+    rows.iter()
+        .map(|row| {
+            (0..row.len())
+                .map(|i| {
+                    cell(row, i, &Column::default())
+                        .map_err(|err| Error::Definition(format!("{sql}: {err}")))
+                })
+                .collect()
+        })
+        .collect()
 }
 
 /// The Rust types a typed repository reads and writes, which it holds
@@ -752,6 +863,31 @@ where
         })
     }
 
+    /// Inserts each of `inputs`, or, when a row already holds its value of
+    /// the unique key `on`, sets on that row each field `fields` names, by
+    /// its member or its field, to the value the input would have inserted
+    /// (D89); each input's row and what the upsert did with it, in order.
+    pub async fn upsert_many(
+        &self,
+        inputs: &[Create],
+        on: &[&str],
+        fields: &[&str],
+        options: UpsertManyOptions,
+    ) -> Result<Vec<Upserted<Row>>, Error> {
+        let inputs = inputs.iter().map(values).collect::<Result<Vec<_>, _>>()?;
+        self.repository
+            .upsert_many(&inputs, on, fields, options)
+            .await?
+            .into_iter()
+            .map(|upserted| {
+                Ok(Upserted {
+                    row: row(upserted.row)?,
+                    status: upserted.status,
+                })
+            })
+            .collect()
+    }
+
     /// Deletes the live row whose key is `key`, stamping it on a
     /// soft-deletable table.
     pub async fn delete_one(&self, key: &Key, options: &WriteOptions) -> Result<(), Error> {
@@ -761,6 +897,12 @@ where
     /// Removes the row whose key is `key`, deleted or not.
     pub async fn hard_delete_one(&self, key: &Key) -> Result<(), Error> {
         self.repository.hard_delete_one(&wire(key)?).await
+    }
+
+    /// Folds the row `from` into the row `into` (D147), as the untyped
+    /// repository's `merge_into` does.
+    pub async fn merge_into(&self, from: &Key, into: &Key) -> Result<super::MergeResult, Error> {
+        self.repository.merge_into(&wire(from)?, &wire(into)?).await
     }
 
     /// Runs `operation` of the behavior under `member` on the live row

@@ -74,5 +74,8 @@ tracing = { version = "{{ tracingVersion }}", default-features = false, features
 {{- with .Behaviors }}
 {{ rulesAdapterCrate }} = { path = "{{ .AdapterPath }}", features = ["{{ $.DatabaseDialect }}"] }
 {{ rulesBehaviorsCrate }} = { path = "{{ .BehaviorsPath }}" }
+{{- if .ProjectCrate }}
+{{ .ProjectCrate }} = { path = "{{ .ProjectCratePath }}" }
+{{- end }}
 {{- end }}
 {{- end }}

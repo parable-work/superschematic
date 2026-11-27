@@ -137,4 +137,96 @@ type UnionDef struct {
 
 	// Types lists the names of all member types.
 	Types []string `json:"types" yaml:"types"`
+
+	// By makes the union a discriminated-union field type (D149): a field
+	// whose type it is holds the member that its sibling field By names by
+	// value, through Arms. By is that sibling's name, a string or enum
+	// field of every type that holds a field of the union. Empty for a
+	// union that picks its member by the payload's shape (D31, amended).
+	// A union with By is the type of a single field only: no list, map,
+	// argument or result is of it.
+	By string `json:"by,omitempty" yaml:"by,omitempty"`
+
+	// Arms maps each value of By that names a member to that member, one of
+	// Types, and each of Types is named by at least one value. While By
+	// holds a value Arms lacks, or none, the field holds none: every
+	// validator refuses a value there with the rule "variant". Set exactly
+	// when By is.
+	Arms map[string]string `json:"arms,omitempty" yaml:"arms,omitempty"`
+}
+
+// VariantRule is the rule every validator reports at a field of a variant
+// union (UnionDef.By, D149) that holds a value while its sibling names no
+// arm, or holds a member other than the one its sibling names.
+const VariantRule = "variant"
+
+// UnionArm is one value of a variant union's By and the member it names.
+type UnionArm struct {
+	Value string
+	Type  string
+}
+
+// IsVariant reports whether the union is a discriminated-union field type,
+// whose member a sibling field names (D149).
+func (u *UnionDef) IsVariant() bool {
+	return u != nil && u.By != ""
+}
+
+// ArmList returns the union's Arms in the order of Types, and by value
+// within a member, the order every generator writes them in.
+func (u *UnionDef) ArmList() []UnionArm {
+	if u == nil || len(u.Arms) == 0 {
+		return nil
+	}
+	arms := make([]UnionArm, 0, len(u.Arms))
+	for value, member := range u.Arms {
+		arms = append(arms, UnionArm{Value: value, Type: member})
+	}
+	order := func(member string) int {
+		if i := slices.Index(u.Types, member); i >= 0 {
+			return i
+		}
+		return len(u.Types)
+	}
+	slices.SortFunc(arms, func(a, b UnionArm) int {
+		if d := order(a.Type) - order(b.Type); d != 0 {
+			return d
+		}
+		return strings.Compare(a.Value, b.Value)
+	})
+	return arms
+}
+
+// ValidateVariant checks a variant union's own shape (D149): By and Arms
+// set together, every arm's value non-empty and its member one of Types,
+// and every member named by an arm. A union without By passes.
+func (u *UnionDef) ValidateVariant() error {
+	if u == nil {
+		return nil
+	}
+	if u.By == "" {
+		if len(u.Arms) > 0 {
+			return fmt.Errorf("union %s has arms and no by: arms map the values of the field by names", u.Name)
+		}
+		return nil
+	}
+	if len(u.Arms) == 0 {
+		return fmt.Errorf("union %s is discriminated by %s and has no arms: map at least one value of %s to a member", u.Name, u.By, u.By)
+	}
+	named := map[string]bool{}
+	for _, arm := range u.ArmList() {
+		if arm.Value == "" {
+			return fmt.Errorf("union %s has an arm with no value: each arm is a value of %s", u.Name, u.By)
+		}
+		if !slices.Contains(u.Types, arm.Type) {
+			return fmt.Errorf("union %s's arm %q names %s, which is not one of its types (%s)", u.Name, arm.Value, arm.Type, strings.Join(u.Types, ", "))
+		}
+		named[arm.Type] = true
+	}
+	for _, member := range u.Types {
+		if !named[member] {
+			return fmt.Errorf("union %s's type %s is named by no arm: a value of %s names each member", u.Name, member, u.By)
+		}
+	}
+	return nil
 }

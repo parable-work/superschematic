@@ -1,0 +1,219 @@
+{
+  "types": {
+    "Company": {
+      "type": "Company",
+      "table": "company",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "city",
+          "column": "city",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "name",
+          "behavior": "Aliased",
+          "anchor": "name",
+          "member": "name",
+          "fields": [
+            {
+              "name": "name",
+              "field": "name",
+              "column": "name",
+              "type": "string",
+              "value": true
+            }
+          ],
+          "operations": [
+            {
+              "name": "rename",
+              "writes": true
+            },
+            {
+              "name": "addAlias",
+              "writes": true
+            },
+            {
+              "name": "removeAlias",
+              "writes": true
+            },
+            {
+              "name": "resolve",
+              "writes": false,
+              "table": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "aliases",
+              "table": "company_name_aliases",
+              "row": "company_id",
+              "key": {
+                "name": "normalized",
+                "field": "normalized",
+                "column": "normalized",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "alias",
+                  "field": "alias",
+                  "column": "alias",
+                  "type": "string"
+                }
+              ]
+            }
+          ],
+          "shared": [
+            {
+              "name": "names",
+              "table": "company_name_names",
+              "key": {
+                "name": "normalized",
+                "field": "normalized",
+                "column": "normalized",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "holder",
+                  "field": "holder",
+                  "column": "holder",
+                  "type": "Identity.UUID"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Company",
+        "uses": [
+          {
+            "behavior": "Aliased",
+            "anchor": {
+              "field": "name"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "city",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Tag": {
+      "type": "Tag",
+      "table": "tag",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [],
+      "uses": [
+        {
+          "id": "label",
+          "behavior": "Aliased",
+          "anchor": "label",
+          "member": "label",
+          "fields": [
+            {
+              "name": "name",
+              "field": "label",
+              "column": "label",
+              "type": "string",
+              "value": true
+            }
+          ],
+          "operations": [
+            {
+              "name": "rename",
+              "writes": true
+            },
+            {
+              "name": "addAlias",
+              "writes": true
+            },
+            {
+              "name": "removeAlias",
+              "writes": true
+            },
+            {
+              "name": "resolve",
+              "writes": false,
+              "table": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "aliases",
+              "table": "tag_label_aliases",
+              "row": "tag_id",
+              "key": {
+                "name": "normalized",
+                "field": "normalized",
+                "column": "normalized",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "alias",
+                  "field": "alias",
+                  "column": "alias",
+                  "type": "string"
+                }
+              ]
+            }
+          ],
+          "shared": [
+            {
+              "name": "names",
+              "table": "tag_label_names",
+              "key": {
+                "name": "normalized",
+                "field": "normalized",
+                "column": "normalized",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "holder",
+                  "field": "holder",
+                  "column": "holder",
+                  "type": "Identity.UUID"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Tag",
+        "uses": [
+          {
+            "behavior": "Aliased",
+            "config": {
+              "normalize": "slug"
+            },
+            "anchor": {
+              "field": "label"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

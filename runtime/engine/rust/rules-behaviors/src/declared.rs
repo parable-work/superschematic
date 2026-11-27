@@ -30,6 +30,14 @@ use superschematic_rules::{Declaration, SignalAccess, TableDecl};
 /// with no name, which a test of each behavior refuses.
 pub(crate) fn declaration(text: &str) -> Declaration {
     let file: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+    declaration_of(&file)
+}
+
+/// The core's declaration of a declaration file already read as JSON:
+/// [`declaration`]'s, for a file a host hands the core whole (a declarative
+/// behavior's, D103's step 5).
+pub(crate) fn declaration_of(file: &Value) -> Declaration {
+    let file = file.clone();
     let mut declaration =
         Declaration::new(file.get("name").and_then(Value::as_str).unwrap_or_default());
     for field in listed(&file, "fields") {
@@ -45,6 +53,15 @@ pub(crate) fn declaration(text: &str) -> Declaration {
     }
     if let Some(value) = file.get("value").and_then(Value::as_str) {
         declaration = declaration.value(value);
+        // A value field a create gives is the use's value at a create
+        // (D147's first primitive: Aliased's name).
+        let given = listed(&file, "fields").any(|field| {
+            field.get("name").and_then(Value::as_str) == Some(value)
+                && field.get("fromCreate") == Some(&Value::Bool(true))
+        });
+        if given {
+            declaration = declaration.value_from_create();
+        }
     }
     for table in listed(&file, "tables") {
         if let Some(name) = table.get("name").and_then(Value::as_str) {

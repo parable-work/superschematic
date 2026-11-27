@@ -40,8 +40,8 @@ use super::run::{finish, Client, Runner};
 use super::{
     row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
     CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error,
-    FieldKeys, FindOptions, Found, Marks, PageOptions, RowPage, Session, Table, UpsertOptions,
-    Upserted, Values, WriteOptions,
+    FieldKeys, FindOptions, Found, Marks, PageOptions, RowPage, Session, Table, UpsertManyOptions,
+    UpsertOptions, Upserted, Values, WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -460,6 +460,30 @@ where
         })
     }
 
+    /// Inserts each of `inputs`, or, when a row already holds its value of
+    /// the unique key `on`, sets on that row each field `fields` names, by
+    /// its member or its field, to the value the input would have inserted
+    /// (D89); each input's row and what the upsert did with it, in order.
+    pub fn upsert_many(
+        &self,
+        inputs: &[Create],
+        on: &[&str],
+        fields: &[&str],
+        options: UpsertManyOptions,
+    ) -> Result<Vec<Upserted<Row>>, Error> {
+        let inputs = inputs.iter().map(values).collect::<Result<Vec<_>, _>>()?;
+        self.repository
+            .upsert_many(&inputs, on, fields, options)?
+            .into_iter()
+            .map(|upserted| {
+                Ok(Upserted {
+                    row: row(upserted.row)?,
+                    status: upserted.status,
+                })
+            })
+            .collect()
+    }
+
     /// Deletes the live row whose key is `key`, stamping it on a
     /// soft-deletable table.
     pub fn delete_one(&self, key: &Key, options: &WriteOptions) -> Result<(), Error> {
@@ -469,6 +493,12 @@ where
     /// Removes the row whose key is `key`, deleted or not.
     pub fn hard_delete_one(&self, key: &Key) -> Result<(), Error> {
         self.repository.hard_delete_one(&wire(key)?)
+    }
+
+    /// Folds the row `from` into the row `into` (D147), as the untyped
+    /// repository's `merge_into` does.
+    pub fn merge_into(&self, from: &Key, into: &Key) -> Result<super::MergeResult, Error> {
+        self.repository.merge_into(&wire(from)?, &wire(into)?)
     }
 
     /// Runs `operation` of the behavior under `member` on the live row
@@ -631,6 +661,27 @@ impl Repository<'_> {
         finish(self.runner().upsert_one(input, on, update, options))
     }
 
+    /// Inserts each of `inputs`, or, when a row already holds its value of
+    /// the unique key `on`, sets on that row each field `fields` names to
+    /// the value the input would have inserted (D89), and answers each
+    /// input's row and what the upsert did with it, in order. A batch's
+    /// rows are as many statements as the sets of columns they set, since
+    /// SQLite's VALUES take no DEFAULT, after one read of the rows that
+    /// hold their keys, which says which rows each inserted; the caller's
+    /// transaction, `TransactionBehavior::Immediate`, holds them together.
+    /// Two inputs of one batch that hold one key are refused, as Postgres
+    /// refuses them, and a table that composes behaviors upserts a row at
+    /// a time with [`Repository::upsert_one`].
+    pub fn upsert_many(
+        &self,
+        inputs: &[Values],
+        on: &[&str],
+        fields: &[&str],
+        options: UpsertManyOptions,
+    ) -> Result<Vec<Upserted<Values>>, Error> {
+        finish(self.runner().upsert_many(inputs, on, fields, options))
+    }
+
     /// Deletes the live row whose key is `key`, stamping it on a
     /// soft-deletable table; [`Error::NotFound`] when there is none.
     pub fn delete_one(&self, key: &Value, options: &WriteOptions) -> Result<(), Error> {
@@ -643,6 +694,14 @@ impl Repository<'_> {
     /// its sub-table rows and its queues' messages (D103).
     pub fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
         finish(self.runner().hard_delete_one(key))
+    }
+
+    /// Folds the row `from` into the row `into` (D147), in a savepoint: of
+    /// the caller's transaction, or the merge's own when it opened none,
+    /// for SQLite's one writer holds the database once the merge writes.
+    /// What it does and refuses is the Postgres repository's `merge_into`'s.
+    pub fn merge_into(&self, from: &Value, into: &Value) -> Result<super::MergeResult, Error> {
+        finish(self.runner().merge_into(from, into))
     }
 
     /// Runs `operation` of the behavior under `member`, the use's field

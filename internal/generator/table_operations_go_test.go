@@ -281,11 +281,30 @@ func (t teams) SummarizeTeam(ctx context.Context, id types.IdentityUUID) (*types
 	return &types.TeamSummary{TeamId: id, OpenIssues: float64(total)}, nil
 }
 
-// openDatabase is the pool and the ORM of fixture-tracker-db over a schema
-// of its own, holding the build's create.sql, which it drops when the test
-// ends.
-func openDatabase(t *testing.T) (*pgxpool.Pool, *orm.Database, string) {
+// tableReads are the scenario's reads of the tables beside the API: a
+// column of the row whose key is id, as text, nil for null; the titles of
+// a team's issues whose column is null, by id; and how many rows of a
+// table hold the key id.
+type tableReads struct {
+	text       func(ctx context.Context, table, column, id string) (*string, error)
+	nullTitles func(ctx context.Context, team, column string) ([]string, error)
+	count      func(ctx context.Context, table, id string) (int, error)
+}
+
+// openSQLite, when set, opens the ORM of fixture-tracker-db on a SQLite
+// file in openDatabase's place (D116): table_operations_sqlite_test.go
+// sets it, in a module whose database lists the sqlite dialect first.
+var openSQLite func(t *testing.T) (tableReads, orm.DatabaseInterface)
+
+// openDatabase is the ORM of fixture-tracker-db, and its reads of the
+// tables, over a schema of its own, holding the build's create.sql, which
+// it drops when the test ends, or over the SQLite file openSQLite opens.
+func openDatabase(t *testing.T) (tableReads, orm.DatabaseInterface, string) {
 	t.Helper()
+	if openSQLite != nil {
+		reads, db := openSQLite(t)
+		return reads, db, ""
+	}
 	target := os.Getenv("` + behaviorServerDatabaseEnv + `")
 	if target == "" {
 		t.Skip("set ` + behaviorServerDatabaseEnv + ` to run the generated Go server's table operations against Postgres")
@@ -324,7 +343,35 @@ func openDatabase(t *testing.T) (*pgxpool.Pool, *orm.Database, string) {
 		t.Fatal(err)
 	}
 	t.Cleanup(db.Close)
-	return pool, db, schema
+	reads := tableReads{
+		text: func(ctx context.Context, table, column, id string) (*string, error) {
+			var value *string
+			err := pool.QueryRow(ctx, "SELECT "+column+"::text FROM "+table+" WHERE id = $1", id).Scan(&value)
+			return value, err
+		},
+		nullTitles: func(ctx context.Context, team, column string) ([]string, error) {
+			rows, err := pool.Query(ctx, "SELECT title FROM issue WHERE team_id = $1 AND "+column+" IS NULL ORDER BY id", team)
+			if err != nil {
+				return nil, err
+			}
+			defer rows.Close()
+			var titles []string
+			for rows.Next() {
+				var title string
+				if err := rows.Scan(&title); err != nil {
+					return nil, err
+				}
+				titles = append(titles, title)
+			}
+			return titles, rows.Err()
+		},
+		count: func(ctx context.Context, table, id string) (int, error) {
+			var rows int
+			err := pool.QueryRow(ctx, "SELECT count(*) FROM "+table+" WHERE id = $1", id).Scan(&rows)
+			return rows, err
+		},
+	}
+	return reads, db, schema
 }
 
 // externalServerEnv names the binary of another server of the same API,
@@ -493,9 +540,9 @@ const (
 
 func TestTableOperations(t *testing.T) {
 	ctx := context.Background()
-	pool, db, schema := openDatabase(t)
+	reads, db, schema := openDatabase(t)
 	var base string
-	if external := os.Getenv(externalServerEnv); external != "" {
+	if external := os.Getenv(externalServerEnv); external != "" && schema != "" {
 		base = startExternalServer(t, external, schema)
 	} else {
 		router := chi.NewRouter()
@@ -518,8 +565,8 @@ func TestTableOperations(t *testing.T) {
 	// column reads one column of one row, as text; "" for null.
 	column := func(t *testing.T, table, name string, id any) string {
 		t.Helper()
-		var value *string
-		if err := pool.QueryRow(ctx, "SELECT "+name+"::text FROM "+table+" WHERE id = $1", uuid(t, id)).Scan(&value); err != nil {
+		value, err := reads.text(ctx, table, name, uuid(t, id))
+		if err != nil {
 			t.Fatalf("read %s.%s of %v: %v", table, name, id, err)
 		}
 		if value == nil {
@@ -631,6 +678,10 @@ func TestTableOperations(t *testing.T) {
 	issues := map[string]map[string]any{}
 	create := func(t *testing.T, body map[string]any) map[string]any {
 		t.Helper()
+		// A list orders by createdAt, which a SQLite file holds to the
+		// millisecond (D116), so each issue is created in a millisecond of
+		// its own.
+		time.Sleep(2 * time.Millisecond)
 		issue := ada.post(coreIssues, body).data(t)
 		issues[issue["title"].(string)] = issue
 		return issue
@@ -749,18 +800,9 @@ func TestTableOperations(t *testing.T) {
 		// direction (D112). The database says only which of two ids is
 		// the lower.
 		none := func(column string) []string {
-			rows, err := pool.Query(ctx, "SELECT title FROM issue WHERE team_id = $1 AND "+column+" IS NULL ORDER BY id", uuid(t, core["id"]))
+			titles, err := reads.nullTitles(ctx, uuid(t, core["id"]), column)
 			if err != nil {
 				t.Fatal(err)
-			}
-			defer rows.Close()
-			var titles []string
-			for rows.Next() {
-				var title string
-				if err := rows.Scan(&title); err != nil {
-					t.Fatal(err)
-				}
-				titles = append(titles, title)
 			}
 			if len(titles) != 2 {
 				t.Fatalf("issues with no %s = %v, want two", column, titles)
@@ -1047,8 +1089,7 @@ func TestTableOperations(t *testing.T) {
 		if got := ben.delete(comments + "/" + fmt.Sprint(first["id"])).data(t); !reflect.DeepEqual(got, first) {
 			t.Errorf("the delete answered %v, want the comment as it was, %v", got, first)
 		}
-		var rows int
-		if err := pool.QueryRow(ctx, "SELECT count(*) FROM comment WHERE id = $1", uuid(t, first["id"])).Scan(&rows); err != nil || rows != 0 {
+		if rows, err := reads.count(ctx, "comment", uuid(t, first["id"])); err != nil || rows != 0 {
 			t.Errorf("the deleted comment's rows = %d, %v, want none", rows, err)
 		}
 		if got := all(t, reader, comments, "", "body"); !reflect.DeepEqual(got, []string{"fixed in main"}) || second["body"] != "fixed in main" {
@@ -1098,7 +1139,12 @@ func TestTableOperations(t *testing.T) {
 		if uuid(t, mine["owner"]) != alice || uuid(t, mine["createdBy"]) != alice || mine["sharedWith"] != nil {
 			t.Fatalf("a note = %v, want the caller as its owner", mine)
 		}
+		// The notes list by createdAt, which a SQLite file holds to the
+		// millisecond (D116), so each is written in a millisecond of its
+		// own.
+		time.Sleep(2 * time.Millisecond)
 		shared := kim.post(notes, map[string]any{"text": "Kim, for Lee", "sharedWith": bob}).data(t)
+		time.Sleep(2 * time.Millisecond)
 		theirs := lee.post(notes, map[string]any{"text": "Lee only"}).data(t)
 		if got := column(t, "note", "owner", shared["id"]); got != alice {
 			t.Errorf("the shared note's owner is %s, want %s", got, alice)

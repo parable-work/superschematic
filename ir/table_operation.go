@@ -39,12 +39,21 @@ const (
 	// TableOperationDelete is a DELETE with the key: the row, soft-deleted
 	// on a table with deletedAt.
 	TableOperationDelete = "delete"
+	// TableOperationMerge is a POST with the key and the key of another row
+	// in the path, {into}, of a table that implements Mergeable (D147):
+	// the row folded into the other by the repository's mergeInto, which
+	// answers the view of the row that stays.
+	TableOperationMerge = "merge"
 )
 
 // TableOperationKinds are the kinds of a table operation.
 var TableOperationKinds = []string{
-	TableOperationRead, TableOperationList, TableOperationCreate, TableOperationUpdate, TableOperationDelete,
+	TableOperationRead, TableOperationList, TableOperationCreate, TableOperationUpdate, TableOperationDelete, TableOperationMerge,
 }
+
+// TableOperationInto is the path parameter of a merge that names the row
+// that stays (D147).
+const TableOperationInto = "into"
 
 // TableOperation is @tableOperation on an operation (D106). The decorator's
 // argument writes the row rule, By and OverridePermission (D108); every
@@ -120,7 +129,7 @@ func (t *TableOperation) Writes() bool {
 		return false
 	}
 	switch t.Kind {
-	case TableOperationCreate, TableOperationUpdate, TableOperationDelete:
+	case TableOperationCreate, TableOperationUpdate, TableOperationDelete, TableOperationMerge:
 		return true
 	}
 	return false

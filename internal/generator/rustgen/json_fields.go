@@ -21,7 +21,7 @@ func (o ModuleOutput) OptionalJSONFieldAdapter() string {
 // hasOptionalJSONFields reports whether any field keeps JSON null.
 func hasOptionalJSONFields(types []TypeInfo) bool {
 	for _, typ := range types {
-		for _, field := range typ.Fields {
+		for _, field := range append(append([]FieldInfo{}, typ.Fields...), typ.WireFields...) {
 			if field.KeepsJSONNull {
 				return true
 			}

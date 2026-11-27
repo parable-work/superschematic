@@ -271,6 +271,14 @@ func buildBehaviorCrate(t *testing.T, sdk bool) behaviorCrate {
 // database's Rust types, which its Deps name, as a build's do.
 func (f behaviorFixture) build(t *testing.T, sdk bool) behaviorCrate {
 	t.Helper()
+	return f.buildWith(t, sdk, nil)
+}
+
+// buildWith writes the fixture's API crate as build does, adjust, when it
+// is given, changing its Deps before they are set: root is the build's
+// temporary root and apiDir the crate's directory under it.
+func (f behaviorFixture) buildWith(t *testing.T, sdk bool, adjust func(root, apiDir string, deps *DepsInfo)) behaviorCrate {
+	t.Helper()
 	behaviorAPI, behaviorDB := f.api, f.db
 	paths := testpaths.Local(t)
 	api, db, reg := f.load(t)
@@ -328,6 +336,9 @@ func (f behaviorFixture) build(t *testing.T, sdk bool) behaviorCrate {
 	}
 	if deps.Behaviors.BehaviorsPath, err = naming.RelPath(apiDir, paths.RulesBehaviorsRust); err != nil {
 		t.Fatal(err)
+	}
+	if adjust != nil {
+		adjust(root, apiDir, &deps)
 	}
 	if err := output.SetDeps(deps); err != nil {
 		t.Fatalf("set deps: %v", err)

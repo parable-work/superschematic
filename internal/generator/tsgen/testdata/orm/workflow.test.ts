@@ -5,17 +5,20 @@
 // generates the package, type-checks it, applies the generated DDL and runs
 // these cases on each dialect: on bun:sqlite, the SQLite create.sql D27
 // plans and the HTTP runtime's adapter over the layout orm.ts embeds
-// (fixtureWorkflowDbRules), since the generated repositories run on
-// Postgres alone; on Postgres, the generated create.sql and the generated
-// repository itself (createOrm). So the generator's layout, its DDL and the
+// (fixtureWorkflowDbRules); on SQLite, the same file through the generated
+// repository (createOrm of ./orm-sqlite, D182), which runs each command through the
+// adapter's SQLite store in the transaction that holds the file; on
+// Postgres, the generated create.sql and the generated repository itself
+// (createOrm). So the generator's layout, its DDL and the
 // adapter are held to one another: a create initializes each status and
 // stamps when it entered it, the typed operation under each field moves it,
 // a move the config has no transition for and a transition whose permission
 // the caller lacks are refused in the engine's words, an update takes no
 // owned field, a raw SQL write of one is never refused, and a write that
 // moves the row under a command runs the command again, up to eight times.
-// On Postgres the generated repository's upserts insert a new row as a
-// create of the core would and update a held row's own fields alone.
+// On Postgres and on SQLite the generated repository's upserts insert a
+// new row as a create of the core would and update a held row's own fields
+// alone.
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -38,7 +41,9 @@ import {
 } from '@superschematic/http-runtime/d1';
 import { openSqlite, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import type { OrmPool, OrmQueryable } from '@superschematic/http-runtime/postgres';
+import type { SqlDatabase, SqlPreparedStatement } from '@superschematic/http-runtime/d1';
 import { createOrm, fixtureWorkflowDbRules as layout } from './orm';
+import { createOrm as createSqliteOrm } from './orm-sqlite';
 import { alice, database, dsn } from './harness';
 
 type TypeName = 'Order' | 'Shipment';
@@ -182,6 +187,76 @@ async function sqliteTables(): Promise<Tables> {
   };
 }
 
+/** db, whose statements tell moves of each read they run, as the behaviors' adapter reads through it; it runs BEGIN, as the file does. */
+function watchedDatabase(db: SqliteDatabase, moves: ReturnType<typeof mover>): SqlDatabase & { readonly beginsTransactions: true } {
+  type Watched = SqlPreparedStatement & { readonly inner: SqlPreparedStatement };
+  const watch = (inner: SqlPreparedStatement, text: string): Watched => ({
+    inner,
+    bind: (...values) => watch(inner.bind(...values), text),
+    first: ((column?: string) => (column === undefined ? inner.first() : inner.first(column))) as SqlPreparedStatement['first'],
+    async all() {
+      const result = await inner.all();
+      await moves.read(text);
+      return result as never;
+    },
+    run: () => inner.run(),
+    raw: (options => inner.raw(options as never)) as SqlPreparedStatement['raw'],
+  });
+  return {
+    beginsTransactions: true,
+    prepare: text => watch(db.prepare(text), text),
+    batch: statements => db.batch(statements.map(statement => (statement as Watched).inner)),
+    exec: text => db.exec(text),
+  };
+}
+
+/**
+ * The tables on SQLite through the generated repository (D182): the
+ * generated SQLite DDL in a file of the test's own, and createOrm of
+ * ./orm-sqlite over it, acting as alice. A command runs in a transaction that holds the
+ * file, so a write that moves its row runs on the repository's own
+ * connection, in that transaction, where another connection's would wait
+ * for it to end.
+ */
+async function sqliteRepositoryTables(): Promise<Tables> {
+  const dir = mkdtempSync(join(tmpdir(), 'workflow-orm-'));
+  const file = join(dir, 'workflow.db');
+  const ddl = new Database(file, { create: true });
+  ddl.exec(readFileSync(new URL('./create.sqlite.sql', import.meta.url), 'utf8'));
+  ddl.close();
+  const db: SqliteDatabase = openSqlite(file);
+  const sql = (text: string) => text.replace(/\$(\d+)/g, '?$1');
+  const moves = mover((text, values) => db.prepare(sql(text)).bind(...(values as never[])).run());
+  const orm = createSqliteOrm(watchedDatabase(db, moves), alice);
+  const repo = (type: TypeName): any => (type === 'Order' ? orm.order : orm.shipment);
+  const read = async (type: TypeName, key: string) => {
+    const row = await repo(type).findOne({ id: { eq: key } });
+    return row === null ? null : flatRow(type, row);
+  };
+  return {
+    dialect: 'SQLite',
+    async create(type, own) {
+      return flatRow(type, await repo(type).createOne(own));
+    },
+    read,
+    operate: (type, key, use, operation, params, caller) => repo(type)[use][operation](key, params, caller ? { caller } : undefined),
+    async update(type, key, patch) {
+      return flatRow(type, await repo(type).updateOne(key, patch));
+    },
+    delete: (type, key) => repo(type).deleteOne(key),
+    raw: (text, values) => orm.exec(sql(text), values),
+    async columns(table, where, value) {
+      return (await db.prepare(`SELECT * FROM "${table}" WHERE "${where}" = ?1`).bind(value as never).first())!;
+    },
+    move: (times, text, values) => moves.arm(times, text, values),
+    reads: () => moves.reads(),
+    async close() {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
+
 /** A pool over pool whose connections tell moves of each statement they run. */
 function watched(pool: pg.Pool, moves: ReturnType<typeof mover>): OrmPool {
   const watch = (q: OrmQueryable): OrmQueryable => ({
@@ -245,6 +320,7 @@ async function refusal(call: Promise<unknown>): Promise<RulesRefusal> {
 
 const dialects: { readonly name: string; readonly skip: boolean; readonly open: () => Promise<Tables> }[] = [
   { name: 'bun:sqlite', skip: false, open: sqliteTables },
+  { name: 'SQLite', skip: false, open: sqliteRepositoryTables },
   { name: 'Postgres', skip: dsn === '', open: postgresTables },
 ];
 
@@ -384,7 +460,10 @@ for (const dialect of dialects) {
         message: `transition of Order ${key}: the row kept moving while the command ran; it ran ${MAX_ATTEMPTS} times and nothing was written, so it may be tried again`,
       });
       expect(t.reads()).toBe(MAX_ATTEMPTS);
-      expect(await t.read('Order', key)).toMatchObject({ status: 'draft', _version: 1 + MAX_ATTEMPTS });
+      // Through the repository on SQLite the moves ran in the transaction
+      // that holds the file, which the refusal rolls back with them.
+      const moved = dialect.name === 'SQLite' ? 0 : MAX_ATTEMPTS;
+      expect(await t.read('Order', key)).toMatchObject({ status: 'draft', _version: 1 + moved });
     });
   });
 }
@@ -415,5 +494,34 @@ describe.skipIf(dsn === '')('upserts through the generated repository, on Postgr
       ['updated', 'U-1', 'pending', 'paid', 3],
       ['inserted', 'U-2', 'pending', 'unpaid', 1],
     ]);
+  });
+});
+
+describe('upserts through the generated repository, on SQLite', () => {
+  test("an upsert by a unique key inserts a new row with what the core's create gives it, and updates a held row's own fields, its states kept, on SQLite", async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'workflow-upsert-'));
+    const file = join(dir, 'workflow.db');
+    const ddl = new Database(file, { create: true });
+    ddl.exec(readFileSync(new URL('./create.sqlite.sql', import.meta.url), 'utf8'));
+    ddl.close();
+    const db = openSqlite(file);
+    try {
+      const orm = createSqliteOrm(db, alice);
+      const before = Date.now() - 1000;
+      const inserted = await orm.shipment.upsertOneResult({ reference: 'U-1' }, ['reference'], { reference: 'U-1' });
+      expect(inserted.status).toBe('inserted');
+      expect(inserted.row).toMatchObject({ reference: 'U-1', status: 'pending', paymentStatus: 'unpaid', _version: 1 });
+      expect(millis(inserted.row.paymentStatusEnteredAt)!).toBeGreaterThanOrEqual(before);
+      expect(await orm.shipment.paymentStatus.transition(inserted.row.id, { to: 'paid' })).toEqual({ from: 'unpaid', to: 'paid' });
+      // The held row's own fields update through the core, its states kept.
+      const updated = await orm.shipment.upsertOneResult({ reference: 'U-1' }, ['reference'], { reference: 'U-1' });
+      expect([updated.status, updated.row.reference, updated.row.status, updated.row.paymentStatus, updated.row._version]).toEqual(['updated', 'U-1', 'pending', 'paid', 3]);
+      // Many rows of it upsert a row at a time on SQLite, as the Go and Rust
+      // repositories upsert them (D182).
+      await expect(orm.shipment.upsertMany([{ reference: 'U-1' }, { reference: 'U-2' }], ['reference'], ['reference'])).rejects.toThrow('a row at a time on SQLite and D1');
+    } finally {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

@@ -11,11 +11,12 @@
   },
   "dependencies": {
     "@acme/shop-wishlist-api": "workspace:*",
+    "@acme/shop-wishlist-db-types": "workspace:*",
     "@acme/shop-wishlist-types": "workspace:*",
     "@superschematic/http-runtime": "*"
   },
   "devDependencies": {
     "@types/node": "22.19.9",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }

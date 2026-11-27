@@ -21,6 +21,7 @@ func customTemplateFuncs() template.FuncMap {
 		"rustStrings":     rustStrings,
 		"fieldNames":      fieldNames,
 		"fieldData":       fieldData,
+		"structFields":    structFields,
 
 		"rustBehaviorVariant": rustBehaviorVariant,
 		"rustBehaviorAttr":    rustBehaviorAttr,
@@ -159,4 +160,18 @@ func toRustEnumVariant(name string) string {
 		return out + "_"
 	}
 	return out
+}
+
+// structFieldsData is what the "structFields" template renders: a struct's
+// fields, and the JSON adapters a Generic.JSON field reads through.
+type structFieldsData struct {
+	Fields                   []FieldInfo
+	JSONFieldAdapter         string
+	OptionalJSONFieldAdapter string
+}
+
+// structFields pairs a struct's fields with the module's JSON adapters, so
+// a type and its variant wire struct (D149) render their fields alike.
+func structFields(module *ModuleOutput, fields []FieldInfo) structFieldsData {
+	return structFieldsData{Fields: fields, JSONFieldAdapter: module.JSONFieldAdapter(), OptionalJSONFieldAdapter: module.OptionalJSONFieldAdapter()}
 }

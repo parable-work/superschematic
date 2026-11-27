@@ -17,8 +17,9 @@ import (
 // An @audience table is a plain table of a DB service: its effective
 // audience is a list of UUIDs the reads compare by array containment on
 // Postgres and through json_each on SQLite, which triggers keep. On SQLite
-// only the TypeScript repositories read it so far, so a service that lists
-// sqlite takes no other language's types (D182, refuseSQLiteReaders). Its
+// only the TypeScript repositories read it so far, and the Go ones refuse
+// its calls at run time, so a service that lists sqlite takes no Rust types
+// (D182, refuseSQLiteReaders). Its
 // owner is a field that holds a UUID or a
 // to-one relation, or createdBy, which the table then declares. Its
 // inheritFrom is a to-one relation to a table that is @audience too. It
@@ -39,8 +40,8 @@ func checkAccess(schema *ir.Schema, in Input, r *Result) {
 		}
 		checkAudience(schema, in, td, bases, r)
 	}
-	checkAccessTable(schema, "@accessGrants", func(td *ir.TypeDef) bool { return td.AccessGrants != nil }, r)
-	checkAccessTable(schema, "@accessLog", func(td *ir.TypeDef) bool { return td.AccessLog != nil }, r)
+	checkAccessTable(schema, in, "@accessGrants", func(td *ir.TypeDef) bool { return td.AccessGrants != nil }, r)
+	checkAccessTable(schema, in, "@accessLog", func(td *ir.TypeDef) bool { return td.AccessLog != nil }, r)
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
 		if td == nil || td.Projection == nil {
@@ -117,7 +118,7 @@ func checkAudience(schema *ir.Schema, in Input, td *ir.TypeDef, bases map[string
 
 // checkAccessTable holds the classes is marks to one per schema, each a
 // table of the database whose fields the expansion filled.
-func checkAccessTable(schema *ir.Schema, decorator string, is func(*ir.TypeDef) bool, r *Result) {
+func checkAccessTable(schema *ir.Schema, in Input, decorator string, is func(*ir.TypeDef) bool, r *Result) {
 	var marked []*ir.TypeDef
 	for _, name := range sortedTypeNames(schema.Types) {
 		if td := schema.Types[name]; td != nil && is(td) {
@@ -144,6 +145,10 @@ func checkAccessTable(schema *ir.Schema, decorator string, is func(*ir.TypeDef) 
 				break
 			}
 		}
+		// The grants a party's or an agent run's reads keep to, and the
+		// access log a route records its calls in (D156), on SQLite only in
+		// the languages that serve them there (D182).
+		refuseSQLiteReaders(schema, in, td, decorator, r)
 	}
 }
 

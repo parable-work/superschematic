@@ -586,6 +586,16 @@ export function writeSchemaJson(schema: Schema, options: WriteSchemaJsonOptions 
         .map(typeName => ({
           $ref: `#/definitions/${typeName}`,
         })),
+      // A variant union (D149): the sibling that names the member, and the
+      // member each of its values names.
+      ...(unionDef.by
+        ? {
+            'x-by': unionDef.by,
+            'x-arms': Object.fromEntries(
+              Object.entries(unionDef.arms || {}).sort(([a], [b]) => a.localeCompare(b))
+            ),
+          }
+        : {}),
     };
   }
   if (Object.keys(unions).length > 0) {

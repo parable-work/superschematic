@@ -89,6 +89,53 @@ func (w *{{.Name}}Wrapper) UnmarshalJSON(data []byte) error {
 	return fmt.Errorf("decode {{$unionName}} union: no member reads the payload")
 	{{- end}}
 }
+{{- if .By}}
+{{$union := .}}
+// {{.StrayType}} holds a {{.Name}} payload decoded while the field's sibling
+// {{.By}} named no member (D149): Validate on the type that holds it reports
+// "variant", and it encodes as it was read.
+type {{.StrayType}} json.RawMessage
+
+func ({{.StrayType}}) is{{.Name}}() {}
+
+// MarshalJSON encodes the payload as it was read.
+func (s {{.StrayType}}) MarshalJSON() ([]byte, error) {
+	return []byte(s), nil
+}
+
+// UnmarshalVariantJSON decodes a {{.Name}}, a variant union (D149), as the
+// member by, the value of the field's sibling {{.By}}, names, as every other
+// language reads it. A payload while by names no member is kept as it was
+// read, which Validate on the type that holds it reports as "variant".
+func (w *{{.Name}}Wrapper) UnmarshalVariantJSON(by string, data []byte) error {
+	switch by {
+	{{- range .Arms}}
+	case {{printf "%q" .Value}}:
+		var member {{.Type}}
+		if err := json.Unmarshal(data, &member); err != nil {
+			return fmt.Errorf("decode {{$unionName}} as {{.Type}}, which {{$union.By}} %q names: %w", by, err)
+		}
+		w.Value = member
+	{{- end}}
+	default:
+		w.Value = {{.StrayType}}(append([]byte(nil), data...))
+	}
+	return nil
+}
+
+// HoldsArm reports whether the wrapper holds the member by, the value of
+// the field's sibling {{.By}}, names (D149): a value of the member's type or
+// a pointer to one. A payload decoded while by named none holds no arm.
+func (w {{.Name}}Wrapper) HoldsArm(by string) bool {
+	switch w.Value.(type) {
+	{{- range .Types}}
+	case {{.}}, *{{.}}:
+		return {{$union.ArmCondition .}}
+	{{- end}}
+	}
+	return false
+}
+{{- end}}
 
 {{end}}
 {{- if .UnionReads}}

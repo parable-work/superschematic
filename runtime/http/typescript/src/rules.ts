@@ -393,7 +393,7 @@ export interface CoreSubRowWrite {
   readonly change: { readonly kind: 'insert'; readonly values: Readonly<Record<string, unknown>> } | { readonly kind: 'update'; readonly values: Readonly<Record<string, unknown>> } | { readonly kind: 'delete' };
 }
 
-/** One write of a row of a use's shared table (D103's step 4): an insert of a key the table does not hold, or an update held to the version the host read it at. */
+/** One write of a row of a use's shared table (D103's step 4): an insert of a key the table does not hold, or an update or a delete (D147) held to the version the host read it at. */
 export interface CoreSharedRowWrite {
   readonly type: string;
   readonly useId: string;
@@ -401,7 +401,8 @@ export interface CoreSharedRowWrite {
   readonly key: string;
   readonly change:
     | { readonly kind: 'insert'; readonly values: Readonly<Record<string, unknown>> }
-    | { readonly kind: 'update'; readonly expectedVersion: number; readonly values: Readonly<Record<string, unknown>> };
+    | { readonly kind: 'update'; readonly expectedVersion: number; readonly values: Readonly<Record<string, unknown>> }
+    | { readonly kind: 'delete'; readonly expectedVersion: number };
 }
 
 /** An event a behavior emits about a row (Cx::emit, D104), which the adapter writes to the event queue of the row's table in the change set's unit. */
@@ -448,6 +449,8 @@ export interface RulesCore {
   check?(specs: readonly CoreTypeSpec[]): (CoreRefusal | null)[];
   /** The registered behaviors' declarations, as much of each as the adapter reads: whether an operation writes beside its row (D77's primitive 1), or writes as an operation of the namespace (D77's primitive 3), either of which a read of its use's sub-tables under a fenced lock has no check of. */
   declarations?(): readonly { readonly name: string; readonly operations?: readonly { readonly beside?: boolean; readonly writes?: boolean; readonly scope?: string }[] }[];
+  /** Hands the core the declaration files of declarative behaviors (D103's step 5), which it runs from then on: the adapter hands it a layout's declarations before it checks the layout's specs. */
+  declare?(declarations: readonly object[]): readonly string[];
 }
 
 // ---- The layout document (internal/generator/behaviorlayout) ----
@@ -667,6 +670,8 @@ export interface RulesTable {
 /** A database's layout document: each table that composes behaviors, by its type's name. */
 export interface RulesLayout {
   readonly types: Readonly<Record<string, RulesTable>>;
+  /** The declaration files of the declarative behaviors (D103's step 5) the tables' uses name, each whole, which the adapter hands its core (RulesCore.declare) before it checks the layout's specs; absent for none. */
+  readonly declarations?: readonly object[];
 }
 
 // ---- The store ----
@@ -845,6 +850,13 @@ export interface RulesHost {
   readonly now?: () => number;
   /** The request id of a command the wrappers build, unique per command; crypto.randomUUID() unless set. */
   readonly request?: () => string;
+  /**
+   * False sends no wake after a command (wakeQueues): the generated
+   * repositories on SQLite and D1 set it, where no drain worker runs and an
+   * enqueue wakes none (D145's left, D182), as the Go SQLite rules host
+   * gives no Wake. Unset, the command wakes as the module says.
+   */
+  readonly wakes?: boolean;
 }
 
 /** What an applied command came to. */
@@ -1092,9 +1104,11 @@ async function perform(host: RulesHost, type: string, command: CoreCommand, opti
  * wakes are sent once the statements have run, before the caller's
  * transaction commits, as an enqueue's are (D145): the run's drain waits a
  * while for what falls due, and the next firing finds what it missed. A
- * host with no waker sends nothing, and a wake never fails the command.
+ * host with no waker sends nothing, a host whose wakes is false sends none,
+ * and a wake never fails the command.
  */
 function wakeQueues(host: RulesHost, changes: CoreChangeSet): void {
+  if (host.wakes === false) return;
   for (const event of changes.events ?? []) {
     const queue = host.layout.types[event.row.type]?.events?.queue;
     if (queue !== undefined) wakeAfterEnqueue(queue);
@@ -1516,6 +1530,10 @@ function checked(host: RulesHost): ReadonlyMap<string, CoreRefusal> {
   }
   let refusals = byLayout.get(host.layout);
   if (refusals === undefined) {
+    // The core runs the declarative behaviors the layout's uses name
+    // (D103's step 5) before it checks the specs that name them.
+    const declarations = host.layout.declarations ?? [];
+    if (declarations.length > 0) host.core.declare?.(declarations);
     const names = Object.keys(host.layout.types);
     const found = host.core.check?.(names.map(name => host.layout.types[name]!.spec)) ?? [];
     const map = new Map<string, CoreRefusal>();
@@ -1830,6 +1848,13 @@ function sharedRowStatement(table: RulesTable, shared: RulesSharedTable, dialect
         expect: 1,
       };
     }
+    case 'delete':
+      // Held to its version (D147): a row a writer moved or deleted first deletes nothing, and the unit runs the command again.
+      return {
+        text: `DELETE FROM ${quote(shared.table)} WHERE ${quote(shared.key.column)} = ${p(1)} AND ${quote(shared.version)} = ${p(2)}`,
+        values: [write.key, change.expectedVersion],
+        expect: 1,
+      };
     default:
       throw internal(`the adapter takes no shared-table row change of this kind: ${JSON.stringify(change)}`);
   }
@@ -2561,6 +2586,7 @@ export function lazyCore(load: () => RulesCore): RulesCore {
   return {
     run: (spec, command, answers) => loaded().run(spec, command, answers),
     check: specs => loaded().check?.(specs) ?? specs.map(() => null),
+    declare: declarations => loaded().declare?.(declarations) ?? [],
   };
 }
 

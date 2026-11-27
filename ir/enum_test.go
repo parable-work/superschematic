@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -137,5 +138,41 @@ func TestEnumTitlePatternIsValidatesRule(t *testing.T) {
 		if got := validateMemberTitle(title) == nil; got != want {
 			t.Errorf("validateMemberTitle(%q) accepts it: %v; the pattern: %v", title, got, want)
 		}
+	}
+}
+
+// TestVariantUnion (D149): a variant union's arms are listed in its types'
+// order, and its shape is checked: by and arms together, each arm's member
+// one of the types, and each type named by an arm.
+func TestVariantUnion(t *testing.T) {
+	u := &UnionDef{Name: "StepResult", Types: []string{"VerifyResult", "ReviewResult"}, By: "kind",
+		Arms: map[string]string{"review": "ReviewResult", "verify": "VerifyResult", "check": "VerifyResult"}}
+	if !u.IsVariant() {
+		t.Fatal("IsVariant = false")
+	}
+	want := []UnionArm{{"check", "VerifyResult"}, {"verify", "VerifyResult"}, {"review", "ReviewResult"}}
+	if got := u.ArmList(); !slices.Equal(got, want) {
+		t.Fatalf("ArmList = %v, want %v", got, want)
+	}
+	if err := u.ValidateVariant(); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		union UnionDef
+		want  string
+	}{
+		{UnionDef{Name: "U", Types: []string{"A"}, Arms: map[string]string{"a": "A"}}, "has arms and no by"},
+		{UnionDef{Name: "U", Types: []string{"A"}, By: "kind"}, "has no arms"},
+		{UnionDef{Name: "U", Types: []string{"A"}, By: "kind", Arms: map[string]string{"a": "B"}}, "which is not one of its types"},
+		{UnionDef{Name: "U", Types: []string{"A", "B"}, By: "kind", Arms: map[string]string{"a": "A"}}, "is named by no arm"},
+		{UnionDef{Name: "U", Types: []string{"A"}, By: "kind", Arms: map[string]string{"": "A"}}, "an arm with no value"},
+	} {
+		err := tc.union.ValidateVariant()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("ValidateVariant(%+v) = %v, want %q", tc.union, err, tc.want)
+		}
+	}
+	if (&UnionDef{Name: "Shape", Types: []string{"A"}}).IsVariant() {
+		t.Error("a union without by is a variant")
 	}
 }

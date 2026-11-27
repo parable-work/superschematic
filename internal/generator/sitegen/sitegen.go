@@ -43,7 +43,7 @@ const ConfigFile = "config.generated.ts"
 
 // TypeScriptVersion is the TypeScript release a scaffolded site
 // type-checks with, the one the API implementations' scaffolds pin.
-const TypeScriptVersion = "5.9.3"
+const TypeScriptVersion = tsutil.TypeScriptVersion
 
 // TypecheckScript is the script of a scaffolded site's package.json that
 // type-checks the site, and with it the SDKs its config imports, which its

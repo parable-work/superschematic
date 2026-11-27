@@ -411,6 +411,27 @@ func TableStatementsOf(table *TableModel) TableStatements {
 //
 // InsertMany is as Postgres's and takes rows that set the same columns: a
 // VALUES list on SQLite has no DEFAULT (SQLiteClauses).
+//
+// Upsert writes many rows a statement on SQLite as on Postgres (D89), with
+// what Postgres's VALUES and returned rows give for free done by the
+// repository that fills it:
+//   - Each statement's rows set the same columns, since a VALUES list here
+//     has no DEFAULT: a batch whose inputs set different columns is a
+//     statement per set of columns, in the order the sets first appear,
+//     in one transaction.
+//   - A batch is TableModel.BatchRowsOf(SQLiteMaxParameters) rows, or
+//     D1MaxParameters' on D1, not Postgres's MaxParameters'.
+//   - Whether it inserted a row is read before the statements, in their
+//     transaction, which on SQLite is the one writer: the rows that hold
+//     the batch's keys, by UniqueKey.SQLiteRows over the tuples of their
+//     values. A returned row whose key none held was inserted.
+//   - Two inputs of one batch that hold one key are refused before it
+//     runs: SQLite's upsert would update the row the first inserted,
+//     where Postgres refuses to change a row twice in one statement.
+//
+// The assignments of its update are Clauses.SetExcluded, its comparison
+// only if changed Clauses.Changed of Clauses.Excluded, and a row it leaves
+// as it was is read back by UniqueKey.SQLiteRows, as on Postgres.
 func SQLiteTableStatementsOf(table *TableModel) TableStatements {
 	return tableStatements(table, tableDialect{clauses: SQLiteClauses(), sqlite: true})
 }

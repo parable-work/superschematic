@@ -69,6 +69,10 @@ func TestLoadServiceGolden(t *testing.T) {
 		"fixture-calendar-api",
 		"fixture-payments-db",
 		"fixture-payments-api",
+		"fixture-variant-field-db",
+		"fixture-variant-field-api",
+		"fixture-blueprint-db",
+		"fixture-blueprint-api",
 	}
 	for _, svc := range services {
 		t.Run(svc, func(t *testing.T) {

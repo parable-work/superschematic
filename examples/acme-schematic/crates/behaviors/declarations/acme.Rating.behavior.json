@@ -1,6 +1,6 @@
 {
   "name": "acme.Rating",
-  "description": "Shoppers rate a catalog item from one star to the configured maximum.",
+  "description": "Shoppers rate a catalog item from one star to the configured maximum, one rating per shopper.",
   "configSchema": {
     "additionalProperties": false,
     "properties": {
@@ -19,17 +19,43 @@
   "fields": [
     {
       "name": "ratingCount",
-      "description": "How many ratings the item has."
+      "description": "How many ratings the item has.",
+      "type": "Generic.Int64"
     },
     {
       "name": "ratingAverage",
-      "description": "The mean rating; 0 before the first."
+      "description": "The mean rating; 0 before the first.",
+      "type": "number"
+    }
+  ],
+  "tables": [
+    {
+      "name": "ratings",
+      "description": "One row per shopper who rated the item: the stars and when the rating came.",
+      "key": "rater",
+      "fields": [
+        {
+          "name": "rater",
+          "description": "The shopper's subject.",
+          "type": "string"
+        },
+        {
+          "name": "stars",
+          "description": "The stars the shopper gave, 1 to maxStars.",
+          "type": "Generic.Int64"
+        },
+        {
+          "name": "ratedAt",
+          "description": "When the shopper rated the item last.",
+          "type": "Temporal.DateTime"
+        }
+      ]
     }
   ],
   "operations": [
     {
       "name": "rate",
-      "description": "Records one shopper's rating of the item.",
+      "description": "Records one shopper's rating of the item, replacing the shopper's earlier one.",
       "paramsSchema": {
         "additionalProperties": false,
         "properties": {
@@ -84,5 +110,73 @@
         "type": "object"
       }
     }
-  ]
+  ],
+  "rules": {
+    "configChange": {
+      "oneWay": {
+        "maxStars": "up"
+      }
+    },
+    "derived": {
+      "ratingAverage": {
+        "average": {
+          "empty": 0,
+          "field": "stars",
+          "table": "ratings"
+        }
+      },
+      "ratingCount": {
+        "count": {
+          "table": "ratings"
+        }
+      }
+    },
+    "operations": {
+      "rate": {
+        "effects": [
+          {
+            "upsert": {
+              "key": {
+                "caller": true
+              },
+              "table": "ratings",
+              "values": {
+                "ratedAt": {
+                  "now": true
+                },
+                "stars": {
+                  "param": "stars"
+                }
+              }
+            }
+          }
+        ],
+        "params": {
+          "stars": {
+            "lte": {
+              "config": "maxStars"
+            }
+          }
+        },
+        "result": {
+          "ratingAverage": {
+            "field": "ratingAverage"
+          },
+          "ratingCount": {
+            "field": "ratingCount"
+          }
+        }
+      },
+      "ratingSummary": {
+        "result": {
+          "ratingAverage": {
+            "field": "ratingAverage"
+          },
+          "ratingCount": {
+            "field": "ratingCount"
+          }
+        }
+      }
+    }
+  }
 }

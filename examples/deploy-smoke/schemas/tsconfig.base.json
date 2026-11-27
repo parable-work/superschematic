@@ -12,7 +12,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    "baseUrl": ".",
     "paths": {
       "@superschematic/*": ["../../../packages/*/src/index.ts"],
       "superscalar": ["../../../third_party/superscalar/bindings/typescript/src/index.ts"],

@@ -1,0 +1,52 @@
+{
+  "schemaVersion": "1.0",
+  "apiId": "fixture-variant-field-api",
+  "registryDigestInputs": [
+    {
+      "apiId": "fixture-variant-field-api",
+      "namespace": "steps",
+      "operationId": "StepsCreateStepHandler",
+      "method": "POST",
+      "path": "/api/steps",
+      "handle": "",
+      "title": "",
+      "description": "Records a step. (Requires authentication)",
+      "icon": null,
+      "hidden": true,
+      "hiddenReason": "",
+      "invocationPolicy": "",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "capability": "",
+      "lifecycle": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "inputSchemaDigest": "sha256:4f5a9c8813a65478f380cf2b4af59cd4af14166f1cf805c1c289975326091323",
+      "bindingStatus": "ready"
+    },
+    {
+      "apiId": "fixture-variant-field-api",
+      "namespace": "steps",
+      "operationId": "StepsGetStepHandler",
+      "method": "GET",
+      "path": "/api/steps/{id}",
+      "handle": "",
+      "title": "",
+      "description": "One step. (Requires authentication)",
+      "icon": null,
+      "hidden": true,
+      "hiddenReason": "",
+      "invocationPolicy": "",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "capability": "",
+      "lifecycle": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "bindingStatus": "ready"
+    }
+  ]
+}

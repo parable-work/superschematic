@@ -1,0 +1,782 @@
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::{Method, Url};
+use serde::de::DeserializeOwned;
+use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
+use crate::errors::SDKError;
+use crate::runtime::{BinaryStream, MultipartBody, RequestInterceptor, RequestOptions};
+
+pub type TokenProviderFuture = Pin<Box<dyn Future<Output = Result<Option<String>, SDKError>> + Send>>;
+pub type TokenProvider = Arc<dyn Fn() -> TokenProviderFuture + Send + Sync>;
+
+pub type RefreshTokenFuture = Pin<Box<dyn Future<Output = Result<String, SDKError>> + Send>>;
+pub type RefreshTokenCallback = Arc<dyn Fn() -> RefreshTokenFuture + Send + Sync>;
+
+pub type ServiceTokenFuture = Pin<Box<dyn Future<Output = Result<String, String>> + Send>>;
+/// Returns the calling service's credential; `fresh` asks for a new token
+/// rather than a cached one. The HTTP runtime's credential sources have this
+/// shape.
+pub type ServiceTokenSource = Arc<dyn Fn(bool) -> ServiceTokenFuture + Send + Sync>;
+
+pub type TransportFuture =
+    Pin<Box<dyn Future<Output = Result<reqwest::Response, reqwest::Error>> + Send>>;
+/// Sends each request the client builds, in place of
+/// `reqwest::Client::execute`. A stack deployable's trace export sends each
+/// call in a client span and carries its trace context (D67), as Go's
+/// `Transport` and TypeScript's `fetch` do. The HTTP runtime's
+/// `telemetry::transport` has this shape.
+pub type Transport = Arc<dyn Fn(reqwest::Client, reqwest::Request) -> TransportFuture + Send + Sync>;
+
+/// The calling service's own credential, beside the end user's (D37). The
+/// client sends `Bearer <token>` in each header on every request. A 401
+/// whose problem code is `service_unauthorized` asks `token(true)` for a
+/// fresh token once and retries, without the end-user refresh; any other
+/// 401 never asks this source.
+#[derive(Clone)]
+pub struct ServiceCredential {
+    pub token: ServiceTokenSource,
+    /// Headers that carry the token; empty means `Service-Authorization`
+    /// alone.
+    pub headers: Vec<String>,
+}
+
+impl ServiceCredential {
+    /// A credential sent in `Service-Authorization`.
+    pub fn new(token: ServiceTokenSource) -> Self {
+        Self {
+            token,
+            headers: vec!["Service-Authorization".to_string()],
+        }
+    }
+}
+
+/// The application an SDK runs in, as it names itself to the API (D143):
+/// a command-line client, a desktop app. `name` is letters, digits, `.`,
+/// `_` and `-`, starting with a letter or a digit, 64 characters at most.
+/// `version` is the application's own version, a semantic version such as
+/// `0.5.0` for the API to compare it; any other version is sent and never
+/// refused.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClientIdentity {
+    pub name: String,
+    pub version: String,
+}
+
+impl ClientIdentity {
+    pub fn new(name: impl Into<String>, version: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            version: version.into(),
+        }
+    }
+
+    /// The `X-Client-Version` header of the client, `<name>/<version>`. A
+    /// name or a version the header cannot carry is a config error, so a
+    /// typo is found where the SDK is built.
+    fn header(&self) -> Result<HeaderValue, SDKError> {
+        let starts = |text: &str| text.bytes().next().is_some_and(|byte| byte.is_ascii_alphanumeric());
+        let holds = |text: &str, others: &[u8]| {
+            text.bytes().all(|byte| byte.is_ascii_alphanumeric() || others.contains(&byte))
+        };
+        if !starts(&self.name) || self.name.len() > 64 || !holds(&self.name, b"._-") {
+            return Err(SDKError::config(format!(
+                "client.name {:?} must start with a letter or a digit and hold letters, digits, '.', '_' and '-', 64 characters at most",
+                self.name
+            )));
+        }
+        if !starts(&self.version) || self.version.len() > 128 || !holds(&self.version, b".+_-") {
+            return Err(SDKError::config(format!(
+                "client.version {:?} must start with a letter or a digit and hold letters, digits, '.', '+', '_' and '-', 128 characters at most",
+                self.version
+            )));
+        }
+        HeaderValue::from_str(&format!("{}/{}", self.name, self.version))
+            .map_err(|err| SDKError::config(format!("invalid client: {err}")))
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct ClientConfig {
+    pub base_url: String,
+    pub timeout_ms: Option<u64>,
+    pub auth_token: Option<String>,
+    pub auth_token_provider: Option<TokenProvider>,
+    pub refresh_auth_token: Option<RefreshTokenCallback>,
+    pub auth_header: Option<String>,
+    pub service_credential: Option<ServiceCredential>,
+    /// The client this SDK runs in (D143): every call then sends
+    /// `X-Client-Version: <name>/<version>`, and an API that lists the
+    /// client answers a version under its minimum with an error whose
+    /// [`SDKError::client_too_old`] holds the minimum. `None` sends no such
+    /// header.
+    pub client: Option<ClientIdentity>,
+    /// Optional config-level interceptor applied to every outgoing request
+    /// after the auth header is attached. Use for header injection that is
+    /// constant for the lifetime of the SDK (eg. service identity, scope
+    /// routing, tracing baggage). Per-call dynamic headers should use
+    /// [`RequestOptions::request_hook`] instead.
+    pub request_interceptor: Option<RequestInterceptor>,
+    /// Sends each request in place of the client's own `execute`; see
+    /// [`Transport`].
+    pub transport: Option<Transport>,
+}
+
+impl ClientConfig {
+    /// Config carrying only the fields every service consumer sets: base
+    /// URL, optional service auth token, optional timeout. The remaining
+    /// auth customization hooks stay at their defaults.
+    pub fn with_base_url(
+        base_url: impl Into<String>,
+        auth_token: Option<String>,
+        timeout_ms: Option<u64>,
+    ) -> Self {
+        Self {
+            base_url: base_url.into(),
+            timeout_ms,
+            auth_token,
+            ..Default::default()
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct HttpClient {
+    client: reqwest::Client,
+    base_url: Url,
+    auth: Arc<AuthState>,
+    service: Option<Arc<ServiceState>>,
+    request_interceptor: Option<RequestInterceptor>,
+    transport: Option<Transport>,
+    /// The `X-Client-Version` every call sends (D143).
+    client_version: Option<HeaderValue>,
+}
+
+struct AuthState {
+    token: RwLock<Option<String>>,
+    token_provider: Option<TokenProvider>,
+    refresh_token_callback: Option<RefreshTokenCallback>,
+    auth_header: HeaderName,
+}
+
+struct ServiceState {
+    token: ServiceTokenSource,
+    headers: Vec<HeaderName>,
+}
+
+/// A response read whole.
+struct ResponseText {
+    status: reqwest::StatusCode,
+    headers: HeaderMap,
+    body: String,
+}
+
+impl ResponseText {
+    async fn read(response: reqwest::Response) -> Result<Self, SDKError> {
+        let status = response.status();
+        let headers = response.headers().clone();
+        let body = response.text().await?;
+        Ok(Self {
+            status,
+            headers,
+            body,
+        })
+    }
+}
+
+/// The retries one call has spent: at most one end-user refresh and at
+/// most one fresh service credential.
+#[derive(Default)]
+struct Retries {
+    user_refreshed: bool,
+    service_retried: bool,
+    /// Ask the service credential source for a fresh token on this attempt.
+    fresh_service_token: bool,
+}
+
+impl HttpClient {
+    pub fn new(config: ClientConfig) -> Result<Self, SDKError> {
+        let base_url = config.base_url.trim();
+        if base_url.is_empty() {
+            return Err(SDKError::config("base_url is required"));
+        }
+
+        let normalized = base_url.trim_end_matches('/');
+        let parsed_base_url = Url::parse(normalized)
+            .map_err(|err| SDKError::config(format!("invalid base_url: {err}")))?;
+
+        let timeout = Duration::from_millis(config.timeout_ms.unwrap_or(30_000));
+        let client = reqwest::Client::builder()
+            .timeout(timeout)
+            .build()
+            .map_err(|err| SDKError::request(format!("failed to build http client: {err}")))?;
+
+        let auth_header_raw = config
+            .auth_header
+            .unwrap_or_else(|| "Authorization".to_string());
+        let auth_header = HeaderName::from_bytes(auth_header_raw.as_bytes()).map_err(|err| {
+            SDKError::config(format!("invalid auth_header value {auth_header_raw:?}: {err}"))
+        })?;
+
+        let service = match config.service_credential {
+            Some(credential) => {
+                let names = if credential.headers.is_empty() {
+                    vec!["Service-Authorization".to_string()]
+                } else {
+                    credential.headers
+                };
+                let headers = names
+                    .iter()
+                    .map(|name| {
+                        HeaderName::from_bytes(name.as_bytes()).map_err(|err| {
+                            SDKError::config(format!(
+                                "invalid service_credential header {name:?}: {err}"
+                            ))
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Some(Arc::new(ServiceState {
+                    token: credential.token,
+                    headers,
+                }))
+            }
+            None => None,
+        };
+        let client_version = config.client.as_ref().map(ClientIdentity::header).transpose()?;
+
+        Ok(Self {
+            client,
+            base_url: parsed_base_url,
+            auth: Arc::new(AuthState {
+                token: RwLock::new(config.auth_token),
+                token_provider: config.auth_token_provider,
+                refresh_token_callback: config.refresh_auth_token,
+                auth_header,
+            }),
+            service,
+            request_interceptor: config.request_interceptor,
+            transport: config.transport,
+            client_version,
+        })
+    }
+
+    pub fn set_token(&self, token: impl Into<String>) {
+        let mut auth_token = self
+            .auth
+            .token
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *auth_token = Some(token.into());
+    }
+
+    pub fn clear_token(&self) {
+        let mut auth_token = self
+            .auth
+            .token
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *auth_token = None;
+    }
+
+    pub async fn request_json<T>(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        request_options: Option<&RequestOptions>,
+    ) -> Result<T, SDKError>
+    where
+        T: DeserializeOwned,
+    {
+        let response = self
+            .send_json_with_refresh(method, path, query, body, request_options, None)
+            .await?;
+        self.decode_response(response)
+    }
+
+    /// `request_json` for a call to an @idempotent operation (D140): every
+    /// send of the call, a retry after a refreshed credential among them,
+    /// carries `Idempotency-Key: <idempotency_key>`.
+    pub async fn request_json_idempotent<T>(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        request_options: Option<&RequestOptions>,
+        idempotency_key: &str,
+    ) -> Result<T, SDKError>
+    where
+        T: DeserializeOwned,
+    {
+        let response = self
+            .send_json_with_refresh(method, path, query, body, request_options, Some(idempotency_key))
+            .await?;
+        self.decode_response(response)
+    }
+
+    /// Sends a request whose success body is a stream of `content_type`, an
+    /// `@httpBinaryStream` operation's (D167), and returns the body unread.
+    /// It asks for the media type or a problem in `Accept`. A refusal is the
+    /// `SDKError::Api` that `request_json` returns, after the same retries; a
+    /// success of another media type is `SDKError::Contract`. The client's
+    /// timeout, or `RequestOptions::timeout_ms`, bounds the whole exchange,
+    /// the body included.
+    pub async fn request_stream(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        content_type: &str,
+        request_options: Option<&RequestOptions>,
+    ) -> Result<BinaryStream, SDKError> {
+        let accept = format!("{content_type}, application/problem+json");
+        let mut retries = Retries::default();
+        loop {
+            let mut request = self
+                .build_request(method, path, query, request_options, retries.fresh_service_token)
+                .await?;
+            if let Some(payload) = body.clone() {
+                request = request.json(&payload);
+            }
+            let response = self.send(request.header(ACCEPT, accept.as_str())).await?;
+            if response.status().is_success() {
+                let received = response
+                    .headers()
+                    .get(CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .unwrap_or("")
+                    .to_string();
+                let media_type = received.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+                if media_type != content_type {
+                    let received = if received.is_empty() { "no content type" } else { received.as_str() };
+                    return Err(SDKError::contract(format!(
+                        "SDK contract error: expected {content_type} in streamed success response, got {received}"
+                    )));
+                }
+                return Ok(BinaryStream {
+                    content_type: content_type.to_string(),
+                    response,
+                });
+            }
+            let response = ResponseText::read(response).await?;
+            if !self.retry(&response, &mut retries, request_options).await? {
+                return Err(SDKError::api(response.status.as_u16(), &response.headers, &response.body));
+            }
+        }
+    }
+
+    pub async fn request_multipart<T>(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: MultipartBody,
+        request_options: Option<&RequestOptions>,
+    ) -> Result<T, SDKError>
+    where
+        T: DeserializeOwned,
+    {
+        let response = self
+            .send_multipart_with_refresh(method, path, query, body, request_options)
+            .await?;
+        self.decode_response(response)
+    }
+
+    async fn send_json_with_refresh(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        request_options: Option<&RequestOptions>,
+        idempotency_key: Option<&str>,
+    ) -> Result<ResponseText, SDKError> {
+        let mut retries = Retries::default();
+        loop {
+            let response = self
+                .send_json_once(
+                    method,
+                    path,
+                    query,
+                    body.clone(),
+                    request_options,
+                    retries.fresh_service_token,
+                    idempotency_key,
+                )
+                .await?;
+            let response = ResponseText::read(response).await?;
+            if !self.retry(&response, &mut retries, request_options).await? {
+                return Ok(response);
+            }
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn send_json_once(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        request_options: Option<&RequestOptions>,
+        fresh_service_token: bool,
+        idempotency_key: Option<&str>,
+    ) -> Result<reqwest::Response, SDKError> {
+        let mut request = self
+            .build_request(method, path, query, request_options, fresh_service_token)
+            .await?;
+        if let Some(key) = idempotency_key {
+            // A call to an @idempotent operation: each send carries the
+            // call's one key (D140).
+            let key = HeaderValue::from_str(key).map_err(|_| {
+                SDKError::config("idempotency_key is 1 to 255 printable ASCII characters")
+            })?;
+            request = request.header("idempotency-key", key);
+        }
+        if let Some(payload) = body {
+            request = request.json(&payload);
+        }
+        self.send(request).await
+    }
+
+    /// Sends a request through the configured [`Transport`], or the
+    /// client's own `send` without one.
+    async fn send(&self, request: reqwest::RequestBuilder) -> Result<reqwest::Response, SDKError> {
+        match &self.transport {
+            Some(transport) => {
+                let request = request.build().map_err(SDKError::from)?;
+                transport(self.client.clone(), request)
+                    .await
+                    .map_err(SDKError::from)
+            }
+            None => request.send().await.map_err(SDKError::from),
+        }
+    }
+
+    async fn send_multipart_with_refresh(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: MultipartBody,
+        request_options: Option<&RequestOptions>,
+    ) -> Result<ResponseText, SDKError> {
+        let mut retries = Retries::default();
+        loop {
+            let response = self
+                .send_multipart_once(
+                    method,
+                    path,
+                    query,
+                    body.clone(),
+                    request_options,
+                    retries.fresh_service_token,
+                )
+                .await?;
+            let response = ResponseText::read(response).await?;
+            if !self.retry(&response, &mut retries, request_options).await? {
+                return Ok(response);
+            }
+        }
+    }
+
+    async fn send_multipart_once(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: MultipartBody,
+        request_options: Option<&RequestOptions>,
+        fresh_service_token: bool,
+    ) -> Result<reqwest::Response, SDKError> {
+        let mut request = self
+            .build_request(method, path, query, request_options, fresh_service_token)
+            .await?;
+        let mut form = reqwest::multipart::Form::new();
+
+        if let Some(json_data) = body.json_data {
+            let serialized = serde_json::to_string(&json_data)?;
+            form = form.text("data", serialized);
+        }
+
+        for (field_name, file) in body.files {
+            let mut part = reqwest::multipart::Part::bytes(file.bytes).file_name(file.filename);
+            if let Some(content_type) = file.content_type {
+                part = part
+                    .mime_str(&content_type)
+                    .map_err(|err| SDKError::request(format!("invalid content type: {err}")))?;
+            }
+            form = form.part(field_name, part);
+        }
+
+        request = request.multipart(form);
+        self.send(request).await
+    }
+
+    /// Whether a response is retried, spending the retry: a 401 whose code
+    /// is `service_unauthorized` asks the service credential source for a
+    /// fresh token once and never refreshes the end user; any other 401
+    /// refreshes the end user once, unless the call forwards one.
+    async fn retry(
+        &self,
+        response: &ResponseText,
+        retries: &mut Retries,
+        request_options: Option<&RequestOptions>,
+    ) -> Result<bool, SDKError> {
+        retries.fresh_service_token = false;
+        if response.status != reqwest::StatusCode::UNAUTHORIZED {
+            return Ok(false);
+        }
+        if problem_code(&response.body).as_deref() == Some("service_unauthorized") {
+            if self.service.is_none() || retries.service_retried {
+                return Ok(false);
+            }
+            retries.service_retried = true;
+            retries.fresh_service_token = true;
+            return Ok(true);
+        }
+        let forwards = request_options.is_some_and(|options| options.forward.is_some());
+        if forwards || retries.user_refreshed {
+            return Ok(false);
+        }
+        retries.user_refreshed = true;
+        self.refresh_token().await
+    }
+
+    async fn build_request(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        request_options: Option<&RequestOptions>,
+        fresh_service_token: bool,
+    ) -> Result<reqwest::RequestBuilder, SDKError> {
+        let parsed_method = Method::from_bytes(method.as_bytes())
+            .map_err(|err| SDKError::request(format!("invalid http method {method:?}: {err}")))?;
+        let mut url = self.base_url.clone();
+        let base_path = self.base_url.path().trim_end_matches('/');
+        let endpoint_path = path.strip_prefix('/').unwrap_or(path);
+        url.set_path(&format!("{base_path}/{endpoint_path}"));
+
+        let mut request = self.client.request(parsed_method, url);
+        if !query.is_empty() {
+            request = request.query(query);
+        }
+        if let Some(client_version) = &self.client_version {
+            request = request.header("x-client-version", client_version.clone());
+        }
+
+        // A forwarded end user replaces the configured auth: its token, or no
+        // Authorization when the request being served has no end user.
+        match request_options.and_then(|options| options.forward.as_ref()) {
+            Some(forward) => {
+                if let Some(token) = forward.bearer_token.as_deref() {
+                    if !token.trim().is_empty() {
+                        request =
+                            request.header(AUTHORIZATION, bearer_value("Authorization", token)?);
+                    }
+                }
+            }
+            None => {
+                if let Some(token) = self.resolve_auth_token().await? {
+                    request = self.apply_auth_header(request, &token)?;
+                }
+            }
+        }
+        request = self.apply_service_credential(request, fresh_service_token).await?;
+
+        // Config-level interceptor runs before per-call hooks so caller
+        // hooks observe (and can override) any default headers injected
+        // here. Used for cross-cutting concerns: scope routing, tracing
+        // baggage, service identity.
+        if let Some(interceptor) = &self.request_interceptor {
+            request = interceptor(request);
+        }
+
+        if let Some(options) = request_options {
+            if let Some(timeout_ms) = options.timeout_ms {
+                request = request.timeout(Duration::from_millis(timeout_ms));
+            }
+            if let Some(request_hook) = &options.request_hook {
+                request = request_hook(request);
+            }
+        }
+
+        Ok(request)
+    }
+
+    async fn resolve_auth_token(&self) -> Result<Option<String>, SDKError> {
+        let current_token = self
+            .auth
+            .token
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        if let Some(token) = current_token {
+            if !token.trim().is_empty() {
+                return Ok(Some(token));
+            }
+        }
+
+        // Consult the provider on every resolve, and never write its result into
+        // the static slot. Caching it there short-circuits this method for the
+        // life of the client, so a provider that mints short-lived credentials
+        // would be called exactly once and its token reused past expiry. The Go
+        // client has always resolved per call; this keeps the two in step.
+        // Providers are expected to do their own caching (a service-token provider's
+        // CachedMinter re-mints only inside a refresh margin), so the per-request
+        // cost here is a mutex lock rather than a signing operation.
+        if let Some(token_provider) = &self.auth.token_provider {
+            if let Some(provided_token) = token_provider().await? {
+                if !provided_token.trim().is_empty() {
+                    return Ok(Some(provided_token));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn refresh_token(&self) -> Result<bool, SDKError> {
+        let Some(refresh_token_callback) = &self.auth.refresh_token_callback else {
+            return Ok(false);
+        };
+
+        let refreshed_token = refresh_token_callback().await?;
+        if refreshed_token.trim().is_empty() {
+            self.clear_token();
+            return Ok(false);
+        }
+
+        self.set_token(refreshed_token);
+        Ok(true)
+    }
+
+    /// Sends the service credential, `Bearer <token>`, in each configured
+    /// header. `fresh` asks the source for a new token.
+    async fn apply_service_credential(
+        &self,
+        mut request: reqwest::RequestBuilder,
+        fresh: bool,
+    ) -> Result<reqwest::RequestBuilder, SDKError> {
+        let Some(service) = &self.service else {
+            return Ok(request);
+        };
+        let token = (service.token)(fresh)
+            .await
+            .map_err(|err| SDKError::request(format!("service credential: {err}")))?;
+        if token.trim().is_empty() {
+            return Ok(request);
+        }
+        for name in &service.headers {
+            request = request.header(name.clone(), bearer_value(name.as_str(), &token)?);
+        }
+        Ok(request)
+    }
+
+    fn apply_auth_header(
+        &self,
+        request: reqwest::RequestBuilder,
+        token: &str,
+    ) -> Result<reqwest::RequestBuilder, SDKError> {
+        let value = if self.auth.auth_header == AUTHORIZATION {
+            format!("Bearer {token}")
+        } else {
+            token.to_string()
+        };
+        let header_value = HeaderValue::from_str(&value).map_err(|err| {
+            SDKError::request(format!(
+                "invalid auth token for header {}: {err}",
+                self.auth.auth_header
+            ))
+        })?;
+        Ok(request.header(self.auth.auth_header.clone(), header_value))
+    }
+
+    fn decode_response<T>(&self, response: ResponseText) -> Result<T, SDKError>
+    where
+        T: DeserializeOwned,
+    {
+        let ResponseText {
+            status,
+            headers,
+            body,
+        } = response;
+        if !status.is_success() {
+            return Err(SDKError::api(status.as_u16(), &headers, &body));
+        }
+
+        if body.trim().is_empty() {
+            return serde_json::from_value(Value::Null).map_err(SDKError::from);
+        }
+
+        let payload: Value = serde_json::from_str(&body).map_err(SDKError::from)?;
+        let data = unwrap_envelope(payload)?;
+        // serde_path_to_error names the failing field (e.g. "connector.taps[3].sync")
+        // instead of serde_json's bare "invalid type" message -- essential when the
+        // response type is a deep generated tree.
+        serde_path_to_error::deserialize(data).map_err(|err| {
+            let path = err.path().to_string();
+            SDKError::contract(format!(
+                "response deserialization failed at {path}: {}",
+                err.into_inner()
+            ))
+        })
+    }
+}
+
+/// `Bearer <token>` as a header value.
+fn bearer_value(header: &str, token: &str) -> Result<HeaderValue, SDKError> {
+    HeaderValue::from_str(&format!("Bearer {token}"))
+        .map_err(|err| SDKError::request(format!("invalid token for header {header}: {err}")))
+}
+
+/// The problem code of an error body: `code` of an RFC 9457 problem, or
+/// `error.code` of the legacy `{"error": {...}}` envelope.
+fn problem_code(body: &str) -> Option<String> {
+    let value: Value = serde_json::from_str(body).ok()?;
+    value
+        .get("code")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("error")?.get("code")?.as_str())
+        .map(str::to_string)
+}
+
+fn unwrap_envelope(payload: Value) -> Result<Value, SDKError> {
+    let mut object = match payload {
+        Value::Object(object) => object,
+        _ => {
+            return Err(SDKError::contract(
+                "SDK contract error: expected RFC 9457 envelope object with data/meta.requestId in success response",
+            ));
+        }
+    };
+
+    {
+        let meta = object.get("meta").ok_or_else(|| {
+            SDKError::contract("SDK contract error: expected RFC 9457 envelope fields data and meta in success response")
+        })?;
+
+        let meta_object = meta.as_object().ok_or_else(|| {
+            SDKError::contract("SDK contract error: expected RFC 9457 envelope meta.requestId in success response")
+        })?;
+
+        if !meta_object.contains_key("requestId") {
+            return Err(SDKError::contract(
+                "SDK contract error: expected RFC 9457 envelope meta.requestId in success response",
+            ));
+        }
+    }
+
+    let data = object.remove("data").ok_or_else(|| {
+        SDKError::contract("SDK contract error: expected RFC 9457 envelope fields data and meta in success response")
+    })?;
+
+    Ok(data)
+}

@@ -18,12 +18,13 @@
     "@opentelemetry/resources": "2.12.0",
     "@opentelemetry/sdk-trace": "2.12.0",
     "@schemas/ts-notes-api": "workspace:*",
+    "@schemas/ts-notes-db-types": "workspace:*",
     "@schemas/ts-notes-implementation": "workspace:*",
     "@superschematic/http-runtime": "*",
     "hono": "4.13.8"
   },
   "devDependencies": {
     "@types/node": "22.19.9",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }

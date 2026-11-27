@@ -176,6 +176,20 @@
     ],
     "type": "object"
   },
+  "references": [
+    {
+      "path": "rules[].when.allTerminal",
+      "kind": "listen"
+    },
+    {
+      "path": "rules[].when.anyTerminal",
+      "kind": "listen"
+    },
+    {
+      "path": "status",
+      "kind": "workflow"
+    }
+  ],
   "requires": [
     "Workflow"
   ],

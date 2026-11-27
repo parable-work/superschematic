@@ -207,6 +207,10 @@ impl Memory {
                     }
                     row.version += 1;
                 }
+                SharedRowChange::Delete { expected_version } => {
+                    let row = self.shared.remove(&at).expect("the shared row it deletes");
+                    assert_eq!(row.version, *expected_version, "{at:?}");
+                }
                 other => panic!("a shared-table change this host does not take: {other:?}"),
             }
         }

@@ -223,6 +223,12 @@ type ORMOutput struct {
 	// written when Rules is set.
 	RulesReplacePath string
 
+	// SQLite is a database whose DB service lists the sqlite dialect
+	// (Options.SQLite): sqlite.go then holds the SQLite database, and each
+	// repository has a table on SQLite (Repository.SQLite) whose
+	// repository sqlite_<table>.go writes (D116).
+	SQLite bool
+
 	// Access is the database's per-record access (D156, D180), nil for a
 	// database with no @audience, @accessGrants or @accessLog table: it
 	// writes access.go, and go.mod requires the schema runtime, whose
@@ -486,6 +492,15 @@ type Repository struct {
 	// "" for any other table.
 	EventQueue string
 
+	// SQLite is the table on SQLite, for a database whose DB service lists
+	// the sqlite dialect (D116); nil for any other. sqliteTargets are the
+	// tables of the database by type, whose keys a relation's column holds,
+	// and sqliteAccess why per-record access refuses the table there
+	// (sqliteAccessRefusal), or "".
+	SQLite        *SQLiteTable
+	sqliteTargets map[string]sqliteTarget
+	sqliteAccess  string
+
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
 	NeedsTime               bool
@@ -584,28 +599,34 @@ type Field struct {
 	IsJSONField        bool   // stored as JSONB (maps, @jsonField, T[][]); scanned via []byte + JSON codec
 	IsScalarType       bool   // scalar or enum (value type in typegen output)
 	JSONUnionDecoder   string // generated per-repository decoder for a closed-union JSON field
-	IsNullableEnum     bool   // optional enum: typegen emits *Enum
-	IsNullableScalar   bool   // optional scalar typegen emits as *Scalar (an integer-like one only without a default, or DistinctNull)
-	IsNullableBool     bool   // optional boolean, number or string typegen emits as a pointer (codegen.GoOptionalShapes): *bool for a boolean without a default
-	IsUUIDScalar       bool   // non-array UUID-like scalar: values coerce via .ToUUID()
-	IsDateTimeScalar   bool   // non-array datetime-like scalar: values coerce via time.Time()
-	IsGeoPoint         bool   // single scalar stored as POINT (Geo.Location): values convert through pgtype.Point, x = Lon, y = Lat
-	IsGeoPointList     bool   // list of a scalar stored as POINT, a native POINT[] column: values convert through []pgtype.Point
-	IsInterval         bool   // single scalar stored as INTERVAL (Temporal.Duration): values convert through time.Duration, whole microseconds
-	IsIntervalList     bool   // list of a scalar stored as INTERVAL, a native INTERVAL[] column: values convert through []time.Duration
-	IsVector           bool   // an Embedding.Vector stored as vector(n) (D84): values cross as pgvector's text, [1,2,3], which pgx sends and reads for a type it does not know
-	IsDecimal          bool   // a scalar stored as NUMERIC (Generic.Decimal, D84), or each element of a NUMERIC[]: superscalar's GenericDecimal binds and scans its canonical text
-	Dimensions         int    // a vector's dimensions, from its vector(n) column; 0 for any other field
-	IsUUIDLike         bool
-	IsStringLike       bool
-	IsIntLike          bool
-	IsFloatLike        bool
-	IsBoolLike         bool
-	IsDateTimeLike     bool
-	IsDateLike         bool
-	IsJSONLike         bool
-	IsEnum             bool // the field's type is an enum, local or imported
-	IsSecret           bool // @secret: never sent to a client
+	// VariantByFunc names the generated function that reads a variant
+	// field's sibling from the row (D149), whose value JSONUnionDecoder
+	// then decodes the member it names by; VariantByBody is its body, over
+	// entity. Empty for every other field.
+	VariantByFunc    string
+	VariantByBody    string
+	IsNullableEnum   bool // optional enum: typegen emits *Enum
+	IsNullableScalar bool // optional scalar typegen emits as *Scalar (an integer-like one only without a default, or DistinctNull)
+	IsNullableBool   bool // optional boolean, number or string typegen emits as a pointer (codegen.GoOptionalShapes): *bool for a boolean without a default
+	IsUUIDScalar     bool // non-array UUID-like scalar: values coerce via .ToUUID()
+	IsDateTimeScalar bool // non-array datetime-like scalar: values coerce via time.Time()
+	IsGeoPoint       bool // single scalar stored as POINT (Geo.Location): values convert through pgtype.Point, x = Lon, y = Lat
+	IsGeoPointList   bool // list of a scalar stored as POINT, a native POINT[] column: values convert through []pgtype.Point
+	IsInterval       bool // single scalar stored as INTERVAL (Temporal.Duration): values convert through time.Duration, whole microseconds
+	IsIntervalList   bool // list of a scalar stored as INTERVAL, a native INTERVAL[] column: values convert through []time.Duration
+	IsVector         bool // an Embedding.Vector stored as vector(n) (D84): values cross as pgvector's text, [1,2,3], which pgx sends and reads for a type it does not know
+	IsDecimal        bool // a scalar stored as NUMERIC (Generic.Decimal, D84), or each element of a NUMERIC[]: superscalar's GenericDecimal binds and scans its canonical text
+	Dimensions       int  // a vector's dimensions, from its vector(n) column; 0 for any other field
+	IsUUIDLike       bool
+	IsStringLike     bool
+	IsIntLike        bool
+	IsFloatLike      bool
+	IsBoolLike       bool
+	IsDateTimeLike   bool
+	IsDateLike       bool
+	IsJSONLike       bool
+	IsEnum           bool // the field's type is an enum, local or imported
+	IsSecret         bool // @secret: never sent to a client
 	// IsEncrypted is an Encrypted<T> field (D85), whose column holds its
 	// envelope: a write seals it and a read opens it (encrypted.go).
 	IsEncrypted bool
@@ -613,6 +634,10 @@ type Field struct {
 	// and its filter hold it, and <Type>Create and <Type>Update leave it
 	// out, since only the behavior's operations change it.
 	IsOwned bool
+	// IsGivenAtCreate is an owned field a create gives (D147,
+	// ir.FieldDef.GivenAtCreate: Aliased's name): <Type>Create holds it,
+	// which the core hands the behavior, and <Type>Update does not.
+	IsGivenAtCreate bool
 
 	// Sortable is true when FindPage can order the table's rows by the
 	// field's column (D60, amended), as sqlutil's column says
@@ -1348,9 +1373,30 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		RowFeatures:              rowFeatures,
 		CrossTables:              crossTables,
 		Notifications:            notifier,
+		SQLite:                   opts.SQLite,
 	}
-	if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
-		return nil, err
+	if opts.SQLite {
+		// Each table's repository on SQLite (D116), whose relations name
+		// their targets' keys by the members of their rows, and read
+		// whether a target row holds a key.
+		targets := make(map[string]sqliteTarget, len(output.Repositories))
+		for _, repo := range output.Repositories {
+			targets[repo.TypeName] = sqliteTarget{member: repo.PrimaryKeyField, table: repo.TableName, quoted: repo.QuotedTableName, key: repo.QuotedPrimaryKey}
+		}
+		for i := range output.Repositories {
+			repo := &output.Repositories[i]
+			repo.sqliteTargets = targets
+			repo.sqliteAccess = sqliteAccessRefusal(access, repo.TypeName)
+			if repo.SQLite, err = sqliteTableOf(repo); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// The inbound path and the dispatcher run on Postgres alone (D192).
+	if !opts.SQLite {
+		if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
+			return nil, err
+		}
 	}
 
 	return output, nil
@@ -1640,6 +1686,9 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 		}
 		if field.IsJSONField && field.IsUnion {
 			field.JSONUnionDecoder = "decode" + typeDef.Name + codegen.ToPascalCase(field.Name) + "JSONUnion"
+			if v := codegen.VariantFieldOf(typeDef, fieldDef, schema, nil); v != nil {
+				field.VariantByFunc = codegen.ToCamelCase(typeDef.Name) + codegen.ToPascalCase(field.Name) + "VariantBy"
+			}
 		}
 		repo.Fields = append(repo.Fields, field)
 		fieldIdx := len(repo.Fields) - 1
@@ -1656,6 +1705,36 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 			repo.PrimaryKeyIsUUID = field.IsUUIDScalar
 			repo.PrimaryKeySQLType = sqlutil.ColumnType(schema, fieldDef, sqlutil.ScalarSQLTypes(schema))
 			repo.PrimaryKeyIsPointer = field.DerefValue || field.IsAutoGenerated
+		}
+	}
+
+	// A variant field's sibling (D149) may come after it, so its reader is
+	// written once every field is known.
+	for i := range repo.Fields {
+		field := &repo.Fields[i]
+		if field.VariantByFunc == "" {
+			continue
+		}
+		var fieldDef *ir.FieldDef
+		for _, fd := range typeDef.Fields {
+			if fd.Name == field.Name {
+				fieldDef = fd
+			}
+		}
+		v := codegen.VariantFieldOf(typeDef, fieldDef, schema, nil)
+		for _, by := range repo.Fields {
+			if v == nil || by.Name != v.By.Name {
+				continue
+			}
+			ref := "entity." + codegen.ToPascalCase(by.Name)
+			if by.IsNullableEnum || by.IsNullableBool || by.IsNullableScalar {
+				field.VariantByBody = "if " + ref + " == nil {\n\t\treturn \"\"\n\t}\n\treturn string(*" + ref + ")"
+			} else {
+				field.VariantByBody = "return string(" + ref + ")"
+			}
+		}
+		if field.VariantByBody == "" {
+			return repo, fmt.Errorf("field %s.%s is a variant field whose sibling is no column of the table", typeDef.Name, field.Name)
 		}
 	}
 
@@ -1851,6 +1930,7 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsSecret:                  fieldDef.Secret || fieldDef.EncryptedAtRest,
 		IsEncrypted:               fieldDef.EncryptedAtRest,
 		IsOwned:                   fieldDef.Owned(),
+		IsGivenAtCreate:           fieldDef.GivenAtCreate(),
 		PreservesExplicitJSONNull: preservesExplicitJSONNull,
 		IsGenericJSONList:         class.AnyJSON && isArray && !isMap,
 	}

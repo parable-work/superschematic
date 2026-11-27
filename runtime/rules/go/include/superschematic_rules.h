@@ -23,6 +23,7 @@ int32_t rules_run(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_
 int32_t rules_declarations(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t *out_len);
 int32_t rules_check(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t *out_len);
 int32_t rules_expand(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t *out_len);
+int32_t rules_declare(const uint8_t *in_ptr, size_t in_len, uint8_t **out_ptr, size_t *out_len);
 void rules_free(uint8_t *ptr, size_t len);
 
 #endif

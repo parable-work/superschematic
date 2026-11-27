@@ -105,7 +105,9 @@ test("a module without the core's exports is refused", async () => {
  */
 function trappingModule(): Uint8Array {
   const text = (name: string) => [name.length, ...new TextEncoder().encode(name)];
-  const section = (id: number, body: number[]) => [id, body.length, ...body];
+  // A section's size is unsigned LEB128, past 127 bytes in more than one.
+  const leb = (n: number): number[] => (n < 0x80 ? [n] : [(n & 0x7f) | 0x80, ...leb(n >>> 7)]);
+  const section = (id: number, body: number[]) => [id, ...leb(body.length), ...body];
   const vector = (items: number[][]) => [items.length, ...items.flat()];
   const types = vector([
     [0x60, 1, 0x7f, 1, 0x7f], // alloc: (i32) -> i32
@@ -114,14 +116,14 @@ function trappingModule(): Uint8Array {
   ]);
   const exports = vector([
     [...text('memory'), 2, 0],
-    ...['rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check', 'rules_expand'].map((name, i) => [...text(name), 0, i]),
+    ...['rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check', 'rules_expand', 'rules_declare'].map((name, i) => [...text(name), 0, i]),
   ]);
   const body = (code: number[]) => [code.length + 1, 0, ...code];
-  const code = vector([body([0x41, 16, 0x0b]), body([0x0b]), body([0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b])]);
+  const code = vector([body([0x41, 16, 0x0b]), body([0x0b]), body([0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b]), body([0x00, 0x0b])]);
   return new Uint8Array([
     0x00, 0x61, 0x73, 0x6d, 1, 0, 0, 0,
     ...section(1, types),
-    ...section(3, vector([[0], [1], [1], [2], [2], [2], [2]])),
+    ...section(3, vector([[0], [1], [1], [2], [2], [2], [2], [2]])),
     ...section(5, vector([[0, 1]])),
     ...section(7, exports),
     ...section(10, code),

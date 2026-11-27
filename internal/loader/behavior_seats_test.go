@@ -146,8 +146,8 @@ func TestSeatsFixturesLoad(t *testing.T) {
 	}
 	if want := []string{
 		"ProblemActions.seatsTakeSeat problem/{id}/seats/take-seat problem_seats_take_seat Seats problems.assign,problems.own,problems.release,problems.work",
-		"ProblemActions.seatsLeaveSeat problem/{id}/seats/leave-seat problem_seats_leave_seat Seats problems.assign,problems.own,problems.release,problems.work",
-		"ProblemActions.seatsListSeats problem/{id}/seats/list-seats problem_seats_list_seats Seats problems.assign,problems.own,problems.release,problems.work",
+		"ProblemActions.seatsLeaveSeat problem/{id}/seats/leave-seat problem_seats_leave_seat Seats problems.assign,problems.release",
+		"ProblemActions.seatsListSeats problem/{id}/seats/list-seats problem_seats_list_seats Seats ",
 		"ProblemActions.statusTransition problem/{id}/status/transition problem_status_transition status problems.override",
 		"SandboxActions.statusTransition sandbox/{id}/status/transition sandbox_status_transition status sandboxes.stop",
 		"SandboxActions.observedObserve sandbox/{id}/observed/observe sandbox_observed_observe observed sandboxes.observe",
@@ -195,9 +195,10 @@ func TestSeatsFixturesLoad(t *testing.T) {
 }
 
 // TestSeatsOperationsListTakeAndAssign: an operation of a Seats use lists
-// the permissions its seats' take and assign name, which no member's name
-// says is a permission, beside those its config names so (D104), sorted
-// and each once; a Reconcile use's observe lists its observePermission.
+// the permissions it checks, which Seats' declaration says (D103's step 5):
+// takeSeat its seats' take and assign, leaveSeat their assign and
+// listSeats none, sorted and each once; a Reconcile use's observe lists its
+// observePermission.
 func TestSeatsOperationsListTakeAndAssign(t *testing.T) {
 	api, err := LoadService(filepath.FromSlash(seatsAPIFixture))
 	if err != nil {
@@ -211,7 +212,12 @@ func TestSeatsOperationsListTakeAndAssign(t *testing.T) {
 			var want []string
 			switch op.BehaviorOperation.Use {
 			case "Seats":
-				want = []string{"problems.assign", "problems.own", "problems.release", "problems.work"}
+				switch op.BehaviorOperation.Operation {
+				case "takeSeat":
+					want = []string{"problems.assign", "problems.own", "problems.release", "problems.work"}
+				case "leaveSeat":
+					want = []string{"problems.assign", "problems.release"}
+				}
 			case "observed":
 				want = []string{"sandboxes.observe"}
 			default:

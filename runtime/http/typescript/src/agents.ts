@@ -1,6 +1,6 @@
 import type { Authenticator, GrantReach, Principal } from './auth.js';
 import { covers } from './auth.js';
-import { activeGrants, grantAuthenticator, issueGrant, reachesOf, revokeGrant } from './access.js';
+import { activeGrants, grantAuthenticator, grantAuthenticatorAdmittingRuns, issueGrant, reachesOf, revokeGrant } from './access.js';
 import type { BucketBody } from './bucket.js';
 import { withCaller } from './caller.js';
 import { createLogger, type Logger } from './logger.js';
@@ -1092,14 +1092,18 @@ export function createAgents(options: AgentsOptions): Agents {
   /** The agent's permissions narrowed to those whom it acts for holds: each the two share, the narrower of a pair. */
   const narrow = narrowPermissions;
 
+  // A token that is no running run's is any other grant's, which refuses a
+  // run's; principalOf alone reads a run's token as its grant's holder,
+  // then narrows it (D194).
   const grants = grantAuthenticator({ orm, now });
+  const runGrants = grantAuthenticatorAdmittingRuns({ orm, now });
 
   const principalOf = async (req: Request): Promise<Principal | null> => {
     const header = req.headers.get('authorization') ?? '';
     if (!header.startsWith('Bearer grant_')) return null;
     let base: Principal | null;
     try {
-      base = await grants({ headers: req.headers } as unknown as RequestContext);
+      base = await runGrants({ headers: req.headers } as unknown as RequestContext);
     } catch {
       // An unknown, revoked or ended grant: no running run holds it.
       return null;

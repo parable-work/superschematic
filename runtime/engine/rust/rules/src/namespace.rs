@@ -417,7 +417,11 @@ impl<'r> NamespaceCx<'r> {
     ) -> Hook<()> {
         self.writing(&format!("a write of shared table {table}"))?;
         let declared = self.held_table(type_name, use_id, table, true, "a shared write")?;
-        let (SharedRowChange::Insert { values } | SharedRowChange::Update { values, .. }) = &change;
+        let none = Map::new();
+        let values = match &change {
+            SharedRowChange::Insert { values } | SharedRowChange::Update { values, .. } => values,
+            SharedRowChange::Delete { .. } => &none,
+        };
         self.checked("a shared write", &declared, values)?;
         if key.is_empty() {
             return Err(self.defect(format!(

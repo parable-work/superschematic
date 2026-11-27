@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
+	"github.com/parable-work/superschematic/internal/loader/projectbehaviors"
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
@@ -388,8 +389,13 @@ func New(n Naming) *Registry { return registry.New(n) }
 // live in internal/generator; see internal/generator.RegisterCore.
 func RegisterCore(reg *Registry) error { return generator.RegisterCore(reg) }
 
-// Assemble runs the whole sequence: New, RegisterCore, Use(exts...), Finalize.
-// It is what a superschematic binary calls once per process.
+// Assemble runs the whole sequence: New, RegisterCore, Use(exts...), the
+// project's own behaviors, Finalize. It is what a superschematic binary
+// calls once per process. The project's behaviors are those the directory
+// its naming file names declares (behaviors, D103's step 5): each class
+// of its *.behavior.ts files and each declaration its *.behavior.json and
+// *.behavior.yaml files hold, registered under its name's prefix
+// (internal/loader/projectbehaviors).
 func Assemble(n Naming, exts ...Extension) (*Registry, error) {
 	reg := registry.New(n)
 	if err := generator.RegisterCore(reg); err != nil {
@@ -397,6 +403,17 @@ func Assemble(n Naming, exts ...Extension) (*Registry, error) {
 	}
 	if err := reg.Use(exts...); err != nil {
 		return nil, err
+	}
+	if dir := n.BehaviorsDir(); dir != "" {
+		specs, err := projectbehaviors.Specs(dir, reg)
+		if err != nil {
+			return nil, err
+		}
+		for _, spec := range specs {
+			if err := reg.RegisterBehavior(spec); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if err := reg.Finalize(); err != nil {
 		return nil, err

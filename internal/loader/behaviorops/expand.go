@@ -127,8 +127,10 @@ func words(name string) string {
 // ConfigPermissions are the permissions a use's config names: every string
 // under a key named permission or ending in Permission, at any depth,
 // sorted and each once (a Workflow transition's, and the Workflow's
-// overridePermission, D104). Until a behavior's class declaration says
-// which operation checks which, each operation of the use lists them all.
+// overridePermission, D104). Each operation of a use whose declaration
+// does not say which operation checks which lists them all; one whose
+// declaration says (registry.BehaviorDeclaration.StatesPermissions, D103's
+// step 5) lists its own (registry.OperationPermissions).
 func ConfigPermissions(config []byte) []string {
 	if len(config) == 0 {
 		return nil
@@ -290,13 +292,21 @@ func PlanSet(set *ir.OperationSet, db *ir.Schema, reg *registry.Registry) (*Plan
 			}
 		}
 		slices.Sort(permissions)
+		// A declaration that says which operation checks which permission
+		// (D103's step 5) lists each operation's alone: the strings its
+		// permissions' paths reach in the config.
+		states := declaration.StatesPermissions()
 		for _, op := range declaration.Operations {
 			if !Serves(op) || !narrowed.Offers(op.Name) || registry.TableLeavesOut(ref.Name, op.Name) != "" {
 				// The build warns of the first (verify.CheckBehaviorOperations).
 				continue
 			}
+			checks := permissions
+			if states {
+				checks = registry.OperationPermissions(op, ref.Config)
+			}
 			b.use, b.operation = use, op.Name
-			p.Operations = append(p.Operations, b.operationOf(set, db, td, key, ref, op, narrowed, permissions, policy))
+			p.Operations = append(p.Operations, b.operationOf(set, db, td, key, ref, op, narrowed, checks, policy))
 		}
 	}
 	return p, nil

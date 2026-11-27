@@ -62,10 +62,26 @@ func TestWriteTypesGolden(t *testing.T) {
 		// lists its fences, on Postgres and on SQLite, which the runtime's
 		// repositories advance, and Depot's soft deletes carry the bump.
 		{service: "fixture-fenced-db", sqlite: true},
+		// A variant field (D149): Step reads through StepWire, whose
+		// TryFrom decodes its result with StepResult::from_variant by its
+		// kind, and validate_step checks it with validate_step_result_by;
+		// the API's views read the database's union.
+		{service: "fixture-variant-field-db", sqlite: true},
+		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
 		// References and attachments (D154, D185): the Postgres definition in
 		// src/orm.rs carries them, and the repositories open references()
 		// and attachments().
 		{service: "fixture-references-db", core: true},
+		// Search across tables (D155, D188): each @searchable table's index
+		// in the Postgres definition, which orm::search_tables reads.
+		{service: "fixture-search-db", core: true},
+		// The calendar (D152, D188): a date source and a Recurrence's
+		// occurrences source, on Postgres alone, which orm::calendar reads.
+		{service: "fixture-recurrence-db", core: true, sqlite: true},
+		// Events and notifications (D153, D191): each table's events and
+		// what it is to the notifier, in the Postgres definition, which
+		// orm::notify reads.
+		{service: "fixture-notifications-db", core: true},
 	}
 
 	for _, tc := range cases {

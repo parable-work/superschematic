@@ -569,6 +569,13 @@ type QueueRequest struct {
 
 	// Log receives progress. Nothing of the result is written to it.
 	Log io.Writer
+
+	// Outputs reads the outputs of the graph the run's last deploy
+	// applied, by node ID and output name, as MigrationRequest.Outputs
+	// does: where a runner finds a database the deploy created, as the
+	// cloudflare target finds a D1 database's uuid. Nil when the caller
+	// reads none.
+	Outputs func(ctx context.Context) (map[string]map[string]any, error)
 }
 
 // Check refuses a request with no valid run, no database of the run's

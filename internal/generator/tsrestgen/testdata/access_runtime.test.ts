@@ -13,7 +13,8 @@ repositories of the ./orm/sqlite entry, on openSqlite's connection to the
 file.
 
 A request names its caller in its Authorization header: a grant's token
-runs as the grant's holder (grantAuthenticator); `<subject>:<permissions>`
+runs as the grant's holder (grantAuthenticator), but an agent run's, which
+it refuses (D194); `<subject>:<permissions>`
 is a user holding those permissions; and `agent=<subject>/<for>:<permissions>`
 an agent run acting for the user <for>. The router records the access log
 through accessLogOf.
@@ -297,6 +298,23 @@ describe('the access of fixture-access-api', () => {
     } finally {
       // Ended here, so the later reads of the active grants hold none of it.
       await revokeGrant(orm, issued.grant.id as string);
+    }
+  });
+
+  test("an agent run's grant is refused as its holder: the agent dispatcher alone resolves a run's token", async () => {
+    // As its grant's bare holder a run would act with its role's
+    // permissions, narrowed to no one it acts for and held to no autonomy
+    // (D194): agents.authenticator resolves it.
+    const run = await issueGrant(orm.asSystem(), { holder: uuid(0xb2), holderKind: 'agent', role: 'tenant', targetType: 'Contract', targetId: contractA.id });
+    try {
+      const refused = await call('GET', '/api/requests', run.token);
+      expect(refused.status).toBe(401);
+      expect(JSON.stringify(refused.body)).toContain('agent dispatcher');
+      expect(await status('GET', `/api/requests/${requestA.id}`, run.token)).toBe(401);
+      expect((await logRows()).filter(row => row.principal === uuid(0xb2))).toEqual([]);
+    } finally {
+      // Ended here, so the later reads of the active grants hold none of it.
+      await revokeGrant(orm, run.grant.id as string);
     }
   });
 

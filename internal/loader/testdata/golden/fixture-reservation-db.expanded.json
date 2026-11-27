@@ -1,0 +1,1711 @@
+{
+  "name": "fixture-reservation-db",
+  "kind": "DB",
+  "scalars": {
+    "Generic.Int64": {
+      "name": "Generic.Int64",
+      "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
+      "languagePrimitive": "number",
+      "primitive": "Int",
+      "typeMappings": {
+        "go": "GenericInt64",
+        "json_schema": "integer",
+        "python": "int",
+        "rust": "i64",
+        "sql": "BIGINT",
+        "typescript": "number"
+      },
+      "minimum": -9007199254740991,
+      "maximum": 9007199254740991,
+      "hasCustomParse": true
+    },
+    "Generic.JSON": {
+      "name": "Generic.JSON",
+      "description": "Any valid JSON value: object, array, primitive, or null",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "GenericJSON",
+        "json_schema": "any",
+        "python": "Any",
+        "rust": "serde_json::Value",
+        "sql": "JSONB",
+        "typescript": "JSONValue"
+      },
+      "hasCustomValidate": true
+    },
+    "Identity.UUID": {
+      "name": "Identity.UUID",
+      "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "IdentityUUID",
+        "json_schema": "string",
+        "python": "uuid.UUID",
+        "rust": "uuid::Uuid",
+        "sql": "UUID",
+        "typescript": "string"
+      },
+      "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+      "hasCustomParse": true
+    },
+    "Temporal.DateTime": {
+      "name": "Temporal.DateTime",
+      "description": "ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "TemporalDateTime",
+        "json_schema": "string",
+        "python": "datetime.datetime",
+        "rust": "chrono::DateTime\u003cchrono::Utc\u003e",
+        "sql": "TIMESTAMPTZ",
+        "typescript": "JSDate"
+      },
+      "hasCustomParse": true
+    }
+  },
+  "types": {
+    "Booking": {
+      "name": "Booking",
+      "owner": "src/bookings.schema.ts",
+      "comment": "A booking of a room (D103, step 5): a Reservation, which says only its\nresource, its interval, its amount and its currency. The bundle adds its\nstatus Workflow, its Holds on the room's time, its Payments and the\nTimers deadline that expires a hold.",
+      "role": "DBTable",
+      "behaviors": [
+        {
+          "name": "Holds",
+          "implements": true,
+          "config": {
+            "commitOn": [
+              "booked"
+            ],
+            "holds": {
+              "slot": {
+                "interval": {
+                  "end": "endsAt",
+                  "start": "startsAt"
+                },
+                "link": "room"
+              }
+            },
+            "releaseOn": [
+              "expired",
+              "cancelled"
+            ],
+            "takeOn": [
+              "held"
+            ]
+          },
+          "bundle": "Reservation"
+        },
+        {
+          "name": "Payments",
+          "implements": true,
+          "config": {
+            "amount": {
+              "field": "priceCents"
+            },
+            "currency": "GBP",
+            "record": {
+              "permission": "payments.record"
+            },
+            "require": {
+              "booked": "paid"
+            },
+            "voidOn": [
+              "expired",
+              "cancelled"
+            ]
+          },
+          "bundle": "Reservation"
+        },
+        {
+          "name": "Timers",
+          "implements": true,
+          "config": {
+            "deadlines": {
+              "holdExpiry": {
+                "afterMs": 900000,
+                "start": {
+                  "enters": "held"
+                },
+                "then": {
+                  "transition": "expired"
+                }
+              }
+            }
+          },
+          "bundle": "Reservation"
+        },
+        {
+          "name": "Workflow",
+          "field": "status",
+          "config": {
+            "initial": "draft",
+            "states": [
+              "draft",
+              "held",
+              "booked",
+              "expired",
+              "cancelled"
+            ],
+            "transitions": [
+              {
+                "from": "draft",
+                "to": "held"
+              },
+              {
+                "from": "held",
+                "to": "booked"
+              },
+              {
+                "from": "held",
+                "to": "expired"
+              },
+              {
+                "from": "held",
+                "to": "cancelled"
+              },
+              {
+                "from": "draft",
+                "to": "cancelled"
+              }
+            ]
+          },
+          "bundle": "Reservation"
+        }
+      ],
+      "bundles": [
+        {
+          "name": "Reservation",
+          "settings": {
+            "amount": "priceCents",
+            "currency": "GBP",
+            "interval": {
+              "end": "endsAt",
+              "start": "startsAt"
+            },
+            "resource": "room"
+          }
+        }
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "key": true,
+          "autoGenerated": true
+        },
+        {
+          "name": "guest",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "startsAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true
+        },
+        {
+          "name": "endsAt",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "required": true
+        },
+        {
+          "name": "priceCents",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "room",
+          "typeRef": {
+            "name": "Room"
+          },
+          "relation": {
+            "type": "Room"
+          }
+        },
+        {
+          "name": "holdsState",
+          "description": "The least advanced state of the items: none before any is asked, then pending, held, committed, released or returned. A rule hears it turn committed.",
+          "typeRef": {
+            "name": "string"
+          },
+          "behavior": {
+            "use": "Holds",
+            "behavior": "Holds",
+            "field": "state"
+          }
+        },
+        {
+          "name": "holdsTotal",
+          "description": "The sum of the priced items' unit prices times their quantities, as { amount, currency }: an item without a price adds nothing, and with none priced it is { amount: 0, currency: null }. Null only when the priced items' currencies differ or the sum passes what a JSON number holds exactly.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          },
+          "behavior": {
+            "use": "Holds",
+            "behavior": "Holds",
+            "field": "total"
+          }
+        },
+        {
+          "name": "paymentsDue",
+          "description": "What the instance owes, in the currency's minor units. It does not change while an attempt is open. From Holds.total, it is 0 while the total cannot be read (an item pending, priced items in two currencies, or a sum past what an integer holds), and openPayment and require refuse with total_unknown then.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "behavior": {
+            "use": "Payments",
+            "behavior": "Payments",
+            "field": "due"
+          }
+        },
+        {
+          "name": "paymentsAuthorized",
+          "description": "What the provider has authorized and not voided or captured.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "behavior": {
+            "use": "Payments",
+            "behavior": "Payments",
+            "field": "authorized"
+          }
+        },
+        {
+          "name": "paymentsCaptured",
+          "description": "What the provider has captured.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "behavior": {
+            "use": "Payments",
+            "behavior": "Payments",
+            "field": "captured"
+          }
+        },
+        {
+          "name": "paymentsRefunded",
+          "description": "What the provider has refunded.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "behavior": {
+            "use": "Payments",
+            "behavior": "Payments",
+            "field": "refunded"
+          }
+        },
+        {
+          "name": "paymentsOutstanding",
+          "description": "due less captured, never below 0.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "behavior": {
+            "use": "Payments",
+            "behavior": "Payments",
+            "field": "outstanding"
+          }
+        },
+        {
+          "name": "paymentsOverpaid",
+          "description": "What captures brought past what was due, such as a late capture of an attempt that failed while a newer one paid, which Payments asked back with a refund of it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "behavior": {
+            "use": "Payments",
+            "behavior": "Payments",
+            "field": "overpaid"
+          }
+        },
+        {
+          "name": "paymentsCurrency",
+          "description": "The ISO 4217 code of every amount.",
+          "typeRef": {
+            "name": "string"
+          },
+          "behavior": {
+            "use": "Payments",
+            "behavior": "Payments",
+            "field": "currency"
+          }
+        },
+        {
+          "name": "paymentsState",
+          "description": "unpaid, pending (an attempt is open), authorized, paid, partiallyRefunded or refunded. A rule hears it turn paid.",
+          "typeRef": {
+            "name": "string"
+          },
+          "behavior": {
+            "use": "Payments",
+            "behavior": "Payments",
+            "field": "state"
+          }
+        },
+        {
+          "name": "status",
+          "description": "The state the instance is in.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "behavior": {
+            "use": "status",
+            "behavior": "Workflow",
+            "field": "status",
+            "value": true
+          }
+        },
+        {
+          "name": "statusEnteredAt",
+          "description": "When the status last changed, in epoch milliseconds: the create's time, then each transition's. Absent on an instance created before Workflow kept it, until its next transition.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          },
+          "behavior": {
+            "use": "status",
+            "behavior": "Workflow",
+            "field": "enteredAt"
+          }
+        }
+      ],
+      "optimistic": true
+    },
+    "BookingChange": {
+      "name": "BookingChange",
+      "owner": "src/bookings.schema.ts",
+      "comment": "The writes of Booking's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "rowKey",
+          "description": "The key of the Booking row written.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "write",
+          "description": "What the write did: insert, update or delete.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "at",
+          "description": "When the write was made, in epoch milliseconds, by the database's clock.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "before",
+          "description": "The row's columns before the write, by column, as JSON; null for an insert.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        },
+        {
+          "name": "after",
+          "description": "The row's columns after the write, by column, as JSON; null for a delete.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        }
+      ],
+      "origin": "behavior",
+      "behaviorQueue": {
+        "row": "Booking",
+        "kind": "changes",
+        "behaviors": [
+          "Timers"
+        ]
+      },
+      "queue": {
+        "retain": "0s",
+        "key": "rowKey",
+        "serialize": true
+      }
+    },
+    "BookingDeadline": {
+      "name": "BookingDeadline",
+      "owner": "src/bookings.schema.ts",
+      "comment": "The deadlines Booking's behaviors arm, one message per row, use and deadline, due when it falls due (D103).",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "rowKey",
+          "description": "The key of the Booking row the deadline is armed on.",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "useId",
+          "description": "The id of the use that armed it: its anchor field, or the behavior's name for a use the table implements.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "name",
+          "description": "The deadline's name, the use's own.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "at",
+          "description": "When it was armed to fall due, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true
+        },
+        {
+          "name": "payload",
+          "description": "What the use armed it with, which its deadline hook reads.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "rowKey",
+            "useId",
+            "name"
+          ],
+          "unique": true,
+          "where": "state IN ('ready', 'claimed')",
+          "origin": "behavior"
+        },
+        {
+          "keys": [
+            "rowKey"
+          ],
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorQueue": {
+        "row": "Booking",
+        "kind": "deadlines",
+        "behaviors": [
+          "Timers"
+        ]
+      },
+      "queue": {
+        "retain": "0s"
+      }
+    },
+    "BookingHoldsItems": {
+      "name": "BookingHoldsItems",
+      "owner": "src/bookings.schema.ts",
+      "comment": "On a table, each item the claim has taken, keyed by its hold and index: the supply it names, what it asks, its state and the unit price the supply held it at, and the Workflow entry it was taken at. An item its fields ask that it has not taken is no row; the items field shows it pending.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "booking",
+          "description": "The Booking row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Booking"
+          },
+          "required": true,
+          "relation": {
+            "type": "Booking",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "key",
+          "description": "The hold's name and the item's index, joined by /.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "hold",
+          "description": "The hold's name.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "item",
+          "description": "The item's index in its hold.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "supplySchema",
+          "description": "The supply's type.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "supplyId",
+          "description": "The supply's key.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "quantity",
+          "description": "The units of counted supply it asks.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "startMs",
+          "description": "When the time it asks starts, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "endMs",
+          "description": "When the time it asks ends, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "state",
+          "description": "pending, held, committed, released or returned.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "unitPrice",
+          "description": "The unit price the supply held it at, in the currency's minor units.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "currency",
+          "description": "The unit price's currency.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "takenAt",
+          "description": "The Workflow's enteredAt at the take, which tells a later entry of a takeOn state from this one.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "booking",
+            "key"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Booking",
+        "use": "Holds",
+        "behavior": "Holds",
+        "table": "items",
+        "key": "key",
+        "rowField": "booking"
+      }
+    },
+    "BookingPaymentsActions": {
+      "name": "BookingPaymentsActions",
+      "owner": "src/bookings.schema.ts",
+      "comment": "On a table, each thing the provider's adapter is to do for the row (create, capture, void, refund), keyed by its id, waiting until an event for it is recorded.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "booking",
+          "description": "The Booking row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Booking"
+          },
+          "required": true,
+          "relation": {
+            "type": "Booking",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "action",
+          "description": "The action's id, act_ and a key the command makes, which the adapter sends its provider as an idempotency key.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "seq",
+          "description": "Its place among the row's actions, from 1.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "kind",
+          "description": "create, capture, void or refund.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "attempt",
+          "description": "The attempt it acts on.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "refund",
+          "description": "For a refund, the refund.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "provider",
+          "description": "The provider it is for.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "amount",
+          "description": "What it moves, in the currency's minor units.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "currency",
+          "description": "Its ISO 4217 code.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "at",
+          "description": "When it was asked, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "doneAt",
+          "description": "When an event for it was recorded; absent while it waits.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "booking",
+            "action"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Booking",
+        "use": "Payments",
+        "behavior": "Payments",
+        "table": "actions",
+        "key": "action",
+        "rowField": "booking"
+      }
+    },
+    "BookingPaymentsAttempts": {
+      "name": "BookingPaymentsAttempts",
+      "owner": "src/bookings.schema.ts",
+      "comment": "On a table, each payment attempt the row opened, keyed by its id: its provider and the provider's reference, its amount, currency and what was due when it opened, its status, what is authorized and captured of it, a card's brand and last four digits, and when it opened and last moved.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "booking",
+          "description": "The Booking row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Booking"
+          },
+          "required": true,
+          "relation": {
+            "type": "Booking",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "attempt",
+          "description": "The attempt's id, pay_ and a key the command makes, which the adapter sends its provider as an idempotency key.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "seq",
+          "description": "Its place among the row's attempts, from 1.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "description": "The key openPayment opened it under.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "provider",
+          "description": "The provider it is at.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "providerRef",
+          "description": "The provider's reference, once the adapter reports it.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "amount",
+          "description": "What it asks, in the currency's minor units.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "currency",
+          "description": "Its ISO 4217 code.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "due",
+          "description": "What was due when it opened.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "status",
+          "description": "open, requiresAction, processing, authorized, captured, failed or cancelled.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "authorized",
+          "description": "What the provider authorized of it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "captured",
+          "description": "What the provider captured of it.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "brand",
+          "description": "A card's brand, for display.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "last4",
+          "description": "A card's last four digits, for display.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "returnUrl",
+          "description": "Where the provider sends the payer back.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "openedAt",
+          "description": "When it opened, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "updatedAt",
+          "description": "When it last moved, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "booking",
+            "attempt"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Booking",
+        "use": "Payments",
+        "behavior": "Payments",
+        "table": "attempts",
+        "key": "attempt",
+        "rowField": "booking"
+      }
+    },
+    "BookingPaymentsEvents": {
+      "name": "BookingPaymentsEvents",
+      "owner": "src/bookings.schema.ts",
+      "comment": "On a table, every provider event recorded, kept for the table as a whole and keyed by its provider and event id, so an event applies once per table and provider: the row it was recorded on, its normalised fields alone, and whether it moved anything. A delete of the row leaves it, so a redelivery is still a repeat.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "event",
+          "description": "The provider and the event id, joined by /.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "key": true
+        },
+        {
+          "name": "provider",
+          "description": "The provider.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "eventId",
+          "description": "The provider's event id.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "rowKey",
+          "description": "The key of the row it was recorded on.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "kind",
+          "description": "What it reported.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "amount",
+          "description": "Its amount, in the currency's minor units.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "currency",
+          "description": "Its ISO 4217 code.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "at",
+          "description": "When the provider says it happened, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "attempt",
+          "description": "The attempt it reported on.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "providerRef",
+          "description": "The provider's reference it named.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "refund",
+          "description": "The refund it reported on.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "applied",
+          "description": "Whether it moved anything.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        },
+        {
+          "name": "metadata",
+          "description": "At most ten string pairs the adapter passed on.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        },
+        {
+          "name": "recordedAt",
+          "description": "When it was recorded, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        }
+      ],
+      "optimistic": true,
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Booking",
+        "use": "Payments",
+        "behavior": "Payments",
+        "table": "events",
+        "key": "event",
+        "rowField": ""
+      }
+    },
+    "BookingPaymentsIssues": {
+      "name": "BookingPaymentsIssues",
+      "owner": "src/bookings.schema.ts",
+      "comment": "On a refund row (refundOf), each refund it asked of the row it refunds, keyed by the refund's id: its key, amount and currency, its status as the provider settled it, and the Workflow entry it was asked at.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "booking",
+          "description": "The Booking row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Booking"
+          },
+          "required": true,
+          "relation": {
+            "type": "Booking",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "refund",
+          "description": "The refund's id, as the row it refunds recorded it.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "seq",
+          "description": "Its place among the row's issues, from 1.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "ofSchema",
+          "description": "The type of the row it refunds.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "ofId",
+          "description": "The key of the row it refunds.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "description": "The key it was asked under: the refund row's type and key and the issue's number.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "amount",
+          "description": "What it asks, in the currency's minor units.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "currency",
+          "description": "Its ISO 4217 code.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "status",
+          "description": "requested, sent, succeeded or failed.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "refunded",
+          "description": "What the provider refunded.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "enteredAt",
+          "description": "The Workflow's enteredAt when it was asked, which tells a later entry of an issueOn state from this one.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "at",
+          "description": "When it was asked, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "updatedAt",
+          "description": "When it last moved, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "booking",
+            "refund"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Booking",
+        "use": "Payments",
+        "behavior": "Payments",
+        "table": "issues",
+        "key": "refund",
+        "rowField": "booking"
+      }
+    },
+    "BookingPaymentsRefunds": {
+      "name": "BookingPaymentsRefunds",
+      "owner": "src/bookings.schema.ts",
+      "comment": "On a table, each refund asked of the row, keyed by its id: the attempt it draws on, its amount and reason, its status and what was refunded, and the refund row that asked it, if one did.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "booking",
+          "description": "The Booking row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Booking"
+          },
+          "required": true,
+          "relation": {
+            "type": "Booking",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "refund",
+          "description": "The refund's id, rf_ and a key the command makes.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "seq",
+          "description": "Its place among the row's refunds, from 1.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "idempotencyKey",
+          "description": "The key it was asked under.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "attempt",
+          "description": "The captured attempt it draws on.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "provider",
+          "description": "That attempt's provider.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "amount",
+          "description": "What it asks, in the currency's minor units.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "currency",
+          "description": "Its ISO 4217 code.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "reason",
+          "description": "Why it was asked.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "status",
+          "description": "requested, sent, succeeded or failed.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "refunded",
+          "description": "What the provider refunded.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "originSchema",
+          "description": "The type of the refund row that asked it, through refundFor.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "originId",
+          "description": "The key of the refund row that asked it.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "at",
+          "description": "When it was asked, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "updatedAt",
+          "description": "When it last moved, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "booking",
+            "refund"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Booking",
+        "use": "Payments",
+        "behavior": "Payments",
+        "table": "refunds",
+        "key": "refund",
+        "rowField": "booking"
+      }
+    },
+    "BookingTimersDeadlines": {
+      "name": "BookingTimersDeadlines",
+      "owner": "src/bookings.schema.ts",
+      "comment": "One row per deadline started on the row, keyed by the deadline's name: the time it starts from, the fact it started from, when it is due (null once until cancelled it), whether and when it fired, and what its then met.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "booking",
+          "description": "The Booking row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Booking"
+          },
+          "required": true,
+          "relation": {
+            "type": "Booking",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "name",
+          "description": "The deadline's name in the config.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "baseAt",
+          "description": "The time the deadline starts from, in epoch milliseconds: the create's, the status's entry's, or the field's.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "armedFrom",
+          "description": "The fact it started from, as text: the create's or the entry's time, or the field's value. A write that leaves it as it is arms nothing.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "dueAt",
+          "description": "When it is due, in epoch milliseconds; null once until cancelled it.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "fired",
+          "description": "Whether it fired.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        },
+        {
+          "name": "firedAt",
+          "description": "When it fired.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "outcome",
+          "description": "What its then met when it fired: moved, skipped, vetoed or forbidden.",
+          "typeRef": {
+            "name": "string"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "booking",
+            "name"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Booking",
+        "use": "Timers",
+        "behavior": "Timers",
+        "table": "deadlines",
+        "key": "name",
+        "rowField": "booking"
+      }
+    },
+    "Room": {
+      "name": "Room",
+      "owner": "src/bookings.schema.ts",
+      "comment": "A room whose time Calendar opens (D70): weekday hours in Europe/London,\none booking at a time, on a quarter-hour grid, of a quarter of an hour\nto two hours. The resource a booking's Reservation holds.",
+      "role": "DBTable",
+      "behaviors": [
+        {
+          "name": "Calendar",
+          "implements": true,
+          "config": {
+            "capacity": 1,
+            "hours": {
+              "fri": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ],
+              "mon": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ],
+              "thu": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ],
+              "tue": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ],
+              "wed": [
+                [
+                  "09:00",
+                  "17:30"
+                ]
+              ]
+            },
+            "maxMs": 7200000,
+            "minMs": 900000,
+            "permission": "rooms.manage",
+            "slotMs": 900000,
+            "timeZone": "Europe/London"
+          }
+        }
+      ],
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true,
+          "key": true,
+          "autoGenerated": true
+        },
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        }
+      ],
+      "optimistic": true
+    },
+    "RoomCalendarBookings": {
+      "name": "RoomCalendarBookings",
+      "owner": "src/bookings.schema.ts",
+      "comment": "On a table, the supply's record of each claim item that holds or held time of the row, keyed by the claim's type and key, the hold and the item's index: the interval it asked, its state, which a call moves only forward, so a call made again changes nothing, and when it last moved. A deleted claim's records retire under a key of their own, its committed time still booked, so a claim created again with its key holds afresh.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "room",
+          "description": "The Room row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Room"
+          },
+          "required": true,
+          "relation": {
+            "type": "Room",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "record",
+          "description": "The claim's type, its key, the hold and the item's index, joined by /; a retired record's has # and a key of its own after it.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "holderSchema",
+          "description": "The claim's type.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "holderId",
+          "description": "The claim's key.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "hold",
+          "description": "The hold's name in the claim's Holds config.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "item",
+          "description": "The item's index in its hold.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "startMs",
+          "description": "When the time it asked starts, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "endMs",
+          "description": "When the time it asked ends, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "state",
+          "description": "held, committed or released.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "unitPrice",
+          "description": "A price the supply held it at; Calendar gives none.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "currency",
+          "description": "The price's currency; Calendar gives none.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "at",
+          "description": "When it last moved, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        },
+        {
+          "name": "retired",
+          "description": "Whether it is a deleted claim's.",
+          "typeRef": {
+            "name": "boolean"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "room",
+            "record"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Room",
+        "use": "Calendar",
+        "behavior": "Calendar",
+        "table": "bookings",
+        "key": "record",
+        "rowField": "room"
+      }
+    },
+    "RoomCalendarClosures": {
+      "name": "RoomCalendarClosures",
+      "owner": "src/bookings.schema.ts",
+      "comment": "On a table, the row's closures, keyed by their name, closure-1 onward: when each starts and ends, why, who made it and when.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "room",
+          "description": "The Room row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Room"
+          },
+          "required": true,
+          "relation": {
+            "type": "Room",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "closure",
+          "description": "The closure's name.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "startMs",
+          "description": "When it starts, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "endMs",
+          "description": "When it ends, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
+        },
+        {
+          "name": "reason",
+          "description": "Why, as the caller gave it.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "by",
+          "description": "The subject of the caller who made it.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "at",
+          "description": "When it was made, in epoch milliseconds.",
+          "typeRef": {
+            "name": "Temporal.DateTime"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "room",
+            "closure"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Room",
+        "use": "Calendar",
+        "behavior": "Calendar",
+        "table": "closures",
+        "key": "closure",
+        "rowField": "room"
+      }
+    },
+    "RoomCalendarSettings": {
+      "name": "RoomCalendarSettings",
+      "owner": "src/bookings.schema.ts",
+      "comment": "On a table, what setOpeningHours and addClosure set of the row, keyed by name: hours, the row's own weekly hours; timeZone, its own zone; closuresMade, how many closures it has made, which names the next. A name with no row follows the config.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "room",
+          "description": "The Room row the rows are of; deleting it deletes them.",
+          "typeRef": {
+            "name": "Room"
+          },
+          "required": true,
+          "relation": {
+            "type": "Room",
+            "onDelete": "CASCADE"
+          }
+        },
+        {
+          "name": "name",
+          "description": "hours, timeZone or closuresMade.",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "value",
+          "description": "Its value: the hours by day, the zone's IANA name, or the count.",
+          "typeRef": {
+            "name": "Generic.JSON"
+          }
+        }
+      ],
+      "indexes": [
+        {
+          "keys": [
+            "room",
+            "name"
+          ],
+          "unique": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior",
+      "behaviorTable": {
+        "row": "Room",
+        "use": "Calendar",
+        "behavior": "Calendar",
+        "table": "settings",
+        "key": "name",
+        "rowField": "room"
+      }
+    }
+  }
+}

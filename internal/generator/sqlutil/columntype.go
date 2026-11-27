@@ -80,7 +80,7 @@ func ColumnType(schema *ir.Schema, field *ir.FieldDef, scalarTypes map[string]st
 	if field.EncryptedAtRest {
 		return "TEXT"
 	}
-	if field.JsonField || field.TypeRef.IsMap || field.TypeRef.IsArrayOfArrays || IsJSONFieldType(schema, field.TypeRef.Name) {
+	if field.JsonField || field.TypeRef.IsMap || field.TypeRef.IsArrayOfArrays || IsJSONFieldType(schema, field.TypeRef.Name) || IsUnionType(schema, field.TypeRef.Name) {
 		return "JSONB"
 	}
 	element := ElementType(field.TypeRef.Name, scalarTypes)
@@ -118,6 +118,12 @@ func VectorDimensions(columnType string) int {
 		return 0
 	}
 	return n
+}
+
+// IsUnionType reports whether name is a union of schema, whose value, a
+// member's object, its column holds as JSON.
+func IsUnionType(schema *ir.Schema, name string) bool {
+	return schema != nil && schema.Unions[name] != nil
 }
 
 // IsJSONFieldType reports whether name is a @jsonField class of schema: a

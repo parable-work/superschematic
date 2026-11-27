@@ -237,26 +237,47 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 		return fmt.Errorf("failed to clean stale version graph files: %w", err)
 	}
 
+	// sqlite.go and a sqlite_<table>.go per repository hold the
+	// repositories on SQLite for a database that lists the sqlite dialect
+	// (D116); any other has none.
+	if err := cleanStaleSQLiteFiles(outputDir, output); err != nil {
+		return fmt.Errorf("failed to clean stale SQLite files: %w", err)
+	}
+	if output.HasSQLiteRepositories() {
+		if err := generateFile(generator, "sqlite.tmpl", filepath.Join(outputDir, "sqlite.go"), output); err != nil {
+			return fmt.Errorf("failed to write sqlite.go: %w", err)
+		}
+	}
+
 	repositoryTasks := make([]func() error, 0, len(output.Repositories))
 	for _, repo := range output.Repositories {
 		repo := repo
+		repoOutput := RepositoryOutput{
+			Repository:   repo,
+			TypesModule:  output.TypesModule,
+			Timestamp:    output.Timestamp,
+			UUIDGoType:   output.UUIDGoType,
+			UserIDGoType: output.UserIDGoType,
+		}
+		repoOutput.RequireUpdatedBy = output.Actor.RequireUpdatedBy
+		repoOutput.RulesGoModule = output.Naming.RulesGoModule
+		repoOutput.HeldByAccess = output.HeldByAccess()
 		repositoryTasks = append(repositoryTasks, func() error {
 			filename := fmt.Sprintf("repository_%s.go", codegen.ToSnakeCase(repo.TypeName))
-			repoOutput := RepositoryOutput{
-				Repository:   repo,
-				TypesModule:  output.TypesModule,
-				Timestamp:    output.Timestamp,
-				UUIDGoType:   output.UUIDGoType,
-				UserIDGoType: output.UserIDGoType,
-			}
-			repoOutput.RequireUpdatedBy = output.Actor.RequireUpdatedBy
-			repoOutput.RulesGoModule = output.Naming.RulesGoModule
-			repoOutput.HeldByAccess = output.HeldByAccess()
 			if err := generateFile(generator, "repository.tmpl", filepath.Join(outputDir, filename), repoOutput); err != nil {
 				return fmt.Errorf("failed to write %s: %w", filename, err)
 			}
 			return nil
 		})
+		if output.HasSQLiteRepositories() && repo.SQLite != nil {
+			repositoryTasks = append(repositoryTasks, func() error {
+				filename := sqliteRepositoryFileName(repo)
+				if err := generateFile(generator, "repository_sqlite.tmpl", filepath.Join(outputDir, filename), repoOutput); err != nil {
+					return fmt.Errorf("failed to write %s: %w", filename, err)
+				}
+				return nil
+			})
+		}
 	}
 
 	for _, graph := range output.VersionGraphs {
@@ -297,6 +318,37 @@ func cleanStaleVersionGraphFiles(outputDir string, graphs []VersionGraph) error 
 	}
 	for _, match := range matches {
 		if _, ok := expected[filepath.Base(match)]; ok {
+			continue
+		}
+		if err := os.Remove(match); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// sqliteRepositoryFileName is the file of repo's repository on SQLite.
+func sqliteRepositoryFileName(repo Repository) string {
+	return fmt.Sprintf("sqlite_%s.go", codegen.ToSnakeCase(repo.TypeName))
+}
+
+// cleanStaleSQLiteFiles removes sqlite.go and the sqlite_*.go files of
+// tables the schema no longer declares, or of a database that no longer
+// lists the sqlite dialect.
+func cleanStaleSQLiteFiles(outputDir string, output *ORMOutput) error {
+	expected := map[string]bool{}
+	if output.HasSQLiteRepositories() {
+		expected["sqlite.go"] = true
+		for _, repo := range output.Repositories {
+			expected[sqliteRepositoryFileName(repo)] = true
+		}
+	}
+	matches, err := filepath.Glob(filepath.Join(outputDir, "sqlite*.go"))
+	if err != nil {
+		return err
+	}
+	for _, match := range matches {
+		if expected[filepath.Base(match)] {
 			continue
 		}
 		if err := os.Remove(match); err != nil {

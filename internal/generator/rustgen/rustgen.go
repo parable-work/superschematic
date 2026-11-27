@@ -117,6 +117,38 @@ type TypeInfo struct {
 	// DenyUnknownFields emits #[serde(deny_unknown_fields)] on the struct,
 	// for @denyUnknownFields and for @strictJSON.
 	DenyUnknownFields bool
+
+	// Variants are the type's variant fields (D149). With any, the struct
+	// deserializes through WireName, the same struct with each variant field
+	// held as JSON (WireFields), which TryFrom decodes as the member its
+	// sibling names.
+	Variants   []RustVariant
+	WireName   string
+	WireFields []FieldInfo
+}
+
+// RustVariant is a variant field (codegen.VariantField) as the type's
+// TryFrom of its wire struct reads it: the field and its sibling by their
+// Rust names, the union, and whether the field is required.
+type RustVariant struct {
+	Field    string
+	By       string
+	Union    string
+	Required bool
+	// KeepsNull is whether the wire field reads a present null as
+	// Some(Value::Null), through the lossless JSON adapter a union that
+	// reaches a Generic.JSON field reads through.
+	KeepsNull bool
+}
+
+// IsVariant reports whether field is one of the type's variant fields.
+func (t TypeInfo) IsVariant(field string) bool {
+	for _, v := range t.Variants {
+		if v.Field == field {
+			return true
+		}
+	}
+	return false
 }
 
 // UnionInfo holds information about a union type for Rust generation.
@@ -138,6 +170,12 @@ type UnionInfo struct {
 	// union buffers its input before it picks a member, so it reads that
 	// buffer through the lossless JSON adapter too.
 	PreserveJSON bool
+
+	// By and Arms make the union a variant union (D149): from_variant decodes
+	// the member a sibling's value names, and validate_<union>_by validates
+	// it.
+	By   string
+	Arms []codegen.UnionArmIndex
 }
 
 // UnionMemberInfo holds per-member serde tagging metadata.
@@ -208,6 +246,10 @@ type ModuleOutput struct {
 	// UsesScalarLib is true when any generated type references the scalar
 	// runtime crate (Naming.ScalarRustCrate).
 	UsesScalarLib bool
+
+	// HasVariants is true when a type has a variant field (D149), whose
+	// TryFrom reads its sibling through variant_by.
+	HasVariants bool
 
 	// HasOptionalJSONFields is true when a field keeps JSON null
 	// (FieldInfo.KeepsJSONNull); types.rs then defines its adapter.
@@ -357,6 +399,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if err := verify.RefuseRustTypes(schema); err != nil {
 		return nil, fmt.Errorf("rustgen: %w", err)
 	}
+	if err := refuseNotifierOnSQLite(schema, opts.SQLite); err != nil {
+		return nil, err
+	}
 	if opts.Clock == nil {
 		opts.Clock = codegen.DefaultClock()
 	}
@@ -437,6 +482,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 
 	output.Types = convertTypes(objectTypes, defaultEnums, enumLookup, discriminators)
 	output.Types = append(output.Types, convertTypes(inputTypes, defaultEnums, enumLookup, discriminators)...)
+	if err := annotateVariantTypes(output.Types, schema, opts.Dependencies); err != nil {
+		return nil, err
+	}
 	if err := validateRenderedUnionDiscriminatorDefaults(output.Types, output.Unions); err != nil {
 		return nil, err
 	}
@@ -464,6 +512,7 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 			importedObjects: imported.objectValidators,
 			unions:          output.Unions,
 			importedUnions:  imported.unionValidators,
+			dependencies:    opts.Dependencies,
 			readModel:       readModel,
 			enumLookup:      enumLookup,
 			naming:          opts.Naming,
@@ -501,6 +550,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	output.UsesHashMap = hasMapFields(output.Types)
 	output.UsesUnions = hasUnionFields(output.Types)
 	output.HasOptionalJSONFields = hasOptionalJSONFields(output.Types)
+	for _, t := range output.Types {
+		output.HasVariants = output.HasVariants || len(t.Variants) > 0
+	}
 	output.ExternalCrateDeps = collectExternalCrateDeps(output)
 	output.UsesScalarLib = usesScalarLib(output)
 	output.RuntimeSchemas, err = runtimeSchemas(schema, opts.Dependencies)
@@ -658,9 +710,65 @@ func convertUnions(codegenUnions []codegen.UnionInfo) []UnionInfo {
 			Types:         u.Types,
 			Discriminator: u.Discriminator,
 			Members:       members,
+			By:            u.By,
+			Arms:          u.ArmIndexes(),
 		}
 	}
 	return unions
+}
+
+// annotateVariantTypes gives each type with a variant field (D149) its wire
+// struct: the same fields, each variant field held as JSON, which the
+// type's TryFrom decodes as the member its sibling names. A field whose
+// sibling breaks the rules, which only a dependency's union can reach past
+// the loader, fails the build.
+func annotateVariantTypes(types []TypeInfo, schema *ir.Schema, dependencies map[string]*ir.Schema) error {
+	for i := range types {
+		t := &types[i]
+		td := schema.Types[t.Name]
+		if td == nil {
+			td = schema.Inputs[t.Name]
+		}
+		variants, err := codegen.VariantFieldsOf(td, schema, dependencies)
+		if err != nil {
+			return fmt.Errorf("rustgen: %w", err)
+		}
+		if len(variants) == 0 {
+			continue
+		}
+		rustName := map[string]string{}
+		for _, f := range t.Fields {
+			rustName[f.Name] = f.RustName
+		}
+		preserve := func(union string) bool {
+			return containsGenericJSON(schema, union, dependencies, map[string]bool{})
+		}
+		byField := map[string]RustVariant{}
+		for _, v := range variants {
+			rv := RustVariant{
+				Field:     rustName[v.Field.Name],
+				By:        rustName[v.By.Name],
+				Union:     v.Union.Name,
+				Required:  v.Field.Required,
+				KeepsNull: preserve(v.Union.Name),
+			}
+			t.Variants = append(t.Variants, rv)
+			byField[v.Field.Name] = rv
+		}
+		t.WireName = t.Name + "Wire"
+		for _, f := range t.Fields {
+			if rv, ok := byField[f.Name]; ok {
+				f.RustType = "Option<serde_json::Value>"
+				if rv.Required {
+					f.RustType = "serde_json::Value"
+				}
+				f.PreserveJSON = rv.KeepsNull && rv.Required
+				f.KeepsJSONNull = rv.KeepsNull && !rv.Required
+			}
+			t.WireFields = append(t.WireFields, f)
+		}
+	}
+	return nil
 }
 
 // annotateShapeDispatch fills Fields and Tags on every member of an untagged

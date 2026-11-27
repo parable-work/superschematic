@@ -20,7 +20,7 @@ The extension adds one of each registration surface:
 | Checks and an OpenAPI hook | policy over the core documentation decorators: acme's `@docs` audiences and `@icon` names only, and the `x-acme-docs` vendor key | `ext/docs.go` |
 | Check, a tool hook and an invocation policy on `@mcp` | every operation of `shop-api` declares `@mcp`, visible or hidden; the SDK tool documents carry acme's vendor keys and icon variant; `confirm` replaces the core's `invocationPolicy` | `ext/mcp.go`, `packages/schema/src/mcp.ts` |
 | Check on a core kind | policy over core projection views: every view in a DB schema binds `acme.shop_id` first | `ext/projection_policy.go` |
-| Behavior | `acme.Rating`, declared in a JSON file; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation; the `acme-behaviors` crate implements it for the engine, over a copy of the declaration, which its registration names and the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `crates/behaviors` |
+| Behavior | `acme.Rating`, declared by a class whose `rules` the behaviors' core interprets on a table, with no crate (D103's step 5), its JSON declaration derived from the class, replayed from `testdata/rules`; `ext/testdata/services/shop-ratings` composes it on a General data-form type and `shop-ratings-ts` with `@behavior`, typed by acme's `BehaviorConfigs` augmentation; the `acme-behaviors` crate implements it for the engine, over a copy of the declaration, which its registration names and the project's engine crate compiles in (D58) | `ext/behavior.go`, `ext/rating.behavior.ts`, `ext/rating.behavior.json`, `packages/schema/src/behaviors.ts`, `crates/behaviors`, `testdata/rules` |
 | Command | `describe` and `fields`, through `cli.CommandProvider` | `ext/command.go`, `ext/fields.go` |
 | Binary | `acme-schematic`: `cli.New(cli.Config{Name: "acme-schematic"}, ext.Extension{})` | `cmd/acme-schematic` |
 
@@ -94,6 +94,7 @@ examples/acme-schematic/
     mcp.go                    every shop-api operation declares @mcp; acme tool keys and icon variant; the confirm policy
     projection_policy.go      projection policy: a check on DB views' first rule
     behavior.go               registers acme.Rating from rating.behavior.json, its declaration
+    rating.behavior.ts        acme.Rating's class, which rating.behavior.json is derived from
     testdata/services/returns-api  an API the tests load that declares confirm on @mcp
     testdata/services/shop-ratings  a General data-form service whose Product composes acme.Rating
     testdata/services/shop-ratings-ts  its TypeScript twin, with @behavior
@@ -102,6 +103,7 @@ examples/acme-schematic/
     fields.go                 fields subcommand: a declaration file type-checked with loader.NewDeclarationProgram
     auth/                     apikey auth provider + its snippet templates
   packages/schema/            @acme/schema, the authoring package @shelf, @feedKey, @crossSell and the Acme.Photo brand are imported from, the confirm key's type and acme.Rating's config type
+  testdata/rules/acme-rating.json  acme.Rating's cases as a declarative behavior, which the core's test kit replays
   crates/behaviors/           acme-behaviors, acme.Rating for the engine (D58), a Cargo workspace of its own
     declarations/             acme.Rating.behavior.json, the copy `acme-schematic behaviors` writes
     src/lib.rs                Rating, behaviors() and tools()
@@ -724,7 +726,10 @@ A behavior adds fields, operations, checks and storage to a type when an
 engine runs the schema. The compiler only declares, carries and checks
 behaviors. acme declares one, `acme.Rating`: shoppers rate a catalog item
 from one star to a maximum each type sets. The declaration is one JSON file,
-`ext/rating.behavior.json`, which `ext/behavior.go` embeds and registers:
+`ext/rating.behavior.json`, which `ext/behavior.go` embeds and registers.
+`make behaviors` derives it from the behavior's class,
+`ext/rating.behavior.ts` (D103's step 5), and `make behaviors-check` holds
+the two to one declaration:
 
 ```go
 //go:embed rating.behavior.json
@@ -774,6 +779,39 @@ among them, since it lists the types by name and nothing a behavior adds
 `build-all` does not meet them. The core-only binary refuses the behavior
 by name. The smoke asserts each of these (`TestRatingBehavior` covers the
 load and the build).
+
+### On a table, with no crate
+
+On a table, acme.Rating is a declarative behavior (D103's step 5): the
+file's `rules` state what it does in the vocabulary the behaviors' core
+interprets, and no Rust implements it there. Each shopper's rating is a row
+of a `ratings` sub-table keyed by the shopper (`{ "caller": true }`);
+`rate` holds `stars` to 1 to the config's `maxStars` (`params`) and
+upserts the shopper's row; `ratingCount` and `ratingAverage` are owned
+columns derived from the rows, a count and an average that is 0 before the
+first; and a new version may raise `maxStars` and may not lower it
+(`configChange`). The fields carry a `type`, which a table's layout makes
+columns of, and the file declares the sub-table; the engine reads neither,
+nor `rules`.
+
+`testdata/rules/acme-rating.json` holds its cases, written by hand in the
+recorded format, its `declarations` naming this file. The behaviors'
+core's test kit replays them (`rules-testkit`'s
+`acme_rating_replays_on_the_core_as_a_declaration`) and writes their
+transcript, `runtime/engine/testdata/rules/acme-rating.transcript.json`,
+which holds the declaration whole; the TypeScript, Go and Rust adapters
+replay it on real tables, on SQLite and Postgres, and so do development
+mode and its wasm library, each handing its core the file first. Nothing
+of this is a core edit either.
+
+What moved: the rules `crates/behaviors` writes in Rust for the engine
+(the two totals columns and their migration, `rate`'s bound and handler,
+`ratingSummary`, the readers of the two fields and the config change
+rule) are the file's `rules` on a table. The engine's crate stays until
+engine types go (D103's step 7), and it counts every `rate` call, where
+the declarative one keeps one rating per shopper. `ext/behavior.go`, the
+registration, and `packages/schema/src/behaviors.ts`, the config's type,
+stay as they are.
 
 What the behavior does when the engine runs the schema is Rust (D58):
 `crates/behaviors`, the `acme-behaviors` crate, implements it. `Rating`

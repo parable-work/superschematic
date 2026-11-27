@@ -272,7 +272,7 @@ func enqueueThrough(td *ir.TypeDef, relation, field string, schema *ir.Schema, t
 // a row once; a message keyed by the table's own key needs none.
 func (t EnqueueTrigger) BackfillSQL() string {
 	identity := func(c string) string { return c }
-	return t.backfillSQL(identity, t.QuotedTable, t.QuotedQueueTable, "TRUE", "FALSE", t.Conflict, true)
+	return t.backfillSQL(identity, t.QuotedTable, t.QuotedQueueTable, "TRUE", "FALSE", t.Conflict, perKeyDistinctOn)
 }
 
 // SQLiteBackfillSQL is the backfill's statement on SQLite, its
@@ -282,13 +282,41 @@ func (t EnqueueTrigger) BackfillSQL() string {
 // that follows it as the upsert's.
 func (t EnqueueTrigger) SQLiteBackfillSQL(quote func(string) string) string {
 	unquote := func(c string) string { return quote(strings.Trim(c, `"`)) }
-	return t.backfillSQL(unquote, quote(t.Table), quote(t.QueueTable), "1", "0", t.SQLiteConflict, false)
+	return t.backfillSQL(unquote, quote(t.Table), quote(t.QueueTable), "1", "0", t.SQLiteConflict, perKeyAll)
 }
 
+// SQLiteQueueBackfillSQL is the backfill `stack queue backfill` runs on
+// SQLite and D1 (D88): SQLiteBackfillSQL's, but under replace it takes one
+// row of each key, the first by the table's key, as Postgres's does, by a
+// window over the rows that meet the conditions, so the command enqueues on
+// SQLite the messages it enqueues on Postgres and counts each key once.
+// The plan's backfill keeps SQLiteBackfillSQL, which the SQLite model
+// holds.
+func (t EnqueueTrigger) SQLiteQueueBackfillSQL(quote func(string) string) string {
+	unquote := func(c string) string { return quote(strings.Trim(c, `"`)) }
+	return t.backfillSQL(unquote, quote(t.Table), quote(t.QueueTable), "1", "0", t.SQLiteConflict, perKeyWindow)
+}
+
+// How a backfill under replace takes the rows of one key (backfillSQL).
+type perKey int
+
+const (
+	// perKeyAll takes every row, so SQLite's upsert keeps a key's last.
+	perKeyAll perKey = iota
+	// perKeyDistinctOn takes the first by the table's key with Postgres's
+	// DISTINCT ON.
+	perKeyDistinctOn
+	// perKeyWindow takes the first by the table's key with row_number().
+	perKeyWindow
+)
+
+// backfillRow is the column perKeyWindow numbers each key's rows in.
+const backfillRow = "superschematic_backfill_row"
+
 // backfillSQL renders a backfill: quote quotes a column, table and queue
-// are quoted, yes and no are the dialect's booleans, and distinct takes
-// one row per key under replace with DISTINCT ON.
-func (t EnqueueTrigger) backfillSQL(quote func(string) string, table, queue, yes, no, conflict string, distinct bool) string {
+// are quoted, yes and no are the dialect's booleans, and per says how it
+// takes the rows of one key under replace.
+func (t EnqueueTrigger) backfillSQL(quote func(string) string, table, queue, yes, no, conflict string, per perKey) string {
 	const row = "src"
 	columns, values := t.columnsAndValues(row, quote)
 	conds := []string{yes}
@@ -310,19 +338,27 @@ func (t EnqueueTrigger) backfillSQL(quote func(string) string, table, queue, yes
 			own = own || values[at] == row+"."+quote(t.SourceKey)
 		}
 	}
+	from, where := table+" AS "+row, strings.Join(conds, " AND ")
 	switch {
-	case !distinct || t.ReplaceKeys == nil:
+	case per == perKeyAll || t.ReplaceKeys == nil:
 	case own:
 		// The table's key is of the message's: each row is its own key.
 	case len(keyed) == 0:
 		order = "\nORDER BY " + row + "." + quote(t.SourceKey) + "\nLIMIT 1"
+	case per == perKeyWindow:
+		// The rows that meet the conditions, numbered within each key by
+		// the table's key, and the first of each.
+		key := strings.Join(keyed, ", ")
+		from = "(SELECT " + row + ".*, row_number() OVER (PARTITION BY " + key + " ORDER BY " + row + "." + quote(t.SourceKey) + ") AS " + quote(backfillRow) +
+			" FROM " + table + " AS " + row + " WHERE " + where + ") AS " + row
+		where = row + "." + quote(backfillRow) + " = 1"
 	default:
 		key := strings.Join(keyed, ", ")
 		selectList = "DISTINCT ON (" + key + ") " + selectList
 		order = "\nORDER BY " + key + ", " + row + "." + quote(t.SourceKey)
 	}
 	s := "INSERT INTO " + queue + " (" + strings.Join(columns, ", ") + ")\nSELECT " + selectList +
-		"\nFROM " + table + " AS " + row + "\nWHERE " + strings.Join(conds, " AND ") + order
+		"\nFROM " + from + "\nWHERE " + where + order
 	if conflict != "" {
 		s += "\n" + conflict
 	}

@@ -1393,10 +1393,7 @@
             "use": "Pool",
             "behavior": "Pool",
             "operation": "pick",
-            "table": true,
-            "permissions": [
-              "accounts.pool"
-            ]
+            "table": true
           },
           "httpMethod": "POST",
           "restPath": "account/pool/pick",

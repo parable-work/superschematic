@@ -1,0 +1,12 @@
+# A Go API over deps-stock-db, its one DB-kind dependency, with a job
+# beside it. TestGoServerAndJobOnSQLite builds it with deps-stock-db
+# listing sqlite first (D116): its Deps.DB is then the ORM over the
+# database's SQLite file.
+name: deps-go-stock
+kind: API
+dependencies:
+  - { name: deps-stock-db, kind: DB }
+outputs:
+  types:
+    go: { enabled: true }
+  api: { enabled: true, language: GO }

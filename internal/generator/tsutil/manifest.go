@@ -14,6 +14,13 @@ import (
 // ManifestFile is a package's manifest.
 const ManifestFile = "package.json"
 
+// TypeScriptVersion is the TypeScript release every generated and
+// scaffolded TypeScript package pins in its devDependencies, the compiler
+// it is checked with: the types packages, the SDKs, the REST packages and
+// their implementations' scaffolds, the servers, the memory stores and the
+// sites.
+const TypeScriptVersion = "7.0.2"
+
 // WorkspaceSpec is the range a package.json names a member of the Bun
 // workspace by.
 const WorkspaceSpec = "workspace:*"

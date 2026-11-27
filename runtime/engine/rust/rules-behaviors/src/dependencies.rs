@@ -557,7 +557,9 @@ fn add_edge(
             format!("{schema} does not compose Workflow, so its instances cannot block"),
         ));
     }
-    if cx.read_row(&schema, &id)?.is_none() {
+    // A row the command creates is one too: a sibling Blueprint stamped
+    // before this one, in the same change set (D149).
+    if cx.row_of(&schema, &id)?.is_none() {
         return Err(refuse.param(cx, "id", format!("{schema} {id} does not exist")));
     }
     let rows = cx.sub_rows(BLOCKERS)?;

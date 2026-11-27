@@ -14,20 +14,28 @@ import (
 // none of it, and a read, a route or a queue the TypeScript runtime serves
 // would silently be missing. Per-record access (D156) is served: an
 // @audience table's reads and writes, row rules through relations, grants,
-// reveal and the access log. An audience on SQLite is refused for every
-// language but TypeScript (refuseSQLiteReaders, D182). References and
+// reveal and the access log. An audience on SQLite is refused for Rust's
+// types (refuseSQLiteReaders, D182). References and
 // attachments (D154, D185) are served on Postgres, and the runtime
 // providers of an API's @providers slots (D159, D185), each a provider
-// crate the server links.
+// crate the server links. So are Recurrence and the calendar (D152) and
+// search across tables (D155), on Postgres (D188): a Rust server serves a
+// Recurrence's operations, deadlines and occurrences through the Rust
+// adapter, the Postgres repositories carry a table's calendar sources and
+// search index, and the runtime's orm::calendar and orm::search_tables
+// read them. A Rust server whose database lists sqlite first is refused
+// Recurrence and the calendar by rustrestgen, which knows the database's
+// dialect; the loader refuses @searchable on SQLite for every language.
+// Events and notifications (D153) are served on Postgres (D191): the
+// Postgres definition carries each table's events and what it is to the
+// notifier, and the runtime's notify module raises, routes, delivers and
+// reads replies over them. The loader refuses the notifier on SQLite for
+// every language, and rustgen refuses it for a crate that lists sqlite.
 //
 // A DB service's Rust types are refused for a table feature; a Rust server
 // for a listed provider with no Rust crate, an @autonomy operation, and
-// the table features
-// of the database its operations read (Input.Database), where the build
-// loaded one. Recurrence (D152) is the core's in every language, and a
-// Rust types crate writes it through the core; a Rust server is refused a
-// table that composes it, since its operations, the calendar read and the
-// feed are not served through the Rust adapter yet.
+// the table features of the database its operations read (Input.Database),
+// where the build loaded one.
 
 // RustFeature is one feature a schema declares that the Rust outputs do
 // not serve yet (D181): the type it is on and what it is.
@@ -40,12 +48,12 @@ type RustFeature struct {
 }
 
 // RustTableFeatures are the features of schema's tables a Rust types crate
-// does not carry (D181), sorted by type: @calendarSource (D152), @event,
-// @notifier and @channelIdentities (D153), @searchable (D155), @party,
-// @conversations and @runRequests
-// (D157), and @agents (D158). With server, a Rust server's: a table that
-// composes Recurrence (D152) too.
+// does not carry (D181), sorted by type: @party, @conversations and
+// @runRequests (D157), and @agents (D158). A Rust server is refused
+// the same table features (server); none is a server's alone since
+// D188 served Recurrence.
 func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
+	_ = server
 	if schema == nil {
 		return nil
 	}
@@ -54,26 +62,6 @@ func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
 		td := schema.Types[name]
 		add := func(feature string) {
 			out = append(out, RustFeature{Owner: td.Owner, Type: td.Name, Feature: feature})
-		}
-		if len(td.CalendarSources) > 0 {
-			add("@calendarSource (D152)")
-		}
-		if server {
-			if _, ok := implementedConfig(td, recurrenceBehavior); ok {
-				add("Recurrence (D152)")
-			}
-		}
-		if len(td.Events) > 0 {
-			add("@event (D153)")
-		}
-		if td.Notifier != nil {
-			add("@notifier (D153)")
-		}
-		if td.ChannelIdentities != nil {
-			add("@channelIdentities (D153)")
-		}
-		if td.Searchable != nil {
-			add("@searchable (D155)")
 		}
 		if td.Party != nil {
 			add("@party (D157)")

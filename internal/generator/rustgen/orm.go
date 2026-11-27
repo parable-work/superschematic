@@ -11,6 +11,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/rustutil"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -70,6 +71,17 @@ type ORMInfo struct {
 	// D185).
 	References  bool
 	Attachments bool
+
+	// Calendar and Searchable are whether a table of the database is a
+	// calendar source (D152) or @searchable (D155), which the runtime's
+	// orm::calendar and orm::search_tables read on Postgres (D188).
+	Calendar   bool
+	Searchable bool
+
+	// Notifications is whether a table of the database declares an @event
+	// or is one of the notifier's (D153), which the runtime's notify module
+	// reads on Postgres (D191).
+	Notifications bool
 }
 
 // ORMUse is a use of a behavior on a table that has operations (D103), as
@@ -173,10 +185,14 @@ type ormDefinition struct {
 	// JSONClauses are the conditions of a Generic.JSON column's filter
 	// where they are not Clauses' (sqlutil.SQLiteJSONClauses); absent on
 	// Postgres, whose JSONB column compares its values itself.
-	JSONClauses      orderedStrings `json:"jsonClauses,omitempty"`
-	DefaultLimit     int            `json:"defaultLimit"`
-	SystemActor      *ormActor      `json:"systemActor,omitempty"`
-	RequireUpdatedBy bool           `json:"requireUpdatedBy,omitempty"`
+	JSONClauses  orderedStrings `json:"jsonClauses,omitempty"`
+	DefaultLimit int            `json:"defaultLimit"`
+	// MaxParameters is the most parameters one statement binds in the
+	// dialect, by which an upsert of many rows batches them (D89):
+	// sqlutil.MaxParameters on Postgres, SQLiteMaxParameters on SQLite.
+	MaxParameters    int       `json:"maxParameters"`
+	SystemActor      *ormActor `json:"systemActor,omitempty"`
+	RequireUpdatedBy bool      `json:"requireUpdatedBy,omitempty"`
 	// HistoryActorCTE and ClearHistoryActor are the statements a versioned
 	// table's hard delete runs around it, on Postgres (D17, D32).
 	HistoryActorCTE   string     `json:"historyActorCTE,omitempty"`
@@ -208,6 +224,7 @@ type ormTable struct {
 	Relations    []ormRelation           `json:"relations,omitempty"`
 	Unsupported  string                  `json:"unsupported,omitempty"`
 	Behaviors    *ormBehaviors           `json:"behaviors,omitempty"`
+	Merge        *ormMerge               `json:"merge,omitempty"`
 	// Many are the table's one-to-many relations, which a filter reaches
 	// through, as a row rule's path and a grant's do (D156).
 	Many []ormMany `json:"many,omitempty"`
@@ -215,6 +232,77 @@ type ormTable struct {
 	// the table is to per-record access: grants, log or roles (D156).
 	Audience *ormAudience `json:"audience,omitempty"`
 	Access   string       `json:"access,omitempty"`
+	// Calendar are the table's @calendarSource declarations (D152), and
+	// Searchable its search index (D155), which the runtime's calendar and
+	// search read (D188); on Postgres alone.
+	Calendar   []rustCalendarSource `json:"calendar,omitempty"`
+	Searchable *rustSearchable      `json:"searchable,omitempty"`
+	// Events are the table's @event declarations, and Notifier what the
+	// table is to the notifier (D153), which the runtime's notify module
+	// reads (D191); on Postgres alone.
+	Events   []rustEvent `json:"events,omitempty"`
+	Notifier string      `json:"notifier,omitempty"`
+}
+
+// ormMerge is what merge_into of a table that implements Mergeable runs
+// (D147), the runtime's orm::Merge: sqlutil's plan in the definition's
+// dialect, each statement that takes the acting user saying how its column
+// holds one.
+type ormMerge struct {
+	Lock         string         `json:"lock"`
+	HistoryActor bool           `json:"historyActor,omitempty"`
+	RequiresUser bool           `json:"requiresUser,omitempty"`
+	Steps        []ormMergeStep `json:"steps"`
+}
+
+type ormMergeStep struct {
+	Source        string              `json:"source"`
+	Field         string              `json:"field"`
+	SelfReference string              `json:"selfReference,omitempty"`
+	Before        []ormMergeStatement `json:"before,omitempty"`
+	Collisions    []ormMergeStatement `json:"collisions,omitempty"`
+	Repoint       ormMergeStatement   `json:"repoint"`
+}
+
+// ormMergeStatement is a merge's statement, its actor "uuid" for a
+// statement that takes the acting user as $3 into a uuid column, "text"
+// for another column, "" for none.
+type ormMergeStatement struct {
+	SQL   string `json:"sql"`
+	Actor string `json:"actor,omitempty"`
+}
+
+// ormMergeOf is the plan as the runtime reads it, each statement's actor
+// in the form its table's column of the audit field holds one.
+func ormMergeOf(plan *sqlutil.MergePlan, tables []sqlutil.TableModel) *ormMerge {
+	statement := func(source string, st sqlutil.MergeStatement) ormMergeStatement {
+		out := ormMergeStatement{SQL: st.SQL}
+		if st.Actor == "" {
+			return out
+		}
+		out.Actor = "text"
+		for i := range tables {
+			if tables[i].Type != source {
+				continue
+			}
+			if c := tables[i].AuditColumn(st.Actor); c != nil && c.Class.UUIDLike {
+				out.Actor = "uuid"
+			}
+		}
+		return out
+	}
+	out := &ormMerge{Lock: plan.Lock, HistoryActor: plan.HistoryActor, RequiresUser: plan.RequiresUser, Steps: []ormMergeStep{}}
+	for _, step := range plan.Steps {
+		s := ormMergeStep{Source: step.Source, Field: step.Field, SelfReference: step.SelfReference, Repoint: statement(step.Source, step.Repoint)}
+		for _, before := range step.Before {
+			s.Before = append(s.Before, statement(step.Source, before))
+		}
+		for _, collision := range step.Collisions {
+			s.Collisions = append(s.Collisions, statement(step.Source, collision))
+		}
+		out.Steps = append(out.Steps, s)
+	}
+	return out
 }
 
 // ormFence is a fence of a table, a @fenced field (D119), the runtime's
@@ -358,6 +446,7 @@ var ormClauses = []string{
 	"eq", "ne", "gt", "gte", "lt", "lte", "ilike", "in", "noneOf", "isNull", "isNotNull", "search",
 	"exists", "notExists", "set", "setNull", "pageKey", "placeholder", "default", "or", "group",
 	"where", "and", "orderBy", "orderTerm", "limit", "offset", "changed", "never", "null",
+	"setExcluded", "excluded",
 }
 
 // named are the members of all that names lists, in its order.
@@ -430,8 +519,8 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		}
 	}
 	info := &ORMInfo{}
-	postgres := ormDefinition{Dialect: "postgres", Clauses: named(sqlutil.PostgresClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
-	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), JSONClauses: sqlutil.SQLiteJSONClauses().AllJSONClauses(), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
+	postgres := ormDefinition{Dialect: "postgres", Clauses: named(sqlutil.PostgresClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, MaxParameters: sqlutil.MaxParameters, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
+	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), JSONClauses: sqlutil.SQLiteJSONClauses().AllJSONClauses(), DefaultLimit: sqlutil.DefaultLimit, MaxParameters: sqlutil.SQLiteMaxParameters, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
 	if opts.Actor.SystemSet {
 		actor := &ormActor{ID: opts.Actor.SystemID, Name: opts.Actor.SystemName}
 		postgres.SystemActor, sqlite.SystemActor = actor, actor
@@ -478,9 +567,10 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			behaviors = &ormBehaviors{Owned: []string{}, NoUpsert: l.Deadlines != nil}
 			for _, use := range l.Uses {
 				// A create that writes a sub-table's or a shared table's
-				// rows (Numbering's counts, D103's step 4) is no upsert's
+				// rows (Numbering's counts, D103's step 4), or another
+				// table's (Blueprint's children, D149), is no upsert's
 				// insert.
-				if len(use.Tables) > 0 || len(use.Shared) > 0 {
+				if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 					behaviors.NoUpsert = true
 				}
 			}
@@ -557,6 +647,26 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			postgres.ClearHistoryActor = sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting)
 		}
 		onPostgres.Statements = tableStatements(sqlutil.TableStatementsOf(t).AllStatements())
+		mergeable := false
+		if td := schema.Types[t.Type]; td != nil && td.Mergeable {
+			mergeable = true
+			plan, err := sqlutil.MergePlanOf(schema, tables, t.Type)
+			if err != nil {
+				return nil, err
+			}
+			onPostgres.Merge = ormMergeOf(plan, tables)
+		}
+		if onPostgres.Calendar, err = calendarOf(schema, schema.Types[t.Type], tables); err != nil {
+			return nil, err
+		}
+		if onPostgres.Searchable, err = searchableOf(schema, schema.Types[t.Type], tables); err != nil {
+			return nil, err
+		}
+		info.Calendar = info.Calendar || len(onPostgres.Calendar) > 0
+		info.Searchable = info.Searchable || onPostgres.Searchable != nil
+		onPostgres.Events = eventsOfTable(schema.Types[t.Type])
+		onPostgres.Notifier = notifierOfTable(schema.Types[t.Type])
+		info.Notifications = info.Notifications || len(onPostgres.Events) > 0 || onPostgres.Notifier != ""
 		for _, k := range t.UniqueKeys {
 			onPostgres.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 		}
@@ -569,6 +679,13 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				info.SQLiteRefused = append(info.SQLiteRefused, ORMRefusal{Type: t.Type, Reason: reason})
 			} else {
 				onSQLite.Statements = tableStatements(sqlutil.SQLiteTableStatementsOf(t).AllStatements())
+				if mergeable {
+					plan, err := sqlutil.SQLiteMergePlanOf(schema, tables, t.Type)
+					if err != nil {
+						return nil, err
+					}
+					onSQLite.Merge = ormMergeOf(plan, tables)
+				}
 				for _, k := range t.UniqueKeys {
 					k = k.SQLite()
 					onSQLite.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
@@ -784,7 +901,9 @@ func (t *ORMTable) add(c sqlutil.ColumnModel, column ormColumn, member ORMMember
 	// A table the repositories only read has no create and no update
 	// (D139).
 	owned := c.Def.Owned()
-	insertable := !c.Internal && c.Audit == "" && !owned && !t.ReadOnly
+	// A value a create gives (D147: Aliased's name) is the create's, which
+	// the core hands the behavior; no update sets it.
+	insertable := !c.Internal && c.Audit == "" && (!owned || c.Def.GivenAtCreate()) && !t.ReadOnly
 	if insertable {
 		create := member
 		create.Optional = !c.Required || column.Auto || c.Key || len(column.Default) > 0
