@@ -6,17 +6,17 @@ import (
 	"testing"
 )
 
-// TestEnginePanelsWithoutViewsWriteMoneyText: a crate whose engine panels
-// show money and which has no display component writes views.rs, holding
-// money_text alone, which the panels call as crate::views::money_text, and
-// lib.rs declares it; a crate without either writes no views.rs.
-func TestEnginePanelsWithoutViewsWriteMoneyText(t *testing.T) {
+// TestMoneyWithoutViewsWritesMoneyText: a crate whose form reads money and
+// which has no display component writes views.rs, holding money_text
+// alone, which the forms call as crate::views::money_text, and lib.rs
+// declares it; a crate without either writes no views.rs.
+func TestMoneyWithoutViewsWritesMoneyText(t *testing.T) {
 	if (&crate{}).HasViews() {
 		t.Fatal("a crate without components or money writes views.rs")
 	}
-	c := &crate{SchemaName: "shop-db", EnginePanels: &enginePanelsModel{}, ScalarCrate: "superscalar"}
+	c := &crate{SchemaName: "shop-db", Money: true, ScalarCrate: "superscalar"}
 	if !c.HasViews() {
-		t.Fatal("a crate whose engine panels show money writes no views.rs")
+		t.Fatal("a crate whose forms read money writes no views.rs")
 	}
 	tmpl, err := parseTemplates()
 	if err != nil {

@@ -330,8 +330,8 @@ fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, 
 }
 
 /// A link the console's own pages add to the nav and the index, after the
-/// resources' lists: the engine's types (`engine_pages::nav_link`), the
-/// account, users and roles (`identity_pages::nav_links`). A `post` link is
+/// resources' lists: the account, users and roles
+/// (`identity_pages::nav_links`). A `post` link is
 /// a button that posts to `href`, as signing out does. A `nav_only` link,
 /// such as signing in, is the nav's alone, and the index leaves it out, as
 /// it does a `post` link: the index has its own link to sign in.
