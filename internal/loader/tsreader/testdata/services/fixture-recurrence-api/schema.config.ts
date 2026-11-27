@@ -16,8 +16,8 @@ export default defineConfig({
       [TargetLanguage.Python]: { enabled: true },
       [TargetLanguage.Rust]: { enabled: true }
     },
-    // A TypeScript server: the Go server serves neither Recurrence nor a
-    // calendar source yet (D180).
+    // A TypeScript server; TestGoRecurrenceEndToEnd builds it as a Go
+    // server too, which serves Recurrence and the calendar (D187).
     api: { enabled: true, language: "TYPESCRIPT" },
     sdk: {
       [TargetLanguage.Go]: { enabled: true },

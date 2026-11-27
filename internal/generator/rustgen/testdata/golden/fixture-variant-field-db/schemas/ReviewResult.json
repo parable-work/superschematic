@@ -1,0 +1,47 @@
+{
+  "name": "fixture-variant-field-db",
+  "kind": "General",
+  "rootType": "ReviewResult",
+  "types": {
+    "ReviewResult": {
+      "name": "ReviewResult",
+      "owner": "src/steps.schema.ts",
+      "comment": "A review step's result: its verdict, and the reviewer's notes.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "verdict",
+          "typeRef": {
+            "name": "Verdict"
+          },
+          "required": true
+        },
+        {
+          "name": "notes",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMaxLength": 200
+        }
+      ],
+      "jsonField": true
+    }
+  },
+  "enums": {
+    "Verdict": {
+      "name": "Verdict",
+      "owner": "fixture-variant-field-db",
+      "comment": "How a review ended.",
+      "values": [
+        {
+          "name": "Approved",
+          "serializedAs": "approved"
+        },
+        {
+          "name": "ChangesRequested",
+          "serializedAs": "changes_requested"
+        }
+      ]
+    }
+  }
+}

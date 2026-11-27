@@ -2,7 +2,7 @@ import { defineConfig, SchemaKind, TargetLanguage } from "@superschematic/schema
 
 // fixture-access-db for the Go outputs (D180): the tables of per-record
 // access (D156) that fixture-access-go-api serves from a generated Go
-// server, without the calendar, which Go does not serve yet.
+// server, the calendar and its feed among them (D152, D187).
 export default defineConfig({
   name: "fixture-access-go-db",
   kind: SchemaKind.DB,

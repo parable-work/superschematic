@@ -333,6 +333,8 @@ export interface MergeStep {
   readonly field: string;
   /** On a relation of the table to itself, reads whether the row that stays references the row merged away through it. */
   readonly selfReference?: string;
+  /** Run first and counted nowhere: an Aliased use's insert of the name of the row merged away as an alias of the row that stays (D147). */
+  readonly before?: readonly MergeStatement[];
   /** Each deletes the rows that reference the row merged away and that one unique key of their table would refuse once repointed. */
   readonly collisions?: readonly MergeStatement[];
   /** Repoints every row that references the row merged away. */
@@ -3243,6 +3245,7 @@ class TableRepository {
             `${this.def.name} ${String(input.into)} references ${String(input.from)} through ${step.field}, and would reference itself: point it elsewhere first`
           );
         }
+        for (const before of step.before ?? []) await run(runner, before.sql, args(before));
         for (const collision of step.collisions ?? []) {
           const { rowCount } = await run(runner, collision.sql, args(collision));
           if (rowCount > 0) deleted[step.source] = (deleted[step.source] ?? 0) + rowCount;

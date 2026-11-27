@@ -46,6 +46,12 @@ type BehaviorRef struct {
 	// every authoring form. Empty when the type configures nothing; a
 	// config of {} is stored as empty, as [SetExtension] drops {}.
 	Config json.RawMessage `json:"config,omitempty" yaml:"config,omitempty"`
+
+	// Bundle names the bundle that added the use, one of its parts (D103,
+	// step 5); empty for a use the schema writes. A use with Bundle set is
+	// the loader's, as an owned field is: the data forms have no key for
+	// it, and a schema writer writes the bundle in its place.
+	Bundle string `json:"bundle,omitempty" yaml:"bundle,omitempty" jsonschema:"-"`
 }
 
 // FieldAnchored reports whether the use is anchored on a field (D103).
@@ -87,6 +93,19 @@ type FieldBehavior struct {
 	// value names: the anchor field itself, whose name and column are the
 	// anchor's.
 	Value bool `json:"value,omitempty" yaml:"value,omitempty"`
+
+	// FromCreate is true for a value field a create gives (D147: Aliased's
+	// name): a repository's create input holds it, which the core hands
+	// the behavior, and its update input does not, since only the
+	// behavior's operations change it.
+	FromCreate bool `json:"fromCreate,omitempty" yaml:"fromCreate,omitempty"`
+}
+
+// GivenAtCreate reports whether a create gives the field (D147): a value
+// field whose behavior takes its value from a create, which a repository's
+// create input holds though a behavior owns it.
+func (f *FieldDef) GivenAtCreate() bool {
+	return f.Owned() && f.Behavior.FromCreate
 }
 
 // CanonicalizeBehaviors rewrites every config in refs with [CanonicalJSON]

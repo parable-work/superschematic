@@ -41,6 +41,14 @@ type BehaviorSpec struct {
 	// behavior, depends on and registers. Optional; the core's behaviors
 	// are the engine's own crates and name none.
 	Rust BehaviorRust
+	// Rules is the Rust crate whose implementation of the core's hooks runs
+	// the behavior on the behaviors' core (D103's step 5): a crate whose
+	// Register value implements superschematic_rules::Behavior, which a
+	// project's rules crate (the rulescore generator's) depends on and adds
+	// to the core's behaviors (Core::with), so a table may implement or
+	// carry the behavior as it does the core's. Optional; the core's own
+	// behaviors are the core's crate and name none.
+	Rules BehaviorRust
 	// Declaration is the behavior's JSON declaration.
 	Declaration json.RawMessage
 }
@@ -86,6 +94,14 @@ type BehaviorDeclaration struct {
 	// ConfigSchema is the JSON Schema of the config a type gives the
 	// behavior. Absent means the behavior takes no config.
 	ConfigSchema json.RawMessage `json:"configSchema,omitempty"`
+	// References are the members of the config that name a part of the
+	// table its use sits on (D103's step 5): a field, a Workflow use, a
+	// state of it, or a table whose writes the use hears. The build holds
+	// a use's config to them (verify's checkConfigReferences) and derives
+	// what reads them (BehaviorListens) from them, as per-behavior code did
+	// before. Only a behavior a table composes names them; an engine's
+	// declaration parser shifts the member out.
+	References []BehaviorReference `json:"references,omitempty"`
 	// CreateParamsSchema is the JSON Schema of the parameters a create
 	// gives the behavior for the new instance, which an engine passes to
 	// its initialize: an object schema that sets "additionalProperties",
@@ -151,6 +167,20 @@ type BehaviorDeclaration struct {
 	// branches on a veto's code, read beside the behavior's name; an
 	// engine refuses a veto whose code its behavior does not list.
 	Vetoes []BehaviorVeto `json:"vetoes,omitempty"`
+	// Rules are a declarative behavior's rules (D103's step 5), in the
+	// vocabulary the behaviors' core interprets: a behavior no Rust
+	// implements, whose declaration a host hands the core whole
+	// (superschematic_rules_behaviors::core_declaring, the bindings'
+	// declare). The core checks them against the declaration when it is
+	// handed it, and each use's config at define; the registry holds them
+	// to an object. Absent for a behavior code implements.
+	Rules json.RawMessage `json:"rules,omitempty"`
+}
+
+// Declarative reports whether the declaration states its rules (D103's
+// step 5): a behavior the core runs from its declaration alone.
+func (d BehaviorDeclaration) Declarative() bool {
+	return len(d.Rules) > 0
 }
 
 // BehaviorTable is a sub-table a behavior keeps per row (D103): on a table
@@ -246,6 +276,19 @@ type BehaviorField struct {
 	// An engine's declaration parser takes the key and shifts it out, as it
 	// does a field's type, since step 4.
 	Optional bool `json:"optional,omitempty"`
+	// FromCreate is true for a value field a create gives (D147): on a
+	// field anchor the create's member of the anchor's name is the value
+	// the core hands the behavior, so a table's create input holds the
+	// field, and its update input does not, since only the behavior's
+	// operations change it (Aliased's name). Only the value field is.
+	FromCreate bool `json:"fromCreate,omitempty"`
+	// RowKey is true for a field of a shared table that holds the key of a
+	// row of the table that composes the behavior (Aliased's holder,
+	// D147): its declared type is string, which the core reads, and on a
+	// table the build types its column by the table's key, so a merge's
+	// statements repoint it as they repoint a foreign key. Only a shared
+	// table's field other than its key is.
+	RowKey bool `json:"rowKey,omitempty"`
 }
 
 // BehaviorFieldPath is a behavior field's qualified name: the behavior's
@@ -298,6 +341,14 @@ type BehaviorOperation struct {
 	// tool: one of the values of the registry's ToolInvocationPolicy.
 	// Empty means the policy's default.
 	InvocationPolicy string `json:"invocationPolicy,omitempty"`
+	// Permissions are the config's members whose permissions the
+	// operation checks (D103's step 5), each a ConfigPath: Workflow's
+	// transition checks transitions[].permission and overridePermission.
+	// The permission catalog lists under the operation only the strings a
+	// use's config holds at them. A declaration none of whose operations
+	// lists any states none, and the catalog lists every permission its
+	// config names under each operation of its use.
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 // BehaviorEvent is an event a behavior emits about a row (D104): its kind,
@@ -405,6 +456,9 @@ type Behavior struct {
 	// Rust is the Rust crate that implements it; the zero value when its
 	// spec names none.
 	Rust BehaviorRust
+	// Rules is the Rust crate that implements it on the behaviors' core
+	// (D103's step 5); the zero value when its spec names none.
+	Rules BehaviorRust
 
 	config         *validator.Schema
 	configRequired bool
@@ -512,10 +566,13 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rust); err != nil {
 		return err
 	}
+	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rules); err != nil {
+		return err
+	}
 	if _, dup := r.behaviors[decl.Name]; dup {
 		return fmt.Errorf("registry: behavior %q is already registered", decl.Name)
 	}
-	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package, Rust: spec.Rust}
+	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package, Rust: spec.Rust, Rules: spec.Rules}
 	if len(decl.ConfigSchema) > 0 {
 		compiled, err := compileSchema(decl.ConfigSchema, "superschematic://behaviors/"+decl.Name+"/config.json")
 		if err != nil {
@@ -562,8 +619,28 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if err := checkBehaviorVetoes(decl); err != nil {
 		return err
 	}
+	if err := checkBehaviorPaths(decl); err != nil {
+		return err
+	}
+	if err := checkBehaviorRules(decl); err != nil {
+		return err
+	}
 	r.behaviors[decl.Name] = b
 	r.noteExtension(spec.Extension)
+	return nil
+}
+
+// checkBehaviorRules holds a declarative behavior's rules (D103's step 5)
+// to an object: the behaviors' core reads the vocabulary and refuses what
+// it does not read when a host hands it the declaration.
+func checkBehaviorRules(decl BehaviorDeclaration) error {
+	if !decl.Declarative() {
+		return nil
+	}
+	var rules map[string]json.RawMessage
+	if err := json.Unmarshal(decl.Rules, &rules); err != nil || rules == nil {
+		return fmt.Errorf("registry: behavior %s rules is an object of the declarative vocabulary's rules (D103)", decl.Name)
+	}
 	return nil
 }
 
@@ -674,6 +751,12 @@ func checkBehaviorFields(decl BehaviorDeclaration) error {
 		if field.Optional && field.Name != decl.Value {
 			return fmt.Errorf("registry: behavior %s field %s is optional, and only its value field may be: every other field a table takes is optional already", decl.Name, field.Name)
 		}
+		if field.FromCreate && field.Name != decl.Value {
+			return fmt.Errorf("registry: behavior %s field %s is fromCreate, and only its value field may be: a create gives a field anchor's value alone", decl.Name, field.Name)
+		}
+		if field.RowKey {
+			return fmt.Errorf("registry: behavior %s field %s is rowKey, and only a shared table's field may be: a row's own fields hold no other row's key", decl.Name, field.Name)
+		}
 	}
 	if decl.Value != "" && !seen[decl.Value] {
 		return fmt.Errorf("registry: behavior %s value %q is not one of its fields", decl.Name, decl.Value)
@@ -712,6 +795,10 @@ func checkBehaviorTables(decl BehaviorDeclaration) error {
 				return fmt.Errorf("registry: behavior %s table %s field %s has no type: a sub-table's field is a column", decl.Name, table.Name, field.Name)
 			case field.Volatile || field.PerReader:
 				return fmt.Errorf("registry: behavior %s table %s field %s is volatile: a sub-table's field is stored", decl.Name, table.Name, field.Name)
+			case field.Optional || field.FromCreate:
+				return fmt.Errorf("registry: behavior %s table %s field %s is optional or fromCreate, which only a value field is", decl.Name, table.Name, field.Name)
+			case field.RowKey && (!table.Shared() || field.Name == table.Key || field.Type != "string"):
+				return fmt.Errorf("registry: behavior %s table %s field %s is rowKey, which only a shared table's field other than its key is, typed string", decl.Name, table.Name, field.Name)
 			}
 			fields[field.Name] = field
 		}

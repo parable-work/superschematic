@@ -590,6 +590,27 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
         self.runner().hard_delete_one(key).await
     }
 
+    /// Folds the row `from` into the row `into`, in a savepoint of the
+    /// caller's transaction (D147): for each relation of the schema that
+    /// references the table it deletes the rows a unique index of their
+    /// table would refuse once repointed, stamping one deleted where the
+    /// index holds live rows alone, repoints the rest, moves an Aliased
+    /// field's aliases and names, and then deletes `from` as `delete_one`
+    /// does. It answers the rows repointed and deleted by table.
+    /// [`Error::NotFound`] when either is no live row; [`Error::Merge`]
+    /// when they are one row, or when `into` references `from` through a
+    /// relation of the table to itself; [`Error::NoUser`] when it stamps a
+    /// row deleted and no user acts; [`Error::Invalid`] for a table that
+    /// does not implement Mergeable, and for a client outside a
+    /// transaction.
+    pub async fn merge_into(
+        &self,
+        from: &Value,
+        into: &Value,
+    ) -> Result<super::MergeResult, Error> {
+        self.runner().merge_into(from, into).await
+    }
+
     /// Runs `operation` of the behavior under `member`, the use's field
     /// or the behavior's own member, on the live row whose key is `key`,
     /// through the behaviors' core (D103), in the caller's transaction: a
@@ -876,6 +897,12 @@ where
     /// Removes the row whose key is `key`, deleted or not.
     pub async fn hard_delete_one(&self, key: &Key) -> Result<(), Error> {
         self.repository.hard_delete_one(&wire(key)?).await
+    }
+
+    /// Folds the row `from` into the row `into` (D147), as the untyped
+    /// repository's `merge_into` does.
+    pub async fn merge_into(&self, from: &Key, into: &Key) -> Result<super::MergeResult, Error> {
+        self.repository.merge_into(&wire(from)?, &wire(into)?).await
     }
 
     /// Runs `operation` of the behavior under `member` on the live row

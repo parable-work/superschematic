@@ -122,6 +122,9 @@ func checkWhat(t *Table, c *Check) string {
 // checkBreach says what a row that fails the check holds, ending a
 // sentence.
 func checkBreach(c *Check) string {
+	if breach := c.spec().Breach(); breach != "" {
+		return breach
+	}
 	if len(c.In) > 0 {
 		return "a value other than " + strings.Join(quoted(c.In), ", ")
 	}

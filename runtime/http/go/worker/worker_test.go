@@ -502,3 +502,43 @@ func TestEachMessageIsASpan(t *testing.T) {
 		t.Errorf("statuses %v and %v; want ok unset and retry an error", byID["ok"].Status, byID["retry"].Status)
 	}
 }
+
+// TestRunReleasesAClaimInFlightAtAStop: a stop that comes while a claim
+// runs lets the claim answer, not cancelling it, and releases what it
+// claimed, whose handlers never start, so the messages are due again at
+// once rather than when their lease runs out (D187).
+func TestRunReleasesAClaimInFlightAtAStop(t *testing.T) {
+	f := newFake()
+	handled := make(chan string, 1)
+	f.add("late", func(context.Context) error { handled <- "late"; return nil })
+	q := f.queue(time.Minute)
+	claiming, answer := make(chan struct{}), make(chan struct{})
+	claim := q.Claim
+	q.Claim = func(ctx context.Context, n int, lease time.Duration) ([]Message, error) {
+		close(claiming)
+		<-answer
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		return claim(ctx, n, lease)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	stopped := make(chan error, 1)
+	go func() { stopped <- Run(ctx, q, Options{Concurrency: 1, Idle: 5 * time.Millisecond}) }()
+	<-claiming
+	cancel()
+	close(answer)
+	if err := <-stopped; err != nil {
+		t.Fatalf("Run = %v", err)
+	}
+	select {
+	case id := <-handled:
+		t.Fatalf("the handler of %s ran after the stop", id)
+	default:
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.claimed != 1 || fmt.Sprint(f.released) != "[late]" {
+		t.Fatalf("claimed %d, released %v; want the claim answered and its message released", f.claimed, f.released)
+	}
+}

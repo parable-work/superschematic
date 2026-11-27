@@ -321,6 +321,15 @@ fn apply_one(state: &mut State, write: &StoreWrite) -> Result<(), Stop> {
                     }
                     row.version += 1;
                 }
+                // A delete held to its version (D147).
+                SharedRowChange::Delete { expected_version } => {
+                    state
+                        .shared
+                        .get(&at)
+                        .filter(|row| row.version == *expected_version)
+                        .ok_or(Stop::Moved)?;
+                    state.shared.remove(&at);
+                }
                 other => {
                     return Err(Stop::Refused(Refusal::internal(format!(
                         "the development store takes no shared-table change of this kind: {other:?}"

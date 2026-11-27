@@ -73,10 +73,12 @@ type BehaviorOperation struct {
 	// table's @key field, which its result's keys are of.
 	Table bool `json:"table,omitempty" yaml:"table,omitempty"`
 
-	// Permissions are the permissions the use's config names, sorted and
-	// each once (a Workflow transition's permission), which the core
-	// checks for the moves that name them. The permission catalog lists
-	// each under the operation.
+	// Permissions are the permissions the operation checks, sorted and
+	// each once (a Workflow transition's permission, which the core checks
+	// for the moves that name it): the strings the use's config holds at
+	// the members its declaration says the operation checks (D103's step
+	// 5), or every permission the config names when the declaration says
+	// none. The permission catalog lists each under the operation.
 	Permissions []string `json:"permissions,omitempty" yaml:"permissions,omitempty"`
 }
 

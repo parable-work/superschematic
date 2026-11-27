@@ -10,6 +10,7 @@ import {
   accessGrants,
   accessLog,
   audience,
+  calendarSource,
   key,
   projection,
   searchField,
@@ -55,8 +56,10 @@ export abstract class Folder {
 }
 
 // A document, in a folder or in none, searched by its title. An agent run
-// reads it and never writes it, unless its row says otherwise.
+// reads it and never writes it, unless its row says otherwise. It is on the
+// calendar on the day it was made, as its reader sees it (D152, D187).
 @audience<Document>({ inheritFrom: "folder", agents: "readOnly" })
+@calendarSource<Document>({ field: "createdAt", title: "title", kind: "document", color: "documents" })
 export abstract class Document {
   @key
   id: AutoGenerate<Identity.UUID>;

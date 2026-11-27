@@ -1,0 +1,2153 @@
+{
+  "file": "core-aliased",
+  "source": "runtime/engine/testdata/rules/scenarios/core-aliased.json",
+  "behaviors": [
+    "Workflow",
+    "Reactions",
+    "Constants",
+    "StateRules",
+    "Approvals",
+    "Timers",
+    "Lease",
+    "Presence",
+    "Budget",
+    "Retries",
+    "Seats",
+    "Reconcile",
+    "Schedules",
+    "Pool",
+    "Rollups",
+    "Dependencies",
+    "Numbering",
+    "Revisions",
+    "Comments",
+    "Derived",
+    "Provenance",
+    "Stock",
+    "Holds",
+    "Calendar",
+    "Payments",
+    "Recurrence",
+    "Blueprint",
+    "Aliased"
+  ],
+  "scenarios": [
+    {
+      "name": "Aliased > a create gives the name, and a name another row holds, as its name or an alias, in its normalized form, refuses a create, a rename and an addAlias with that row's key",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Company",
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Company",
+              "uses": [
+                {
+                  "behavior": "Aliased",
+                  "anchor": {
+                    "field": "name"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "city",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c1",
+              "own": {
+                "name": "Acme",
+                "city": "Oslo"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "c1",
+            "row": {
+              "own": {
+                "city": "Oslo"
+              },
+              "owned": {
+                "name": {
+                  "name": "Acme"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "addAlias",
+              "params": {
+                "alias": "Acme Corp"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "alias": "Acme Corp"
+            },
+            "row": {
+              "own": {
+                "city": "Oslo"
+              },
+              "owned": {
+                "name": {
+                  "name": "Acme"
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme corp",
+                    "values": {
+                      "alias": "Acme Corp"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c2",
+              "own": {
+                "name": "ACME"
+              },
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Aliased vetoes create of Company c2: \"ACME\" is held by Company c1, as its name or an alias: a name is one row's",
+              "details": {
+                "behavior": "Aliased",
+                "use": "name",
+                "action": "create",
+                "reason": "\"ACME\" is held by Company c1, as its name or an alias: a name is one row's",
+                "vetoCode": "name_taken",
+                "vetoDetails": {
+                  "name": "ACME",
+                  "normalized": "acme",
+                  "holder": "c1"
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c2",
+              "own": {
+                "name": " acme   corp"
+              },
+              "params": {}
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Aliased vetoes create of Company c2: \" acme   corp\" is held by Company c1, as its name or an alias: a name is one row's",
+              "details": {
+                "behavior": "Aliased",
+                "use": "name",
+                "action": "create",
+                "reason": "\" acme   corp\" is held by Company c1, as its name or an alias: a name is one row's",
+                "vetoCode": "name_taken",
+                "vetoDetails": {
+                  "name": " acme   corp",
+                  "normalized": "acme corp",
+                  "holder": "c1"
+                }
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c2",
+              "own": {
+                "name": "Globex"
+              },
+              "params": {}
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "key": "c2",
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Globex"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c2",
+              "useId": "name",
+              "operation": "rename",
+              "params": {
+                "name": "acme corp"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Aliased vetoes rename of Company c2: \"acme corp\" is held by Company c1, as its name or an alias: a name is one row's",
+              "details": {
+                "behavior": "Aliased",
+                "use": "name",
+                "action": "rename",
+                "reason": "\"acme corp\" is held by Company c1, as its name or an alias: a name is one row's",
+                "vetoCode": "name_taken",
+                "vetoDetails": {
+                  "name": "acme corp",
+                  "normalized": "acme corp",
+                  "holder": "c1"
+                }
+              }
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Globex"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c2",
+              "useId": "name",
+              "operation": "addAlias",
+              "params": {
+                "alias": "Acme"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Aliased vetoes addAlias of Company c2: \"Acme\" is held by Company c1, as its name or an alias: a name is one row's",
+              "details": {
+                "behavior": "Aliased",
+                "use": "name",
+                "action": "addAlias",
+                "reason": "\"Acme\" is held by Company c1, as its name or an alias: a name is one row's",
+                "vetoCode": "name_taken",
+                "vetoDetails": {
+                  "name": "Acme",
+                  "normalized": "acme",
+                  "holder": "c1"
+                }
+              }
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Globex"
+                }
+              }
+            },
+            "version": 1
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 11,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        },
+        {
+          "step": 12,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Aliased > rename keeps the old name as an alias, a rename to an alias makes it the name and the old name an alias, one of only the case keeps none, and the name the row has answers unchanged",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Company",
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Company",
+              "uses": [
+                {
+                  "behavior": "Aliased",
+                  "anchor": {
+                    "field": "name"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "city",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c1",
+              "own": {
+                "name": "Acme"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "c1",
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "rename",
+              "params": {
+                "name": "Acme Group"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "name": "Acme Group",
+              "alias": "Acme"
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme Group"
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme",
+                    "values": {
+                      "alias": "Acme"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "rename",
+              "params": {
+                "name": "ACME"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "name": "ACME",
+              "alias": "Acme Group"
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "ACME"
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme group",
+                    "values": {
+                      "alias": "Acme Group"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "rename",
+              "params": {
+                "name": "acme"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "name": "acme"
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "acme"
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme group",
+                    "values": {
+                      "alias": "Acme Group"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "rename",
+              "params": {
+                "name": "acme"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "name": "acme",
+              "unchanged": true
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "acme"
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme group",
+                    "values": {
+                      "alias": "Acme Group"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 4
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "name",
+              "operation": "resolve",
+              "params": {
+                "name": "acme group"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "row": {
+                "key": "c1",
+                "name": "acme",
+                "alias": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "name",
+              "operation": "resolve",
+              "params": {
+                "name": "Acme"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "row": {
+                "key": "c1",
+                "name": "acme",
+                "alias": false
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c2",
+              "own": {
+                "name": "Acme Group"
+              },
+              "params": {}
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Aliased vetoes create of Company c2: \"Acme Group\" is held by Company c1, as its name or an alias: a name is one row's",
+              "details": {
+                "behavior": "Aliased",
+                "use": "name",
+                "action": "create",
+                "reason": "\"Acme Group\" is held by Company c1, as its name or an alias: a name is one row's",
+                "vetoCode": "name_taken",
+                "vetoDetails": {
+                  "name": "Acme Group",
+                  "normalized": "acme group",
+                  "holder": "c1"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        },
+        {
+          "step": 6,
+          "call": "instances.get",
+          "reason": "a read of rows, which the transcript holds after each command that names one"
+        }
+      ]
+    },
+    {
+      "name": "Aliased > with normalize slug, removeAlias frees its alias for another row, refuses the name, and answers one the row does not hold unchanged; resolve finds the row a name or an alias names, and none",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Company",
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Company",
+              "uses": [
+                {
+                  "behavior": "Aliased",
+                  "config": {
+                    "normalize": "slug"
+                  },
+                  "anchor": {
+                    "field": "name"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "city",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "config": {
+                  "normalize": "slug"
+                },
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "config": {
+                  "normalize": "slug"
+                },
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c1",
+              "own": {
+                "name": "Acme, Inc."
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "c1",
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme, Inc."
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "addAlias",
+              "params": {
+                "alias": "Acme Co"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "alias": "Acme Co"
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme, Inc."
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme-co",
+                    "values": {
+                      "alias": "Acme Co"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "addAlias",
+              "params": {
+                "alias": "acme--co"
+              }
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "result": {
+              "alias": "acme--co",
+              "unchanged": true
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme, Inc."
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme-co",
+                    "values": {
+                      "alias": "Acme Co"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "addAlias",
+              "params": {
+                "alias": "ACME INC"
+              }
+            },
+            "request": "request-4"
+          },
+          "expect": {
+            "result": {
+              "alias": "ACME INC",
+              "unchanged": true
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme, Inc."
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme-co",
+                    "values": {
+                      "alias": "Acme Co"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "name",
+              "operation": "resolve",
+              "params": {
+                "name": "acme_co"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "row": {
+                "key": "c1",
+                "name": "Acme, Inc.",
+                "alias": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "removeAlias",
+              "params": {
+                "alias": "acme inc"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "refused": {
+              "code": "vetoed",
+              "status": 409,
+              "class": "BehaviorVetoError",
+              "message": "behavior Aliased vetoes removeAlias of Company c1: \"acme inc\" is the name of Company c1, not one of its aliases: a rename gives it another name first",
+              "details": {
+                "behavior": "Aliased",
+                "use": "name",
+                "action": "removeAlias",
+                "reason": "\"acme inc\" is the name of Company c1, not one of its aliases: a rename gives it another name first",
+                "vetoCode": "is_name",
+                "vetoDetails": {
+                  "name": "Acme, Inc."
+                }
+              }
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme, Inc."
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme-co",
+                    "values": {
+                      "alias": "Acme Co"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "removeAlias",
+              "params": {
+                "alias": "Initech"
+              }
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "result": {
+              "alias": "Initech",
+              "unchanged": true
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme, Inc."
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme-co",
+                    "values": {
+                      "alias": "Acme Co"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "removeAlias",
+              "params": {
+                "alias": "acme co"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "alias": "Acme Co"
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme, Inc."
+                }
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "name",
+              "operation": "resolve",
+              "params": {
+                "name": "Acme Co"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "row": null
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 13,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c2",
+              "own": {
+                "name": "ACME CO"
+              },
+              "params": {}
+            },
+            "request": "request-10"
+          },
+          "expect": {
+            "key": "c2",
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "ACME CO"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 14,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "name",
+              "operation": "resolve",
+              "params": {
+                "name": "acme-co"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "row": {
+                "key": "c2",
+                "name": "ACME CO",
+                "alias": false
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 15,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "name",
+              "operation": "resolve",
+              "params": {
+                "name": "Initech"
+              }
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "result": {
+              "row": null
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Aliased > a delete frees the row's names, its name and each alias, for another row",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [
+        {
+          "name": "Company",
+          "fields": [
+            {
+              "name": "city",
+              "type": "string"
+            }
+          ],
+          "versions": [
+            {
+              "name": "Company",
+              "uses": [
+                {
+                  "behavior": "Aliased",
+                  "anchor": {
+                    "field": "name"
+                  }
+                }
+              ],
+              "fields": [
+                {
+                  "name": "city",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.publish",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "publish",
+              "from": null
+            }
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 4,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c1",
+              "own": {
+                "name": "Acme"
+              },
+              "params": {}
+            },
+            "request": "request-1"
+          },
+          "expect": {
+            "key": "c1",
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 5,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c1",
+              "useId": "name",
+              "operation": "addAlias",
+              "params": {
+                "alias": "Acme Co"
+              }
+            },
+            "request": "request-2"
+          },
+          "expect": {
+            "result": {
+              "alias": "Acme Co"
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme"
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme co",
+                    "values": {
+                      "alias": "Acme Co"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 6,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c2",
+              "own": {
+                "name": "Globex"
+              },
+              "params": {}
+            },
+            "request": "request-3"
+          },
+          "expect": {
+            "key": "c2",
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Globex"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 7,
+          "call": "instances.delete",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "delete",
+              "key": "c1"
+            },
+            "request": "request-4"
+          },
+          "expect": {}
+        },
+        {
+          "kind": "command",
+          "step": 8,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "name",
+              "operation": "resolve",
+              "params": {
+                "name": "acme"
+              }
+            },
+            "request": "request-5"
+          },
+          "expect": {
+            "result": {
+              "row": null
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 9,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "operation",
+              "key": "c2",
+              "useId": "name",
+              "operation": "addAlias",
+              "params": {
+                "alias": "Acme"
+              }
+            },
+            "request": "request-6"
+          },
+          "expect": {
+            "result": {
+              "alias": "Acme"
+            },
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Globex"
+                }
+              }
+            },
+            "subRows": {
+              "name": {
+                "aliases": [
+                  {
+                    "key": "acme",
+                    "values": {
+                      "alias": "Acme"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 10,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "create",
+              "id": "c3",
+              "own": {
+                "name": "Acme Co"
+              },
+              "params": {}
+            },
+            "request": "request-7"
+          },
+          "expect": {
+            "key": "c3",
+            "row": {
+              "own": {},
+              "owned": {
+                "name": {
+                  "name": "Acme Co"
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "name",
+              "operation": "resolve",
+              "params": {
+                "name": "acme"
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "result": {
+              "row": {
+                "key": "c2",
+                "name": "Globex",
+                "alias": true
+              }
+            }
+          }
+        },
+        {
+          "kind": "command",
+          "step": 12,
+          "call": "instances.invokeSchema",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Company",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "tableOperation",
+              "useId": "name",
+              "operation": "resolve",
+              "params": {
+                "name": "acme co"
+              }
+            },
+            "request": "request-9"
+          },
+          "expect": {
+            "result": {
+              "row": {
+                "key": "c3",
+                "name": "Acme Co",
+                "alias": false
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    },
+    {
+      "name": "Aliased > define refuses a normalize that is neither lower nor slug, and a key the config does not take",
+      "clock": {
+        "fixed": 1000000
+      },
+      "types": [],
+      "steps": [
+        {
+          "kind": "check",
+          "step": 2,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "config": {
+                  "normalize": "upper"
+                },
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Company: field name: behavior Aliased config: /normalize: must be one of \"lower\", \"slug\"",
+              "details": {
+                "issues": [
+                  {
+                    "use": "name",
+                    "index": 0,
+                    "behavior": "Aliased",
+                    "kind": "schema",
+                    "path": "/config/normalize",
+                    "message": "must be one of \"lower\", \"slug\""
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "kind": "check",
+          "step": 3,
+          "call": "schemas.define",
+          "database": "{{dir:1}}/engine.db",
+          "spec": {
+            "name": "Company",
+            "uses": [
+              {
+                "behavior": "Aliased",
+                "config": {
+                  "case": "lower"
+                },
+                "anchor": {
+                  "field": "name"
+                }
+              }
+            ],
+            "fields": [
+              {
+                "name": "city",
+                "type": "string"
+              }
+            ]
+          },
+          "command": {
+            "caller": {
+              "subject": "alice",
+              "permissions": []
+            },
+            "now": 1000000,
+            "action": {
+              "kind": "define"
+            }
+          },
+          "expect": {
+            "refused": {
+              "code": "invalid_schema",
+              "status": 422,
+              "class": "SchemaDocumentError",
+              "message": "type Company: field name: behavior Aliased config: unknown key \"case\"",
+              "details": {
+                "issues": [
+                  {
+                    "use": "name",
+                    "index": 0,
+                    "behavior": "Aliased",
+                    "kind": "schema",
+                    "path": "/config",
+                    "message": "unknown key \"case\""
+                  }
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "skipped": [
+        {
+          "step": 1,
+          "call": "open",
+          "reason": "it opens an engine: an adapter keeps one set of tables for each database the steps name"
+        }
+      ]
+    }
+  ]
+}

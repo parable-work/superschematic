@@ -10,9 +10,16 @@ to the correct member by inspecting the discriminator value during validation.
 """
 
 import math
+{{- if .VariantUnions}}
+from enum import Enum
+from typing import Annotated, Any, Dict, NamedTuple, Optional, Tuple, Union
+
+from pydantic import BaseModel, Field, TypeAdapter
+{{- else}}
 from typing import Annotated, Any, NamedTuple, Union
 
 from pydantic import Field, TypeAdapter
+{{- end}}
 
 from .types import (
     {{range $i, $name := .UnionMemberTypeNames}}{{if $i}},
@@ -279,3 +286,102 @@ def read_union_field(name: str, value: Any, depth: int, is_map: bool) -> Any:
         return {key: levels(entry, depth) if entry is not None else None for key, entry in value.items()}
     return levels(value, depth)
 
+{{- if .VariantUnions}}
+
+
+# The member each value of a variant union's sibling names (D149), by its
+# index in _UNION_MEMBERS: a field of the union holds the member its
+# sibling's value names, and none while the sibling names none.
+_VARIANT_ARMS: Dict[str, Dict[str, int]] = {
+{{- range .VariantUnions}}
+    "{{.Name}}": { {{- range $i, $arm := .ArmIndexes}}{{if $i}}, {{end}}"{{$arm.Value}}": {{$arm.Index}}{{end -}} },
+{{- end}}
+}
+
+
+def _variant_by(value: Any) -> Optional[str]:
+    """The string a variant field's sibling holds: an enum's value or the
+    text itself, and None for any other value or none."""
+    if isinstance(value, Enum):
+        value = value.value
+    return value if isinstance(value, str) else None
+
+
+def _variant_field_value(data: Dict[str, Any], keys: Tuple[str, str]) -> Tuple[Optional[str], Any]:
+    """The key data holds a field at, by its wire name or its attribute
+    name, and the value there."""
+    for key in keys:
+        if key in data:
+            return key, data[key]
+    return None, None
+
+
+def read_variant_value(name: str, by: Optional[str], value: Any) -> Any:
+    """Read value, a field of the variant union name, as the member by
+    names, by its from_dict_non_strict, and raise ValueError when the value
+    does not decode under the member's types (the structural predicate's
+    _reads_type), as read_union_value refuses a value no member reads. A
+    member model is returned as it is; a value while by names no member is
+    read as read_union_value reads it, and validate_all reports it as
+    "variant"."""
+    members = _UNION_MEMBERS[name]
+    index = _VARIANT_ARMS[name].get(by) if by is not None else None
+    if index is None or isinstance(value, members) or not isinstance(value, dict):
+        return read_union_value(name, value)
+    member = _READ_UNIONS[name].members[index].type_name
+    if not _reads_type(member, value):
+        raise ValueError(f"{name}: the payload does not read as {member}, which its sibling names")
+    return members[index].from_dict_non_strict(value)
+
+
+def read_variant_field(name: str, data: Any, field: Tuple[str, str], by: Tuple[str, str]) -> Any:
+    """Read a model's variant field in data, the input its model validates,
+    as the member of union name its sibling names (D149). field and by are
+    the field's and the sibling's wire and attribute names."""
+    if not isinstance(data, dict):
+        return data
+    key, value = _variant_field_value(data, field)
+    if key is None or value is None:
+        return data
+    _, by_value = _variant_field_value(data, by)
+    return {**data, key: read_variant_value(name, _variant_by(by_value), value)}
+
+
+def _construct_member(model: Any, payload: Dict[str, Any]) -> Any:
+    """Build model from payload, a JSON object, without pydantic's own
+    checks, its defaults filled in, so its validate_all reports every rule
+    the payload breaks; a required field the payload lacks is None."""
+    data: Dict[str, Any] = {}
+    for attr, field in model.model_fields.items():
+        key = field.alias or attr
+        if key in payload:
+            data[attr] = payload[key]
+        elif attr in payload:
+            data[attr] = payload[attr]
+        elif field.is_required():
+            data[attr] = None
+    return model.model_construct(**data)
+
+
+def check_variant_field(name: str, errors: Any, key: str, by: Any, value: Any, by_alias: bool) -> None:
+    """Validate value, a field of the variant union name, as the member its
+    sibling's value, by, names (D149): "variant" at key while by names no
+    member or value holds another member, "type" for a value that is no
+    object, and otherwise the member's validate_all errors under key."""
+    members = _UNION_MEMBERS[name]
+    index = _VARIANT_ARMS[name].get(_variant_by(by))
+    if index is None:
+        errors.add_field_error(key, "variant", "holds a value its sibling names no member for")
+        return
+    member = members[index]
+    if isinstance(value, dict):
+        value = _construct_member(member, value)
+    elif not isinstance(value, BaseModel):
+        errors.add_field_error(key, "type", "expected an object")
+        return
+    if not isinstance(value, member):
+        errors.add_field_error(key, "variant", "holds a member its sibling does not name")
+        return
+    nested = value.validate_all(by_alias=True) if by_alias else value.validate_all()
+    errors.add_nested_errors(key, nested)
+{{- end}}

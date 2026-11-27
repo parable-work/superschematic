@@ -137,9 +137,8 @@ a secret, on gcp and on Workers, and a collector the target runs.
 **D69** (L 8468). A planner per pull request. `planner` admits every pull
 request in every project with a plan job.
 
-**D31, amended** (L 8521, 9320).
-- The parity matrix (`internal/generator/parity`) has no union field.
-- No compatibility check holds a Go enum's members as a wire contract.
+**D31, amended** (L 8521, 9320). No compatibility check holds a Go
+enum's members as a wire contract.
 
 **D71** (L 9735). A template per scenario, such as an API with its
 database and sign-in. Once the authoring packages are published, `init`
@@ -678,11 +677,86 @@ pays for a claim, each held to the test and passing it; a supply's write
 takes the lock its row names, and on SQLite and D1 every adapter checks a
 sub-table read made under a lock against its row's version, refusing one
 of a use that writes beside its rows or through an operation of the
-namespace. Development mode runs all twenty-five. Left of step 4: the
-folded Links, Search, Queue and Branches removed, Blueprint ported and
-Variants a field type (D149). Then steps 5 to 7, whose step 6 D117
-renames development mode. What the built steps left follows. The
-names and rules are reversible until the first release.
+namespace. Then Blueprint, ported, and Variants, a field type (D149), and
+Aliased (D147). Development mode runs those twenty-five and Blueprint;
+its handler refuses a create that gives Aliased's name (D147). The folded
+Links, Search, Queue and Branches are removed with engine types at step
+7, since engine types and the examples still compose them. On
+development mode, `examples/engine-jobs` replaces Links with a relation,
+Search with a `contains` list filter, since development mode serves no
+`searchText`, and Queue with D104's claim. Then step 5, below, and steps
+6 and 7, whose step 6 D117 renames development mode. What the built steps
+left follows. The names and rules are reversible until the first release.
+
+Step 5 is built, its three ways each:
+
+- **A class.** A behavior is declared by an exported abstract class
+  marked `@declaresBehavior` (`@superschematic/db`), and the build derives
+  its declaration from it (`internal/tools/behaviorclasses`, `make
+  behaviors`). The core's behaviors are classes, Comments aside. A class
+  states which config paths each operation's permissions are (`@checks`,
+  `BehaviorOperation.Permissions`), and the permission catalog lists under
+  an operation only those; and the config's references (`Names`, `Hears`),
+  to which the build holds a use's config and from which it derives the
+  listeners (`registry.BehaviorListens`).
+- **The implements form.** A project names its behaviors' directory
+  (`behaviors` in `superschematic.toml`), of classes or of declarations as
+  data, each named `<prefix>.<Name>`. A table implements one with
+  `implements Behavior<typeof B, T, C>`. A behavior whose rules need code
+  names its crate (`crate`), and the build of its DB schema writes the
+  project's rules crate (`rules/rust/<schema>`): the core's behaviors and
+  the crates', behind the core's ABI (`export_rules_abi!`), whose archive
+  and module stand in the stock ones' place. A generated Rust server builds
+  that crate's core, or the stock core with the layout's declarations.
+- **Bundles.** A bundle is a type alias (`Bundle<Parts, Fields>`), or
+  `bundles` in the data forms, which the loader expands into its parts'
+  uses, so the core never meets one. The core's are Reservation, Barrier,
+  Mailbox and Assignment (`internal/registry/bundles`), replayed in
+  `core-bundles`.
+- **Declarative rules.** A declaration's `rules` state a behavior's rules
+  in a fixed vocabulary the core interprets (`Declarative`): conditions in
+  the filter grammar with D104's `caller` operand, Constants' and
+  StateRules' field rules, guards, an operation's params, effects and
+  result, reactions, fields derived from a sub-table, and `configChange`. A
+  class gives them in `@declaresBehavior({ rules })`. A layout lists the
+  declarative behaviors its tables compose (`declarations`), and every host
+  hands them to its core (`declare`). acme.Rating is a class with rules
+  and no crate; its engine crate stays until step 7. Constants and
+  StateRules are declarative too, the question D104 left for step 5:
+  their registered declarations state rules, and no Rust behavior of
+  either is registered.
+
+Choices made: a class's rules are written as the JSON the declaration
+holds, and the canonical declaration sorts their object members; a class
+names a crate or rules, not both; a declare refuses a name the core it was
+built with registers, a project's crates' among them; a layout lists only
+the declarative behaviors the stock core does not embed; a bundle's parts
+are named as their uses, a field part by its fixed field.
+
+What step 5 left:
+
+- The bundle declarations (`internal/registry/bundles/*.bundle.json`) and
+  the TypeScript aliases (`packages/db/src/bundles.ts`) are two
+  definitions, held equal by the loader's tests. Deriving the JSON from an
+  alias needs a reader of its type-level configs, with `S["name"]` as a
+  placeholder, and a JSON Schema of its settings interface, whose keywords
+  the alias does not state (a currency's pattern, a lease's minimum), and
+  the declarations' descriptions are not the aliases' JSDoc.
+- A bundle written as a class, an extension's bundles, settings with
+  defaults, and bundles in `superschematic catalog`. Mailbox's take stays
+  the app's, and Reservation's resource's Calendar stays the resource's.
+- Runtime mode's publish and `superschematic-dev` take no declarations,
+  and a TypeScript server does not load a project's wasm core: a host
+  passes it to `@superschematic/rules`' `init` by hand.
+- Comments as a class: its signal's `paramsSchema` keeps the order it is
+  written in, which a class does not keep.
+- `@checks` and references for Budget, Lease, Retries, Schedules,
+  Recurrence, Derived, Payments, Revisions and Comments, which keep the
+  catalog's old rule. The Timers and Reactions checks a declaration cannot
+  state stay code (`verify/behaviors_timers.go`,
+  `verify/behaviors_reactions.go`).
+- A generated Rust server over a project's rules crate is built by
+  clippy in a test, and no test calls it.
 
 Four of step 4's ports met the test in part or not at all: Rollups,
 Blueprint, Revisions and Variants. D149 settles each: Rollups and
@@ -690,8 +764,9 @@ Blueprint stay behaviors, Revisions keeps its own log, and Variants
 becomes a discriminated-union field type.
 
 What Rollups and Dependencies left: a route or field that serves Rollups'
-`values` and Dependencies' `blocked`, which only `Action::Read` reaches;
-the TypeScript and Rust servers of `fixture-steps-api`, run end to end,
+`values` and Dependencies' `blocked`, which only `Action::Read` reaches.
+No table adapter runs `Action::Read` yet, only development mode's handler
+does, so each adapter needs it first. Also left: the TypeScript and Rust servers of `fixture-steps-api`, run end to end,
 and their SDK goldens; Rollups' `latest`, which needs a creation time the
 core can read; `listDependents` on a table (`registry.TableLeavesOut`),
 which needs a read across tables outside the core; hearing a blocker's
@@ -704,8 +779,7 @@ What Numbering and Revisions left: their SDK goldens and servers run end
 to end, and an API fixture of Revisions; a proposal's patch typed by the
 table's own fields, where `Generic.JSON` lets a patch name a field the
 table lacks and fail at the approval; `pendingProposals` served by the
-adapters and by development mode, which runs no `Action::Read` and so
-serves no Rollups `values` either; Retries' `resultField` and Budget's
+adapters, as development mode serves it; Retries' `resultField` and Budget's
 `limitField` with `setLimit`, which `Cx::update` now allows; Lease's
 `directOn` and Reactions' `when.revised`, which wait for Branches; a
 Reactions rule on `Revisions.pendingProposals`, which the build refuses;
@@ -740,8 +814,7 @@ engine types alone); a supply key held as a UUID in two forms, which the
 holder check compares as text; Stock's ledger read whole for its next
 number, where a count would do; Calendar's exclusion constraint on
 Postgres, which D83's DDL has no form for (and which says capacity 1
-alone); two claims raced through a Go or a Rust API server; and the
-Reservation bundle (step 5).
+alone); and two claims raced through a Go or a Rust API server.
 
 What Derived and Provenance left: an index for a deriver's pull, which
 scans rows a page at a time until a declaration may list a column (step
@@ -853,19 +926,12 @@ with several Workflows.
     stages the archive); a release's archives tarball holds it.
   - The layout holds only tables that compose a behavior, so
     `Cx::create_row` and `Cx::call_on` reach those tables alone.
-  - Typed operations (`behaviortypes.Narrow`), the field types and
+  - Typed operations (`behaviortypes.Narrow`) and the field types and
     carriers in `@superschematic/db` (`Workflow<C>`, `Timers<T, C>`,
-    `Reactions<T, C>`), the build's checks of Timers' and Reactions'
-    configs against the table (`verify/behaviors_timers.go`,
-    `verify/behaviors_reactions.go`) and the listener computation
-    (`registry.BehaviorListens`) are per-behavior code, as D58's are,
-    until step 5 derives them from a behavior's class declaration. Until
-    then an extension's field behavior has the data forms alone, and the
-    build checks Timers' rules that read the IR alone: its other rules
-    (states, transitions) and Workflow's are the core's define check's, at
-    the first command on the table.
-  - The implements form for behaviors other than the core's, bundles and
-    the declarative vocabulary (step 5).
+    `Reactions<T, C>`) are per-behavior code, as D58's are. The build
+    checks Timers' rules that read the IR alone: its other rules (states,
+    transitions) and Workflow's are the core's define check's, at the
+    first command on the table.
   - A read of a row's deadlines (`Timers.deadlines`) in the repositories,
     the API, the SDKs and MCP, through `Core::read_fields` or a declared
     read (D86), and a read of a use's sub-table rows in the repositories:
@@ -925,10 +991,6 @@ with several Workflows.
     for tables: only the build refuses it on an engine type, so a type the
     engine defines at run time keeps it unread, until step 7 removes
     engine types.
-  - The permission catalog lists a use's config permission under each of
-    its operations (`tickets.timers` under `fireTimer` too), though only
-    `resetTimer` and `snoozeTimer` check it, as the item on the catalog
-    below says.
   - A `dueAt` in the API is epoch milliseconds, an integer, as Timers
     declares it, not a date-time.
   - Timers' declaration lists `deadlines`, its computed read, as a field
@@ -986,9 +1048,10 @@ with several Workflows.
     where TypeScript's binds a string as it is. The adapters are to agree,
     and a transcript case would hold them to it.
   - An own field the layout leaves unconverted reaches the core apart in
-    each adapter, which no ported behavior reads yet and declarative rules
-    (step 5) will. On Postgres, Go reads a `DATE` as an instant's ISO
-    text, and a `TIME` or an `INTERVAL` as pgx's struct, where TypeScript
+    each adapter, which no ported behavior reads yet and a declarative
+    rule's condition may (step 5). On Postgres, Go reads a `DATE` as an
+    instant's ISO text, and a `TIME` or an `INTERVAL` as pgx's struct,
+    where TypeScript
     and Rust read the column's text. A list of date-times is left out of
     the Go ORM's create's own fields, which TypeScript's passes, and reads
     back as RFC 3339 with the server's offset in Go, `toISOString` text in
@@ -1036,11 +1099,11 @@ with several Workflows.
   - A non-writing behavior operation is a `POST` like the rest; a read
     that is a query, as a declared query (D86) and a `GET`, comes with the
     first behavior that declares one.
-  - A config's permissions are attributed to every operation of its use:
-    the catalog lists each string under a key `permission`, or since D104
-    one ending in `Permission` (Workflow's `overridePermission`), under each,
-    until step 5 derives which operation checks which from the class
-    declaration.
+  - A config's permissions are attributed to every operation of its use
+    when its declaration states no operation's `permissions`: the catalog
+    lists each string under a key `permission`, or since D104 one ending
+    in `Permission` (Workflow's `overridePermission`), under each. Step 5's
+    left names the behaviors whose classes state none.
   - The TypeScript SDK's typed states are the API's enum
     (`OrderStatusState.Paid`), not the literals the repository takes, and
     the TypeScript handler passes the decoded input to the repository
@@ -1069,30 +1132,37 @@ with several Workflows.
 
 ## D104. A transition may name who makes it and may repeat as no change, a sign-off pins what was read, Retries waits, Budget keeps periods, Presence times by state, Lease and Retries stay behaviors on tables, and Pool, Schedules, Seats and Reconcile join the core (D16, D56, D103 amended)
 
-Built: steps 1 to 3. A Workflow transition takes `by`,
+Built: steps 1 to 4. A Workflow transition takes `by`,
 `overridePermission`, `repeat` and `from`; Constants, StateRules,
 Approvals, Lease, Retries, Presence and Budget run on the core with their
 upgrades; and Seats, Reconcile, Schedules and Pool join it, with the
-`Capacity` contract Budget implements. Left: step 4, "Barrier, Mailbox
-and Assignment as bundles with step 5, and the `caller` operand of its
-declarative conditions", and what the built steps left.
+`Capacity` contract Budget implements. Queue's claim is built in
+`examples/engine-jobs` as a declared read and Lease's `acquire`, with no
+new primitive: it lists the queued rows by `-priority,id`, skips those
+`dependenciesBlocked`, takes the first with `Lease.acquire`, transitions
+it with the token as a precondition, and calls `Budget.reserve`.
 
-### Step 4
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| The declarative vocabulary (D103, step 5) gains a `caller` operand in its conditions, compared with a field that holds a subject. | Conditions over the row alone, which cannot say whose row it is |
-| `Assignment` becomes a bundle of one seat with `max: 1` and `onFull: refuse` (step 5), and its guard on another principal's `acquire` reads that seat. | Two behaviors that say who a row is for |
-
-### Two bundles
-
-Two of the app's patterns need no rules of their own, and wait for step
-5's bundles.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| *Barrier* is Workflow (`waiting`, `released`, `cancelled`), Rollups' `all` over the rows that relate to it, gating `released`, a Timers deadline whose `then` releases it, and a `release` transition behind a permission, a person's go-ahead: an update that waits for every running agent to say it is ready, for five minutes when a person started it, or for a person's go-ahead. It needed Rollups ported over a `HasMany` relation, which step 4 has built. | A behavior of its own |
-| *Mailbox* is Workflow (`queued`, `urgent`, `taken`, `sent`, `canceled`, `failed`), StateRules freezing a taken message, `by: ["createdBy"]` on the sender's moves, and Lease on a taken message, whose expiry moves it back to `queued`. A take is the declared read of a conversation's oldest waiting message and Lease's `acquire`, as above. | Comments, whose deliveries tell a subject of a message and are no work an agent takes in turn |
+Step 4 is built with D103's step 5. The declarative vocabulary's `caller`
+operand compares the caller's subject with a field that holds a subject.
+Barrier, Mailbox and Assignment are the core's bundles
+(`internal/registry/bundles`, and `@superschematic/db`'s aliases), each a
+fixture, replayed in `core-bundles` on every host. Barrier is built as
+this entry meant it: Rollups' gate takes `exemptions`, a permission whose
+holder passes it and the Timers deadlines whose moves do, and Barrier's
+exempts its release permission and its `timeout`. A barrier releases once
+every row is ready, at the timeout, or on a person's go-ahead, whether
+every row is ready or not; a caller without the permission is held by the
+gate. A Timers fire the gate would veto now moves, so it needs no retry.
+An exemption is a gating rollup's member, `{ permission?, deadlines? }`;
+a deadline's move is the Timers use's call of the transition while the
+named deadline is due and has not fired, and each named deadline is held
+at define to the Timers config. With the release permission exempt, the
+gate holds only a caller without it, whom Workflow's release refuses
+too: the gate decides which refusal that caller meets.
+Assignment is Seats with one seat of one subject that refuses a take
+while it is full; its guard on another principal's `acquire` is left
+(below). Step 5's question is answered: Constants and StateRules are
+declarative behaviors (D103's step 5). Left: what the built steps left.
 
 ### What the built steps left
 
@@ -1108,19 +1178,21 @@ context is written out.
 - An own-field write from an operation: the engine's `update()` runs
   through validation and the guards of Constants and StateRules
   (L 17048).
-- `Queue` folds into `@queue`: its claim a declared read and Lease's
-  `acquire`. The recordings that compose Presence or Budget beside Queue
-  wait for it, as does `checkReserve`'s `hears` (L 14883, 15070, 17235).
+- `Queue`'s claim is built (above). The recordings that compose Presence
+  or Budget beside Queue, and `checkReserve`'s `hears`, need a claim
+  mapping in the testkit, since a claim is now several commands where a
+  recorded `claimNext` was one (L 14883, 15070, 17235).
 - An operation of the namespace runs on the core now
   (`Action::NamespaceOperation`); a build's table still leaves Comments'
   streamed replies and read state out, and `@behaviorOperations` warns
   (L 17127, 17262).
-- Step 5's question: whether Constants' constancy and `oneWay`, and
-  StateRules' required and frozen fields, become declarative rules.
-  Constants still requires at least one field (L 15306, 17044, 17103).
+- Assignment's guard on another principal's Lease `acquire`, which reads
+  the assignee seat: a declarative condition reads the row's fields, not
+  Seats' occupants (step 4).
 - The permission catalog lists every permission a config names under
-  each of its use's operations, until a class declaration says which
-  operation checks which (L 17397).
+  each of its use's operations for a behavior whose class states no
+  operation's permissions, which D103's step 5 left names: Budget, Lease,
+  Retries and Schedules among them (L 17397).
 - The engine advertises and refuses the table-only members until engine
   types go (D103's step 7, which D117 reworks) (L 17028, 17124, 17252,
   17328).
@@ -1305,9 +1377,6 @@ its policy. Left:
   and a publish through the planner and a runner), the library on Workers
   and in a browser, run, and the Go and Python libraries over the C ABI;
   and the prebuilt image (D103's step 6).
-- `examples/engine-notes` and `examples/engine-jobs` on development mode:
-  engine-notes runs there (its differences are in its README), and
-  engine-jobs waits for Blueprint on the core (D149).
 - The policy asked of a behavior's reads of other types (Dependencies'
   blockers, Revisions' evidence, Rollups' links), as the engine asked
   them; the runner's requests made by a system principal the policy sees.
@@ -1709,32 +1778,44 @@ before it writes; a version graph's table that references the table, and
 a unique index that lists no keys on a referencing table, are refused at
 the build; and the counts are disjoint and leave `from` out.
 
-Left: `Aliased`, whole. A field typed `Aliased<T, { normalize? }>` is a
-name with aliases, `normalize` being `lower` (the default) or `slug`. The
-behavior keeps a table of the names, each unique in its normalized form
-across the table's names and aliases together. Its operations are
-`rename({ name })`, which keeps the old name as an alias, `addAlias` and
-`removeAlias`, and on the table `resolve({ name })`, which answers the row
-whose name or alias matches. A name another row holds, as a name or an
-alias, is refused with that row's key. The rules are the behaviors'
-core's, and a merge of a table with such a field moves `from`'s aliases to
-`into` and adds its name as one, a statement of `sqlutil.MergePlan`.
+Also built: `Aliased` on the core and on a table, in Go, TypeScript and
+Rust, over two primitives of the core: a declaration's value field that a
+create hands the behavior (`fromCreate`), refused at an update, and a
+shared row's delete held to its version (`Cx::delete_shared`). A field
+typed `Aliased<T, { normalize? }>` is a name with aliases, each unique in
+its normalized form (`lower`, the default, or `slug`) across the table's
+names and aliases together, through a shared table whose `holder` is
+typed by the table's key. Its operations are `rename`, `addAlias`,
+`removeAlias` and `resolve`, and a name another row holds is refused with
+`name_taken`, which names the holder. A merge moves `from`'s aliases to
+`into` and adds its name as one, through `MergeStep.Before`. The Rust
+repositories gain `merge_into` on Postgres and on SQLite
+(`sqlutil.SQLiteMergePlanOf`), where a merge that deletes `@versioned`
+rows is refused. Under per-record access a merge finds only the two rows
+its caller may write, and either one beyond the caller is not found
+before a statement runs, as an update's row is: Rust's `merge_into`
+opened for a caller (D181), and Go's `MergeInto` under `WithPrincipal`
+(D180), each held to it on Postgres, and in Rust on SQLite too. A
+`@tableOperation` merge (`ir.TableOperationMerge`) serves a table's
+`mergeInto` as a route, which the TypeScript server serves on Postgres;
+the build refuses it over a database whose first dialect is sqlite, where
+the TypeScript repositories refuse a merge (D182). It settled what the
+text left open: `resolve` answers `{ row: null }` for a name no row
+holds; `T` is `string`; a name is at most 256 characters; and a name
+whose holder is no live row is taken over.
 
-Two things it waits on in the core. A field anchor's field is its
-behavior's alone (`anchored_writes` refuses it in a create), so a name a
-create gives needs a field anchor whose value a create hands the behavior,
-or the use on the type naming an own field. And uniqueness across rows
-needs a key the database holds: a use's shared table keyed by the
-normalized name serves it (`ReadRequest::SharedRow`), but the core deletes
-no shared row and reads no sub-table across rows, so a removed alias and
-a deleted row's names need one of the two.
-
-Also left: `merge_into` in the Rust repositories, SQLite and D1; a route
-that serves a table's `mergeInto`; a merge that repoints a version graph's
-table, which needs the merge as a commit; a Derived field whose input is
-a repointed relation, which the merge does not hash again (Derived hears
-no set-based write); and a check of cycles longer than `into` under
-`from` in a relation of the table to itself.
+Left: Go and Rust handlers of the merge route; the rows of the tables
+that reference the two, which a merge repoints and deletes whether or not
+its caller may see them, in Go, TypeScript and Rust; a create on
+development mode, whose handler refuses the name a create gives as
+Aliased's owned field, though its stores replay `core-aliased`; a merge
+that repoints a version graph's table, which needs the merge as a commit;
+a Derived field whose input is a repointed relation, which the merge does
+not hash again (Derived hears no set-based write); a check of cycles
+longer than `into` under `from` in a relation of the table to itself; and
+`MergeResult`, which the generated Rust `orm.rs` does not re-export. A
+merge in the TypeScript repositories on SQLite and D1, which refuse it,
+is D182's to build.
 
 ## D149. Rollups and Blueprint stay behaviors, Revisions keeps its own log, and Variants becomes a discriminated-union field type (D103 amended)
 
@@ -1764,11 +1845,45 @@ the one behavior with no state, by this entry; Variants goes from the
 behaviors as a field type, as Links, Search, Queue and Branches go as
 schema features.
 
-Built: Rollups and Revisions as they are. Left: Blueprint on the core,
-its recordings replayed, a table implementing it in each language and
-`examples/engine-jobs` on it; the discriminated-union field type in the
-IR, both readers, every validator, the DDL and both ORMs; and the
-engine's Variants removed with engine types (step 7).
+Built: Rollups and Revisions as they are, and Blueprint and Variants.
+
+Blueprint runs on the core. A create stamps its children through
+`Cx::create_row` in the create's change set, `children` is computed at a
+read, and a Dependencies blocker may be a row created earlier in the same
+command. `workqueue-blueprint.json` replays 206 of its 405 steps with no
+mismatch, and its transcript runs in every adapter. A table implements it
+in Go, TypeScript and Rust, through `fixture-blueprint-db` and
+`fixture-blueprint-api`. `examples/engine-jobs` runs on development mode
+beside its engine version. It settled what the text left open: `from` is
+refused on a table, since a relation pins no revision; a child's key is a
+UUID drawn from `Cx::new_key`; and Blueprint may be removed from a table
+that has rows.
+
+Variants is a field type, `Variant<By, Arms>`. A schema writes it as a
+named alias (`export type X = Variant<"kind", { a: A; b: B }>`) and types
+the field `X`; an inline `Variant` is refused. That settles the syntax the
+text left to the change that builds it. The IR's `UnionDef` takes `by` and
+`arms`, and both readers and the TypeScript writer carry it. The
+validators and decoders in Go, TypeScript, Rust and Python read the field
+by its sibling, and the parity matrix has a union field, with 19 vectors.
+On Postgres and SQLite the column is JSONB with a one-level CHECK. Every
+union column is now JSONB, where a single union field was TEXT before. The
+Go ORM reads the field by its sibling, and the SDKs carry it.
+
+Left of Blueprint: `from` and `copyLinks` pins, which wait for a relation
+pinned to a revision; on development mode, a child row's own fields
+validated at its create, and an access policy asked of the children; the
+generated fixture packages run end to end; and the engine's Blueprint,
+which goes with engine types (step 7).
+
+Left of Variants: a variant field in `union_requests.json`; a Go route
+that answers each error of a variant field, where `bodyargs.DecodeRefusal`
+substitutes an enum's first value and so answers the `kind` error alone;
+the TypeScript ORM and the Rust repositories run on Postgres with a
+variant field; a test of a Go versioned history's decode of a variant
+field; projections and `@tableOperation` views over a variant field; a
+dependency's variant union checked by verify, where generation checks it
+now; and the engine's Variants, which goes at step 7.
 
 ## D151. A behavior worker drains on Workers at a Cron Trigger's firings within its CPU time, a write due before the next firing wakes the worker's Workflow, and an environment whose behavior queue no worker drains is refused (D80, D92, D103, D145 amended)
 
@@ -2170,9 +2285,10 @@ Left:
   the row plans again on its own write, at a fire, or at `setRecurrence`.
 - The generated router mounting `calendarRoutes` and the calendar MCP
   tool; an app wires them, as it wires `grantAuthenticator` (D156).
-- The Go server: Recurrence's operations through its adapter end to end,
-  and the calendar read and feed. D188 serves them in Rust, on Postgres;
-  a Rust server on SQLite is refused them.
+- A Go or a Rust server whose database lists sqlite first, which is
+  refused Recurrence and a calendar source: D187 serves Recurrence's
+  operations and the calendar read and feed in Go, and D188 in Rust, on
+  Postgres alone.
 - A hand-written scenario of Recurrence that every adapter replays.
 - The SDK types narrowed by the config (`behaviortypes`: the anchors).
 - A calendar source's permission in the schema, beside the route's option;
@@ -2248,8 +2364,9 @@ kept while the text holds and fall back to the text order.
 
 Left:
 
-- The Go repositories and servers, and Python's. D188 serves search in
-  the Rust repositories and runtime, on Postgres.
+- Python's repositories and servers. D187 serves search in the Go
+  repositories and the Go schema runtime, and D188 in the Rust
+  repositories and runtime, on Postgres.
 - The generated router mounting `searchRoutes` and the MCP tool, and a
   generated handler for the indexing queue; an app wires them.
 - A list operation's row rule (`by`), which is its operation's and not
@@ -2356,9 +2473,8 @@ is refused `done`; and password reset sends through the email adapter.
 
 Left:
 
-- Go: the notifier, `@event` raising, the reply entry point and password
-  reset; and SQLite and D1 in every language (Rust's on Postgres is
-  D191's).
+- SQLite and D1 in every language (Go's notifier on Postgres is D190's,
+  Rust's D191's).
 - Comments raising its mentions and replies into the inbox, and the core's
   Comments `inbox` operation retired.
 - A generated server that builds the notifier into its `Deps` (with D159's
@@ -2613,9 +2729,9 @@ Left:
   TypeScript's does; a generated table operation runs in one.
 - TypeScript's `accessConditions` keeps the values of the branches before
   a `*` path bound.
-- The Go server's calendar, search, notifier, parties and agents, which
-  later Go workstreams port. References, attachments and provider slots
-  are D184's.
+- The Go server's parties and agents, which later Go workstreams port.
+  References, attachments and provider slots are D184's, Recurrence, the
+  calendar and search D187's, and the notifier D190's.
 - A held table that composes behaviors, through the Go behaviors' core:
   its create fills neither default of `audience` and `agentAccess`, so a
   create that names neither fails their checks, and its reads of the
@@ -3052,6 +3168,115 @@ Left:
   TypeScript (D152's and D155's left).
 - A generated handler for a `@searchable` declaration's queue, which an
   app's `@worker` writes, calling `index_search`.
+
+## D187. The Go server serves D152's Recurrence and calendar and D155's search across tables on Postgres, through a schema runtime package the generated ORM hosts, a read across tables takes its caller, and a stop never strands a claim (D152, D155, D180 amended)
+
+D152 and D155 built Recurrence's routes and worker, the calendar and its
+feed, and search across tables in the TypeScript runtime; D180 refused
+them in a Go server. This entry ports them to Go, on Postgres, with the
+TypeScript tables, statements, ranking, states and refusals. The Rust
+chain ports the same two in D188, and Go keeps to it where the languages
+allow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Go server serves a table that composes Recurrence through the adapter it serves every behavior through: its `recurrence` routes run `setRecurrence`, `complete`, `skip`, `moveOne` and `listOccurrences` through the core, and the behavior worker's generated queues fire the `open`, `remind`, `overdue` and `plan` deadlines, hear a raw write on the change queue, and hand `opened`, `reminded` and `missed` to the Workers methods. The refusal was lifted; what was missing was the ORM of a table the core writes for another's behavior with no use, deadline, change or event of its own (a relative anchor's target), which imported `encoding/json` for nothing and so never compiled: it keeps the import in use (`Repository.BehaviorsWithoutJSON`). | A Recurrence module of the Go runtime, a second runner beside the adapter's. |
+| The calendar and search are one package of the Go schema runtime, `crosstable`: `ReadCalendar`, the feed (`IssueFeed`, `RotateFeed`, `RevokeFeed`, `FeedOf`), `CalendarICS`, `CalendarRoutes` and the MCP tool; `SearchTables`, `IndexSearch`, `ReindexSearch`, `SearchRoutes`, `SearchMCPTool` and `CallSearchTool`. ormgen writes `crosstable.go` for a database with a calendar source or a `@searchable` table: the definitions, and `Database.CrossTables()`, the `crosstable.Host` over its pool, its access predicate and its grants. Routes are `http.Handler`s and take an `Authenticate` of the request. | The HTTP runtime, which the ORM cannot import (D184 kept `rowrefs` in the schema runtime for the same reason); two packages, which would repeat the host and the caller. |
+| A Go read across tables reads a table's rows by one statement held to the caller by the predicate the table's repository applies (`AccessConditions`, D180) and its live condition, where TypeScript and Rust read them through the repository by its fields: a Go repository is typed per table and has no filter by a field's name. So the calendar's definition holds the columns, quoted, its title, field, end and owner are of, and the search's is tsgen's, member for member. A calendar source titled by an `Encrypted<T>` field, whose column holds it sealed, is refused in a Go server. | A generated read per table and source, which would repeat the repository; reading the rows' titles back through `GetManyByIDs`, a second read per source. |
+| A read across tables takes its `Caller`, a principal and the permissions it holds, and binds the principal itself (`Host.As`, `orm.WithPrincipal`), as Rust's takes its principal (D188): a feed's fetch reads as the feed's holder, not the request's caller. Go's `access.Principal` holds no permissions, which a source's or a table's permission is checked against, so the caller carries them beside it. | Reading the ambient caller of the context, which a feed's route would have to rebind; a permissions member on `access.Principal`, which every other reader of it would carry. |
+| Search's audience is checked on the index row's copied columns by the package's own condition, the generated `audienceCondition`'s over `si.audience` and `si.agents`, since the ORM's predicate names a table's own columns; a caller with grants is held by an `EXISTS` back to each table with `Host.Conditions`. | Copying the grant reach into the index, which D155 turned down. |
+| `IndexSearch` runs in a transaction of its own on the host and embeds after it commits, as `indexSearch` and Rust's `index_search` do. | The caller's transaction, which would hold the share lock across the model's call. |
+| Embeddings re-rank through `providers.SearchEmbeddingsOf`, which refuses at once a model provider that implements no `providers.ModelEmbedder` (D184), telling it by its type, where Rust asks the provider to embed nothing. A search's `Embedder` is an interface, with `EmbedderFunc`, so a test or an app gives its own. | Asking at the first search, which would fail one late. |
+| The Go worker no longer cancels a claim in flight at a stop: it runs the claim to its answer within its own timeout and releases what it claimed, whose handlers never start. Cancelling it could leave messages the database had claimed with no handler until their lease ran out, as D188 found in Rust; a test that stops its worker between fires runs into it. | Starting the claimed handlers at the stop, which the grace then waits for. |
+| A Go server whose database lists `sqlite` first is refused Recurrence and a calendar source (`verify.GoServerSQLiteErr`, which the generator calls with the database's dialects), as rustrestgen refuses a Rust server; `@searchable` on SQLite stays the loader's refusal for every language. | Serving the calendar on SQLite, D152's left for every language. |
+
+Built: the refusals of D180 lose `@calendarSource`, Recurrence and
+`@searchable` (`verify/go_features.go`), and gain the sealed title and
+`GoServerSQLiteErr` (`internal/generator/crosstable_go.go`);
+`runtime/schema/go/crosstable` and its tests; ormgen's `crosstable.go`
+(`ormgen/crosstable.go`, `templates/crosstable.tmpl`, goldens of
+fixture-recurrence-db, fixture-access-go-db and fixture-search-db) and
+`BehaviorsWithoutJSON`; `providers.SearchEmbeddingsOf`; the claim at a
+stop (`worker.go`); fixture-access-go-db's document calendar source.
+`TestGoRecurrenceEndToEnd` runs D152's cases through a generated Go
+server and worker on Postgres: the plan to the horizon off a holiday with
+its deadlines, a rule change that leaves the open occurrence, the remind
+deadline on the worker and its events, `complete` and an afterDone
+recurrence, the refusals, the calendar merging a date and occurrences,
+and a raw write heard. `TestGoAccessEndToEnd` gains the feed's case: a
+feed shows what its principal reads, busy or in full, is no credential
+elsewhere, and is refused once rotated or revoked. `TestGoSearchEndToEnd`
+runs D155's six cases through the Go repositories and `crosstable`, a
+party's and an agent run's grants among them, with embeddings through a
+model provider and `ReindexSearch`.
+`TestAGoServerOnSQLiteRefusesRecurrenceAndTheCalendar` holds the
+refusal. The guides' Go sections.
+
+Left:
+
+- Go on SQLite: Recurrence on a Go server and the calendar (D152's "the
+  calendar on SQLite and D1"), and search (D155's).
+- A generated Go server that mounts `CalendarRoutes` and `SearchRoutes`
+  and serves the two MCP tools; an app mounts them, as in TypeScript
+  (D152's and D155's left).
+- A generated handler for a `@searchable` declaration's queue, which an
+  app's `@worker` writes, calling `IndexSearch`.
+- A calendar source titled by an `Encrypted<T>` field in Go.
+- A parity file of the calendar's reference and iCalendar text, which
+  each language's tests hold to the same algorithm on their own.
+
+## D190. The Go runtime serves D153's notifier on Postgres: the generated ORM hosts it, `notify` raises, routes, delivers, escalates and reads replies as the TypeScript notifier does, and an approval's approve and deny are two reply actions (D153, D180 amended)
+
+D153 built the notifier in the TypeScript runtime, and D180 refused
+`@event`, `@notifier` and `@channelIdentities` in a Go server. This entry
+ports it to Go, on Postgres, with the TypeScript tables, statements,
+states and refusals, and keeps to the points the Rust port of the same
+decision (D191) settled where the languages allow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The notifier is the Go HTTP runtime's `notify` package, since it sends through the channel adapters an environment configures (D159), which the ORM cannot import. What it runs through is the schema runtime's `notifications.Host`, which the generated ORM of a database that uses the notifier implements in `notifications.go` (`Database.Notifications()`): its pool or a transaction, its dispatch queue, its access predicate and each table's repository, with the definitions it is generated with: the notifier's tables by part and their columns, and every table's key, events and to-one relations (`ormgen/notifications.go`). | One package in the schema runtime, as D187's `crosstable`, which would need the providers and the worker of the HTTP runtime; a generated notifier per database, which would repeat the notifier in every ORM. |
+| The notifier's own tables are the loader's, the same fields in every database, so `notify` reads and writes them by statements over the columns the definitions name, a UUID in base62 as the Go types write one. An application's table it reads through that table's repository (`Host.Record`, `Find`, `Update`): a route's filter, a brief's saved query and an approval's update are JSON in the repositories' syntax, which the ORM reads into the table's typed filter or update, refusing a member it has no field for. | Statements over the application's tables, as `crosstable` reads them, which would leave a soft delete, a sealed field and the audience to the notifier; a filter compiler of the notifier's own beside the ORM's. |
+| Go has an ambient caller, the context. A recipient's read of the record is the repository's read in a context bound to the recipient (`Host.As`, the ORM's `WithPrincipal`): a user by its id, a party or an agent run with its active grants. A reply's action runs in a transaction of the database as the sender (`Host.Acting`: `WithPrincipal`, and `WithBehaviorCaller` with the permissions the channel's trust leaves it), and its `ReplyContext` holds that transaction as the ORM's `TxInterface`. | Repositories opened for the principal, as Rust's are (D191), which Go's typed repositories need no second set of. |
+| `Raise`, `FromBehaviorEvent`, `Cleared` and `ScheduleSubscription` take the caller's transaction as the ORM's `TxInterface` (`Host.In`), so the event commits with the change; nil opens a transaction of its own. `FromBehaviorEvent` takes the event as the Go behaviors adapter hands a project's Workers method: its kind, the row's key and its payload. | A transaction type of the notifier's own, which a Workers method would have to convert to. |
+| As in Rust: the wall time of quiet hours and of a digest's date is read from Postgres (`AT TIME ZONE`), and the pure rule over it (`QuietDelaySeconds`) is shared; a notice's next reference is taken in a savepoint of the routing transaction (the ORM's nested `Transaction`) and tried again when another notice of the recipient took it; a reply action (`notify.ReplyAction`: permission, describe, `Run`, `Undo`) and `ApprovalReplies(table, permission)`, the `approve` and `deny` of `approval.requested`, which decide the approval as the replier within the channel's trust, refuse an agent run and a decided approval, and write D158's `state`, `decidedBy`, `decidedVia` and `decidedAt`. | |
+| Whether an adapter reports statuses or reads inbound messages is its definition's optional operations, which Go reads as the interfaces it implements, `providers.ChannelStatusReader` and `ChannelInboundReader`: `Providers` binds an adapter so it implements exactly the ones its instance does (`CheckInstance`). | A list of operations beside the adapter, which in Go is the interface's own answer. |
+| A trust row's permissions are `nil` for no cap and empty for none (`ReplyAllows`, `NarrowedPermissions`), as Rust's `Option` and TypeScript's `null`. | A pointer to a slice. |
+| The pure parts are read from `runtime/http/testdata/notify_parity.json` (D191's), which TypeScript's `notify-parity.test.ts` writes: `NormaliseAddress`, `ReadReplyText`, `LooksLikeCode`, `QuietDelaySeconds`, `ReplyAllows`, `NarrowedPermissions`, `CodeHash` and `SameID`. | |
+| Password reset is `notify.PasswordReset` over the identity service's new `UserOfLogin` and `ResetPassword`, which ends every session of the user. | |
+
+Built: the refusals of D180 lose `@event`, `@notifier` and
+`@channelIdentities` (`verify/go_features.go`); the schema runtime's
+`notifications` package; ormgen's `notifications.go`
+(`ormgen/notifications.go`, `templates/notifications.tmpl`, golden of
+fixture-notifications-db); the HTTP runtime's `notify` package
+(`runtime/http/go/notify`) and its parity test; `identity.Service`'s
+`UserOfLogin` and `ResetPassword`; fixture-notifications-db's `Approval`
+table, TypeScript's exported pure functions, the parity file and its
+test, as D191 has them. `TestGoNotificationsEndToEnd` runs D153's cases,
+the TypeScript repositories' ten, and the approval case of the Rust ones,
+through the Go repositories and `notify` on Postgres over a stand-in SMS
+relay and mail relay: an urgent event reaches two recipients, skips one
+who cannot read the record, and escalates to email; `ack`, `done 142` and
+`undo` as their sender with the audit; SMS refused `done`, and an address
+entered by hand only acknowledging; a reply by reference; a code
+verifying an address and an unknown sender reaching nothing; a failed
+send falling through and an adapter down alerted once; quiet hours,
+digests and record; statuses, inbound, a cleared reference and a
+behavior's event; password reset by email; and an approval asked of its
+approvers, refused by SMS, approved and denied by email, and decided
+once. The guides' Go sections.
+
+Left:
+
+- Go on SQLite, as in every language (D153's).
+- A route to an agent in Go, which is logged and reaches no one, and a
+  party's channel identity that lapsed with its grants (D157's
+  `identityLapsed`), which the Go notifier does not ask: D192's, which
+  ports parties and agents to Go.
+- A generated Go server that builds the notifier into its `Deps`, mounts
+  the inbox and the relay routes, and fills a `@worker` of the dispatch
+  queue with `Handle`; an app wires them, as in TypeScript (D153's left).
 
 ## D191. The Rust runtime serves D153's notifier on Postgres: the definition carries each table's events and notifier part, `orm::notify` raises, routes, delivers, escalates and reads replies as the TypeScript notifier does, and an approval's approve and deny are two reply actions (D153, D181 amended)
 

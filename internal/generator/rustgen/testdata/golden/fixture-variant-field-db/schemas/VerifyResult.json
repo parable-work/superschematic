@@ -1,0 +1,53 @@
+{
+  "name": "fixture-variant-field-db",
+  "kind": "General",
+  "rootType": "VerifyResult",
+  "types": {
+    "Check": {
+      "name": "Check",
+      "owner": "src/steps.schema.ts",
+      "comment": "One check a verify step ran.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "name",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
+        },
+        {
+          "name": "ok",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true
+        }
+      ],
+      "jsonField": true
+    },
+    "VerifyResult": {
+      "name": "VerifyResult",
+      "owner": "src/steps.schema.ts",
+      "comment": "A verify step's result: whether it passed, and the checks it ran.",
+      "role": "DBTable",
+      "fields": [
+        {
+          "name": "passed",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true
+        },
+        {
+          "name": "checks",
+          "typeRef": {
+            "name": "Check",
+            "isArray": true
+          }
+        }
+      ],
+      "jsonField": true
+    }
+  }
+}

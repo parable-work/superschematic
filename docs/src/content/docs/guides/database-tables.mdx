@@ -628,6 +628,35 @@ tool; an app merges the route into its router. A party's or an agent run's
 search, through `access::GrantAuthenticator`, keeps to the rows its grants
 reach, as in TypeScript.
 
+In Go, the schema runtime's `crosstable` package runs the same statements
+over the generated ORM's `CrossTables()`, which carries each `@searchable`
+table's index (D187). `SearchTables` takes the caller and binds it itself,
+so a route can search as whom it chooses; a caller with grants is held by
+the predicate each table's repository applies for it (`AccessConditions`).
+`IndexSearch` builds a row's index row in a transaction of its own and
+embeds after it commits, as a worker's handler calls it. A model provider
+that implements `providers.ModelEmbedder` re-ranks through
+`providers.SearchEmbeddingsOf`, which refuses one that does not:
+
+```go
+import (
+	"github.com/parable-work/superschematic/runtime/http/go/providers"
+	"github.com/parable-work/superschematic/runtime/schema/go/crosstable"
+)
+
+model, err := deps.Providers.Model(ctx, "MODEL")
+embeddings, err := providers.SearchEmbeddingsOf(model, "text-embedding-1", 0)
+options := crosstable.SearchOptions{Embeddings: embeddings}
+// The worker of the SearchIndexing queue, for each message.
+_, err = crosstable.IndexSearch(ctx, db.CrossTables(), crosstable.SearchIndexing{SourceTable: message.SourceTable, SourceKey: message.SourceKey}, options)
+// A search, as the caller.
+found, err := crosstable.SearchTables(ctx, db.CrossTables(), crosstable.Caller{Principal: principal, Permissions: permissions}, crosstable.SearchRequest{Q: q}, options)
+```
+
+`crosstable.SearchRoutes` serves `GET /api/search` as an `http.Handler`,
+and `SearchMCPTool` with `CallSearchTool` the MCP tool; an app mounts the
+handler on its router. `ReindexSearch` builds every row's index row again.
+
 Search across tables is Postgres alone: the build refuses `@searchable` in
 a service that lists `sqlite`.
 
@@ -737,6 +766,30 @@ and lists of lists are `JSONB` too. A compiler before D83 made such a
 field `TEXT`; a migration plan from a database it built casts the column
 with `USING shipping_address::JSONB`, which fails on text that is not JSON
 (`data-dependent`).
+
+A field of a union is a `JSONB` column too. A field of a variant union,
+whose member a sibling field names (see
+[Modeling types](/superschematic/guides/modeling-types/#a-field-whose-shape-another-field-picks)),
+gets a `CHECK` over its column, `ck_<table>_<column>`, on Postgres and on
+SQLite. It holds the column to nothing, SQL `NULL` or JSON `null`, while
+the sibling's column names no member, and otherwise to nothing or to the
+member's object one level deep:
+
+- each required key is present and not null, and a `RequiredNull` key is
+  present and null;
+- each key present holds its JSON kind: a string, a number, a boolean, an
+  object (a nested object, a map or a union) or an array (a list);
+- an enum key holds one of its values.
+
+The `CHECK` does not say what a list, a nested object or a map holds, a
+scalar's format, whether a number is an integer, a field's own rules
+(lengths, ranges and patterns), or that a `@strictJSON` member has no
+other key: those are the validators'. Every member's shape gets a check,
+so a result its kind names no member for, and one that is no object of
+its member's shape, are refused whatever writes them. A migration plan
+adds the check in `contract` over a
+column the previous version has, `data-dependent`, and replaces it when
+an arm changes; SQLite rebuilds the table to change it.
 
 ## Encrypted fields
 
@@ -1142,7 +1195,10 @@ What a merge does not do:
   hears them as it hears any write.
 - A behavior's sub-tables are the behavior's state of `from` and are not
   repointed: they go with `from` when it is removed, and stay with it
-  when it is deleted softly.
+  when it is deleted softly. An Aliased field's are the exception (D147):
+  `from`'s aliases move to `into`, its name joins them as an alias, and
+  its rows of the names table name `into` their holder
+  ([A row's names](#a-rows-names)).
 - A relation of another schema's table, or of a table outside the schema,
   is not repointed. Its foreign key decides what the delete of `from`
   does to it.
@@ -1154,7 +1210,14 @@ table: a commit made before a merge would still reference the row merged
 away. And a unique `@index` that lists no `keys` on a table that
 references it: the merge could not tell whether the index holds the
 relation's column, so list the fields its `expression` reads. The repositories run it on
-Postgres, in Go and in TypeScript.
+Postgres in Go and in TypeScript, and the Rust repositories on Postgres
+and on SQLite (`merge_into(&from, &into)`), each in a savepoint of the
+caller's transaction. On Postgres a Rust client outside a transaction is
+refused; on SQLite the savepoint is the merge's own transaction when the
+caller opened none, and the lock is SQLite's one writer, which holds the
+database once the merge writes. A merge whose relations delete rows of a
+`@versioned` table has no SQLite form. The TypeScript and Go
+repositories run on Postgres alone, so D1 has no merge.
 
 ## References and files on any row
 
@@ -2657,6 +2720,8 @@ or implements Derived and Provenance
 ([Fields a model fills, and who set each](#fields-a-model-fills-and-who-set-each)),
 or Stock, Calendar, Holds and Payments
 ([Units and time a claim holds, and what it owes](#units-and-time-a-claim-holds-and-what-it-owes)),
+or a bundle of them, Reservation, Barrier, Mailbox or Assignment
+([Bundles: behaviors with their wiring preset](#bundles-behaviors-with-their-wiring-preset)),
 stays a table: the behavior's fields are its
 columns, its sub-tables, its deadline queue, its change queue and its
 event queue are tables beside it, and its operations change them through
@@ -3855,9 +3920,8 @@ another, and `DELETE /api/calendar/feeds/<id>` revokes it.
 The generated router mounts neither `calendarRoutes` nor the calendar's
 MCP tool: an app wires them itself, as it wires `grantAuthenticator`
 (`examples/recurring-duties`). Recurrence and the calendar are served end
-to end by a TypeScript server and a Rust one on Postgres. The Go server
-does not run Recurrence's operations end to end or serve the calendar yet,
-and the calendar has no SQLite or D1 form.
+to end by a TypeScript server, a Rust one and a Go one on Postgres, and
+the calendar has no SQLite or D1 form.
 
 A Rust server serves Recurrence on Postgres as the TypeScript one does
 (D188): the router's `recurrence` routes run the operations through the
@@ -3879,6 +3943,29 @@ let routes = calendar_routes(CalendarRoutes::new(Tables::new(pool, postgres_defi
 and `issue_calendar_feed`, `rotate_calendar_feed` and
 `revoke_calendar_feed` are the feed's operations. A Rust server whose
 database lists `sqlite` first is refused Recurrence and a calendar source.
+
+A Go server serves Recurrence on Postgres as the TypeScript one does
+(D187): its `recurrence` routes run the operations through the behaviors'
+core, and the behavior worker's generated queues fire the `open`,
+`remind`, `overdue` and `plan` deadlines and hear a raw write. The schema
+runtime's `crosstable` package reads the calendar over the generated
+ORM's `CrossTables()`, which carries each table's calendar sources:
+
+```go
+import "github.com/parable-work/superschematic/runtime/schema/go/crosstable"
+
+caller := crosstable.Caller{Principal: session.GetCaller(ctx), Permissions: permissions}
+calendar, err := crosstable.ReadCalendar(ctx, db.CrossTables(), caller, crosstable.CalendarRead{From: "2026-12-01", To: "2027-01-01"}, crosstable.CalendarOptions{})
+// GET /api/calendar, the feed and its issue, rotation and revocation.
+router.Mount("/api/calendar", crosstable.CalendarRoutes(crosstable.CalendarRoutesOptions{Host: db.CrossTables(), Authenticate: authenticate}))
+```
+
+`CallCalendarTool` answers the MCP tool `CalendarMCPTool` describes, and
+`IssueFeed`, `RotateFeed` and `RevokeFeed` are the feed's operations; the
+ORM's `AuthenticateGrant` refuses a feed's token on every other route. A
+Go server whose database lists `sqlite` first is refused Recurrence and a
+calendar source, and one whose calendar source is titled by an
+`Encrypted<T>` field is refused it.
 
 ### A pool of members
 
@@ -4122,7 +4209,12 @@ this one (`link`), and a function:
 - `gatedStates` names states of the table's one Workflow. A transition
   into one is refused as `not_held` until every rollup that gates it
   holds, whoever asks, with the rollup and its counts in the veto's
-  details. A rollup reads the rows that relate to the row 500 at a time,
+  details. A gating rollup's `exemptions` let a move through though it
+  does not hold (D104's Barrier): a caller's who holds `permission`, and
+  the move each of `deadlines`, deadlines of the table's one Timers whose
+  `then` moves into a gated state, makes as it falls due. The core holds
+  each named deadline to the Timers config at define. An engine type
+  refuses `exemptions`. A rollup reads the rows that relate to the row 500 at a time,
   up to 10,000; past that the value is `{ "over": true }` and its gate
   does not hold.
 - Rollups keeps no column. A read of the row computes its values through
@@ -4248,6 +4340,74 @@ held where a request's types and the database hold it, so a patch that
 breaks it is kept and fails at its approval. A `@versioned` table keeps a
 history of its own on Postgres: Revisions adds the review step, and keeps
 its log on SQLite and D1 too.
+
+### A row's names
+
+A field typed `Aliased<string, C>` holds a name people know a row by,
+with the names it was also known by (D147). No two rows hold one name, as
+a name or an alias, in its normalized form. The config's `normalize` says
+how two names read as one: `lower`, the default, ignores their case, the
+white space at their ends and each run of it within one; `slug` keeps
+only their letters and digits, in lower case, so "Q3 Plan" and "q3-plan"
+are one name.
+
+```ts
+// companies-db
+export abstract class Company implements Mergeable {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  name: Aliased<string>;
+  city: string;
+}
+
+export abstract class Tag {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  label: Aliased<string, { normalize: "slug" }>;
+}
+```
+
+The field's column holds the name. A create gives it, the one owned field
+a create input holds, and no update sets it: `name.rename({ name })` does,
+and keeps the old name as an alias. A rename to one of the row's aliases
+makes it the name and the old name an alias in its place, and one that
+changes only the case or the spacing keeps no alias. `name.addAlias({
+alias })` and `name.removeAlias({ alias })` keep the rest; the row's name
+is no alias to remove (the veto `is_name`). `name.resolve({ name })`, on
+the table, answers the row a name or an alias names, `{ row: { key, name,
+alias } }`, or `{ row: null }`.
+
+```ts
+await orm.company.createOne({ name: "Acme", city: "Oslo" });
+await orm.company.name.rename(id, { name: "Acme Group" }); // { name: "Acme Group", alias: "Acme" }
+const { row } = await orm.company.name.resolve({ name: "ACME" }); // { key, name: "Acme Group", alias: true }
+```
+
+```go
+out, err := db.Company.Name().Rename(ctx, id, orm.CompanyNameRenameParams{Name: "Acme Group"})
+found, err := db.Company.Name().Resolve(ctx, orm.CompanyNameResolveParams{Name: "ACME"})
+```
+
+The aliases are a sub-table of the row (`company_name_aliases`). Every
+name a row holds is a row of a table of the use's own, kept for the table
+as a whole and keyed by its normalized form (`company_name_names`), whose
+`holder` column holds the row's key. So the database holds each name
+unique: a create, a rename or an addAlias that takes a name inserts its
+row, and two that take one name at once never both hold it. A name
+another row holds is refused with that row's key, the veto `name_taken`
+(`details.vetoDetails.holder`), on Postgres, SQLite and D1 alike. A
+removed alias frees its name for any row, and so does a delete of the
+row, through the repository, for all of its names. A name whose holder is
+no live row, deleted past the repository, is taken over by the next row
+that takes it. Aliased cannot be added to a table with rows, nor removed
+from one, and its `normalize` stays while the table has rows. A table
+whose behaviors keep such tables has no upserts. A write around the core,
+raw SQL of the name, the aliases or the names, runs none of these rules.
+
+A merge of a table with an Aliased field ([Merging rows](#merging-rows))
+moves the aliases of the row merged away to the row that stays, its name
+among them, and its rows of the names table with them, so a merge frees
+no name and takes none.
 
 ### A row's conversation
 
@@ -4554,3 +4714,147 @@ the ledger stop agreeing, so do not write them by hand.
 What a table does not have yet: `Stock.low` is computed at a read, so a
 list does not filter on it; a Payments event applies once per table and
 provider, where the engine applied it once per namespace.
+
+### Bundles: behaviors with their wiring preset
+
+A bundle implements existing behaviors with the wiring between them
+preset, and exposes only the settings that vary (D103). It defines no
+rules of its own. A table implements a bundle as it implements a
+behavior, the table first and its settings second:
+
+```ts
+// bookings-db
+import { AutoGenerate, Relation, Reservation, key } from "@superschematic/db";
+
+export abstract class Booking
+  implements
+    Reservation<Booking, {
+      resource: "room";
+      interval: { start: "startsAt"; end: "endsAt" };
+      amount: "priceCents";
+      currency: "GBP";
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  guest: string;
+  startsAt: Temporal.DateTime;
+  endsAt: Temporal.DateTime;
+  priceCents: Generic.Int64;
+  room: Nullable<Relation<Room>>;
+}
+```
+
+The loader expands a bundle into its parts, and each part is a use of
+the table, as if the table had written it. The verification pass, the
+behaviors' core and every generator meet the parts alone. The booking
+above gets the same columns, sub-tables, queues and operations as a
+table that writes `Holds`, `Payments` and `Timers` in its implements
+clause and `status: Workflow<{ ... }>` as a field.
+
+A part is named as the use it is. A part the table implements is named
+for its behavior: the columns `holds_state` and `payments_due`, the
+sub-table `booking_holds_items`, and the operations `holdsRetakeHolds`,
+`paymentsOpenPayment` and `timersResetTimer` of a
+`@behaviorOperations(Booking)` set. A part anchored on a field is named
+for the field the bundle gives it: `status`, `status_entered_at` and
+`statusTransition`. No column, table or operation is named for the
+bundle. A table that implements a bundle does not also
+implement one of its parts, or declare a field a part is anchored on:
+the build refuses both, naming the bundle.
+
+The data forms name the bundle and its settings, and the loader expands
+them from the registry's declaration of the bundle, alike:
+
+```json
+{
+  "name": "Booking",
+  "role": "DBTable",
+  "bundles": [
+    {
+      "name": "Reservation",
+      "settings": { "resource": "room", "interval": { "start": "startsAt", "end": "endsAt" }, "amount": "priceCents", "currency": "GBP" }
+    }
+  ],
+  "fields": []
+}
+```
+
+`superschematic format` writes a bundle in place of its parts, in every
+format. The core's bundles:
+
+| Bundle | Parts | Settings |
+| --- | --- | --- |
+| `Reservation` | `Holds` (`slot` on the resource, `takeOn: ["held"]`, `commitOn: ["booked"]`, `releaseOn: ["expired", "cancelled"]`), `Payments` (`require: { booked: "paid" }`, `voidOn` the two ends, `record` needs `payments.record`), `Timers` (`holdExpiry`, fifteen minutes after `held`, moves to `expired`), `Workflow` on `status` (`draft`, `held`, `booked`, `expired`, `cancelled`) | `resource`, `interval` (`start`, `end`), `amount`, `currency`, each required |
+| `Barrier` | `Rollups` (`ready`: `all` of `rows` through `link` finished with `success`, gating `released`, exempting `releasePermission` and the `timeout` deadline), `Timers` (`timeout`, `timeoutMs` after `waiting`, moves to `released`), `Workflow` on `status` (`waiting`, `released`, `cancelled`; the release needs `releasePermission`) | `rows`, `link`, `timeoutMs`, `releasePermission`, each required |
+| `Mailbox` | `StateRules` (`taken` freezes every own field), `Lease` (`onExpiry` moves a taken message back to `queued`), `Workflow` on `status` (`queued`, `urgent`, `taken`, `sent`, `canceled`, `failed`; the sender's moves are `by: ["createdBy"]`) | `ttlMs`, Lease's; `takePermission`, Lease's `acquirePermission`; both optional |
+| `Assignment` | `Seats` (one seat, `assignee`, `max: 1`, `onFull: "refuse"`) | `take`, `assign`, both optional |
+
+A setting the table leaves out leaves out the member of the part that
+reads it: `Assignment<Chore, {}>` seats a caller who holds no permission,
+and nobody seats another.
+
+`Reservation`'s resource implements `Calendar`, whose hours, time zone
+and capacity are the resource's own, so the bundle does not set them. A
+booking that enters `held` takes the resource's time, `booked` waits
+until the payment is captured, and the deadline moves a booking still
+`held` to `expired`, which lets the time go.
+
+`Barrier` is released once every row that points at it has finished
+with the outcome `success`, at the timeout, or by a person's go-ahead.
+Its gate exempts the deadline's move and a caller who holds
+`releasePermission` (Rollups' `exemptions`), so the timeout and a
+go-ahead release it whether its rows are ready or not; the deadline's
+fire is recorded `moved` in `Timers.deadlines`. A caller without the
+permission is held by the gate, and Workflow refuses its release too. A
+barrier no row points at is ready. The table's `@behaviorWorker` holds
+`releasePermission`, or its fire is recorded `forbidden`.
+
+`Mailbox`'s table declares `createdBy`, an own field that holds the
+sender's subject. A take is your API's: a declared query of the oldest
+waiting message, `lease.acquire`, and the move to `taken` with the token
+as Lease's precondition. While a message is `taken`, another principal's
+write is refused by Lease, and every own field is frozen. The lease's
+expiry, an abandon or a release moves a taken message back to `queued`.
+
+`Assignment`'s seat is `assignee`: name it in a Workflow transition's or
+a StateRules state's `by` as `seat:assignee`. Its calls are Seats':
+`seats.takeSeat({ seat: "assignee" })`, `leaveSeat` and `listSeats`.
+
+A bundle of your own is a type alias in a schema file, generic in the
+table and its settings, whose type is `Bundle<Parts, Fields>`. `Parts`
+is a tuple of the behaviors the table implements, each its carrier with
+the alias's table and a config. `Fields` is an object type of the
+behaviors it anchors on fields, by field. A config reads a setting as
+`S["name"]`, written in place, and the reader substitutes the table's
+settings through the checker:
+
+```ts
+import { Bundle, StateRules, Workflow, type FieldOf } from "@superschematic/db";
+
+type Reviewed<T, S extends { reviewer: FieldOf<T> }> = Bundle<
+  [StateRules<T, { states: { review: { frozen: "all"; by: [S["reviewer"]] } } }>],
+  {
+    status: Workflow<{
+      states: ["draft", "review", "approved"];
+      transitions: [{ from: "draft"; to: "review" }, { from: "review"; to: "approved"; by: [S["reviewer"]] }];
+    }>;
+  }
+>;
+
+export abstract class Proposal implements Reviewed<Proposal, { reviewer: "reviewer" }> {
+  // ...
+}
+```
+
+The alias is no type of the schema. TypeScript alone reads a bundle of
+your own: the data forms have no declaration of it, so `superschematic
+format` writes its parts as the table's own uses. A config reads the
+table only as a carrier's first type argument; a part that reads `T`
+otherwise, and a tuple element whose setting the table leaves out, are
+refused.
+
+What a bundle does not have yet: an extension cannot register one;
+`Assignment`'s guard on another principal's Lease `acquire`, which reads
+its seat, waits for the declarative vocabulary's `caller` operand; and a
+bundle is not yet written as a class.

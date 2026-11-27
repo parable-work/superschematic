@@ -20,7 +20,7 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares thirty-three behaviors, so every binary's meta-schema
+The core declares thirty-four behaviors, so every binary's meta-schema
 admits a schema that composes them. An engine runs twenty-eight of them,
 which `superschematic catalog behaviors` lists. The engine implements
 seventeen itself and registers them when it opens. Seven are claimable work, the work
@@ -32,20 +32,20 @@ in the engine's `behaviors` option (`workQueueBehaviors`, from
 the package `@superschematic/engine-commerce`, the core's addon carries
 them and a project's engine crate links them, and an engine runs them
 once a deployment names them (`commerceBehaviors`), as a generated
-server does. The last five, `Seats`, `Reconcile`, `Schedules`, `Pool` and
-`Recurrence`, no engine runs: the behaviors' core implements them for a
-DB table alone, and the build refuses an engine type that composes one,
-naming the table form.
+server does. The last six, `Seats`, `Reconcile`, `Schedules`, `Pool`,
+`Recurrence` and `Aliased`, no engine runs: the behaviors' core
+implements them for a DB table alone, and the build refuses an engine
+type that composes one, naming the table form.
 
 A DB table that implements a behavior, or types a field as one, stays a
 table (D103): its rules run in the behaviors' core, the Rust library every
-language embeds, which runs twenty-six of the behaviors. They are the five
-above, every behavior the engine implements but `Links`, `Search`,
-`Variants` and `Branches`, the work queue's but `Assignment`, `Queue` and
-`Blueprint`, and the four of commerce. A table has a `Relation<>`, a
-`@searchField`, a version graph and a `@queue` in place of `Links`,
-`Search`, `Branches` and `Queue`. `Assignment` and `Blueprint` are not on
-the core yet, and `Variants` is to become a field type (D149)
+language embeds, which runs twenty-eight of the behaviors. They are the
+six above, every behavior the engine implements but `Links`, `Search`,
+`Variants` and `Branches`, the work queue's but `Assignment` and `Queue`,
+and the four of commerce. A table has a `Relation<>`, a `@searchField`, a
+version graph and a `@queue` in place of `Links`, `Search`, `Branches` and
+`Queue`, and a `Variant<By, Arms>` field in place of `Variants` (D149).
+`Assignment` is not on the core yet
 ([Beyond plain tables](/superschematic/guides/database-tables/#beyond-plain-tables)).
 
 | Behavior | What it adds | Requires | Covered in |
@@ -72,6 +72,7 @@ the core yet, and `Variants` is to become a field type (D149)
 | `Seats`, `Reconcile` | a DB table's alone: named seats on a row, each holding the subjects seated in it, and the state a provider last reported, which moves the row's Workflow field | `Workflow` for `Reconcile` | [A row's seats](/superschematic/guides/database-tables/#a-rows-seats-and-a-field-that-follows-observations) |
 | `Schedules`, `Pool` | a DB table's alone: runs after a delay, at an interval or on a cron line, and a pool of members `pick` chooses from | | [A row's schedules](/superschematic/guides/database-tables/#a-rows-schedules), [A pool of members](/superschematic/guides/database-tables/#a-pool-of-members) |
 | `Recurrence` | a DB table's alone: a rule that turns into dated occurrences, each opened, reminded, done, missed or skipped, which a calendar and its feed read | | [A row's recurrence](/superschematic/guides/database-tables/#a-rows-recurrence-and-the-calendar) |
+| `Aliased` | a DB table's alone: a name with the names a row was also known by, unique across the table's names and aliases | | [A row's names](/superschematic/guides/database-tables/#a-rows-names) |
 
 A running engine lists the behaviors it runs, an extension's included,
 at `GET /behaviors`, and returns one's declaration at
@@ -1439,9 +1440,10 @@ engine.instances.update(me, 'Step', lint.id, { kind: 'review' });
   [Fields a table keeps, freezes and signs off](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)):
   the engine refuses it, naming the table form.
 - **No table's Variants.** The behaviors' core does not run `Variants`,
-  so the build refuses a table that implements it. D149 makes it a field
-  type instead, a discriminated union whose arm a sibling field names,
-  which is not built yet.
+  so the build refuses a table that implements it. A table types the
+  field as a `Variant<By, Arms>` instead (D149), a discriminated union
+  whose arm a sibling field names
+  ([Modeling types](/superschematic/guides/modeling-types/#a-field-whose-shape-another-field-picks)).
 
 The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#validating-fields)
 shows how a behavior of your own judges the fields a write stores.

@@ -358,6 +358,10 @@ pub struct Table {
     /// repository's `Rules` runs.
     #[serde(default)]
     pub behaviors: Option<Behaviors>,
+    /// What `merge_into` runs, for a table that implements Mergeable
+    /// (D147); none for any other.
+    #[serde(default)]
+    pub merge: Option<Merge>,
     /// The one-to-many relations of the table (D90): a filter reaches
     /// through one to the rows that point back at the row, as a row rule's
     /// path and a grant's do (D156).
@@ -431,6 +435,78 @@ pub struct EventDefinition {
     /// The members of the row its payload carries.
     #[serde(default)]
     pub payload: Vec<String>,
+}
+
+/// What `merge_into` of a table that implements Mergeable runs (D147),
+/// written at build time from the schema's relations and unique indexes,
+/// in the definition's dialect (sqlutil's `MergePlan`): each statement
+/// takes the key of the row merged away first and the key of the row that
+/// stays second, and one with an actor the acting user third.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Merge {
+    /// Reads the two rows, locked where the dialect locks a read: a row
+    /// per one it finds, true for the row merged away.
+    pub lock: String,
+    /// A step deletes rows of a @versioned table, whose tombstone records
+    /// the acting user (Postgres alone).
+    #[serde(default)]
+    pub history_actor: bool,
+    /// The merge stamps a row deleted, so it needs an acting user before it
+    /// writes, as a soft delete does.
+    #[serde(default)]
+    pub requires_user: bool,
+    /// The relations that reference the table, by source and field.
+    #[serde(default)]
+    pub steps: Vec<MergeStep>,
+}
+
+/// One relation that references a Mergeable table (D147).
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MergeStep {
+    /// What the counts name the step's rows by.
+    pub source: String,
+    /// What holds the reference.
+    pub field: String,
+    /// On a relation of the table to itself, reads whether the row that
+    /// stays references the row merged away through it.
+    #[serde(default)]
+    pub self_reference: Option<String>,
+    /// Run first, counted nowhere: an Aliased use's insert of the name of
+    /// the row merged away as an alias of the row that stays.
+    #[serde(default)]
+    pub before: Vec<MergeStatement>,
+    /// Each deletes the rows a unique key would refuse once repointed.
+    #[serde(default)]
+    pub collisions: Vec<MergeStatement>,
+    /// Repoints every row that references the row merged away.
+    pub repoint: MergeStatement,
+}
+
+/// One statement of a merge (D147): its SQL, and how it takes the acting
+/// user, `uuid` for a uuid column, `text` for another, none when it takes
+/// none.
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct MergeStatement {
+    /// The statement.
+    pub sql: String,
+    /// How it takes the acting user.
+    #[serde(default)]
+    pub actor: Option<String>,
+}
+
+/// What a merge did to the tables that referenced the row merged away
+/// (D147), each by its type's name: the rows it repointed to the row that
+/// stays, and the rows it deleted because a unique index of their table
+/// would have refused them once repointed. No row is in both. The row
+/// merged away is in neither.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+pub struct MergeResult {
+    /// The rows repointed, by table.
+    pub repointed: BTreeMap<String, u64>,
+    /// The rows deleted, by table.
+    pub deleted: BTreeMap<String, u64>,
 }
 
 /// A one-to-many relation of a table (D90, D156): the rows of another
@@ -697,6 +773,15 @@ pub enum Error {
     /// The behaviors' core refused the command (D103), as its `Rules`
     /// says it. Boxed, so a result that may hold one stays small.
     Refused(Box<Refusal>),
+    /// A merge the repository refuses before it writes (D147): of a row
+    /// into itself (`self`), or into a row that references the one merged
+    /// away through a relation of the table to itself (`self_reference`).
+    Merge {
+        /// `self` or `self_reference`.
+        code: &'static str,
+        /// What it says.
+        message: String,
+    },
     /// A party's or an agent run's write that leaves a row its grants do
     /// not reach (D156): a create under a target no grant names. A table
     /// operation answers it 403, and its transaction keeps nothing.
@@ -765,6 +850,7 @@ impl fmt::Display for Error {
             ),
             Error::Constraint(constraint) => f.write_str(&constraint.message),
             Error::Refused(refusal) => write!(f, "{}: {}", refusal.code, refusal.message),
+            Error::Merge { message, .. } => f.write_str(message),
         }
     }
 }

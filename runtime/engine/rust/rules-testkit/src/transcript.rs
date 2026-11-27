@@ -241,8 +241,16 @@ pub struct Transcript {
     /// The recording it was written from, from the checkout's root.
     pub source: String,
     /// The behaviors the core that replays it registers, in its order:
-    /// `superschematic_rules_behaviors::NAMES`, what the wasm core runs.
+    /// `superschematic_rules_behaviors::NAMES`, what the wasm core runs,
+    /// then the declarative behaviors `declarations` declares.
     pub behaviors: Vec<String>,
+    /// The declaration files of the declarative behaviors (D103's step 5)
+    /// its scenarios compose, each whole, which a host hands its core
+    /// (`superschematic_rules_behaviors::core_declaring`, the bindings'
+    /// `declare`) and makes its tables from before it replays the
+    /// transcript; absent when it composes none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub declarations: Vec<Value>,
     pub scenarios: Vec<TranscriptScenario>,
 }
 
@@ -524,6 +532,7 @@ pub fn transcript(file: &ScenarioFile, make_core: &dyn Fn() -> Core) -> Result<T
         make_core,
         false,
         format!("runtime/engine/testdata/scenarios/{}.json", file.name),
+        &[],
     )
 }
 
@@ -541,16 +550,43 @@ pub fn hand_written_transcript(
         make_core,
         true,
         format!("runtime/engine/testdata/rules/scenarios/{}.json", file.name),
+        &[],
     )
 }
 
+/// Writes a hand-written scenario file's transcript as
+/// [`hand_written_transcript`] does, for a file whose scenarios compose
+/// declarative behaviors (D103's step 5): the core `make_core` builds with
+/// each of `declarations` added, which the transcript holds whole
+/// (`declarations`) for a host to hand its core. `source` is the file's
+/// path from the checkout's root. A declaration the vocabulary does not
+/// read fails it.
+pub fn hand_written_transcript_declaring(
+    file: &ScenarioFile,
+    make_core: &dyn Fn() -> Core,
+    declarations: &[Value],
+    source: &str,
+) -> Result<Transcript, String> {
+    let declared = superschematic_rules_behaviors::declaratives(declarations)?;
+    let declaring = || {
+        let mut core = make_core();
+        for behavior in &declared {
+            core.push(behavior.clone());
+        }
+        core
+    };
+    written(file, &declaring, true, source.to_owned(), declarations)
+}
+
 // written writes a scenario file's transcript from its source, with each
-// command's row version when `versions` is set.
+// command's row version when `versions` is set, and the declaration files
+// of the declarative behaviors its core adds.
 fn written(
     file: &ScenarioFile,
     make_core: &dyn Fn() -> Core,
     versions: bool,
     source: String,
+    declarations: &[Value],
 ) -> Result<Transcript, String> {
     let (report, recorded) = replay_recording(file, make_core, Some(versions));
     if !report.mismatches().is_empty() {
@@ -635,7 +671,14 @@ fn written(
         behaviors: superschematic_rules_behaviors::NAMES
             .iter()
             .map(|name| (*name).to_owned())
+            .chain(declarations.iter().filter_map(|declaration| {
+                declaration
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            }))
             .collect(),
+        declarations: declarations.to_vec(),
         scenarios,
     })
 }

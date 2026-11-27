@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureVariantFieldApiSDK Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-variant-field-api API",
+  "tools": [
+    {
+      "name": "steps.createStep",
+      "operationId": "StepsCreateStepHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Records a step. (Requires authentication)",
+      "namespace": "steps",
+      "methodName": "createStep",
+      "httpMethod": "POST",
+      "httpPath": "/api/steps",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:4f5a9c8813a65478f380cf2b4af59cd4af14166f1cf805c1c289975326091323",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {"description":"A StepKind value","enum":["verify","review","note"],"type":"string"},
+          "result": {"description":"A step's result in the shape its kind gives it (D149): a VerifyResult\nwhile the step's kind is verify, a ReviewResult while it is review, and\nnone while it is note.","oneOf":[{"additionalProperties":false,"description":"VerifyResult object","properties":{"checks":{"description":"Array of Check values","items":{"additionalProperties":false,"description":"Check object","properties":{"name":{"description":"A string value","type":"string"},"ok":{"description":"A boolean value (true or false)","type":"boolean"}},"required":["name","ok"],"type":"object"},"type":["array","null"]},"passed":{"description":"A boolean value (true or false)","type":"boolean"}},"required":["passed"],"type":"object"},{"additionalProperties":false,"description":"ReviewResult object","properties":{"notes":{"description":"A string value","maxLength":200,"type":["string","null"]},"verdict":{"description":"A Verdict value","enum":["approved","changes_requested"],"type":"string"}},"required":["verdict"],"type":"object"},{"type":"null"}],"type":["object","null"]},
+          "title": {"description":"A string value","type":"string"}
+        },
+        "required": ["kind", "title"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "StepView object"
+      }
+    },
+    {
+      "name": "steps.getStep",
+      "operationId": "StepsGetStepHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "One step. (Requires authentication)",
+      "namespace": "steps",
+      "methodName": "getStep",
+      "httpMethod": "GET",
+      "httpPath": "/api/steps/{id}",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "StepView object"
+      }
+    }
+  ]
+}

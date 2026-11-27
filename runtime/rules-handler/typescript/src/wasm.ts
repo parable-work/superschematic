@@ -44,7 +44,7 @@ export class HandlerError extends Error {
 }
 
 /** An operation of the C ABI (runtime/engine/rust/rules-handler-wasm/src/ffi.rs). */
-export type Operation = 'run' | 'route' | 'respond' | 'events' | 'tool' | 'bridge' | 'core' | 'layout';
+export type Operation = 'run' | 'route' | 'respond' | 'events' | 'tool' | 'bridge' | 'core' | 'layout' | 'declare';
 
 /**
  * The handler's module, instantiated. Each call takes an operation's input
@@ -53,8 +53,19 @@ export type Operation = 'run' | 'route' | 'respond' | 'events' | 'tool' | 'bridg
  */
 export interface HandlerModule {
   call(operation: Operation, input: string): string;
-  /** The behaviors' tables and the host loop's bounds, read once. */
+  /** The behaviors' tables and the host loop's bounds, read once and again after a declare. */
   layout(): Layout;
+  /**
+   * Hands the handler the declaration files of declarative behaviors (D103's
+   * step 5), each whole: behaviors whose declarations state their rules,
+   * which no Rust implements. Every operation runs them from then on, after
+   * the core's own, and layout lists them, so a store made after it keeps
+   * their sub-table rows. It returns the name of every declarative behavior
+   * the handler runs. A file the vocabulary does not read, one that names a
+   * behavior the core implements, and a second file of a declared name that
+   * differs throw a HandlerError of code invalid_input.
+   */
+  declare(declarations: readonly object[]): string[];
 }
 
 /**
@@ -103,6 +114,7 @@ interface Exports {
   handler_bridge: Export;
   handler_core: Export;
   handler_layout: Export;
+  handler_declare: Export;
 }
 
 const EXPORTS = [
@@ -118,6 +130,7 @@ const EXPORTS = [
   'handler_bridge',
   'handler_core',
   'handler_layout',
+  'handler_declare',
 ] as const;
 
 // The return codes of the C ABI.
@@ -188,6 +201,9 @@ class Module implements HandlerModule {
   readonly #module: WebAssembly.Module;
   #exports: Exports;
   #layout: Layout | undefined;
+  // The declaration files declared so far, which a fresh instance is handed
+  // again after a trap.
+  #declared: string[] = [];
 
   constructor(module: WebAssembly.Module, exports: Exports) {
     this.#module = module;
@@ -197,6 +213,16 @@ class Module implements HandlerModule {
   layout(): Layout {
     this.#layout ??= JSON.parse(this.call('layout', '{}')) as Layout;
     return this.#layout;
+  }
+
+  declare(declarations: readonly object[]): string[] {
+    const { declared } = JSON.parse(this.call('declare', JSON.stringify({ declarations }))) as { declared: string[] };
+    for (const declaration of declarations) {
+      const text = JSON.stringify(declaration);
+      if (!this.#declared.includes(text)) this.#declared.push(text);
+    }
+    this.#layout = undefined;
+    return declared;
   }
 
   call(operation: Operation, input: string): string {
@@ -220,6 +246,8 @@ class Module implements HandlerModule {
       // call is refused as the module's own failure.
       if (error instanceof WebAssembly.RuntimeError) {
         this.#exports = exportsOf(new WebAssembly.Instance(this.#module, {}));
+        // The fresh instance runs the declarative behaviors this one did.
+        if (this.#declared.length > 0) this.#copy('declare', encoder.encode(`{"declarations":[${this.#declared.join(',')}]}`));
         throw new HandlerError('internal', `rules-handler: the module trapped while it ran ${operation} (${error.message}); it runs on a fresh instance from the next call`);
       }
       throw error;

@@ -263,7 +263,7 @@ func ClassifyColumn(f *ir.FieldDef, schema *ir.Schema, scalar ScalarClass, isSca
 		FloatLike:    traits.IsFloatLike || ref.Name == codegen.PrimitiveNumber,
 		BoolLike:     traits.IsBooleanLike || ref.Name == codegen.PrimitiveBoolean,
 		JSONLike:     traits.IsJSONLike || traits.IsObjectLike || ref.IsMap,
-		JSON:         f.JsonField || ref.IsMap || ref.IsArrayOfArrays || jsonPayload || explicitJSONNull,
+		JSON:         f.JsonField || ref.IsMap || ref.IsArrayOfArrays || jsonPayload || explicitJSONNull || isUnion,
 		Point:        stored && strings.EqualFold(scalar.SQLType, "POINT"),
 		Interval:     stored && strings.EqualFold(scalar.SQLType, "INTERVAL"),
 		Vector:       stored && !ref.IsArray && ref.Name == ir.VectorScalarName && f.ValidateDimensions != nil,

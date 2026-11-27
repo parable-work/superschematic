@@ -201,6 +201,9 @@ type CoreOwnColumn struct {
 	// Relationship that relation's.
 	Column       *Field
 	Relationship *Relationship
+	// Given is a value a create gives (D147: Aliased's name), which a
+	// create's own fields name and no update's patch does.
+	Given bool
 }
 
 // CoreValue is the core's value of the column's field held at expr, a Go
@@ -651,6 +654,13 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 		}
 		repo.CoreOwn = append(repo.CoreOwn, own)
 	}
+	// A value a create gives (D147: Aliased's name) is the create's own
+	// member of the anchor's name, which the core hands the use.
+	for i := range repo.Fields {
+		if repo.Fields[i].IsGivenAtCreate {
+			repo.CoreOwn = append(repo.CoreOwn, CoreOwnColumn{Field: repo.Fields[i].Name, Column: &repo.Fields[i], Given: true})
+		}
+	}
 
 	for _, use := range table.Uses {
 		member := use.Member
@@ -665,8 +675,9 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			where, rename = "the table implements", "rename the field or type whose name it takes"
 		}
 		// A create that writes a sub-table's or a shared table's rows
-		// (Numbering's counts, D103's step 4) is no upsert's insert.
-		if len(use.Tables) > 0 || len(use.Shared) > 0 {
+		// (Numbering's counts, D103's step 4), or another table's
+		// (Blueprint's children, D149), is no upsert's insert.
+		if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 			repo.NoUpsert = true
 		}
 		goName := codegen.ToPascalCase(member)

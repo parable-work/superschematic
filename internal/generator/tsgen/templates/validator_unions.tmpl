@@ -327,4 +327,50 @@ export function parse{{.Name}}Json(input: unknown): unknown {
   }
   return input;
 }
+{{- if .By}}
+
+/**
+ * The member each value of {{.By}} names, by its index in {{.Name}}Members:
+ * {{.Name}} is a variant union (D149), whose member a field's sibling
+ * {{.By}} names.
+ */
+const {{.Name}}Arms: ReadonlyMap<unknown, number> = new Map<unknown, number>([
+{{- range .Arms}}
+  [{{jsonString .Value}}, {{.Index}}],
+{{- end}}
+]);
+
+/**
+ * Validates a field's {{.Name}} as the member its sibling {{.By}} names, by,
+ * with its defaults filled in, by the member's own validator: true, or the
+ * member's field errors. A value while by names no member is "variant",
+ * and one that is no object "type", each the field's own error (D149).
+ */
+export function validate{{.Name}}By(by: unknown, value: unknown): 'variant' | 'type' | ValidationResult {
+  const index = {{.Name}}Arms.get(by);
+  if (index === undefined) {
+    return 'variant';
+  }
+  const payload = unionPayload(value);
+  if (payload === undefined) {
+    return 'type';
+  }
+  return checkUnionMember({{.Name}}Members[index], payload) ?? true;
+}
+
+/**
+ * Parses a field's {{.Name}} from JSON as the member its sibling {{.By}}
+ * names, by, read by the member's parse<Member>FromJSON. A value by names
+ * no member for, which validate{{.Name}}By refuses, is read as
+ * parse{{.Name}}FromJSON reads it.
+ */
+export function parse{{.Name}}FromJSONBy(by: unknown, input: unknown): {{.Name}} {
+  const index = {{.Name}}Arms.get(by);
+  const payload = unionPayload(input);
+  if (index === undefined || payload === undefined) {
+    return parse{{.Name}}FromJSON(input);
+  }
+  return {{.Name}}Members[index][0]({ ...payload }) as {{.Name}};
+}
+{{- end}}
 {{end -}}

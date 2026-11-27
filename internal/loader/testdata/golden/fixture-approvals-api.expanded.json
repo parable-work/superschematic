@@ -568,10 +568,7 @@
             "use": "Approvals",
             "behavior": "Approvals",
             "operation": "withdrawSignOff",
-            "writes": true,
-            "permissions": [
-              "tasks.review"
-            ]
+            "writes": true
           },
           "httpMethod": "POST",
           "restPath": "task/{id}/approvals/withdraw-sign-off",
@@ -622,10 +619,7 @@
             "key": "id",
             "use": "Approvals",
             "behavior": "Approvals",
-            "operation": "listSignOffs",
-            "permissions": [
-              "tasks.review"
-            ]
+            "operation": "listSignOffs"
           },
           "httpMethod": "POST",
           "restPath": "task/{id}/approvals/list-sign-offs",

@@ -495,6 +495,12 @@ where
         self.repository.hard_delete_one(&wire(key)?)
     }
 
+    /// Folds the row `from` into the row `into` (D147), as the untyped
+    /// repository's `merge_into` does.
+    pub fn merge_into(&self, from: &Key, into: &Key) -> Result<super::MergeResult, Error> {
+        self.repository.merge_into(&wire(from)?, &wire(into)?)
+    }
+
     /// Runs `operation` of the behavior under `member` on the live row
     /// whose key is `key`, through the behaviors' core (D103), with
     /// `params`, and answers its result as `R`.
@@ -688,6 +694,14 @@ impl Repository<'_> {
     /// its sub-table rows and its queues' messages (D103).
     pub fn hard_delete_one(&self, key: &Value) -> Result<(), Error> {
         finish(self.runner().hard_delete_one(key))
+    }
+
+    /// Folds the row `from` into the row `into` (D147), in a savepoint: of
+    /// the caller's transaction, or the merge's own when it opened none,
+    /// for SQLite's one writer holds the database once the merge writes.
+    /// What it does and refuses is the Postgres repository's `merge_into`'s.
+    pub fn merge_into(&self, from: &Value, into: &Value) -> Result<super::MergeResult, Error> {
+        finish(self.runner().merge_into(from, into))
     }
 
     /// Runs `operation` of the behavior under `member`, the use's field

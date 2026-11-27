@@ -242,6 +242,9 @@ func (w *walker) resolveTypeReference(node *astNode) (*typeInfo, *SchemaError) {
 	if w.isAuthoring(id) && wrapperNames[id.name] {
 		return w.resolveWrapper(node, id)
 	}
+	if w.isAuthoring(id) && id.name == "Variant" {
+		return nil, errorAtNode(node, "Variant<By, Arms> declares a union, which a field names: %s, and the field is result?: StepResult (D149)", variantUsage)
+	}
 
 	// Branded scalar: the resolved type carries a __brand string literal.
 	t := w.checker.GetTypeFromTypeNode(node)

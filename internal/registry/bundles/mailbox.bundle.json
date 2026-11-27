@@ -1,0 +1,54 @@
+{
+  "name": "Mailbox",
+  "description": "A message an agent takes in turn (D104): a Workflow on status with fixed states (queued, urgent, taken, sent, canceled, failed), whose sender's moves (to urgent, back to queued, and canceled) the subject the row's createdBy holds makes; StateRules freezing every own field of a taken message; and Lease on a taken message: a taker acquires the row's lease and moves it to taken with the token, and while it is taken the lease's expiry, an abandon or a release moves it back to queued. The table declares createdBy, an own field that holds the sender's subject. A take is the app's: the declared read of a conversation's oldest waiting message, Lease's acquire and the move to taken.",
+  "settingsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "ttlMs": {
+        "description": "How long a taker's lease lasts after its acquire or its last heartbeat, in milliseconds; Lease's 60000 when absent.",
+        "type": "integer",
+        "minimum": 1000
+      },
+      "takePermission": {
+        "description": "The permission a caller needs to take a message, Lease's acquirePermission; any caller who may write the row when absent.",
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "parts": [
+    {
+      "behavior": "StateRules",
+      "config": { "states": { "taken": { "frozen": "all" } } }
+    },
+    {
+      "behavior": "Lease",
+      "config": {
+        "onExpiry": { "transition": "queued", "from": ["taken"] },
+        "ttlMs": { "$setting": "ttlMs" },
+        "acquirePermission": { "$setting": "takePermission" }
+      }
+    },
+    {
+      "behavior": "Workflow",
+      "field": "status",
+      "config": {
+        "states": ["queued", "urgent", "taken", "sent", "canceled", "failed"],
+        "initial": "queued",
+        "transitions": [
+          { "from": "queued", "to": "urgent", "by": ["createdBy"] },
+          { "from": "urgent", "to": "queued", "by": ["createdBy"] },
+          { "from": "queued", "to": "canceled", "by": ["createdBy"] },
+          { "from": "urgent", "to": "canceled", "by": ["createdBy"] },
+          { "from": "queued", "to": "taken" },
+          { "from": "urgent", "to": "taken" },
+          { "from": "taken", "to": "sent" },
+          { "from": "taken", "to": "failed" },
+          { "from": "taken", "to": "queued" }
+        ],
+        "outcomes": { "canceled": "neutral", "failed": "failure" }
+      }
+    }
+  ]
+}

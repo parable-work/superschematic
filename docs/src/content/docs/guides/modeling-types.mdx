@@ -329,6 +329,105 @@ Here is `FeedItem` as the Rust types crate declares it:
 
 <Snippet file="testdata/generated/types/rust/shop-common/src/types.rs" symbol="FeedItem" />
 
+## A field whose shape another field picks
+
+A variant union is a field type whose member another field of the same
+type names by value (D149). A step's result takes the shape its kind
+gives it:
+
+```ts
+import { Variant, jsonField } from "@superschematic/schema";
+
+export enum StepKind {
+  Verify = "verify",
+  Review = "review",
+  Note = "note"
+}
+
+@jsonField
+export abstract class VerifyResult {
+  passed: boolean;
+  checks?: Check[];
+}
+
+@jsonField
+export abstract class ReviewResult {
+  verdict: Verdict;
+  notes?: Validate<string, { maxLength: 200 }>;
+}
+
+// A VerifyResult while the kind is verify, a ReviewResult while it is
+// review, and nothing while it is note.
+export type StepResult = Variant<"kind", { verify: VerifyResult; review: ReviewResult }>;
+
+export abstract class Step {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  title: string;
+  kind: StepKind;
+  result?: StepResult;
+}
+```
+
+`Variant<By, Arms>` is declared as an exported alias, which names the
+union. `By` names the sibling: a string or enum field of every type that
+holds a field of the union. Each key of `Arms` is a value of the sibling,
+a member of its enum when it is one, and names an object type of the
+schema. Several values may name one member. While the sibling holds a
+value `Arms` lacks, or none, the field holds nothing. The JSON and YAML
+forms write the union's `by` and `arms` beside its `types`, which list
+each member once:
+
+```yaml
+unions:
+  StepResult:
+    name: StepResult
+    types: [VerifyResult, ReviewResult]
+    by: kind
+    arms: { verify: VerifyResult, review: ReviewResult }
+```
+
+Every validator, in Go, TypeScript, Python and Rust, and every schema
+runtime holds the field to the member its sibling names:
+
+- A value while the sibling names no member is refused with the rule
+  `variant`, and so is a Go or Rust value that holds another member.
+- A value that is no JSON object is `type`.
+- Any other value is checked as the member, with its defaults filled in.
+  The member's errors sit under the field's path: `result.verdict` is
+  `required` for a review result without its verdict.
+- An absent or null optional field passes, and an absent required one is
+  `required`.
+
+Every decoder reads the member the sibling names, not the one the value's
+shape would pick, as a union without `by` does (a review result that also
+holds `passed` is still a `ReviewResult`):
+
+- Go: the type's `UnmarshalJSON` reads the field through the union's
+  `StepResultWrapper.UnmarshalVariantJSON`, and `Validate` checks the
+  member with `HoldsArm`.
+- TypeScript: `parseStepFromJSON` reads it with
+  `parseStepResultFromJSONBy`, and `validateStep` checks it with
+  `validateStepResultBy`.
+- Python: the model reads it with `read_variant_field`, and
+  `validate_all` checks it with `check_variant_field`.
+- Rust: `Step` deserializes through `StepWire`, whose `TryFrom` reads the
+  field with `StepResult::from_variant`.
+
+Each language types the field as the union of its members: the
+`StepResult` interface in Go, `VerifyResult | ReviewResult` in
+TypeScript, a `Union` in Python and an enum in Rust. An API's view or
+input that holds the field names the database's union and holds the
+sibling too. The ORMs read a row's column as the member the row's sibling
+names. On a DB table the column is `JSONB`, and a `CHECK` holds it to
+its arms; see
+[Database tables](/superschematic/guides/database-tables/#json-columns).
+
+A variant union is one field's type: no list, map, argument or operation
+result is of it, and the field takes no default. The engine's `Variants`
+behavior is the same rule for an engine type, and stays until engine
+types go.
+
 ## Strict decoding
 
 By default the decoders are lenient about keys a type does not declare, in

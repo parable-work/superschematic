@@ -326,3 +326,35 @@ fn a_plan_in_progress_serves_no_request() {
     .expect("the plan done");
     common::ok(&mut runtime, json!({"kind": "list", "type": "Task"}));
 }
+
+/// A runtime host handed a declarative behavior's declaration (D103's step
+/// 5) runs it through its core after the core's own, and refuses a file the
+/// vocabulary does not read. A publish of a table that composes it plans
+/// through the compiler of a project that registers it, which the core's
+/// own planner here is not, so no table is published.
+#[test]
+fn a_runtime_declaring_a_declarative_behavior_runs_it_through_its_core() {
+    let votes: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../testdata/rules/declarations/test.Votes.behavior.json"
+    ))
+    .expect("the declaration file");
+    let runtime = Runtime::open(file("declaring"))
+        .expect("the file opens")
+        .declaring(std::slice::from_ref(&votes))
+        .expect("the declaration reads");
+    assert!(runtime.core().declaration("test.Votes").is_some());
+    assert_eq!(
+        runtime.core().names().last().map(String::as_str),
+        Some("test.Votes")
+    );
+    let refused = Runtime::open(file("declaring-refused"))
+        .expect("the file opens")
+        .declaring(&[json!({"name": "test.Plain"})]);
+    let refusal = refused.err().expect("a file with no rules is refused");
+    assert_eq!(refusal.code, Code::InvalidArgument);
+    assert!(
+        refusal.message.contains("states no rules"),
+        "{}",
+        refusal.message
+    );
+}

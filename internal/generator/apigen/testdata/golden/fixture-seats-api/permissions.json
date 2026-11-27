@@ -7,7 +7,6 @@
       "identity": false,
       "operations": [
         "ProblemSeatsLeaveSeatHandler",
-        "ProblemSeatsListSeatsHandler",
         "ProblemSeatsTakeSeatHandler"
       ]
     },
@@ -22,8 +21,6 @@
       "name": "problems.own",
       "identity": false,
       "operations": [
-        "ProblemSeatsLeaveSeatHandler",
-        "ProblemSeatsListSeatsHandler",
         "ProblemSeatsTakeSeatHandler"
       ]
     },
@@ -32,7 +29,6 @@
       "identity": false,
       "operations": [
         "ProblemSeatsLeaveSeatHandler",
-        "ProblemSeatsListSeatsHandler",
         "ProblemSeatsTakeSeatHandler"
       ]
     },
@@ -40,8 +36,6 @@
       "name": "problems.work",
       "identity": false,
       "operations": [
-        "ProblemSeatsLeaveSeatHandler",
-        "ProblemSeatsListSeatsHandler",
         "ProblemSeatsTakeSeatHandler"
       ]
     },

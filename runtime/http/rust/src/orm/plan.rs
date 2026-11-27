@@ -263,6 +263,57 @@ impl<'a> Plan<'a> {
         })
     }
 
+    /// One of a merge's statements with its arguments (D147): the key of
+    /// the row merged away, the key of the row that stays, and, for one
+    /// that takes it, the acting user in the form its column holds, null
+    /// for none.
+    pub(crate) fn merge_statement(
+        &self,
+        statement: &super::MergeStatement,
+        from: &Value,
+        into: &Value,
+    ) -> Result<Statement, Error> {
+        let mut args = vec![self.key(from)?, self.key(into)?];
+        if let Some(actor) = &statement.actor {
+            let marks = if actor == "uuid" {
+                Marks {
+                    uuid: true,
+                    ..Marks::TEXT
+                }
+            } else {
+                Marks::TEXT
+            };
+            args.push(Bound {
+                value: self.user().map_or(Value::Null, Value::String),
+                marks,
+            });
+        }
+        Ok(Statement {
+            sql: statement.sql.clone(),
+            args,
+        })
+    }
+
+    /// The acting user a merge that stamps a row deleted needs (D147).
+    pub(crate) fn merge_user(&self) -> Result<String, Error> {
+        self.require_user()
+    }
+
+    /// The statement that sets the history actor for a merge's
+    /// transaction, whose steps delete a @versioned table's rows (D147).
+    pub(crate) fn merge_history_actor(&self) -> Statement {
+        Statement {
+            sql: format!(
+                "{}SELECT _history_actor FROM history_actor",
+                self.definition.history_actor_cte
+            ),
+            args: vec![Bound {
+                value: self.user().map_or(Value::Null, Value::String),
+                marks: Marks::TEXT,
+            }],
+        }
+    }
+
     pub(crate) fn key(&self, key: &Value) -> Result<Bound, Error> {
         if key.is_null() {
             return Err(invalid(format!(

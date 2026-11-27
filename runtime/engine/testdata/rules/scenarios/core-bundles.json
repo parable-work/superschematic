@@ -1,0 +1,2951 @@
+{
+  "name": "core-bundles",
+  "description": "The core's bundles on tables, D103's step 5 and D104: Reservation, Barrier, Mailbox and Assignment, each a table whose uses are the parts the loader expands the bundle into, as the fixtures of internal/loader/tsreader/testdata/services load them, which a Go test holds the defines here to (TestBundleScenariosAreTheLoadersParts). A bundle defines no rules, so the core runs its parts as it runs any table's uses. Cases written by hand in the recorded format, since no engine implements a bundle. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "source": "written by hand (D103, step 5): runtime/engine/testdata/rules/scenarios/core-bundles.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Reservation > a booking says its room, its interval, its amount and its currency: it holds the room's time as it enters held, waits for its payment to be booked, commits the time as it is booked, a hold of the same time is unavailable, a hold its deadline expires lets the time go, and a cancellation lets it go",
+      "behaviors": [
+        "Calendar",
+        "Holds",
+        "Links",
+        "Payments",
+        "Timers",
+        "Workflow"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        },
+        "mo": {
+          "subject": "mo",
+          "permissions": [
+            "rooms.manage"
+          ]
+        },
+        "adapter": {
+          "subject": "adapter",
+          "permissions": [
+            "payments.record"
+          ]
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1792573200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Room",
+              "types": {
+                "Room": {
+                  "name": "Room",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Calendar",
+                      "config": {
+                        "capacity": 1,
+                        "hours": {
+                          "fri": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "mon": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "thu": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "tue": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ],
+                          "wed": [
+                            [
+                              "09:00",
+                              "17:30"
+                            ]
+                          ]
+                        },
+                        "maxMs": 7200000,
+                        "minMs": 900000,
+                        "permission": "rooms.manage",
+                        "slotMs": 900000,
+                        "timeZone": "Europe/London"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Room",
+            "version": null,
+            "instanceType": "Room"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "mo",
+          "args": [
+            "Room"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Room",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "mo",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Booking",
+              "types": {
+                "Booking": {
+                  "name": "Booking",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "guest",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "startsAt",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    },
+                    {
+                      "name": "endsAt",
+                      "typeRef": {
+                        "name": "Temporal.DateTime"
+                      }
+                    },
+                    {
+                      "name": "priceCents",
+                      "typeRef": {
+                        "name": "Generic.Int64"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Links",
+                      "config": {
+                        "links": {
+                          "room": {
+                            "schema": "Room"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Holds",
+                      "config": {
+                        "commitOn": [
+                          "booked"
+                        ],
+                        "holds": {
+                          "slot": {
+                            "interval": {
+                              "end": "endsAt",
+                              "start": "startsAt"
+                            },
+                            "link": "room"
+                          }
+                        },
+                        "releaseOn": [
+                          "expired",
+                          "cancelled"
+                        ],
+                        "takeOn": [
+                          "held"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Payments",
+                      "config": {
+                        "amount": {
+                          "field": "priceCents"
+                        },
+                        "currency": "GBP",
+                        "record": {
+                          "permission": "payments.record"
+                        },
+                        "require": {
+                          "booked": "paid"
+                        },
+                        "voidOn": [
+                          "expired",
+                          "cancelled"
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Timers",
+                      "config": {
+                        "deadlines": {
+                          "holdExpiry": {
+                            "afterMs": 900000,
+                            "start": {
+                              "enters": "held"
+                            },
+                            "then": {
+                              "transition": "expired"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "initial": "draft",
+                        "states": [
+                          "draft",
+                          "held",
+                          "booked",
+                          "expired",
+                          "cancelled"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "draft",
+                            "to": "held"
+                          },
+                          {
+                            "from": "held",
+                            "to": "booked"
+                          },
+                          {
+                            "from": "held",
+                            "to": "expired"
+                          },
+                          {
+                            "from": "held",
+                            "to": "cancelled"
+                          },
+                          {
+                            "from": "draft",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Booking",
+            "version": null,
+            "instanceType": "Booking"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "mo",
+          "args": [
+            "Booking"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Booking",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "mo",
+          "args": [
+            "Room",
+            {
+              "name": "Garden room"
+            },
+            {
+              "id": "r1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Room",
+            "id": "r1",
+            "data": {
+              "name": "Garden room"
+            },
+            "behaviors": {
+              "Calendar": {
+                "timeZone": "Europe/London",
+                "hours": {
+                  "fri": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "mon": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "thu": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "tue": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ],
+                  "wed": [
+                    [
+                      "09:00",
+                      "17:30"
+                    ]
+                  ]
+                },
+                "closures": []
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "guest": "Ada",
+              "startsAt": "2026-10-22T09:00:00Z",
+              "endsAt": "2026-10-22T10:00:00Z",
+              "priceCents": 4500
+            },
+            {
+              "id": "b1",
+              "behaviors": {
+                "Links": {
+                  "room": "r1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b1",
+            "data": {
+              "guest": "Ada",
+              "startsAt": "2026-10-22T09:00:00Z",
+              "endsAt": "2026-10-22T10:00:00Z",
+              "priceCents": 4500
+            },
+            "behaviors": {
+              "Holds": {
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                },
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Room",
+                    "id": "r1",
+                    "startMs": 1792659600000,
+                    "endMs": 1792663200000,
+                    "state": "pending"
+                  }
+                ]
+              },
+              "Payments": {
+                "due": 4500,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 4500,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              },
+              "Timers": {
+                "deadlines": {}
+              },
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792573200000
+              },
+              "Links": {
+                "targets": {
+                  "room": {
+                    "schema": "Room",
+                    "id": "r1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "expect": {
+            "from": "draft",
+            "to": "held"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1",
+            "transition",
+            {
+              "to": "booked"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Payments vetoes transition of Booking b1: Booking b1 moves to booked once 4500 is captured; 0 is captured and 0 authorized",
+            "details": {
+              "behavior": "Payments",
+              "action": "transition",
+              "reason": "Booking b1 moves to booked once 4500 is captured; 0 is captured and 0 authorized",
+              "vetoCode": "unpaid",
+              "vetoDetails": {
+                "state": "booked",
+                "requires": "paid",
+                "due": 4500,
+                "authorized": 0,
+                "captured": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1",
+            "openPayment",
+            {
+              "provider": "acmepay",
+              "idempotencyKey": "k1"
+            }
+          ],
+          "expect": {
+            "attempt": "pay_{{id:1}}",
+            "provider": "acmepay",
+            "amount": 4500,
+            "currency": "GBP",
+            "status": "open"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "adapter",
+          "args": [
+            "Booking",
+            "b1",
+            "recordPaymentEvent",
+            {
+              "provider": "acmepay",
+              "eventId": "e1",
+              "kind": "captured",
+              "amount": 4500,
+              "currency": "GBP",
+              "at": 1792573200000,
+              "attempt": "pay_{{id:1}}",
+              "providerRef": "pi_1"
+            }
+          ],
+          "expect": {
+            "applied": true,
+            "attempt": {
+              "attempt": "pay_{{id:1}}",
+              "provider": "acmepay",
+              "providerRef": "pi_1",
+              "amount": 4500,
+              "currency": "GBP",
+              "status": "captured",
+              "captured": 4500,
+              "openedAt": 1792573200000,
+              "updatedAt": 1792573200000
+            },
+            "state": "paid"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1",
+            "transition",
+            {
+              "to": "booked"
+            }
+          ],
+          "expect": {
+            "from": "held",
+            "to": "booked"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b1",
+            "data": {
+              "guest": "Ada",
+              "startsAt": "2026-10-22T09:00:00Z",
+              "endsAt": "2026-10-22T10:00:00Z",
+              "priceCents": 4500
+            },
+            "behaviors": {
+              "Holds": {
+                "state": "committed",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                },
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Room",
+                    "id": "r1",
+                    "startMs": 1792659600000,
+                    "endMs": 1792663200000,
+                    "state": "committed"
+                  }
+                ]
+              },
+              "Payments": {
+                "due": 4500,
+                "authorized": 0,
+                "captured": 4500,
+                "refunded": 0,
+                "outstanding": 0,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "paid",
+                "attempts": [
+                  {
+                    "attempt": "pay_{{id:1}}",
+                    "provider": "acmepay",
+                    "providerRef": "pi_1",
+                    "amount": 4500,
+                    "currency": "GBP",
+                    "status": "captured",
+                    "captured": 4500,
+                    "openedAt": 1792573200000,
+                    "updatedAt": 1792573200000
+                  }
+                ]
+              },
+              "Timers": {
+                "deadlines": {
+                  "holdExpiry": {
+                    "dueAt": 1792574100000,
+                    "fired": false
+                  }
+                }
+              },
+              "status": {
+                "status": "booked",
+                "enteredAt": 1792573200000
+              },
+              "Links": {
+                "targets": {
+                  "room": {
+                    "schema": "Room",
+                    "id": "r1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "guest": "Bo",
+              "startsAt": "2026-10-22T09:30:00Z",
+              "endsAt": "2026-10-22T10:30:00Z",
+              "priceCents": 4500
+            },
+            {
+              "id": "b2",
+              "behaviors": {
+                "Links": {
+                  "room": "r1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b2",
+            "data": {
+              "guest": "Bo",
+              "startsAt": "2026-10-22T09:30:00Z",
+              "endsAt": "2026-10-22T10:30:00Z",
+              "priceCents": 4500
+            },
+            "behaviors": {
+              "Holds": {
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                },
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Room",
+                    "id": "r1",
+                    "startMs": 1792661400000,
+                    "endMs": 1792665000000,
+                    "state": "pending"
+                  }
+                ]
+              },
+              "Payments": {
+                "due": 4500,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 4500,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              },
+              "Timers": {
+                "deadlines": {}
+              },
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792573200000
+              },
+              "Links": {
+                "targets": {
+                  "room": {
+                    "schema": "Room",
+                    "id": "r1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b2",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Holds vetoes transition of Booking b2: Room r1 is held for part of 2026-10-22 10:30 to 2026-10-22 11:30 Europe/London",
+            "details": {
+              "behavior": "Holds",
+              "action": "transition",
+              "reason": "Room r1 is held for part of 2026-10-22 10:30 to 2026-10-22 11:30 Europe/London",
+              "vetoCode": "unavailable",
+              "vetoDetails": {
+                "items": [
+                  {
+                    "code": "unavailable",
+                    "reason": "Room r1 is held for part of 2026-10-22 10:30 to 2026-10-22 11:30 Europe/London",
+                    "supply": {
+                      "schema": "Room",
+                      "id": "r1"
+                    },
+                    "hold": "slot",
+                    "item": 0,
+                    "asked": {
+                      "interval": {
+                        "startMs": 1792661400000,
+                        "endMs": 1792665000000
+                      }
+                    },
+                    "conflict": {
+                      "startMs": 1792659600000,
+                      "endMs": 1792663200000
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "guest": "Cy",
+              "startsAt": "2026-10-22T11:00:00Z",
+              "endsAt": "2026-10-22T12:00:00Z",
+              "priceCents": 3000
+            },
+            {
+              "id": "b3",
+              "behaviors": {
+                "Links": {
+                  "room": "r1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b3",
+            "data": {
+              "guest": "Cy",
+              "startsAt": "2026-10-22T11:00:00Z",
+              "endsAt": "2026-10-22T12:00:00Z",
+              "priceCents": 3000
+            },
+            "behaviors": {
+              "Holds": {
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                },
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Room",
+                    "id": "r1",
+                    "startMs": 1792666800000,
+                    "endMs": 1792670400000,
+                    "state": "pending"
+                  }
+                ]
+              },
+              "Payments": {
+                "due": 3000,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 3000,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              },
+              "Timers": {
+                "deadlines": {}
+              },
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792573200000
+              },
+              "Links": {
+                "targets": {
+                  "room": {
+                    "schema": "Room",
+                    "id": "r1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b3",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "expect": {
+            "from": "draft",
+            "to": "held"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1792574100000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b3"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b3",
+            "data": {
+              "guest": "Cy",
+              "startsAt": "2026-10-22T11:00:00Z",
+              "endsAt": "2026-10-22T12:00:00Z",
+              "priceCents": 3000
+            },
+            "behaviors": {
+              "Holds": {
+                "state": "released",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                },
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Room",
+                    "id": "r1",
+                    "startMs": 1792666800000,
+                    "endMs": 1792670400000,
+                    "state": "released"
+                  }
+                ]
+              },
+              "Payments": {
+                "due": 3000,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 3000,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              },
+              "Timers": {
+                "deadlines": {
+                  "holdExpiry": {
+                    "dueAt": 1792574100000,
+                    "fired": true,
+                    "firedAt": 1792574100000,
+                    "outcome": "moved"
+                  }
+                }
+              },
+              "status": {
+                "status": "expired",
+                "enteredAt": 1792574100000
+              },
+              "Links": {
+                "targets": {
+                  "room": {
+                    "schema": "Room",
+                    "id": "r1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            {
+              "guest": "Di",
+              "startsAt": "2026-10-22T11:00:00Z",
+              "endsAt": "2026-10-22T12:00:00Z",
+              "priceCents": 3000
+            },
+            {
+              "id": "b4",
+              "behaviors": {
+                "Links": {
+                  "room": "r1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b4",
+            "data": {
+              "guest": "Di",
+              "startsAt": "2026-10-22T11:00:00Z",
+              "endsAt": "2026-10-22T12:00:00Z",
+              "priceCents": 3000
+            },
+            "behaviors": {
+              "Holds": {
+                "state": "pending",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                },
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Room",
+                    "id": "r1",
+                    "startMs": 1792666800000,
+                    "endMs": 1792670400000,
+                    "state": "pending"
+                  }
+                ]
+              },
+              "Payments": {
+                "due": 3000,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 3000,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              },
+              "Timers": {
+                "deadlines": {}
+              },
+              "status": {
+                "status": "draft",
+                "enteredAt": 1792574100000
+              },
+              "Links": {
+                "targets": {
+                  "room": {
+                    "schema": "Room",
+                    "id": "r1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b4",
+            "transition",
+            {
+              "to": "held"
+            }
+          ],
+          "expect": {
+            "from": "draft",
+            "to": "held"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b4",
+            "transition",
+            {
+              "to": "cancelled"
+            }
+          ],
+          "expect": {
+            "from": "held",
+            "to": "cancelled"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Booking",
+            "b4"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Booking",
+            "id": "b4",
+            "data": {
+              "guest": "Di",
+              "startsAt": "2026-10-22T11:00:00Z",
+              "endsAt": "2026-10-22T12:00:00Z",
+              "priceCents": 3000
+            },
+            "behaviors": {
+              "Holds": {
+                "state": "released",
+                "total": {
+                  "amount": 0,
+                  "currency": null
+                },
+                "items": [
+                  {
+                    "hold": "slot",
+                    "item": 0,
+                    "schema": "Room",
+                    "id": "r1",
+                    "startMs": 1792666800000,
+                    "endMs": 1792670400000,
+                    "state": "released"
+                  }
+                ]
+              },
+              "Payments": {
+                "due": 3000,
+                "authorized": 0,
+                "captured": 0,
+                "refunded": 0,
+                "outstanding": 3000,
+                "overpaid": 0,
+                "currency": "GBP",
+                "state": "unpaid",
+                "attempts": []
+              },
+              "Timers": {
+                "deadlines": {
+                  "holdExpiry": {
+                    "dueAt": 1792575000000,
+                    "fired": false
+                  }
+                }
+              },
+              "status": {
+                "status": "cancelled",
+                "enteredAt": 1792574100000
+              },
+              "Links": {
+                "targets": {
+                  "room": {
+                    "schema": "Room",
+                    "id": "r1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Room",
+            "r1",
+            "listBookings",
+            {
+              "startMs": 1792573200000,
+              "endMs": 1795165200000
+            }
+          ],
+          "expect": {
+            "items": [
+              {
+                "holder": {
+                  "schema": "Booking",
+                  "id": "b1"
+                },
+                "hold": "slot",
+                "item": 0,
+                "startMs": 1792659600000,
+                "endMs": 1792663200000,
+                "state": "committed"
+              }
+            ],
+            "next": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Barrier > a rollout waits for every agent that points at it to be ready, for its timeout, or for a person's go-ahead: the gate holds a caller without the release permission until each agent has finished with success; the deadline's release at the timeout and a go-ahead by a caller who holds the permission pass it whether the agents are ready or not (Rollups' exemptions); a release once every agent is ready needs the permission too; a cancelled rollout's deadline is skipped",
+      "behaviors": [
+        "Links",
+        "Rollups",
+        "Timers",
+        "Workflow"
+      ],
+      "principals": {
+        "lead": {
+          "subject": "lead",
+          "permissions": [
+            "rollouts.release"
+          ]
+        },
+        "agent": {
+          "subject": "agent",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "rollouts.release"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "lead",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Rollout",
+              "types": {
+                "Rollout": {
+                  "name": "Rollout",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Rollups",
+                      "config": {
+                        "rollups": {
+                          "ready": {
+                            "exemptions": {
+                              "deadlines": [
+                                "timeout"
+                              ],
+                              "permission": "rollouts.release"
+                            },
+                            "function": "all",
+                            "gatedStates": [
+                              "released"
+                            ],
+                            "link": "rollout",
+                            "outcomes": [
+                              "success"
+                            ],
+                            "schema": "Agent"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Timers",
+                      "config": {
+                        "deadlines": {
+                          "timeout": {
+                            "afterMs": 300000,
+                            "start": {
+                              "enters": "waiting"
+                            },
+                            "then": {
+                              "transition": "released"
+                            }
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "initial": "waiting",
+                        "outcomes": {
+                          "cancelled": "neutral"
+                        },
+                        "states": [
+                          "waiting",
+                          "released",
+                          "cancelled"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "waiting",
+                            "permission": "rollouts.release",
+                            "to": "released"
+                          },
+                          {
+                            "from": "waiting",
+                            "to": "cancelled"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Rollout",
+            "version": null,
+            "instanceType": "Rollout"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "lead",
+          "args": [
+            "Rollout"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Rollout",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "lead",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Agent",
+              "types": {
+                "Agent": {
+                  "name": "Agent",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Links",
+                      "config": {
+                        "links": {
+                          "rollout": {
+                            "schema": "Rollout"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "outcomes": {
+                          "gone": "neutral"
+                        },
+                        "states": [
+                          "running",
+                          "ready",
+                          "gone"
+                        ],
+                        "transitions": [
+                          {
+                            "from": "running",
+                            "to": "ready"
+                          },
+                          {
+                            "from": "running",
+                            "to": "gone"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Agent",
+            "version": null,
+            "instanceType": "Agent"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "lead",
+          "args": [
+            "Agent"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Agent",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            {
+              "title": "v2"
+            },
+            {
+              "id": "r1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Rollout",
+            "id": "r1",
+            "data": {
+              "title": "v2"
+            },
+            "behaviors": {
+              "Rollups": {
+                "values": {
+                  "ready": true
+                }
+              },
+              "Timers": {
+                "deadlines": {
+                  "timeout": {
+                    "dueAt": 1300000,
+                    "fired": false
+                  }
+                }
+              },
+              "status": {
+                "status": "waiting",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Agent",
+            {
+              "name": "a1"
+            },
+            {
+              "id": "a1",
+              "behaviors": {
+                "Links": {
+                  "rollout": "r1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a1",
+            "data": {
+              "name": "a1"
+            },
+            "behaviors": {
+              "status": {
+                "status": "running",
+                "enteredAt": 1000000
+              },
+              "Links": {
+                "targets": {
+                  "rollout": {
+                    "schema": "Rollout",
+                    "id": "r1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Agent",
+            {
+              "name": "a2"
+            },
+            {
+              "id": "a2",
+              "behaviors": {
+                "Links": {
+                  "rollout": "r1"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a2",
+            "data": {
+              "name": "a2"
+            },
+            "behaviors": {
+              "status": {
+                "status": "running",
+                "enteredAt": 1000000
+              },
+              "Links": {
+                "targets": {
+                  "rollout": {
+                    "schema": "Rollout",
+                    "id": "r1"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Rollout",
+            "r1",
+            "transition",
+            {
+              "to": "released"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Rollups vetoes transition of Rollout r1: Rollout r1 cannot move to released until rollup ready holds: 2 of the 2 instances of Agent that point at it through rollout are not in a terminal state whose outcome is success",
+            "details": {
+              "behavior": "Rollups",
+              "action": "transition",
+              "reason": "Rollout r1 cannot move to released until rollup ready holds: 2 of the 2 instances of Agent that point at it through rollout are not in a terminal state whose outcome is success",
+              "vetoCode": "not_held",
+              "vetoDetails": {
+                "rollup": "ready",
+                "to": "released",
+                "over": false,
+                "linked": 2,
+                "counted": 0
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Agent",
+            "a1",
+            "transition",
+            {
+              "to": "ready"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "from": "running",
+            "to": "ready"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1300000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            "r1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Rollout",
+            "id": "r1",
+            "data": {
+              "title": "v2"
+            },
+            "behaviors": {
+              "Rollups": {
+                "values": {
+                  "ready": false
+                }
+              },
+              "Timers": {
+                "deadlines": {
+                  "timeout": {
+                    "dueAt": 1300000,
+                    "fired": true,
+                    "firedAt": 1300000,
+                    "outcome": "moved"
+                  }
+                }
+              },
+              "status": {
+                "status": "released",
+                "enteredAt": 1300000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            {
+              "title": "v3"
+            },
+            {
+              "id": "r2"
+            }
+          ],
+          "now": 1400000,
+          "expect": {
+            "namespace": "default",
+            "schema": "Rollout",
+            "id": "r2",
+            "data": {
+              "title": "v3"
+            },
+            "behaviors": {
+              "Rollups": {
+                "values": {
+                  "ready": true
+                }
+              },
+              "Timers": {
+                "deadlines": {
+                  "timeout": {
+                    "dueAt": 1700000,
+                    "fired": false
+                  }
+                }
+              },
+              "status": {
+                "status": "waiting",
+                "enteredAt": 1400000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Agent",
+            {
+              "name": "a3"
+            },
+            {
+              "id": "a3",
+              "behaviors": {
+                "Links": {
+                  "rollout": "r2"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a3",
+            "data": {
+              "name": "a3"
+            },
+            "behaviors": {
+              "status": {
+                "status": "running",
+                "enteredAt": 1400000
+              },
+              "Links": {
+                "targets": {
+                  "rollout": {
+                    "schema": "Rollout",
+                    "id": "r2"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            "r2",
+            "transition",
+            {
+              "to": "released"
+            }
+          ],
+          "expect": {
+            "from": "waiting",
+            "to": "released"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            {
+              "title": "v4"
+            },
+            {
+              "id": "r3"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Rollout",
+            "id": "r3",
+            "data": {
+              "title": "v4"
+            },
+            "behaviors": {
+              "Rollups": {
+                "values": {
+                  "ready": true
+                }
+              },
+              "Timers": {
+                "deadlines": {
+                  "timeout": {
+                    "dueAt": 1700000,
+                    "fired": false
+                  }
+                }
+              },
+              "status": {
+                "status": "waiting",
+                "enteredAt": 1400000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Agent",
+            {
+              "name": "a4"
+            },
+            {
+              "id": "a4",
+              "behaviors": {
+                "Links": {
+                  "rollout": "r3"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a4",
+            "data": {
+              "name": "a4"
+            },
+            "behaviors": {
+              "status": {
+                "status": "running",
+                "enteredAt": 1400000
+              },
+              "Links": {
+                "targets": {
+                  "rollout": {
+                    "schema": "Rollout",
+                    "id": "r3"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Agent",
+            "a4",
+            "transition",
+            {
+              "to": "ready"
+            }
+          ],
+          "expect": {
+            "from": "running",
+            "to": "ready"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Rollout",
+            "r3",
+            "transition",
+            {
+              "to": "released"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "agent may not move Rollout r3's status from waiting to released: the transition needs permission rollouts.release"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            "r3",
+            "transition",
+            {
+              "to": "released"
+            }
+          ],
+          "expect": {
+            "from": "waiting",
+            "to": "released"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            {
+              "title": "v5"
+            },
+            {
+              "id": "r4"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Rollout",
+            "id": "r4",
+            "data": {
+              "title": "v5"
+            },
+            "behaviors": {
+              "Rollups": {
+                "values": {
+                  "ready": true
+                }
+              },
+              "Timers": {
+                "deadlines": {
+                  "timeout": {
+                    "dueAt": 1700000,
+                    "fired": false
+                  }
+                }
+              },
+              "status": {
+                "status": "waiting",
+                "enteredAt": 1400000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            "r4",
+            "transition",
+            {
+              "to": "cancelled"
+            }
+          ],
+          "expect": {
+            "from": "waiting",
+            "to": "cancelled"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1800000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            "r4"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Rollout",
+            "id": "r4",
+            "data": {
+              "title": "v5"
+            },
+            "behaviors": {
+              "Rollups": {
+                "values": {
+                  "ready": true
+                }
+              },
+              "Timers": {
+                "deadlines": {
+                  "timeout": {
+                    "dueAt": 1700000,
+                    "fired": true,
+                    "firedAt": 1800000,
+                    "outcome": "skipped"
+                  }
+                }
+              },
+              "status": {
+                "status": "cancelled",
+                "enteredAt": 1400000
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Mailbox > a sender's message waits queued or urgent, which its sender alone moves, until a taker with the permission takes its lease and moves it to taken with the token; a taken message is frozen, the lease's expiry puts it back in the queue, and the next taker sends it",
+      "behaviors": [
+        "Lease",
+        "StateRules",
+        "Workflow"
+      ],
+      "principals": {
+        "sam": {
+          "subject": "sam",
+          "permissions": []
+        },
+        "ana": {
+          "subject": "ana",
+          "permissions": [
+            "messages.take"
+          ]
+        },
+        "bob": {
+          "subject": "bob",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "sam",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Message",
+              "types": {
+                "Message": {
+                  "name": "Message",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "body",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "createdBy",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "StateRules",
+                      "config": {
+                        "states": {
+                          "taken": {
+                            "frozen": "all"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "name": "Lease",
+                      "config": {
+                        "acquirePermission": "messages.take",
+                        "onExpiry": {
+                          "from": [
+                            "taken"
+                          ],
+                          "transition": "queued"
+                        },
+                        "ttlMs": 30000
+                      }
+                    },
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "initial": "queued",
+                        "outcomes": {
+                          "canceled": "neutral",
+                          "failed": "failure"
+                        },
+                        "states": [
+                          "queued",
+                          "urgent",
+                          "taken",
+                          "sent",
+                          "canceled",
+                          "failed"
+                        ],
+                        "transitions": [
+                          {
+                            "by": [
+                              "createdBy"
+                            ],
+                            "from": "queued",
+                            "to": "urgent"
+                          },
+                          {
+                            "by": [
+                              "createdBy"
+                            ],
+                            "from": "urgent",
+                            "to": "queued"
+                          },
+                          {
+                            "by": [
+                              "createdBy"
+                            ],
+                            "from": "queued",
+                            "to": "canceled"
+                          },
+                          {
+                            "by": [
+                              "createdBy"
+                            ],
+                            "from": "urgent",
+                            "to": "canceled"
+                          },
+                          {
+                            "from": "queued",
+                            "to": "taken"
+                          },
+                          {
+                            "from": "urgent",
+                            "to": "taken"
+                          },
+                          {
+                            "from": "taken",
+                            "to": "sent"
+                          },
+                          {
+                            "from": "taken",
+                            "to": "failed"
+                          },
+                          {
+                            "from": "taken",
+                            "to": "queued"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Message",
+            "version": null,
+            "instanceType": "Message"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "sam",
+          "args": [
+            "Message"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Message",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "sam",
+          "args": [
+            "Message",
+            {
+              "body": "Deploy v2",
+              "createdBy": "sam"
+            },
+            {
+              "id": "m1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Message",
+            "id": "m1",
+            "data": {
+              "body": "Deploy v2",
+              "createdBy": "sam"
+            },
+            "behaviors": {
+              "Lease": {
+                "token": 0,
+                "expiries": 0,
+                "active": false
+              },
+              "status": {
+                "status": "queued",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ana",
+          "args": [
+            "Message",
+            "m1",
+            "transition",
+            {
+              "to": "urgent"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Workflow vetoes transition of Message m1: ana may not move Message m1's status from queued to urgent: the transition is made by the subject createdBy holds",
+            "details": {
+              "behavior": "Workflow",
+              "use": "status",
+              "action": "transition",
+              "reason": "ana may not move Message m1's status from queued to urgent: the transition is made by the subject createdBy holds",
+              "vetoCode": "not_principal",
+              "vetoDetails": {
+                "from": "queued",
+                "to": "urgent",
+                "by": [
+                  "createdBy"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "sam",
+          "args": [
+            "Message",
+            "m1",
+            "transition",
+            {
+              "to": "urgent"
+            }
+          ],
+          "expect": {
+            "from": "queued",
+            "to": "urgent"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bob",
+          "args": [
+            "Message",
+            "m1",
+            "acquire",
+            {},
+            {}
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "bob may not acquire the lease of Message m1: it needs permission messages.take"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ana",
+          "args": [
+            "Message",
+            "m1",
+            "acquire",
+            {},
+            {}
+          ],
+          "now": 1001000,
+          "expect": {
+            "token": 1,
+            "expiresAt": 1031000,
+            "heartbeatMs": 10000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ana",
+          "args": [
+            "Message",
+            "m1",
+            "transition",
+            {
+              "to": "taken"
+            },
+            {
+              "preconditions": {
+                "Lease": {
+                  "token": 1
+                }
+              }
+            }
+          ],
+          "expect": {
+            "from": "urgent",
+            "to": "taken"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.update",
+          "principal": "sam",
+          "args": [
+            "Message",
+            "m1",
+            {
+              "body": "Deploy v3"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior StateRules vetoes update of Message m1: Message m1 is taken, which freezes body: it does not change while it is taken",
+            "details": {
+              "behavior": "StateRules",
+              "action": "update",
+              "reason": "Message m1 is taken, which freezes body: it does not change while it is taken",
+              "vetoCode": "frozen_fields",
+              "vetoDetails": {
+                "state": "taken",
+                "fields": [
+                  "body"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "sam",
+          "args": [
+            "Message",
+            "m1",
+            "transition",
+            {
+              "to": "canceled"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Lease vetoes transition of Message m1: another principal holds its lease, until 1970-01-01T00:17:11.000Z",
+            "details": {
+              "behavior": "Lease",
+              "action": "transition",
+              "reason": "another principal holds its lease, until 1970-01-01T00:17:11.000Z",
+              "vetoCode": "held_by_another",
+              "vetoDetails": {
+                "expiresAt": 1031000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "runner.runDue",
+          "now": 1031000,
+          "expect": {
+            "failed": 0
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "sam",
+          "args": [
+            "Message",
+            "m1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Message",
+            "id": "m1",
+            "data": {
+              "body": "Deploy v2",
+              "createdBy": "sam"
+            },
+            "behaviors": {
+              "Lease": {
+                "token": 2,
+                "expiries": 1,
+                "ended": {
+                  "reason": "ttl",
+                  "at": 1031000
+                },
+                "active": false
+              },
+              "status": {
+                "status": "queued",
+                "enteredAt": 1031000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ana",
+          "args": [
+            "Message",
+            "m1",
+            "acquire",
+            {},
+            {}
+          ],
+          "now": 1040000,
+          "expect": {
+            "token": 3,
+            "expiresAt": 1070000,
+            "heartbeatMs": 10000
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ana",
+          "args": [
+            "Message",
+            "m1",
+            "transition",
+            {
+              "to": "taken"
+            },
+            {
+              "preconditions": {
+                "Lease": {
+                  "token": 3
+                }
+              }
+            }
+          ],
+          "expect": {
+            "from": "queued",
+            "to": "taken"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ana",
+          "args": [
+            "Message",
+            "m1",
+            "transition",
+            {
+              "to": "sent"
+            },
+            {
+              "preconditions": {
+                "Lease": {
+                  "token": 3
+                }
+              }
+            }
+          ],
+          "expect": {
+            "from": "taken",
+            "to": "sent"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ana",
+          "args": [
+            "Message",
+            "m1",
+            "release",
+            {},
+            {
+              "preconditions": {
+                "Lease": {
+                  "token": 3
+                }
+              }
+            }
+          ],
+          "expect": {}
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "sam",
+          "args": [
+            "Message",
+            "m1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Message",
+            "id": "m1",
+            "data": {
+              "body": "Deploy v2",
+              "createdBy": "sam"
+            },
+            "behaviors": {
+              "Lease": {
+                "token": 4,
+                "expiries": 1,
+                "ended": {
+                  "reason": "release",
+                  "at": 1040000
+                },
+                "active": false
+              },
+              "status": {
+                "status": "sent",
+                "enteredAt": 1040000
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Assignment > one seat of one subject: a caller with the take permission assigns the row to itself while it is free, the next is refused while it is full, only the assignee moves the row, and a caller with the assign permission unseats the assignee and seats another",
+      "behaviors": [
+        "Seats",
+        "Workflow"
+      ],
+      "principals": {
+        "ada": {
+          "subject": "ada",
+          "permissions": [
+            "problems.take"
+          ]
+        },
+        "bo": {
+          "subject": "bo",
+          "permissions": [
+            "problems.take"
+          ]
+        },
+        "lead": {
+          "subject": "lead",
+          "permissions": [
+            "problems.assign"
+          ]
+        },
+        "cy": {
+          "subject": "cy",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": []
+                }
+              }
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "lead",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Problem",
+              "types": {
+                "Problem": {
+                  "name": "Problem",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Workflow",
+                      "field": "status",
+                      "config": {
+                        "states": [
+                          "open",
+                          "working",
+                          "done"
+                        ],
+                        "transitions": [
+                          {
+                            "by": [
+                              "seat:assignee"
+                            ],
+                            "from": "open",
+                            "to": "working"
+                          },
+                          {
+                            "by": [
+                              "seat:assignee"
+                            ],
+                            "from": "working",
+                            "to": "done"
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "name": "Seats",
+                      "config": {
+                        "seats": {
+                          "assignee": {
+                            "assign": "problems.assign",
+                            "max": 1,
+                            "onFull": "refuse",
+                            "take": "problems.take"
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": null,
+            "instanceType": "Problem"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "lead",
+          "args": [
+            "Problem"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Problem",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "lead",
+          "args": [
+            "Problem",
+            {
+              "title": "Flaky test"
+            },
+            {
+              "id": "p1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Problem",
+            "id": "p1",
+            "data": {
+              "title": "Flaky test"
+            },
+            "behaviors": {
+              "status": {
+                "status": "open",
+                "enteredAt": 1000000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "cy",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "assignee"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "cy may not take a seat in Problem p1's assignee: it needs permission problems.take"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "assignee"
+            }
+          ],
+          "now": 1001000,
+          "expect": {
+            "seat": "assignee",
+            "subject": "ada",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bo",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "assignee"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Seats vetoes takeSeat of Problem p1: Problem p1's assignee seats at most 1, and it is full (ada)",
+            "details": {
+              "behavior": "Seats",
+              "action": "takeSeat",
+              "reason": "Problem p1's assignee seats at most 1, and it is full (ada)",
+              "vetoCode": "seat_full",
+              "vetoDetails": {
+                "seat": "assignee",
+                "max": 1,
+                "seated": [
+                  "ada"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bo",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "working"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Workflow vetoes transition of Problem p1: bo may not move Problem p1's status from open to working: the transition is made by a subject seated in assignee",
+            "details": {
+              "behavior": "Workflow",
+              "use": "status",
+              "action": "transition",
+              "reason": "bo may not move Problem p1's status from open to working: the transition is made by a subject seated in assignee",
+              "vetoCode": "not_principal",
+              "vetoDetails": {
+                "from": "open",
+                "to": "working",
+                "by": [
+                  "seat:assignee"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "working"
+            }
+          ],
+          "expect": {
+            "from": "open",
+            "to": "working"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "lead",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "assignee",
+              "subject": "bo"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Seats vetoes takeSeat of Problem p1: Problem p1's assignee seats at most 1, and it is full (ada)",
+            "details": {
+              "behavior": "Seats",
+              "action": "takeSeat",
+              "reason": "Problem p1's assignee seats at most 1, and it is full (ada)",
+              "vetoCode": "seat_full",
+              "vetoDetails": {
+                "seat": "assignee",
+                "max": 1,
+                "seated": [
+                  "ada"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "lead",
+          "args": [
+            "Problem",
+            "p1",
+            "leaveSeat",
+            {
+              "seat": "assignee",
+              "subject": "ada"
+            }
+          ],
+          "now": 1002000,
+          "expect": {
+            "seat": "assignee",
+            "subject": "ada"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "lead",
+          "args": [
+            "Problem",
+            "p1",
+            "takeSeat",
+            {
+              "seat": "assignee",
+              "subject": "bo"
+            }
+          ],
+          "now": 1003000,
+          "expect": {
+            "seat": "assignee",
+            "subject": "bo",
+            "displaced": []
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "lead",
+          "args": [
+            "Problem",
+            "p1",
+            "listSeats",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "seat": "assignee",
+                "subject": "bo",
+                "seatedAt": 1003000,
+                "seatedBy": "lead",
+                "fromField": false
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "ada",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "done"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Workflow vetoes transition of Problem p1: ada may not move Problem p1's status from working to done: the transition is made by a subject seated in assignee",
+            "details": {
+              "behavior": "Workflow",
+              "use": "status",
+              "action": "transition",
+              "reason": "ada may not move Problem p1's status from working to done: the transition is made by a subject seated in assignee",
+              "vetoCode": "not_principal",
+              "vetoDetails": {
+                "from": "working",
+                "to": "done",
+                "by": [
+                  "seat:assignee"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "bo",
+          "args": [
+            "Problem",
+            "p1",
+            "transition",
+            {
+              "to": "done"
+            }
+          ],
+          "expect": {
+            "from": "working",
+            "to": "done"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,1265 @@
+{
+  "name": "core-aliased",
+  "description": "Aliased's names on a table, D147: a create gives the name, which no other row holds as a name or an alias in its normalized form (lower or slug), a name taken refused with the key of the row that holds it; rename keeps the old name as an alias; addAlias and removeAlias, a removed alias freed for another row; resolve on the table; a delete that frees the row's names; and the define refusals. Cases written by hand in the recorded format, since no engine implements Aliased. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "source": "written by hand (D147): runtime/engine/testdata/rules/scenarios/core-aliased.json",
+  "shared": {},
+  "scenarios": [
+    {
+      "name": "Aliased > a create gives the name, and a name another row holds, as its name or an alias, in its normalized form, refuses a create, a rename and an addAlias with that row's key",
+      "behaviors": [
+        "Aliased"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Company",
+              "types": {
+                "Company": {
+                  "name": "Company",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "city",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Aliased",
+                      "field": "name"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Company",
+            "version": null,
+            "instanceType": "Company"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Company"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Company",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "Acme",
+              "city": "Oslo"
+            },
+            {
+              "id": "c1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c1",
+            "data": {
+              "city": "Oslo"
+            },
+            "behaviors": {
+              "name": {
+                "name": "Acme"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "addAlias",
+            {
+              "alias": "Acme Corp"
+            }
+          ],
+          "expect": {
+            "alias": "Acme Corp"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "ACME"
+            },
+            {
+              "id": "c2"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Aliased vetoes create of Company c2: \"ACME\" is held by Company c1, as its name or an alias: a name is one row's",
+            "details": {
+              "behavior": "Aliased",
+              "use": "name",
+              "action": "create",
+              "reason": "\"ACME\" is held by Company c1, as its name or an alias: a name is one row's",
+              "vetoCode": "name_taken",
+              "vetoDetails": {
+                "name": "ACME",
+                "normalized": "acme",
+                "holder": "c1"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": " acme   corp"
+            },
+            {
+              "id": "c2"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Aliased vetoes create of Company c2: \" acme   corp\" is held by Company c1, as its name or an alias: a name is one row's",
+            "details": {
+              "behavior": "Aliased",
+              "use": "name",
+              "action": "create",
+              "reason": "\" acme   corp\" is held by Company c1, as its name or an alias: a name is one row's",
+              "vetoCode": "name_taken",
+              "vetoDetails": {
+                "name": " acme   corp",
+                "normalized": "acme corp",
+                "holder": "c1"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "Globex"
+            },
+            {
+              "id": "c2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c2",
+            "data": {},
+            "behaviors": {
+              "name": {
+                "name": "Globex"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c2",
+            "rename",
+            {
+              "name": "acme corp"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Aliased vetoes rename of Company c2: \"acme corp\" is held by Company c1, as its name or an alias: a name is one row's",
+            "details": {
+              "behavior": "Aliased",
+              "use": "name",
+              "action": "rename",
+              "reason": "\"acme corp\" is held by Company c1, as its name or an alias: a name is one row's",
+              "vetoCode": "name_taken",
+              "vetoDetails": {
+                "name": "acme corp",
+                "normalized": "acme corp",
+                "holder": "c1"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c2",
+            "addAlias",
+            {
+              "alias": "Acme"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Aliased vetoes addAlias of Company c2: \"Acme\" is held by Company c1, as its name or an alias: a name is one row's",
+            "details": {
+              "behavior": "Aliased",
+              "use": "name",
+              "action": "addAlias",
+              "reason": "\"Acme\" is held by Company c1, as its name or an alias: a name is one row's",
+              "vetoCode": "name_taken",
+              "vetoDetails": {
+                "name": "Acme",
+                "normalized": "acme",
+                "holder": "c1"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c2"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c2",
+            "data": {},
+            "behaviors": {
+              "name": {
+                "name": "Globex"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c1",
+            "data": {
+              "city": "Oslo"
+            },
+            "behaviors": {
+              "name": {
+                "name": "Acme"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Aliased > rename keeps the old name as an alias, a rename to an alias makes it the name and the old name an alias, one of only the case keeps none, and the name the row has answers unchanged",
+      "behaviors": [
+        "Aliased"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Company",
+              "types": {
+                "Company": {
+                  "name": "Company",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "city",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Aliased",
+                      "field": "name"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Company",
+            "version": null,
+            "instanceType": "Company"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Company"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Company",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "Acme"
+            },
+            {
+              "id": "c1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c1",
+            "data": {},
+            "behaviors": {
+              "name": {
+                "name": "Acme"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "rename",
+            {
+              "name": "Acme Group"
+            }
+          ],
+          "expect": {
+            "name": "Acme Group",
+            "alias": "Acme"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.get",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1"
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c1",
+            "data": {},
+            "behaviors": {
+              "name": {
+                "name": "Acme Group"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "rename",
+            {
+              "name": "ACME"
+            }
+          ],
+          "expect": {
+            "name": "ACME",
+            "alias": "Acme Group"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "rename",
+            {
+              "name": "acme"
+            }
+          ],
+          "expect": {
+            "name": "acme"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "rename",
+            {
+              "name": "acme"
+            }
+          ],
+          "expect": {
+            "name": "acme",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "resolve",
+            {
+              "name": "acme group"
+            }
+          ],
+          "expect": {
+            "row": {
+              "key": "c1",
+              "name": "acme",
+              "alias": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "resolve",
+            {
+              "name": "Acme"
+            }
+          ],
+          "expect": {
+            "row": {
+              "key": "c1",
+              "name": "acme",
+              "alias": false
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "Acme Group"
+            },
+            {
+              "id": "c2"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Aliased vetoes create of Company c2: \"Acme Group\" is held by Company c1, as its name or an alias: a name is one row's",
+            "details": {
+              "behavior": "Aliased",
+              "use": "name",
+              "action": "create",
+              "reason": "\"Acme Group\" is held by Company c1, as its name or an alias: a name is one row's",
+              "vetoCode": "name_taken",
+              "vetoDetails": {
+                "name": "Acme Group",
+                "normalized": "acme group",
+                "holder": "c1"
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Aliased > with normalize slug, removeAlias frees its alias for another row, refuses the name, and answers one the row does not hold unchanged; resolve finds the row a name or an alias names, and none",
+      "behaviors": [
+        "Aliased"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Company",
+              "types": {
+                "Company": {
+                  "name": "Company",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "city",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Aliased",
+                      "field": "name",
+                      "config": {
+                        "normalize": "slug"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Company",
+            "version": null,
+            "instanceType": "Company"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Company"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Company",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "Acme, Inc."
+            },
+            {
+              "id": "c1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c1",
+            "data": {},
+            "behaviors": {
+              "name": {
+                "name": "Acme, Inc."
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "addAlias",
+            {
+              "alias": "Acme Co"
+            }
+          ],
+          "expect": {
+            "alias": "Acme Co"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "addAlias",
+            {
+              "alias": "acme--co"
+            }
+          ],
+          "expect": {
+            "alias": "acme--co",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "addAlias",
+            {
+              "alias": "ACME INC"
+            }
+          ],
+          "expect": {
+            "alias": "ACME INC",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "resolve",
+            {
+              "name": "acme_co"
+            }
+          ],
+          "expect": {
+            "row": {
+              "key": "c1",
+              "name": "Acme, Inc.",
+              "alias": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "removeAlias",
+            {
+              "alias": "acme inc"
+            }
+          ],
+          "error": {
+            "class": "BehaviorVetoError",
+            "code": "vetoed",
+            "message": "behavior Aliased vetoes removeAlias of Company c1: \"acme inc\" is the name of Company c1, not one of its aliases: a rename gives it another name first",
+            "details": {
+              "behavior": "Aliased",
+              "use": "name",
+              "action": "removeAlias",
+              "reason": "\"acme inc\" is the name of Company c1, not one of its aliases: a rename gives it another name first",
+              "vetoCode": "is_name",
+              "vetoDetails": {
+                "name": "Acme, Inc."
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "removeAlias",
+            {
+              "alias": "Initech"
+            }
+          ],
+          "expect": {
+            "alias": "Initech",
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "removeAlias",
+            {
+              "alias": "acme co"
+            }
+          ],
+          "expect": {
+            "alias": "Acme Co"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "resolve",
+            {
+              "name": "Acme Co"
+            }
+          ],
+          "expect": {
+            "row": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "ACME CO"
+            },
+            {
+              "id": "c2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c2",
+            "data": {},
+            "behaviors": {
+              "name": {
+                "name": "ACME CO"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "resolve",
+            {
+              "name": "acme-co"
+            }
+          ],
+          "expect": {
+            "row": {
+              "key": "c2",
+              "name": "ACME CO",
+              "alias": false
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "resolve",
+            {
+              "name": "Initech"
+            }
+          ],
+          "expect": {
+            "row": null
+          }
+        }
+      ]
+    },
+    {
+      "name": "Aliased > a delete frees the row's names, its name and each alias, for another row",
+      "behaviors": [
+        "Aliased"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Company",
+              "types": {
+                "Company": {
+                  "name": "Company",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "city",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Aliased",
+                      "field": "name"
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Company",
+            "version": null,
+            "instanceType": "Company"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "alice",
+          "args": [
+            "Company"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Company",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "Acme"
+            },
+            {
+              "id": "c1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c1",
+            "data": {},
+            "behaviors": {
+              "name": {
+                "name": "Acme"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1",
+            "addAlias",
+            {
+              "alias": "Acme Co"
+            }
+          ],
+          "expect": {
+            "alias": "Acme Co"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "Globex"
+            },
+            {
+              "id": "c2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c2",
+            "data": {},
+            "behaviors": {
+              "name": {
+                "name": "Globex"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.delete",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c1"
+          ],
+          "expect": true
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "resolve",
+            {
+              "name": "acme"
+            }
+          ],
+          "expect": {
+            "row": null
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "c2",
+            "addAlias",
+            {
+              "alias": "Acme"
+            }
+          ],
+          "expect": {
+            "alias": "Acme"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "alice",
+          "args": [
+            "Company",
+            {
+              "name": "Acme Co"
+            },
+            {
+              "id": "c3"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Company",
+            "id": "c3",
+            "data": {},
+            "behaviors": {
+              "name": {
+                "name": "Acme Co"
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "resolve",
+            {
+              "name": "acme"
+            }
+          ],
+          "expect": {
+            "row": {
+              "key": "c2",
+              "name": "Globex",
+              "alias": true
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invokeSchema",
+          "principal": "alice",
+          "args": [
+            "Company",
+            "resolve",
+            {
+              "name": "acme co"
+            }
+          ],
+          "expect": {
+            "row": {
+              "key": "c3",
+              "name": "Acme Co",
+              "alias": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Aliased > define refuses a normalize that is neither lower nor slug, and a key the config does not take",
+      "behaviors": [
+        "Aliased"
+      ],
+      "principals": {
+        "alice": {
+          "subject": "alice",
+          "permissions": []
+        }
+      },
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded"
+            }
+          ],
+          "now": 1000000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Company",
+              "types": {
+                "Company": {
+                  "name": "Company",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "city",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Aliased",
+                      "field": "name",
+                      "config": {
+                        "normalize": "upper"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Company/behaviors/0: must match \"then\" schema; /types/Company/behaviors/0/config/normalize: must be one of \"lower\", \"slug\"",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Company/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Company/behaviors/0/config/normalize",
+                  "message": "must be one of \"lower\", \"slug\""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "alice",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Company",
+              "types": {
+                "Company": {
+                  "name": "Company",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "city",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Aliased",
+                      "field": "name",
+                      "config": {
+                        "case": "lower"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "SchemaDocumentError",
+            "code": "invalid_schema",
+            "message": "schema: /types/Company/behaviors/0: must match \"then\" schema; /types/Company/behaviors/0/config: unknown key \"case\"",
+            "details": {
+              "issues": [
+                {
+                  "path": "/types/Company/behaviors/0",
+                  "message": "must match \"then\" schema"
+                },
+                {
+                  "path": "/types/Company/behaviors/0/config",
+                  "message": "unknown key \"case\""
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

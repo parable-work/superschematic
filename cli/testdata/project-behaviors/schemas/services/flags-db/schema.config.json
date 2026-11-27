@@ -1,0 +1,1 @@
+{"name": "flags-db", "kind": "DB", "outputs": {"types": {"go": {"enabled": true}}, "sql": {"dialects": ["postgres"]}}}

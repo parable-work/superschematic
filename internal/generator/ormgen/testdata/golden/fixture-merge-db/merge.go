@@ -70,8 +70,11 @@ type mergeStep struct {
 	source        string
 	field         string
 	selfReference string
-	collisions    []mergeStatement
-	repoint       mergeStatement
+	// before run first, counted nowhere: an Aliased use's insert of the row
+	// merged away's name as an alias of the row that stays (D147).
+	before     []mergeStatement
+	collisions []mergeStatement
+	repoint    mergeStatement
 }
 
 // customerMergeSteps are the relations of the schema that reference Customer.
@@ -185,6 +188,11 @@ func (r *CustomerRepository) MergeInto(ctx context.Context, from, into types.Ide
 				}
 				if references {
 					return nil, fmt.Errorf("merge Customer: %v references %v through %s, and would reference itself: %w", into, from, step.field, ErrMergeSelfReference)
+				}
+			}
+			for _, before := range step.before {
+				if _, err := before.run(ctx, tx, fromKey, intoKey, actor); err != nil {
+					return nil, fmt.Errorf("merge Customer: move %s.%s: %w", step.source, step.field, err)
 				}
 			}
 			for _, collision := range step.collisions {
@@ -377,6 +385,11 @@ func (r *LabelRepository) MergeInto(ctx context.Context, from, into types.Identi
 				}
 				if references {
 					return nil, fmt.Errorf("merge Label: %v references %v through %s, and would reference itself: %w", into, from, step.field, ErrMergeSelfReference)
+				}
+			}
+			for _, before := range step.before {
+				if _, err := before.run(ctx, tx, fromKey, intoKey, actor); err != nil {
+					return nil, fmt.Errorf("merge Label: move %s.%s: %w", step.source, step.field, err)
 				}
 			}
 			for _, collision := range step.collisions {
