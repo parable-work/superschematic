@@ -137,11 +137,11 @@ func londonDay(days int) string {
 
 // occurrence is a row of a filing's occurrences.
 type occurrence struct {
-	Key                                          string
-	Due, State, Shifted                          *string
-	DueAt, OpensAt, RemindAt, OverdueAt          *time.Time
-	RemindedAt                                   *time.Time
-	Revision                                     *int64
+	Key                                           string
+	Due, State, Shifted                           *string
+	DueAt, OpensAt, RemindAt, OverdueAt           *time.Time
+	RemindedAt                                    *time.Time
+	Revision                                      *int64
 	CompletedByTable, CompletedByKey, CompletedBy *string
 }
 

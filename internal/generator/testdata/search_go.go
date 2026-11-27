@@ -608,7 +608,6 @@ func TestSearch(t *testing.T) {
 // first is a FindMany's rows, its count dropped.
 func first[R any](rows []R, _ int, err error) ([]R, error) { return rows, err }
 
-
 // doors is a stand-in model provider (D159): a text's vector says whether
 // it is about a door, counting the texts it embeds.
 type doors struct{ calls *atomic.Int64 }
