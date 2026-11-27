@@ -128,12 +128,18 @@ const d1Fixture = "runtime/http/typescript/test/workerd/fixtures/d1-orm"
 
 // d1FixtureDatabases are the databases the workerd fixture d1-orm runs, by
 // the prefix of their files there: fixture-references-db's references and
-// files (D182), fixture-recurrence-db's Recurrence and calendar and
-// fixture-search-db's search (D186).
-var d1FixtureDatabases = []struct{ prefix, service string }{
-	{"records", referencesFixture},
-	{"filings", recurrenceFixture},
-	{"search", searchFixture},
+// files (D182), fixture-recurrence-db's Recurrence and calendar,
+// fixture-search-db's search (D186), and fixture-notifications-db's
+// notifier, whose dispatch queue's definition the fixture takes from its
+// queues.ts too (D189).
+var d1FixtureDatabases = []struct {
+	prefix, service string
+	queues          bool
+}{
+	{"records", referencesFixture, false},
+	{"filings", recurrenceFixture, false},
+	{"search", searchFixture, false},
+	{"notices", notificationsFixture, true},
 }
 
 // recurrenceFixture is the DB service of a Recurrence table and two
@@ -187,7 +193,16 @@ func TestTheWorkerdD1FixtureIsCurrent(t *testing.T) {
 			t.Fatal(err)
 		}
 		sql := fmt.Sprintf("// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// %s's sqlite/create.sql.\nexport const createSQL = %s;\n", database.service, quoted)
-		for name, want := range map[string]string{database.prefix + "-orm.ts": header + text, database.prefix + "-sql.ts": sql} {
+		files := map[string]string{database.prefix + "-orm.ts": header + text, database.prefix + "-sql.ts": sql}
+		if database.queues {
+			queues, err := os.ReadFile(filepath.Join(dir, QueuesFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			header := fmt.Sprintf("// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// %s's queues.ts, its runtime the built dist/d1.js.\n", database.service)
+			files[database.prefix+"-queues.ts"] = header + strings.ReplaceAll(string(queues), runtime, "'../../../../dist/d1.js'")
+		}
+		for name, want := range files {
 			path := filepath.Join(root, name)
 			if *update {
 				if err := os.WriteFile(path, []byte(want), 0o644); err != nil {

@@ -309,6 +309,11 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		seen[m.Field] = m.Service
 	}
 	if deps.Agents != nil && !depsORM(deps) {
+		if deps.Dialect == SQLiteDialect {
+			// The dispatcher runs on SQLite and D1 (D189); the generated
+			// server's Deps.orm over a SqlDatabase is D182's left item.
+			return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), and %s lists sqlite first: the generated server builds Deps.orm over a pg pool alone (D182). On SQLite and D1 an app builds createAgents of the runtime's ./d1 entry over the ./orm/sqlite entry's repositories and claims its queues over the SqlDatabase (D189)", o.SchemaName, deps.Database)
+		}
 		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), which runs over the repositories %s's TypeScript types export for Postgres, and holds none", o.SchemaName, deps.Database)
 	}
 	// A @worker of the dispatcher's queues is the dispatcher's (D183).

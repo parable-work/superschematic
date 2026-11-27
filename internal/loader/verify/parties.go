@@ -1,9 +1,6 @@
 package verify
 
 import (
-	"slices"
-
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -17,7 +14,8 @@ import (
 // identities (D153) its senders resolve through. The conversations class
 // takes nothing but its fields; the messages class may take @references
 // and @attachments, its references and its files. A @runRequests class is
-// a @queue, once. Postgres alone, as the notifier is.
+// a @queue, once. On Postgres, SQLite and D1 in TypeScript, as the notifier
+// is (D189).
 func checkParties(schema *ir.Schema, in Input, r *Result) {
 	if !schema.UsesParties() {
 		return
@@ -32,9 +30,6 @@ func checkParties(schema *ir.Schema, in Input, r *Result) {
 	if schema.Kind != ir.SchemaKindDB {
 		r.errorf(first.Owner, "%s: parties, conversations and run requests are a DB service's, and %s is a %s service (D157)", first.Name, schema.Name, schema.Kind)
 		return
-	}
-	if slices.Contains(in.Dialects, registry.SQLDialectSQLite) {
-		r.errorf(first.Owner, "%s: %s lists the sqlite dialect, and the inbound path enqueues and claims through the Postgres queue client alone so far; build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]) (D157)", first.Name, schema.Name, schema.Name)
 	}
 	parts := map[string]*ir.TypeDef{}
 	var runs *ir.TypeDef
