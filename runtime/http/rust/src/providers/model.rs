@@ -21,8 +21,12 @@ pub enum ModelRole {
     Tool,
 }
 
-/// One message of a turn.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// One message of a turn. An assistant message is an earlier completion
+/// of the run, replayed (D158): its content, the tool calls it made, which
+/// the tool messages after it answer, and the provider's own state of it,
+/// as the provider returned them. A provider builds its API's conversation
+/// from these alone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModelMessage {
     pub role: ModelRole,
@@ -30,6 +34,14 @@ pub struct ModelMessage {
     /// For a tool message: the call it answers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// For an assistant message: the tool calls its completion made, in
+    /// order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<ModelToolCall>,
+    /// For an assistant message: the `provider_state` its completion
+    /// returned, unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_state: Option<Value>,
     /// Content from outside the app, which is data and never instructions.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub untrusted: bool,
@@ -95,6 +107,15 @@ pub struct ModelCompletion {
     pub tool_calls: Vec<ModelToolCall>,
     pub stop: ModelStop,
     pub usage: ModelUsage,
+    /// The provider's own record of the turn, as JSON, which no one but the
+    /// provider reads: a Claude provider's content blocks, its thinking
+    /// with their signatures among them. The dispatcher keeps it with the
+    /// completion, unredacted while the run lives, and passes it back,
+    /// unchanged, on that assistant message in every later turn (D158); a
+    /// reader of the transcript, and the transcript a run leaves, hold it
+    /// redacted. A provider that keeps none leaves it out.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_state: Option<Value>,
 }
 
 /// Texts to embed (D155): each becomes one vector, under `model` or the
