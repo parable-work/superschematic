@@ -97,7 +97,7 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 	// fake output location so the golden stays machine-independent;
 	// SetReplacePaths only computes strings, so the directories need not
 	// exist.
-	paths := naming.LocalPaths{HTTPRuntimeRust: "/repo/runtime/http/rust", ScalarRust: "/repo/third_party/superscalar/crates/core"}
+	paths := naming.LocalPaths{HTTPRuntimeRust: "/repo/runtime/http/rust", ScalarRust: "/repo/third_party/superscalar/crates/core", VersionGraphRust: "/repo/runtime/versiongraph/rust-engine"}
 	if err := SetReplacePaths(output, paths, "/repo/schemas/dist/api/"+name); err != nil {
 		t.Fatalf("set replace paths: %v", err)
 	}
@@ -124,6 +124,9 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 	}
 	if output.HasBehaviorOperations() {
 		files = append(files, filepath.Join("src", "behaviors.rs"))
+	}
+	if output.HasGraphOperations() {
+		files = append(files, filepath.Join("src", GraphsFile))
 	}
 	if output.MCP != nil {
 		files = append(files, filepath.Join("src", filepath.FromSlash(MCPFile)))

@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use runtime::bucket::{
-    Body, Bucket, BucketError, Bytes, ListOptions, Object, Page, PutOptions, Reader,
+    Body, Bucket, BucketError, Bytes, ListOptions, Object, Page, PutOptions, PutResult, Reader,
     SignedUrlOptions, Stream,
 };
 use runtime::orm::postgres::{deadpool_postgres, tokio_postgres};
@@ -129,14 +129,26 @@ impl Bucket for MemoryBucket {
         "records-files"
     }
 
-    async fn put(&self, name: &str, body: Body, options: PutOptions) -> Result<Object, BucketError> {
+    async fn put(&self, name: &str, body: Body, options: PutOptions) -> Result<PutResult, BucketError> {
+        let mut objects = self.objects.lock().unwrap();
+        if let Some((bytes, content_type)) = objects.get(name).filter(|_| options.if_absent) {
+            let object = Object { name: name.to_owned(), size: bytes.len() as u64, content_type: content_type.clone(), updated: None };
+            return Ok(PutResult { object, created: false });
+        }
         let bytes = body.as_bytes().cloned().unwrap_or_default();
         let size = bytes.len() as u64;
-        self.objects
-            .lock()
-            .unwrap()
-            .insert(name.to_owned(), (bytes.to_vec(), options.content_type.clone()));
-        Ok(Object { name: name.to_owned(), size, content_type: options.content_type, updated: None })
+        objects.insert(name.to_owned(), (bytes.to_vec(), options.content_type.clone()));
+        let object = Object { name: name.to_owned(), size, content_type: options.content_type, updated: None };
+        Ok(PutResult { object, created: true })
+    }
+
+    async fn head(&self, name: &str) -> Result<Option<Object>, BucketError> {
+        Ok(self.objects.lock().unwrap().get(name).map(|(bytes, content_type)| Object {
+            name: name.to_owned(),
+            size: bytes.len() as u64,
+            content_type: content_type.clone(),
+            updated: None,
+        }))
     }
 
     async fn get(&self, name: &str) -> Result<Reader, BucketError> {

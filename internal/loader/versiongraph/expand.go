@@ -438,9 +438,11 @@ func (g *graph) addRelease() {
 		Indexes: []ir.IndexDef{releaseIndex()},
 		// A root's first release inserts its pointer and a later one
 		// updates it: a pointer moved to another commit enqueues, and a
-		// release of the commit it already names does not (D138).
+		// release of the commit it already names does not (D138). The
+		// pointer holds no sequence, so the message takes the released
+		// commit's, which the trigger reads through the pointer's commit.
 		EnqueueOnChange: g.enqueue(g.root.VersionGraph.EnqueueOnRelease, []string{ir.EnqueueOnInsert, ir.EnqueueOnUpdate}, []string{"commit"},
-			map[string]string{"root": "root", "commit": "commit"}),
+			map[string]string{"root": "root", "commit": "commit", "sequence": "commit.sequence"}),
 	})
 }
 

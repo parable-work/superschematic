@@ -631,7 +631,7 @@ if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }} != nil {
 {{- end }}
 
 {{ if .Released -}}
-{{ docComment "" (printf "%s reads %s, the released rows of %s. The version graph's Release owns the rows and rewrites them at each release (D139), so the repository has no create, upsert, update or delete." .Name .TypeName .ReleasedOf) }}
+{{ docComment "" (printf "%s reads %s, the released rows of %s. The version graph's Release owns the rows and rewrites them at each release (D139), so the repository has no create, upsert, update or delete.%s" .Name .TypeName .ReleasedOf (or (and .LiveRoot " Its reads leave out the rows of a soft-deleted root, unless IncludeDeleted asks for them, and a restore of the root sees them again: the soft delete clears no row.") "")) }}
 {{- else -}}
 // {{ .Name }} provides database operations for {{ .TypeName }}
 {{- end }}
@@ -1314,7 +1314,7 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 		query = {{ goRawString .SQL.GetOne }}
 	}
 
-	{{- if .HasSoftDelete }}
+	{{- if .ReadsLive }}
 	query += {{ printf "%q" .SQL.Live }}
 	{{- end }}
 
@@ -1647,7 +1647,7 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 	// Build query with explicit column order
 	query := fmt.Sprintf({{ goRawString .SQL.GetMany }}, strings.Join(placeholders, ", "))
 
-	{{- if .HasSoftDelete }}
+	{{- if .ReadsLive }}
 	query += {{ printf "%q" .SQL.Live }}
 	{{- end }}
 
@@ -1805,7 +1805,7 @@ func (r *{{ .Name }}) FindOne(ctx context.Context, filter *{{ .TypeName }}Filter
 	var args []interface{}
 	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &args, 0, false){{ else }}filter.buildWhereClause(&args, 0){{ end }}
 
-	{{- if .HasSoftDelete }}
+	{{- if .ReadsLive }}
 	// Apply soft-delete filter unless IncludeDeleted is set
 	if !opts.IncludeDeleted {
 		if whereClause == "" {
@@ -2013,7 +2013,7 @@ func (r *{{ .Name }}) FindMany(ctx context.Context, filter *{{ .TypeName }}Filte
 	var args []interface{}
 	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &args, 0, false){{ else }}filter.buildWhereClause(&args, 0){{ end }}
 
-	{{- if .HasSoftDelete }}
+	{{- if .ReadsLive }}
 	// Apply soft-delete filter unless IncludeDeleted is set
 	if !opts.IncludeDeleted {
 		if whereClause == "" {
@@ -2074,7 +2074,7 @@ func (r *{{ .Name }}) findRelated(ctx context.Context, filter *{{ .TypeName }}Fi
 	}
 	var args []interface{}
 	whereClause := {{ if $.HeldByAccess }}r.accessWhere(ctx, filter, &args, 0, false){{ else }}filter.buildWhereClause(&args, 0){{ end }}
-	{{- if .HasSoftDelete }}
+	{{- if .ReadsLive }}
 	if !opts.IncludeDeleted {
 		if whereClause == "" {
 			whereClause = {{ printf "%q" .SQL.LiveWhere }}
@@ -2531,7 +2531,7 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	}
 	selectFields := buildSelectFieldsTyped(fieldStrings, "{{ .TableName }}")
 
-	{{- if .HasSoftDelete }}
+	{{- if .ReadsLive }}
 	// The filter's conditions, each qualified by the table, then the
 	// soft-delete condition, then the keyset's.
 	{{- else }}
@@ -2540,7 +2540,7 @@ func (r *{{ .Name }}) FindPage(ctx context.Context, filter *{{ .TypeName }}Filte
 	{{- end }}
 	var args []interface{}
 	conditions := {{ if $.HeldByAccess }}r.accessConditions(ctx, filter, &args, 0, false){{ else }}filter.conditions(&args, 0){{ end }}
-	{{- if .HasSoftDelete }}
+	{{- if .ReadsLive }}
 	if !opts.IncludeDeleted {
 		conditions = append(conditions, {{ goRawString .SQL.LiveCondition }})
 	}
@@ -4569,6 +4569,13 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute update: %w", err)
 	}
+	{{- if .ChangeQueue }}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of {{ .ChangeQueue }} (D145).
+		wakeQueue({{ printf "%q" .ChangeQueue }})
+	}
+	{{- end }}
 
 	return int(result.RowsAffected()), nil
 }
@@ -4692,6 +4699,13 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete records: %w", err)
 	}
+	{{- if .ChangeQueue }}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of {{ .ChangeQueue }} (D145).
+		wakeQueue({{ printf "%q" .ChangeQueue }})
+	}
+	{{- end }}
 
 	return int(result.RowsAffected()), nil
 }
@@ -4731,6 +4745,11 @@ func (r *{{ .Name }}) HardDeleteOne(ctx context.Context, id {{ .PrimaryKeyType }
 	if result.RowsAffected() == 0 {
 		return ErrNotFound
 	}
+	{{- if .ChangeQueue }}
+	// The table's trigger wrote the row's change: it wakes the worker of
+	// {{ .ChangeQueue }} (D145).
+	wakeQueue({{ printf "%q" .ChangeQueue }})
+	{{- end }}
 
 	return nil
 }
@@ -4864,6 +4883,13 @@ func (r *{{ .Name }}) DeleteMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete records: %w", err)
 	}
+	{{- if .ChangeQueue }}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of {{ .ChangeQueue }} (D145).
+		wakeQueue({{ printf "%q" .ChangeQueue }})
+	}
+	{{- end }}
 
 	return int(result.RowsAffected()), nil
 }

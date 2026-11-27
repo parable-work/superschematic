@@ -305,8 +305,9 @@ func Register(r *registry.Registry) error {
 		{
 			Name: DeriverPlatform,
 			Kind: ir.DeployableDeriver,
-			// In its API's language, TypeScript or Rust (D74).
-			Languages: []string{registry.APILanguageTypeScript, registry.APILanguageRust},
+			// In its API's language, TypeScript or Rust (D74), or Go for a
+			// deriver of tables (D146).
+			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			NameOf:    processName,
 			AddressOf: func(registry.PlatformContext) any { return nil },
 			Lower:     lowerDeriver,

@@ -21,10 +21,10 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde_json::{json, Value};
 use superschematic_http_runtime::postgres::{connect, Pool};
 use superschematic_http_runtime::queue::{
-    enqueue, Claim, PostgresQueue, QueueDefinition, QueueError, CLAIM_LOST, UNREADABLE,
+    enqueue, enqueue_in, Claim, PostgresQueue, QueueDefinition, QueueError, CLAIM_LOST, UNREADABLE,
 };
 use superschematic_http_runtime::stackconfig::Database;
-use superschematic_http_runtime::worker::{run_worker, Options};
+use superschematic_http_runtime::worker::{run_worker, Drain, Options};
 use superschematic_http_runtime::{BoxError, Shutdown};
 
 const URL_ENV: &str = "SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL";
@@ -1163,5 +1163,140 @@ async fn a_stopping_worker_releases_the_messages_its_handlers_did_not_finish() {
         "released, due at once, their attempts uncounted"
     );
     drop(client);
+    db.close().await;
+}
+
+/// How many sessions hold an advisory lock of the drain slots of `table`.
+async fn slots_held(db: &Db, table: &str) -> i64 {
+    db.admin
+        .get()
+        .await
+        .unwrap()
+        .query_one(
+            "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND classid::int = hashtext($1)",
+            &[&format!("superschematic.drain.{table}")],
+        )
+        .await
+        .unwrap()
+        .get(0)
+}
+
+/// Waits up to ten seconds for `held` slots of `table` to be held.
+async fn until_slots(db: &Db, table: &str, held: i64) {
+    let start = Instant::now();
+    while slots_held(db, table).await != held {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "{} slots of {table} are held, not {held}",
+            slots_held(db, table).await
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}
+
+#[tokio::test]
+async fn the_next_due_time_is_that_of_the_first_ready_message_that_waits() {
+    let Some(db) = Db::open().await else { return };
+    let def = order_placed();
+    let queue = queue::<OrderPlaced>(&db, def.clone());
+    assert_eq!(queue.next_due().await.unwrap(), None);
+    // A message due at once waits for nothing.
+    db.enqueue(&def, &an_order(1)).await;
+    assert_eq!(queue.next_due().await.unwrap(), None);
+    let client = db.pool.get().await.unwrap();
+    enqueue_in(&client, &def, &an_order(2), Duration::from_secs(120))
+        .await
+        .unwrap();
+    let due = queue
+        .next_due()
+        .await
+        .unwrap()
+        .expect("the delayed message");
+    assert!(
+        (Duration::from_secs(110)..=Duration::from_secs(120)).contains(&due),
+        "due in {due:?}"
+    );
+    db.close().await;
+}
+
+#[tokio::test]
+async fn a_drain_worker_holds_its_slot_while_it_runs_and_exits_once_its_queue_is_idle() {
+    let Some(db) = Db::open().await else { return };
+    let def = order_placed();
+    // A slot is a session lock of the queue's, named for its table, which
+    // no other test of this file takes: one of one is taken, the second of
+    // two is free, and each is given back as it drops.
+    let slots = queue::<OrderPlaced>(&db, def.clone());
+    let first = slots.slot(1).await.unwrap().expect("a free slot");
+    until_slots(&db, "order_placed_queue", 1).await;
+    assert!(
+        slots.slot(1).await.unwrap().is_none(),
+        "the one slot is taken"
+    );
+    let second = slots.slot(2).await.unwrap().expect("the second of two");
+    until_slots(&db, "order_placed_queue", 2).await;
+    drop((first, second));
+    until_slots(&db, "order_placed_queue", 0).await;
+
+    for n in 0..3 {
+        db.enqueue(&def, &an_order(n)).await;
+    }
+    let options = Options {
+        drain: Some(Drain {
+            idle: Duration::from_millis(300),
+            ..Drain::default()
+        }),
+        ..quick(2, Duration::from_secs(1))
+    };
+    let gate = Arc::new(tokio::sync::Notify::new());
+    let held = Arc::clone(&gate);
+    let run = tokio::spawn(run_worker(
+        queue::<OrderPlaced>(&db, def.clone()),
+        move |order: OrderPlaced| {
+            let held = Arc::clone(&held);
+            async move {
+                if order.quantity == 0 {
+                    held.notified().await;
+                }
+                Ok::<(), BoxError>(())
+            }
+        },
+        options,
+        Shutdown::new(),
+    ));
+    db.until("order_placed_queue", "state = 'done'", 2).await;
+    until_slots(&db, "order_placed_queue", 1).await;
+    // A second worker finds the slot taken and exits at once, claiming
+    // nothing.
+    let second = Instant::now();
+    run_worker(
+        queue::<OrderPlaced>(&db, def.clone()),
+        |_: OrderPlaced| async { Ok::<(), BoxError>(()) },
+        Options {
+            drain: Some(Drain {
+                idle: Duration::from_secs(60),
+                ..Drain::default()
+            }),
+            ..Options::default()
+        },
+        Shutdown::new(),
+    )
+    .await
+    .unwrap();
+    assert!(second.elapsed() < Duration::from_secs(5));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(
+        !run.is_finished(),
+        "the worker exited while a handler held a message"
+    );
+    let released = Instant::now();
+    gate.notify_one();
+    run.await.unwrap().unwrap();
+    assert!(
+        released.elapsed() >= Duration::from_millis(300),
+        "the worker exited before its idle time after its last handler"
+    );
+    db.until("order_placed_queue", "state = 'done'", 3).await;
+    until_slots(&db, "order_placed_queue", 0).await;
     db.close().await;
 }

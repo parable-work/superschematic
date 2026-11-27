@@ -666,6 +666,16 @@ async fn handle_{{ .SnakeName }}(
     )
     .await{{ if and .Page .Page.Sort }}
     .and_then(|listed| listed.bind(&page)){{ end }};
+{{- else if .Graph }}
+    // {{ .Graph.Graph }}'s {{ .Graph.Operation }} (D138): run through the graph's facade over
+    // {{ .Graph.Database }}'s pool, as the request's caller, the root and the ref or
+    // the commit it names read first.
+    let result = crate::graphs::{{ .SnakeName }}(
+        &state.implementations.graphs,
+        ctx.principal.clone(),
+        args,
+    )
+    .await;
 {{- else }}
 {{- if and .Page .Page.Sort }}
     // The page's next names the sort it was read in (D60, amended).

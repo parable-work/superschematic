@@ -32,6 +32,18 @@
 //! each batch skips the rows another holds, and a row deleted once is gone.
 //! It never deletes a dead message.
 //!
+//! In drain mode (D145), which a platform sets in [`MODE_VARIABLE`] and
+//! [`drain_from_env`] reads, the worker runs as a job that empties its
+//! queue and exits: [`run_worker`] takes one of [`Drain::slots`] locks
+//! named for its queue as it starts ([`WorkerQueue::slot`]), returning at
+//! once when none is free, claims as any worker does, and returns `Ok` once
+//! no message was ready or held for [`Drain::idle`] and none falls due
+//! within [`Drain::horizon`] ([`WorkerQueue::next_due`]), which it waits
+//! for. Once every claim has failed for the idle time it returns an error,
+//! so the process exits with one and gives its slot back. A behavior
+//! worker's queues run so too, with one slot for them all, idle together
+//! or not at all ([`Group`]), as Go's `worker.RunAll` runs them.
+//!
 //! The loop knows no database: it claims through a [`WorkerQueue`], which
 //! [`PostgresQueue`](crate::queue::PostgresQueue) implements, so its tests
 //! run over a queue in memory. A behavior worker's queue (D103) is a
@@ -58,9 +70,11 @@ pub mod drain;
 use std::any::Any;
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::fmt;
 use std::future::Future;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::pin::Pin;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -77,7 +91,7 @@ use tracing::Instrument as _;
 use crate::queue::PostgresQueue;
 #[cfg(feature = "sqlite")]
 use crate::queue::SqliteQueue;
-use crate::queue::{Claim, QueueError};
+use crate::queue::{Claim, QueueError, Slot};
 use crate::stackconfig::{quote, StackConfigError};
 use crate::{BoxError, Shutdown};
 
@@ -117,6 +131,129 @@ const OP_TIMEOUT: Duration = Duration::from_secs(5);
 /// The longest cause a failed message records, in characters.
 const MAX_CAUSE: usize = 4000;
 
+/// The environment variables a platform sets on a worker in drain mode
+/// (D145; `ir.WorkerModeVariable` and its neighbours): [`MODE_VARIABLE`] is
+/// [`MODE_DRAIN`], [`IDLE_SECONDS_VARIABLE`] how long the worker waits with
+/// no message ready or held before it exits, and [`SLOTS_VARIABLE`] how many
+/// of it may run at once. A worker with no [`MODE_VARIABLE`], or
+/// [`MODE_POOL`], polls until it is stopped.
+pub const MODE_VARIABLE: &str = "WORKER_MODE";
+pub const IDLE_SECONDS_VARIABLE: &str = "WORKER_IDLE_SECONDS";
+pub const SLOTS_VARIABLE: &str = "WORKER_SLOTS";
+pub const MODE_POOL: &str = "pool";
+pub const MODE_DRAIN: &str = "drain";
+
+/// How long a worker in drain mode waits idle before it exits, unless
+/// [`IDLE_SECONDS_VARIABLE`] says.
+pub const DEFAULT_DRAIN_IDLE: Duration = Duration::from_secs(30);
+
+/// How far ahead a worker in drain mode that found its queue idle looks for
+/// a message that is not due yet, a delayed one or a retry after its
+/// backoff (D145): it waits for one due within the horizon instead of
+/// exiting, and leaves one due later to the platform's next start, a wake
+/// or its tick. Five minutes is gcp's default tick, as Go's
+/// `worker.DrainHorizon` and TypeScript's `DRAIN_HORIZON_MS` are.
+pub const DRAIN_HORIZON: Duration = Duration::from_secs(5 * 60);
+
+/// How a worker in drain mode runs (D145), as the module says. A zero in
+/// any of them is its default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Drain {
+    /// How long the worker waits with no message ready or held before it
+    /// stops; [`DEFAULT_DRAIN_IDLE`] by default.
+    pub idle: Duration,
+    /// How many workers may drain the queue at once; one by default.
+    pub slots: usize,
+    /// How far ahead the worker looks for a message that is not due yet
+    /// before it stops; [`DRAIN_HORIZON`] by default.
+    pub horizon: Duration,
+}
+
+impl Default for Drain {
+    fn default() -> Self {
+        Self {
+            idle: DEFAULT_DRAIN_IDLE,
+            slots: 1,
+            horizon: DRAIN_HORIZON,
+        }
+    }
+}
+
+impl Drain {
+    /// The drain with each zero replaced by its default.
+    fn or_defaults(self) -> Self {
+        let defaults = Self::default();
+        Self {
+            idle: if self.idle.is_zero() {
+                defaults.idle
+            } else {
+                self.idle
+            },
+            slots: self.slots.max(1),
+            horizon: if self.horizon.is_zero() {
+                defaults.horizon
+            } else {
+                self.horizon
+            },
+        }
+    }
+}
+
+/// The drain the environment gives a worker, or `None` for one that runs
+/// as a pool's instance: [`MODE_VARIABLE`] unset, empty or [`MODE_POOL`].
+/// Refuses a mode it does not know, and an idle time or a slot count that
+/// is no whole number, one or more, as Go's `worker.DrainFromEnv` does.
+pub fn drain_from_env() -> Result<Option<Drain>, StackConfigError> {
+    let mut vars = HashMap::new();
+    for name in [MODE_VARIABLE, IDLE_SECONDS_VARIABLE, SLOTS_VARIABLE] {
+        if let Some(value) = std::env::var_os(name) {
+            let Ok(value) = value.into_string() else {
+                return Err(StackConfigError::one(format!("{name} is not UTF-8")));
+            };
+            vars.insert(name.to_string(), value);
+        }
+    }
+    drain_from(&vars)
+}
+
+/// [`drain_from_env`] over `vars` in place of the environment.
+pub fn drain_from(vars: &HashMap<String, String>) -> Result<Option<Drain>, StackConfigError> {
+    let get = |name: &str| vars.get(name).map_or("", String::as_str);
+    match get(MODE_VARIABLE) {
+        "" | MODE_POOL => return Ok(None),
+        MODE_DRAIN => {}
+        mode => {
+            return Err(StackConfigError::one(format!(
+                "{MODE_VARIABLE} is {}; it is {} or {}",
+                quote(mode),
+                quote(MODE_POOL),
+                quote(MODE_DRAIN)
+            )))
+        }
+    }
+    let whole = |name: &str| -> Result<Option<u64>, StackConfigError> {
+        let value = get(name);
+        if value.is_empty() {
+            return Ok(None);
+        }
+        match value.parse::<u64>() {
+            Ok(n) if n >= 1 => Ok(Some(n)),
+            _ => Err(StackConfigError::one(format!(
+                "{name} is {}; it is a whole number, one or more",
+                quote(value)
+            ))),
+        }
+    };
+    let mut drain = Drain::default();
+    if let Some(seconds) = whole(IDLE_SECONDS_VARIABLE)? {
+        drain.idle = Duration::from_secs(seconds);
+    }
+    if let Some(slots) = whole(SLOTS_VARIABLE)? {
+        drain.slots = usize::try_from(slots).unwrap_or(usize::MAX);
+    }
+    Ok(Some(drain))
+}
+
 /// How [`run_worker`] runs. A zero in any of them is its default.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Options {
@@ -132,6 +269,9 @@ pub struct Options {
     /// How often to prune the queue after the prune the worker starts with;
     /// [`DEFAULT_PRUNE_EVERY`] by default.
     pub prune_every: Duration,
+    /// Runs the worker in drain mode (D145), as the module says; `None`
+    /// polls until the worker is stopped.
+    pub drain: Option<Drain>,
 }
 
 impl Default for Options {
@@ -141,6 +281,7 @@ impl Default for Options {
             grace: DEFAULT_GRACE,
             idle: DEFAULT_IDLE,
             prune_every: DEFAULT_PRUNE_EVERY,
+            drain: None,
         }
     }
 }
@@ -166,6 +307,7 @@ impl Options {
             } else {
                 self.prune_every
             },
+            drain: self.drain.map(Drain::or_defaults),
         }
     }
 }
@@ -250,6 +392,24 @@ pub trait WorkerQueue: Send + Sync + 'static {
     async fn prune(&self, _limit: usize) -> Result<u64, QueueError> {
         Ok(0)
     }
+
+    /// Takes one of `slots` locks named for the queue, which a worker in
+    /// drain mode holds while it runs (D145): `None` when every one is
+    /// taken, and otherwise the slot, which gives the lock back as it
+    /// drops. A queue that does not implement it takes none, as on a
+    /// database with no such lock: every worker started then drains.
+    async fn slot(&self, _slots: usize) -> Result<Option<Slot>, QueueError> {
+        Ok(Some(Slot::none()))
+    }
+
+    /// How long until the first ready message that is not due yet falls
+    /// due, or `None` when none waits (D145): a worker in drain mode that
+    /// found the queue idle waits for one due within its horizon instead of
+    /// stopping. A queue that does not implement it reads none, and the
+    /// worker stops once idle.
+    async fn next_due(&self) -> Result<Option<Duration>, QueueError> {
+        Ok(None)
+    }
 }
 
 #[cfg(feature = "postgres")]
@@ -287,6 +447,14 @@ impl<M: DeserializeOwned + Send + 'static> WorkerQueue for PostgresQueue<M> {
 
     async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
         PostgresQueue::prune(self, limit).await
+    }
+
+    async fn slot(&self, slots: usize) -> Result<Option<Slot>, QueueError> {
+        PostgresQueue::slot(self, slots).await
+    }
+
+    async fn next_due(&self) -> Result<Option<Duration>, QueueError> {
+        PostgresQueue::next_due(self).await
     }
 }
 
@@ -417,13 +585,28 @@ impl<Q: WorkerQueue> WorkerQueue for SelfCompleting<Q> {
     async fn prune(&self, limit: usize) -> Result<u64, QueueError> {
         self.queue.prune(limit).await
     }
+
+    async fn slot(&self, slots: usize) -> Result<Option<Slot>, QueueError> {
+        self.queue.slot(slots).await
+    }
+
+    async fn next_due(&self) -> Result<Option<Duration>, QueueError> {
+        self.queue.next_due().await
+    }
 }
 
 /// Claims and handles `queue`'s messages with `handler` until `shutdown` is
 /// cancelled, then stops as the module says: it claims no more, lets the
 /// running handlers finish within the grace, and drops those that do not,
 /// releasing their messages. It returns `Ok` once it stopped, and an error
-/// only for a queue it cannot run, whose lease is zero.
+/// only for a queue it cannot run, whose lease is zero, or in drain mode
+/// for a slot it could not take or once every claim has failed for the
+/// drain's idle time.
+///
+/// In drain mode (`options.drain`, D145) it first takes a slot of the
+/// queue, returning `Ok` at once when every one is taken, and returns `Ok`
+/// once no message was ready or held for the drain's idle time and none
+/// falls due within its horizon, giving the slot back as it returns.
 ///
 /// The handler is any function of a message to a future that resolves to
 /// `Ok` or a [`BoxError`]: an `async` closure over the API's `Workers`.
@@ -438,31 +621,235 @@ where
     H: Fn(Q::Message) -> F + Send + Sync + 'static,
     F: Future<Output = Result<(), BoxError>> + Send + 'static,
 {
-    let lease = queue.lease();
-    if lease.is_zero() {
+    check_lease(&queue)?;
+    let options = options.or_defaults();
+    let span = tracing::error_span!("worker", queue = queue.name());
+    async move {
+        let Some(_slot) = slot_of(&queue, options.drain, &shutdown).await? else {
+            return Ok(());
+        };
+        run_loop(
+            queue,
+            handler,
+            options,
+            shutdown.child(),
+            Arc::new(Quiet::new()),
+        )
+        .await
+    }
+    .instrument(span)
+    .await
+}
+
+/// The claim loops of one behavior worker (D103), one per behavior queue of
+/// its table, run together as Go's `worker.RunAll` runs them: each is
+/// [`run_worker`]'s over its queue, with the same options, and in drain
+/// mode (D145) the worker takes one slot for them all
+/// ([`Group::take_slot`]), and they stop together, once none was busy for
+/// the drain's idle time: a claim that found a message, a handler that
+/// started and one that returned, of any of them, make them all busy. A
+/// loop that stops with an error stops the others at once.
+///
+/// ```ignore
+/// let group = worker::Group::new(&shutdown);
+/// if !group.take_slot(&deadlines, options).await? {
+///     return Ok(());
+/// }
+/// let ran = tokio::join!(
+///     group.run(deadlines, handle_deadline, options),
+///     group.run(changes, handle_change, options),
+/// );
+/// ```
+pub struct Group {
+    stop: Shutdown,
+    quiet: Arc<Quiet>,
+    slot: Mutex<Option<Slot>>,
+}
+
+impl Group {
+    /// The loops of a worker that stop when `shutdown` is cancelled.
+    pub fn new(shutdown: &Shutdown) -> Self {
+        Self {
+            stop: shutdown.child(),
+            quiet: Arc::new(Quiet::new()),
+            slot: Mutex::new(None),
+        }
+    }
+
+    /// In drain mode, takes the worker's one slot through `queue`, its first
+    /// queue, which the group holds until it is dropped, and returns false
+    /// when every one is taken: the worker then runs none of its loops, as
+    /// one that drains them. Out of drain mode it takes none and returns
+    /// true.
+    pub async fn take_slot<Q: WorkerQueue>(
+        &self,
+        queue: &Q,
+        options: Options,
+    ) -> Result<bool, QueueError> {
+        let drain = options.or_defaults().drain;
+        let span = tracing::error_span!("worker", queue = queue.name());
+        let taken = slot_of(queue, drain, &self.stop).instrument(span).await?;
+        let Some(slot) = taken else {
+            return Ok(false);
+        };
+        *self.slot.lock().unwrap_or_else(PoisonError::into_inner) = Some(slot);
+        Ok(true)
+    }
+
+    /// Runs one of the worker's queues as [`run_worker`] does, but for the
+    /// slot, which [`Group::take_slot`] took for them all, and the idle
+    /// time, which its loops share.
+    pub async fn run<Q, H, F>(
+        &self,
+        queue: Q,
+        handler: H,
+        options: Options,
+    ) -> Result<(), QueueError>
+    where
+        Q: WorkerQueue,
+        H: Fn(Q::Message) -> F + Send + Sync + 'static,
+        F: Future<Output = Result<(), BoxError>> + Send + 'static,
+    {
+        let ran = match check_lease(&queue) {
+            Ok(()) => {
+                let span = tracing::error_span!("worker", queue = queue.name());
+                run_loop(
+                    queue,
+                    handler,
+                    options.or_defaults(),
+                    self.stop.child(),
+                    Arc::clone(&self.quiet),
+                )
+                .instrument(span)
+                .await
+            }
+            Err(err) => Err(err),
+        };
+        if ran.is_err() {
+            self.stop.cancel();
+        }
+        ran
+    }
+}
+
+impl fmt::Debug for Group {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Group").finish_non_exhaustive()
+    }
+}
+
+/// Refuses a queue whose lease is zero.
+fn check_lease<Q: WorkerQueue>(queue: &Q) -> Result<(), QueueError> {
+    if queue.lease().is_zero() {
         return Err(QueueError::Definition(format!(
             "worker: queue {} has a lease of 0 s; it is positive",
             queue.name()
         )));
     }
-    let span = tracing::error_span!("worker", queue = queue.name());
+    Ok(())
+}
+
+/// The slot a worker in drain mode takes of `queue` as it starts (D145):
+/// `Some` of the slot, which holds nothing out of drain mode, or `None`
+/// when every one is taken or `shutdown` is cancelled first.
+async fn slot_of<Q: WorkerQueue>(
+    queue: &Q,
+    drain: Option<Drain>,
+    shutdown: &Shutdown,
+) -> Result<Option<Slot>, QueueError> {
+    let Some(drain) = drain else {
+        return Ok(Some(Slot::none()));
+    };
+    let taken = tokio::select! {
+        () = shutdown.cancelled() => return Ok(None),
+        taken = queue.slot(drain.slots) => taken,
+    };
+    match taken {
+        Ok(Some(slot)) => Ok(Some(slot)),
+        Ok(None) => {
+            tracing::info!(
+                slots = drain.slots,
+                "every slot of the queue is taken: the workers that hold them drain it"
+            );
+            Ok(None)
+        }
+        Err(err) => Err(QueueError::Failed(format!(
+            "worker: take a slot of queue {}: {err}",
+            queue.name()
+        ))),
+    }
+}
+
+/// Runs the loop over `queue` until `stop` is cancelled or, in drain mode,
+/// it has drained, then stops within the grace.
+async fn run_loop<Q, H, F>(
+    queue: Q,
+    handler: H,
+    options: Options,
+    stop: Shutdown,
+    quiet: Arc<Quiet>,
+) -> Result<(), QueueError>
+where
+    Q: WorkerQueue,
+    H: Fn(Q::Message) -> F + Send + Sync + 'static,
+    F: Future<Output = Result<(), BoxError>> + Send + 'static,
+{
+    let lease = queue.lease();
     let worker = Arc::new(Loop {
         queue,
         handler,
-        options: options.or_defaults(),
+        options,
         lease,
         running: Mutex::new(HashMap::new()),
         freed: Notify::new(),
         tracker: TaskTracker::new(),
-        span: span.clone(),
+        span: tracing::Span::current(),
+        quiet,
     });
-    async {
-        tokio::join!(worker.claim_loop(&shutdown), worker.prune_loop(&shutdown));
-        worker.stop().await;
+    // The prune stops with the claims: when the worker is stopped, or once
+    // a worker in drain mode has drained.
+    let claims = async {
+        let claimed = worker.claim_loop(&stop).await;
+        stop.cancel();
+        claimed
+    };
+    let (claimed, ()) = tokio::join!(claims, worker.prune_loop(&stop));
+    worker.stop().await;
+    claimed
+}
+
+/// When the claim loops of one worker in drain mode were last busy, and how
+/// many of their handlers run (D145): a claim that found a message, a
+/// handler that started and one that returned each make them busy, so the
+/// queues of a behavior worker are idle together or not at all.
+struct Quiet {
+    last: Mutex<Instant>,
+    running: AtomicUsize,
+}
+
+impl Quiet {
+    fn new() -> Self {
+        Self {
+            last: Mutex::new(Instant::now()),
+            running: AtomicUsize::new(0),
+        }
     }
-    .instrument(span)
-    .await;
-    Ok(())
+
+    /// Marks the worker busy now.
+    fn busy(&self) {
+        *self.last.lock().unwrap_or_else(PoisonError::into_inner) = Instant::now();
+    }
+
+    /// Whether no handler runs and none was busy for `idle`.
+    fn over(&self, idle: Duration) -> bool {
+        self.running.load(Ordering::SeqCst) == 0
+            && self
+                .last
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .elapsed()
+                >= idle
+    }
 }
 
 /// One run of [`run_worker`].
@@ -480,6 +867,8 @@ struct Loop<Q, H> {
     /// The task of each message, which the stop waits for.
     tracker: TaskTracker,
     span: tracing::Span,
+    /// The idle clock the worker's loops share in drain mode.
+    quiet: Arc<Quiet>,
 }
 
 /// A message whose handler runs.
@@ -508,49 +897,156 @@ where
         self.running().len()
     }
 
-    /// Claims messages for the free slots until `shutdown` is cancelled.
-    async fn claim_loop(self: &Arc<Self>, shutdown: &Shutdown) {
+    /// Claims messages for the free slots until `stop` is cancelled, or, in
+    /// drain mode, until the worker has drained. It returns an error only
+    /// in drain mode, once every claim has failed for the drain's idle
+    /// time.
+    async fn claim_loop(self: &Arc<Self>, stop: &Shutdown) -> Result<(), QueueError> {
         let mut wait = self.options.idle;
-        while !shutdown.is_cancelled() {
+        // When the claims began to fail: a worker in drain mode whose every
+        // claim fails for its idle time stops with an error.
+        let mut failing_since: Option<Instant> = None;
+        while !stop.is_cancelled() {
             let free = self.options.concurrency.saturating_sub(self.count());
             if free == 0 {
                 tokio::select! {
-                    () = shutdown.cancelled() => return,
+                    () = stop.cancelled() => return Ok(()),
                     () = self.freed.notified() => continue,
                 }
             }
             let claimed = tokio::select! {
-                () = shutdown.cancelled() => return,
+                () = stop.cancelled() => return Ok(()),
                 claimed = timed(self.queue.claim(free, self.lease)) => claimed,
             };
             let claims = match claimed {
                 Ok(claims) => claims,
                 Err(err) => {
-                    tracing::error!(retryIn = wait.as_secs_f64(), error = %err, "claim failed");
-                    if !sleep(shutdown, wait).await {
-                        return;
+                    let since = *failing_since.get_or_insert_with(Instant::now);
+                    if !self.claim_failed(&err, since, wait, stop).await? {
+                        return Ok(());
                     }
                     wait = (wait * 2).min(MAX_BACKOFF);
                     continue;
                 }
             };
             wait = self.options.idle;
+            failing_since = None;
             let found = claims.len();
             for claim in claims {
                 self.start(claim);
             }
-            if found < free && !sleep(shutdown, self.options.idle).await {
-                return;
+            if self.drained(found) {
+                if self.wait_for_due(stop).await {
+                    continue;
+                }
+                return Ok(());
             }
+            if found < free && !sleep(stop, self.options.idle).await {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    /// After a claim that failed, the claims having failed since `since`:
+    /// the error that stops a worker in drain mode whose every claim failed
+    /// for its idle time, or the wait before the next claim, and whether
+    /// the worker is still live after it.
+    async fn claim_failed(
+        &self,
+        err: &QueueError,
+        since: Instant,
+        wait: Duration,
+        stop: &Shutdown,
+    ) -> Result<bool, QueueError> {
+        if let Some(drain) = self.options.drain {
+            if since.elapsed() >= drain.idle {
+                tracing::error!(
+                    idle = drain.idle.as_secs_f64(),
+                    error = %err,
+                    "every claim failed for the idle time: the worker stops with an error and gives its slot back"
+                );
+                return Err(QueueError::Failed(format!(
+                    "worker: every claim of queue {} failed for {}s, so the worker in drain mode stops: {err}",
+                    self.queue.name(),
+                    drain.idle.as_secs_f64()
+                )));
+            }
+        }
+        tracing::error!(retryIn = wait.as_secs_f64(), error = %err, "claim failed");
+        Ok(sleep(stop, wait).await)
+    }
+
+    /// Once a worker in drain mode has drained: waits for a message that
+    /// falls due within the horizon, a delayed one or a retry, and returns
+    /// whether to claim again, which takes it; or logs that it drained and
+    /// returns false.
+    async fn wait_for_due(&self, stop: &Shutdown) -> bool {
+        let Some(due) = self.next_due(stop).await else {
+            tracing::info!(
+                idle = self
+                    .options
+                    .drain
+                    .map_or(0.0, |drain| drain.idle.as_secs_f64()),
+                "drained: no message was ready or held"
+            );
+            return false;
+        };
+        tracing::info!(
+            dueIn = due.as_secs_f64(),
+            "idle, and waiting for a message due soon"
+        );
+        sleep(stop, due.max(self.options.idle)).await
+    }
+
+    /// Whether a worker in drain mode is done: its claim found nothing, none
+    /// of its handlers runs, and none was busy for the drain's idle time. A
+    /// claim that found a message makes the worker busy.
+    fn drained(&self, claimed: usize) -> bool {
+        let Some(drain) = self.options.drain else {
+            return false;
+        };
+        if claimed > 0 || self.count() > 0 {
+            self.quiet.busy();
+            return false;
+        }
+        self.quiet.over(drain.idle)
+    }
+
+    /// How long until a message that is not due yet falls due, when that is
+    /// within the drain's horizon: a worker in drain mode that found its
+    /// queue idle waits for it. A queue that reads none, or whose read
+    /// fails, gives `None`, and the worker stops.
+    async fn next_due(&self, stop: &Shutdown) -> Option<Duration> {
+        let horizon = self.options.drain?.horizon;
+        let read = tokio::select! {
+            () = stop.cancelled() => return None,
+            read = timed(self.queue.next_due()) => read,
+        };
+        match read {
+            Err(err) => {
+                tracing::warn!(error = %err, "reading when the next message is due failed: the tick runs it");
+                None
+            }
+            Ok(None) => None,
+            Ok(Some(due)) if due > horizon => {
+                tracing::info!(
+                    dueIn = due.as_secs_f64(),
+                    horizon = horizon.as_secs_f64(),
+                    "the next message is due past the drain's horizon: a wake or the tick runs it"
+                );
+                None
+            }
+            Ok(Some(due)) => Some(due),
         }
     }
 
-    /// Prunes the queue at once, then every `prune_every`, until `shutdown`
-    /// is cancelled.
-    async fn prune_loop(&self, shutdown: &Shutdown) {
+    /// Prunes the queue at once, then every `prune_every`, until `stop` is
+    /// cancelled.
+    async fn prune_loop(&self, stop: &Shutdown) {
         loop {
-            self.prune(shutdown).await;
-            if !sleep(shutdown, self.options.prune_every).await {
+            self.prune(stop).await;
+            if !sleep(stop, self.options.prune_every).await {
                 return;
             }
         }
@@ -559,11 +1055,11 @@ where
     /// Deletes the queue's done messages past its retention, a batch at a
     /// time until a batch is short, and logs how many it deleted. A failed
     /// batch ends the prune, which the next tries again.
-    async fn prune(&self, shutdown: &Shutdown) {
+    async fn prune(&self, stop: &Shutdown) {
         let mut pruned: u64 = 0;
         loop {
             let batch = tokio::select! {
-                () = shutdown.cancelled() => break,
+                () = stop.cancelled() => break,
                 batch = timed(self.queue.prune(PRUNE_BATCH)) => batch,
             };
             match batch {
@@ -602,6 +1098,8 @@ where
                 abort: None,
             },
         );
+        self.quiet.running.fetch_add(1, Ordering::SeqCst);
+        self.quiet.busy();
         let worker = Arc::clone(self);
         let key = token.clone();
         let task = self.tracker.spawn(
@@ -615,6 +1113,9 @@ where
                     message_failed(&span, cause);
                 }
                 worker.finish(&id, &token, attempt, outcome).await;
+                // A handler that returns leaves the worker busy until now.
+                worker.quiet.busy();
+                worker.quiet.running.fetch_sub(1, Ordering::SeqCst);
                 worker.freed.notify_one();
             }
             .instrument(self.span.clone()),

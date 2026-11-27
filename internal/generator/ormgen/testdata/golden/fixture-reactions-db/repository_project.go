@@ -1783,6 +1783,11 @@ func (r *ProjectRepository) UpdateMany(ctx context.Context, filter *ProjectFilte
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute update: %w", err)
 	}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of ProjectChange (D145).
+		wakeQueue("ProjectChange")
+	}
 
 	return int(result.RowsAffected()), nil
 }
@@ -1819,6 +1824,11 @@ func (r *ProjectRepository) DeleteMany(ctx context.Context, filter *ProjectFilte
 	}
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete records: %w", err)
+	}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of ProjectChange (D145).
+		wakeQueue("ProjectChange")
 	}
 
 	return int(result.RowsAffected()), nil

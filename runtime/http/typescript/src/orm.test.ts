@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { ormOf } from './orm-postgres';
-import { fenceBumps, type Clauses, type FenceDefinition, type OrmDefinition, type OrmPool, type OrmQueryable, type OrmTx } from './orm';
+import { fenceBumps, READ_METHODS, type Clauses, type FenceDefinition, type OrmDefinition, type OrmPool, type OrmQueryable, type OrmTx, type TableDefinition, type TableStatements } from './orm';
 import type { RowField } from './pgcodec';
 
 // The statements an ORM's transaction runs around its function (D89),
@@ -91,6 +91,69 @@ describe('an ORM transaction', () => {
     await expect(orm.transaction(async () => Promise.reject(new Error('no')))).rejects.toThrow('no');
     expect(statements).toEqual(['BEGIN', 'ROLLBACK']);
     expect(released).toEqual([false]);
+  });
+});
+
+describe("a read-only table's repository", () => {
+  // The released rows of a graph member (D139), as a types package's
+  // ./orm entry holds them, beside a table the repositories write; the
+  // generated packages' Postgres tests read the rows of each.
+  const columns = (table: string) => [
+    { name: 'id', column: 'id', field: 'id', qualified: `${table}.id`, key: true, required: true },
+    { name: 'heading', column: 'heading', field: 'heading', qualified: `${table}.heading`, required: true },
+  ];
+  const statements = (table: string) =>
+    ({
+      columns: 'id, heading',
+      qualifiedColumns: 'id, heading',
+      getOne: `SELECT id, heading FROM ${table} WHERE id = $1`,
+      getMany: `SELECT id, heading FROM ${table} WHERE id IN (%s)`,
+      findOne: `SELECT %s FROM ${table}%s%s LIMIT 1`,
+      findMany: `SELECT %s FROM ${table}%s%s%s`,
+      count: `SELECT COUNT(*) FROM ${table}%s`,
+      live: ' AND live',
+      liveWhere: ' WHERE live',
+      liveCondition: 'live',
+    }) as unknown as TableStatements;
+  const released: TableDefinition = {
+    name: 'PartReleased',
+    table: 'part_released',
+    key: 'id',
+    columns: columns('part_released'),
+    statements: statements('part_released'),
+    uniqueKeys: {},
+    readOnly: true,
+    softDelete: true,
+  };
+  const part: TableDefinition = { name: 'Part', table: 'part', key: 'id', columns: columns('part'), statements: statements('part'), uniqueKeys: {} };
+  const tables: OrmDefinition = { ...definition, tables: { partReleased: released, part } };
+  const writes = ['createOne', 'createMany', 'updateOne', 'updateMany', 'upsertOne', 'upsertOneResult', 'upsertMany', 'deleteOne', 'deleteMany', 'hardDeleteOne', 'mergeInto', 'reencrypt'];
+
+  test('holds the reads alone, on the ORM and in a transaction, and a table beside it its writes', async () => {
+    const { pool } = recording();
+    const orm = ormOf<Record<string, Record<string, unknown>>>(pool, tables);
+    const inTx = await orm.transaction(async tx => tx);
+    for (const repository of [orm.partReleased!, inTx.partReleased!]) {
+      expect(Object.keys(repository).sort()).toEqual([...READ_METHODS].sort());
+      expect(Object.isFrozen(repository)).toBe(true);
+      for (const write of writes) expect(repository[write]).toBeUndefined();
+    }
+    for (const write of ['createOne', 'updateOne', 'upsertOne', 'deleteOne']) expect(typeof orm.part![write]).toBe('function');
+  });
+
+  test('reads through the repository, held to its live condition unless the read includes deleted rows', async () => {
+    const id = '0f8b6c4e-1b2a-4c3d-9e8f-123456789abc';
+    const { pool, statements: run } = recording([{ id, heading: 'Mix', count: '1' }]);
+    const repository = ormOf<Record<string, Record<string, (...args: unknown[]) => Promise<unknown>>>>(pool, tables).partReleased!;
+    expect(await repository.getOne!(id)).toEqual({ id, heading: 'Mix' });
+    expect((await repository.findMany!(null, { count: false })) as unknown).toEqual({ rows: [{ id, heading: 'Mix' }], total: undefined });
+    expect(await repository.findOne!(null, { includeDeleted: true })).toEqual({ id, heading: 'Mix' });
+    expect(run).toEqual([
+      'SELECT id, heading FROM part_released WHERE id = $1 AND live',
+      // The clauses are each %s here, so the limit follows the WHERE.
+      'SELECT id, heading FROM part_released WHERE live100',
+      'SELECT id, heading FROM part_released LIMIT 1',
+    ]);
   });
 });
 

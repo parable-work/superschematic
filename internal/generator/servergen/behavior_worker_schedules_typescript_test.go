@@ -104,7 +104,7 @@ func TestTypeScriptSchedulesBehaviorWorkerEntrypoint(t *testing.T) {
 		"fixtureSchedulesApiImpl.createWorkers(fixtureSchedulesApiDeps)",
 		"fixtureSchedulesApiApi.problemWakeUpsQueues(fixtureSchedulesDbPool, orm, workers,",
 		"createFixtureSchedulesDbOrm(fixtureSchedulesDbPool)",
-		"runWorker(",
+		"runWorkers(",
 	} {
 		if !strings.Contains(string(main), want) {
 			t.Errorf("main.ts has no %s:\n%s", want, main)

@@ -2207,6 +2207,11 @@ func (r *TaskRepository) UpdateMany(ctx context.Context, filter *TaskFilter, upd
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute update: %w", err)
 	}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of TaskChange (D145).
+		wakeQueue("TaskChange")
+	}
 
 	return int(result.RowsAffected()), nil
 }
@@ -2243,6 +2248,11 @@ func (r *TaskRepository) DeleteMany(ctx context.Context, filter *TaskFilter) (in
 	}
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete records: %w", err)
+	}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of TaskChange (D145).
+		wakeQueue("TaskChange")
 	}
 
 	return int(result.RowsAffected()), nil

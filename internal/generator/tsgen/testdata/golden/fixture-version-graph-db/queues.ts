@@ -179,6 +179,7 @@ export const recipePublishedQueue: QueueDefinition<RecipePublished> = {
   fields: [
     { name: "root", column: "root", uuid: true },
     { name: "commit", column: "\"commit\"", uuid: true },
+    { name: "sequence", column: "\"sequence\"" },
   ],
   statements: {
     insert: `INSERT INTO recipe_published_queue`,
@@ -198,7 +199,7 @@ WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
 UPDATE recipe_published_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
   claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
 FROM due WHERE q.id = due.id
-RETURNING q.id::text, q.claim_token::text, q.attempts, q.root, q."commit"`,
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.root, q."commit", q."sequence"`,
     complete: `UPDATE recipe_published_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
     fail: `UPDATE recipe_published_queue SET

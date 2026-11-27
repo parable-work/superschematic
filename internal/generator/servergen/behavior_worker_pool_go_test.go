@@ -81,7 +81,7 @@ func TestGoBehaviorWorkerEntrypointOfAccountRechecks(t *testing.T) {
 	for _, want := range []string{
 		"workers, err := fixturepoolapiimpl.NewWorkers(fixturePoolApiDeps)",
 		"queues := fixturepoolapi.AccountRechecksQueues(fixturePoolDb, workers, logger)",
-		"return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger})",
+		"return worker.RunAll(ctx, queues, worker.Options{Concurrency: concurrency, Grace: 8 * time.Second, Logger: logger, Drain: drain})",
 	} {
 		if !strings.Contains(main, want) {
 			t.Errorf("main.go holds no %q:\n%s", want, main)

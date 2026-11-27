@@ -245,8 +245,8 @@ func TestRustBehaviorWorkerEntrypoint(t *testing.T) {
 		"fixture_timers_api_api::behaviors::run_ticket_timers_deadline(&pool, claimed).await",
 		"fixture_timers_api_api::behaviors::ticket_timers_changes(&fixture_timers_db_pool)?",
 		"fixture_timers_api_api::behaviors::run_ticket_timers_change(&pool, claimed).await",
-		"worker::run_worker(deadlines, run_deadlines, options, shutdown.clone()),",
-		"worker::run_worker(changes, run_changes, options, shutdown.clone()),",
+		"group.run(deadlines, run_deadlines, options),",
+		"group.run(changes, run_changes, options),",
 	} {
 		if !strings.Contains(string(main), want) {
 			t.Errorf("main.rs does not contain %q:\n%s", want, main)

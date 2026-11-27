@@ -14,11 +14,13 @@ message, due again a minute on. A change is claimed, one row's in the order
 they were written, and run through the repository (runChange) the same way:
 the core runs the behaviors that hear the write on the row as it is now, so
 a raw SQL write, or a repository's bulk or hard write, is heard after its
-commit. The worker's main runs each queue with runWorker; the queue's
+commit. The worker's main runs its queues with runWorkers; each queue's
 complete does nothing, since the handler completes the message in the
 transaction that runs it. A message the handler fails is due again after
 the queue's backoff, and dead once its retries are spent. nextDue tells a
-run that drains, a wake's on Workers (D151), when the next falls due.
+run that drains, a wake's on Workers (D151) or a worker's in drain mode
+(D145), when the next falls due, and slot takes the lock a worker in drain
+mode holds while it runs, its first queue's for them all (runWorkers).
 */
 
 import type { Pool } from 'pg';
@@ -35,7 +37,7 @@ const ticketTimersCaller: CoreCaller = { subject: 'fixture-timers-api/TicketTime
  * The queues of the behavior worker TicketTimers (D103): fixture-timers-db's
  * Ticket's deadlines and changes, deadlines first, each run through the
  * behaviors' core in one transaction with its message's completion, as
- * ticketTimersCaller. The worker's main runs each with runWorker.
+ * ticketTimersCaller. The worker's main runs them with runWorkers.
  */
 export function ticketTimersQueues(pool: Pool, orm: FixtureTimersDbOrm, logger?: Logger): WorkerQueue[] {
   const deadlines = postgresQueue(pool, ticketDeadlineQueue);
@@ -61,6 +63,7 @@ export function ticketTimersQueues(pool: Pool, orm: FixtureTimersDbOrm, logger?:
       release: (id, token) => deadlines.release(id, token),
       prune: limit => deadlines.prune(limit),
       nextDue: () => deadlines.nextDue(),
+      slot: slots => deadlines.slot(slots),
     },
     {
       name: changes.name,
@@ -82,6 +85,7 @@ export function ticketTimersQueues(pool: Pool, orm: FixtureTimersDbOrm, logger?:
       release: (id, token) => changes.release(id, token),
       prune: limit => changes.prune(limit),
       nextDue: () => changes.nextDue(),
+      slot: slots => changes.slot(slots),
     },
   ];
 }

@@ -1082,15 +1082,17 @@ async function perform(host: RulesHost, type: string, command: CoreCommand, opti
 
 /**
  * Tells the process's queue waker of what a command's unit left a behavior
- * worker (D151): each event, on its table's event queue, due at once, and
- * each deadline it armed, on its table's deadline queue, due at its time.
- * A worker whose platform drains at a Cron Trigger's firings starts a run
- * that waits for one due before the next firing, so an urgent deadline or
- * an event does not wait for it. The wakes are sent once the statements
- * have run, before the caller's transaction commits, as an enqueue's are
- * (D145): the run's drain waits a while for what falls due, and the next
- * firing finds what it missed. A host with no waker sends nothing, and a
- * wake never fails the command.
+ * worker (D145, D151): each event, on its table's event queue, due at
+ * once; each deadline it armed, on its table's deadline queue, due at its
+ * time; and each row it wrote, on its table's change queue, due at once,
+ * whose trigger writes the message, each queue once. A worker in drain
+ * mode starts, and one whose platform drains at a Cron Trigger's firings
+ * starts a run that waits for one due before the next firing, so an
+ * urgent deadline, an event or a Reaction does not wait for its tick. The
+ * wakes are sent once the statements have run, before the caller's
+ * transaction commits, as an enqueue's are (D145): the run's drain waits a
+ * while for what falls due, and the next firing finds what it missed. A
+ * host with no waker sends nothing, and a wake never fails the command.
  */
 function wakeQueues(host: RulesHost, changes: CoreChangeSet): void {
   for (const event of changes.events ?? []) {
@@ -1101,6 +1103,14 @@ function wakeQueues(host: RulesHost, changes: CoreChangeSet): void {
     if (change.kind !== 'arm') continue;
     const queue = host.layout.types[change.row.type]?.deadlines?.queue;
     if (queue !== undefined) wakeAfterEnqueue(queue, change.at);
+  }
+  const written = new Set<string>();
+  for (const row of changes.rows ?? []) {
+    if (row.kind === 'gone') continue;
+    const queue = host.layout.types[row.type]?.changes?.queue;
+    if (queue === undefined || written.has(queue)) continue;
+    written.add(queue);
+    wakeAfterEnqueue(queue);
   }
 }
 
