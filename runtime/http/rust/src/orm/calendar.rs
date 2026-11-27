@@ -37,7 +37,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use super::{epoch_millis, rfc3339_millis, Error};
-use crate::civil::{from_days, to_days};
+use crate::civil::to_days;
 
 /// The occurrences sub-table an occurrences source reads: the table,
 /// unquoted, and its columns of the row's key, an occurrence's key, its
@@ -219,11 +219,13 @@ pub fn iso(millis: i64) -> String {
 }
 
 /// The date of epoch milliseconds, `YYYY-MM-DD`, in UTC.
+#[cfg(feature = "postgres")]
 fn date_of(millis: i64) -> String {
-    let (year, month, day) = from_days(millis.div_euclid(86_400_000));
+    let (year, month, day) = crate::civil::from_days(millis.div_euclid(86_400_000));
     format!("{year:04}-{month:02}-{day:02}")
 }
 
+#[cfg(feature = "postgres")]
 fn text(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),

@@ -249,6 +249,7 @@ const MAX_OFFSET: i64 = 10_000;
 const OPEN: char = '\u{2}';
 const CLOSE: char = '\u{3}';
 /// `ts_rank_cd`'s weights of the classes D, C, B and A.
+#[cfg(feature = "postgres")]
 const WEIGHTS: &str = "'{0.1, 0.2, 0.4, 1}'::real[]";
 
 fn is_mark(c: char) -> bool {
@@ -267,6 +268,7 @@ pub fn search_words(q: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(feature = "postgres")]
 fn whole(value: Option<i64>, fallback: i64, min: i64, max: i64, what: &str) -> Result<i64, Error> {
     match value {
         None => Ok(fallback),
@@ -279,6 +281,7 @@ fn whole(value: Option<i64>, fallback: i64, min: i64, max: i64, what: &str) -> R
 
 /// A vector of unit length, the zero vector as itself; a vector that
 /// holds a number that is not finite is refused.
+#[cfg(feature = "postgres")]
 fn unit(vector: &[f64]) -> Result<Vec<f64>, Error> {
     let mut sum = 0.0;
     for x in vector {
@@ -299,6 +302,7 @@ fn unit(vector: &[f64]) -> Result<Vec<f64>, Error> {
 
 /// A snippet's parts, from `ts_headline`'s text with the marks around each
 /// match.
+#[cfg(feature = "postgres")]
 fn snippet_parts(text: &str) -> Vec<SnippetPart> {
     let mut parts = Vec::new();
     let mut rest = text;
@@ -335,6 +339,7 @@ fn snippet_parts(text: &str) -> Vec<SnippetPart> {
 
 /// An index row's text: its marks made spaces, at most
 /// [`MAX_INDEXED_TEXT`] characters, none when it is blank.
+#[cfg(feature = "postgres")]
 fn clean(text: Option<&str>) -> Option<String> {
     let text = text?;
     let out: String = text
@@ -345,6 +350,7 @@ fn clean(text: Option<&str>) -> Option<String> {
     (!out.trim().is_empty()).then_some(out)
 }
 
+#[cfg(feature = "postgres")]
 fn hex_sha256(text: &str) -> String {
     ring::digest::digest(&ring::digest::SHA256, text.as_bytes())
         .as_ref()
@@ -1204,6 +1210,7 @@ mod tests {
         assert!(search_words("   ").is_empty());
     }
 
+    #[cfg(feature = "postgres")]
     #[test]
     fn a_snippet_marks_each_match() {
         let parts = snippet_parts("A \u{2}walnut\u{3} desk");
@@ -1230,6 +1237,7 @@ mod tests {
         );
     }
 
+    #[cfg(feature = "postgres")]
     #[test]
     fn an_index_row_holds_no_mark_and_no_blank() {
         assert_eq!(clean(Some("a\u{0}b")), Some("a b".to_owned()));
