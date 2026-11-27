@@ -24,9 +24,10 @@ import (
 // BEFORE UPDATE trigger does (sqliteBumpTrigger). A @stateMachine's guard
 // (D118) is one trigger whose WHEN is the machine's rule and whose body
 // fails the write, and a @fenced counter's (D119) is one of the same form.
-// The model refuses what SQLite has no form of (D27), naming the feature:
-// @versioned, projections, GIN and GIST indexes, and types it has no
-// storage for.
+// A @versioned table's history is a table its row triggers fill (D189,
+// sqlite_history.go). The model refuses what SQLite has no form of (D27),
+// naming the feature: a history's retention, pins and partitions,
+// projections, GIN and GIST indexes, and types it has no storage for.
 func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, error) {
 	m := &Model{Version: ModelVersion, Dialect: SQLite, Service: opts.SchemaName}
 	out, err := sqlgen.Generate(schema, opts)
@@ -37,8 +38,16 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		return m, nil
 	}
 	types := map[string]string{} // table name -> type name
+	searchIndex := ""
 	for i := range out.Tables {
 		types[out.Tables[i].Name] = out.Tables[i].OriginalName
+		if out.Tables[i].OriginalName == ir.SearchIndexTypeName {
+			// The search index's words and audience have GIN indexes on
+			// Postgres; on SQLite its words are its FTS5 table, and its
+			// audience a JSON array a search reads with json_each (D186).
+			searchIndex = out.Tables[i].Name
+			out.Tables[i].Indexes = slices.DeleteFunc(out.Tables[i].Indexes, func(idx sqlgen.Index) bool { return idx.Type == "GIN" })
+		}
 	}
 	if err := sqliteRefusals(out, types); err != nil {
 		return nil, err
@@ -75,6 +84,26 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
+	}
+	// A @versioned table's history and the triggers that keep it (D189).
+	for _, h := range out.HistoryTables {
+		var source *Table
+		for _, t := range m.Tables {
+			if t.Name == h.SourceTableName {
+				source = t
+			}
+		}
+		if source == nil {
+			return nil, fmt.Errorf("sqlmigrate: the history %s has no table %s", h.Name, h.SourceTableName)
+		}
+		source.History = h.Name
+		source.HistoryExclude = append([]string(nil), h.ExcludedColumns...)
+		history, err := sqliteHistoryTable(h, types[h.SourceTableName], ns)
+		if err != nil {
+			return nil, err
+		}
+		m.Tables = append(m.Tables, history)
+		m.Triggers = append(m.Triggers, sqliteHistoryTriggers(h, source)...)
 	}
 	for _, o := range out.OptimisticTables {
 		m.Triggers = append(m.Triggers, &Trigger{Name: o.TriggerName, Table: o.TableName, Definition: sqliteBumpTrigger(o), Origin: types[o.TableName]})
@@ -130,6 +159,19 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		}
 		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
 	}
+	// Search's row triggers (D155, D186): each @searchable table's after
+	// each write, which delete its index row with it, copy its audience and
+	// enqueue it, and its sub-tables', which enqueue the row they belong to.
+	for _, s := range out.SearchTriggers {
+		for _, t := range s.SQLiteTriggers(qs) {
+			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: s.Origin})
+		}
+	}
+	for _, c := range out.SearchChildTriggers {
+		for _, t := range c.SQLiteTriggers(qs) {
+			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
+		}
+	}
 	// References' and attachments' row triggers (D154, D182): a target's
 	// clear and a file's release.
 	for _, c := range out.ReferencesClears {
@@ -151,11 +193,30 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 		return nil, err
 	}
 	m.RawSQL = modelRawSQL(pieces)
+	if searchIndex != "" {
+		m.RawSQL = append(m.RawSQL, searchFTSPiece(searchIndex))
+	}
 	for _, s := range out.RoleSeeds {
 		m.Roles = append(m.Roles, modelRole(s, s.SQLiteInsertSQL(qs), s.SQLiteUpdateSQL(qs)))
 	}
 	m.sort()
 	return m, nil
+}
+
+// SearchFTSPiece is the id of the piece of SQL that makes the search
+// index's FTS5 table on SQLite (D186).
+const SearchFTSPiece = "search_index_fts"
+
+// searchFTSPiece is the search index's words on SQLite (D186): its FTS5
+// table and the triggers on the index table that keep it, which the model
+// carries as a piece of SQL of its own, after every object, since it has
+// no form of a virtual table: a file that holds them reads back as having
+// run it, and a plan to a schema that adds the index runs it. Its down
+// drops them. A table made @searchable with rows needs reindexSearch once,
+// as on Postgres.
+func searchFTSPiece(index string) *RawSQL {
+	up, down := sqlgen.SearchFTS(index, qs)
+	return &RawSQL{ID: SearchFTSPiece, Origin: ir.SearchIndexTypeName, Position: ir.RawSQLAfterIndexes, Statements: up, Down: down, Checksum: sqlutil.StatementsChecksum(up)}
 }
 
 // sqliteRefusals lists the features of a schema the SQLite dialect does
@@ -179,7 +240,7 @@ func sqliteRefusals(out *sqlgen.DDLOutput, types map[string]string) error {
 		}
 	}
 	for _, h := range out.HistoryTables {
-		refuse("%s is @versioned", types[h.SourceTableName])
+		sqliteHistoryRefusals(h, types[h.SourceTableName], refuse)
 	}
 	for _, view := range out.Projections {
 		refuse("%s is a projection (%s.%s)", view.TypeName, view.Pool, view.Name)

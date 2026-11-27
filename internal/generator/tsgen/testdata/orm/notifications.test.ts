@@ -6,17 +6,19 @@
 // these cases through the notifier over the generated repositories, with
 // the runtime-providers example's SMS and mail relays (D159) as the
 // channels, each over a stand-in service the test answers.
+// TestNotificationsEndToEndOnSQLite runs the same cases with ORM_DIALECT
+// sqlite (D189): over the ./orm/sqlite entry's repositories on a file the
+// package's sqlite/create.sql made, the dispatch queue claimed over it.
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createHmac } from 'node:crypto';
 import { createNotifier, passwordReset, type Notifier, type ReplyAction } from '@superschematic/http-runtime/postgres';
 import { providersFrom, SecretValue } from '@superschematic/http-runtime/providers';
-import { IdentityService, hashPassword, postgresIdentityStore, verifyPassword } from '@superschematic/http-runtime/identity';
+import { IdentityService, hashPassword, verifyPassword } from '@superschematic/http-runtime/identity';
 import type { WorkerQueue } from '@superschematic/http-runtime/worker';
-import { createOrm, type FixtureNotificationsDbOrm } from './orm';
+import type { FixtureNotificationsDbOrm } from './orm';
 import { noticeWorkQueue, referenceClearedQueue } from './queues';
 import { identityDescriptor } from './identity';
-import { postgresQueue } from '@superschematic/http-runtime/postgres';
-import { database, dsn, type TestDatabase } from './harness';
+import { available, featureDatabase, ormEntry, type FeatureDatabase } from './dialect';
 import { smsRelayA } from './sms-relay-a';
 import { mailRelay } from './mail-relay';
 
@@ -59,7 +61,7 @@ const PHONE = { ann: '+15550100001', ben: '+15550100002', cal: '+15550100003' };
 const EMAIL = { ann: 'ann@example.test', ben: 'ben@example.test', cal: 'cal@example.test' };
 
 interface World {
-  db: TestDatabase;
+  db: FeatureDatabase;
   orm: FixtureNotificationsDbOrm;
   notifier: Notifier;
   queue: WorkerQueue;
@@ -85,8 +87,8 @@ const markDone: ReplyAction = {
 };
 
 async function world(options: { now?: () => Date; expand?: (input: Record<string, unknown>) => { occurrences: { dueAt: number }[] } } = {}): Promise<World> {
-  const db = await database('notifications');
-  const orm = createOrm(db.pool);
+  const db = await featureDatabase('notifications');
+  const orm = (await ormEntry<FixtureNotificationsDbOrm>()).createOrm(db.source);
   const sys = orm.asSystem();
   const relay = relays();
   const providers = providersFrom({
@@ -130,7 +132,7 @@ async function world(options: { now?: () => Date; expand?: (input: Record<string
     recipients: [{ path: 'owner' }, { path: 'watchers' }],
     escalation: [{ afterSeconds: 600, channels: ['email'] }],
   });
-  return { db, orm, notifier, queue: notifier.workerQueue(db.pool), relay, ann, ben, cal, ticket };
+  return { db, orm, notifier, queue: notifier.workerQueue(db.source), relay, ann, ben, cal, ticket };
 }
 
 /** Runs every message of the dispatch queue that is due, until none is. */
@@ -150,7 +152,7 @@ async function drain(queue: WorkerQueue): Promise<number> {
 
 /** Makes the queue's waiting messages of step due now: time passing. */
 async function advance(w: World, step: string): Promise<void> {
-  await w.db.pool.query(`UPDATE notice_work_queue SET due_at = now() WHERE step = $1 AND state = 'ready'`, [step]);
+  await w.db.raw(`UPDATE notice_work_queue SET due_at = now() WHERE step = $1 AND state = 'ready'`, [step]);
 }
 
 async function overdue(w: World): Promise<string> {
@@ -161,7 +163,7 @@ async function noticesOf(w: World, user: string) {
   return w.notifier.inbox({ kind: 'user', id: user });
 }
 
-describe.skipIf(!dsn)('notifications', () => {
+describe.skipIf(!available)('notifications', () => {
   let w: World;
   afterEach(async () => {
     await w?.db.drop();
@@ -346,7 +348,7 @@ describe.skipIf(!dsn)('notifications', () => {
     const record = (await noticesOf(w, w.ann)).find(n => n.eventKind === 'reference.cleared')!;
     expect(record.state).toBe('read');
     // One digest is waiting for Ann's two summaries.
-    const waiting = await w.db.pool.query(`SELECT step FROM notice_work_queue WHERE state = 'ready'`);
+    const waiting = await w.db.raw(`SELECT step FROM notice_work_queue WHERE state = 'ready'`);
     expect(waiting.rows.map(r => r.step).sort()).toEqual(['deliver', 'digest']);
     await advance(w, 'digest');
     await advance(w, 'deliver');
@@ -376,7 +378,7 @@ describe.skipIf(!dsn)('notifications', () => {
     const other = String((await sys.ticket.createOne({ title: 'Parts order', status: 'open', owner: w.ann })).id);
     await sys.references.add({ from: { table: 'Ticket', key: w.ticket }, to: { table: 'Ticket', key: other } });
     await sys.ticket.deleteOne(other);
-    const cleared = postgresQueue(w.db.pool, referenceClearedQueue);
+    const cleared = w.db.queue(referenceClearedQueue);
     const claims = await cleared.claim(10);
     expect(claims.length).toBe(1);
     await w.orm.transaction(tx => w.notifier.cleared(tx, claims[0]!.message as never));
@@ -396,7 +398,7 @@ describe.skipIf(!dsn)('notifications', () => {
   test('password reset sends a code through the email adapter and the code sets the password', async () => {
     w = await world();
     const params = { memoryKiB: 64, iterations: 1, parallelism: 1 };
-    const store = postgresIdentityStore(w.db.pool, identityDescriptor);
+    const store = await w.db.identityStore(identityDescriptor);
     const identity = new IdentityService({ store, config: { password: { argon2: params } } });
     await store.createUser({ login: 'dana@example.test', name: '', passwordHash: await hashPassword('first-password-1', params), at: new Date() });
     const reset = passwordReset({ notifier: w.notifier, orm: w.orm, identity });

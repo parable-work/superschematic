@@ -694,8 +694,7 @@ impl Agents {
                 sandbox_spec: None,
                 dispatcher: Caller {
                     subject: "agent-dispatcher".to_owned(),
-                    permissions: Vec::new(),
-                    stands_in: false,
+                    ..Caller::default()
                 },
                 cost_of: Arc::new(|usage: &ModelUsage| {
                     i64::try_from(usage.input_tokens + usage.output_tokens).unwrap_or(i64::MAX)

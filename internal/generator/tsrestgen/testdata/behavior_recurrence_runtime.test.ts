@@ -19,6 +19,14 @@ calendar its holidayCalendar names, whose days are rows of Holiday. A
 deadline's fire is driven as the Schedules end-to-end tests drive one: its
 message made due with SQL, then the worker's queues until the row shows
 it, the command running at the later of the clock and the deadline's time.
+
+TestGeneratedRecurrenceEndToEndOnSQLite runs the same cases with
+ORM_DIALECT sqlite (D186), CREATE_SQL fixture-recurrence-db's
+sqlite/create.sql and SQLITE_FILE a file of its own: the router serves the
+API over the repositories of the ./orm/sqlite entry on openSqlite's
+connection to the file, whose behaviors run through the core in its
+transactions, and the worker's queues are the generated ones' handlers
+over the SQLite queue client (sqliteQueue).
 */
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -26,16 +34,23 @@ import pg from 'pg';
 import { Hono } from 'hono';
 import type { Principal, RequestContext } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
-import { readCalendar, uuidToDb } from '@superschematic/http-runtime/postgres';
+import { readCalendar, uuidToDb, type CoreCaller } from '@superschematic/http-runtime/postgres';
 import { runWorker, type WorkerQueue } from '@superschematic/http-runtime/worker';
 import { createOrm } from '@schemas/fixture-recurrence-db-types/orm';
+import { filingChangeQueue, filingDeadlineQueue, filingEventQueue } from '@schemas/fixture-recurrence-db-types/queues';
+import { sqliteQueue, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import { parseIdentityUUID } from 'superscalar/scalars';
 
 const apiDir = process.env.API_DIR;
 const createSQL = process.env.CREATE_SQL;
+const dialect = process.env.ORM_DIALECT ?? 'postgres';
 const dsn = process.env.SUPERSCHEMATIC_RULES_TEST_DATABASE_URL;
-if (!apiDir || !createSQL || !dsn) throw new Error('API_DIR, CREATE_SQL and SUPERSCHEMATIC_RULES_TEST_DATABASE_URL are required');
+const sqliteFile = process.env.SQLITE_FILE;
+if (!apiDir || !createSQL || (dialect === 'sqlite' ? !sqliteFile : !dsn)) {
+  throw new Error('API_DIR, CREATE_SQL and SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, or ORM_DIALECT=sqlite and SQLITE_FILE, are required');
+}
 const { buildRouter, filingDeadlinesQueues } = await import(`${apiDir}/index.ts`);
+const onSQLite = dialect === 'sqlite';
 
 const subject = (): string => parseIdentityUUID(crypto.randomUUID())!;
 const callers = {
@@ -57,18 +72,32 @@ const authenticate = Object.assign(
 const logger = { debug() {}, info() {}, warn() {}, error() {}, child() { return logger; } };
 
 const schema = `recurrence_ts_${process.hrtime.bigint()}`;
-let admin: pg.Client;
-let pool: pg.Pool;
+let admin: pg.Client | undefined;
+let pool: pg.Pool | undefined;
+let sqlite: SqliteDatabase | undefined;
 let orm: ReturnType<typeof createOrm>;
 let app: Hono;
 
 beforeAll(async () => {
-  admin = new pg.Client({ connectionString: dsn });
-  await admin.connect();
-  await admin.query(`CREATE SCHEMA ${schema}`);
-  pool = new pg.Pool({ connectionString: dsn, options: `-c search_path=${schema},public`, max: 6 });
-  await pool.query(readFileSync(createSQL, 'utf8'));
-  orm = createOrm(pool);
+  if (onSQLite) {
+    // The file made from the database's SQLite create.sql, then opened as
+    // a server under stack dev opens it.
+    const { Database } = await import('bun:sqlite');
+    const file = new Database(sqliteFile!, { create: true });
+    file.exec(readFileSync(createSQL, 'utf8'));
+    file.close();
+    const { openSqlite } = await import('@superschematic/http-runtime/sqlite');
+    sqlite = openSqlite(sqliteFile!);
+    const repositories = await import('@schemas/fixture-recurrence-db-types/orm/sqlite');
+    orm = repositories.createOrm(sqlite);
+  } else {
+    admin = new pg.Client({ connectionString: dsn });
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    pool = new pg.Pool({ connectionString: dsn, options: `-c search_path=${schema},public`, max: 6 });
+    await pool.query(readFileSync(createSQL, 'utf8'));
+    orm = createOrm(pool);
+  }
   app = new Hono();
   app.route('/', buildRouter({}, { authenticate, orm }));
   app.notFound(notFoundHandler());
@@ -76,6 +105,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  sqlite?.close();
   await pool?.end();
   await admin?.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
   await admin?.end();
@@ -108,23 +138,40 @@ async function newFiling(own: Record<string, unknown> = {}): Promise<string> {
   return row.id as string;
 }
 
-/** A filing's occurrences by SQL, in due order. */
+/** A statement's text in the dialect: Postgres's $n as SQLite's ?n, and its clock. */
+const sql = (text: string) => (onSQLite ? text.replace(/\$(\d+)/gu, '?$1').replaceAll('now()', "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')") : text);
+
+/** Runs a statement on the test's own connection, the pool's or the file's: its rows and how many it changed. */
+async function raw(text: string, values: unknown[] = []): Promise<{ rows: Record<string, any>[]; rowCount: number }> {
+  if (onSQLite) {
+    const result = await sqlite!.prepare(sql(text)).bind(...(values as never[])).all<Record<string, any>>();
+    return { rows: result.results, rowCount: result.meta.changes };
+  }
+  const result = await pool!.query(text, values);
+  return { rows: result.rows, rowCount: result.rowCount ?? 0 };
+}
+
+/** A time column as epoch milliseconds: pg reads a Date, SQLite its RFC 3339 text. */
+const millis = (value: unknown) => (value === null || value === undefined ? value : value instanceof Date ? value.getTime() : typeof value === 'string' ? Date.parse(value) : Number(value));
+const TIMES = ['due_at', 'opens_at', 'remind_at', 'overdue_at', 'reminded_at'];
+
+/** A filing's occurrences by SQL, in due order, each time as epoch milliseconds. */
 async function occurrences(id: string): Promise<Record<string, any>[]> {
-  const { rows } = await pool.query(
+  const { rows } = await raw(
     `SELECT key, due, due_at, opens_at, remind_at, overdue_at, state, revision, shifted, reminded_at, completed_by_table, completed_by_key, completed_by_principal FROM filing_recurrence_occurrences WHERE filing_id = $1 ORDER BY due_at, key`,
     [uuidToDb(id)]
   );
-  return rows;
+  return rows.map(row => ({ ...row, ...Object.fromEntries(TIMES.map(column => [column, millis(row[column])])) }));
 }
 
 /** A filing's live deadline messages, by name. */
 async function deadlines(id: string): Promise<Map<string, number>> {
-  const { rows } = await pool.query(`SELECT name, at FROM filing_deadline_queue WHERE row_key = $1 AND state IN ('ready', 'claimed')`, [uuidToDb(id)]);
+  const { rows } = await raw(`SELECT name, at FROM filing_deadline_queue WHERE row_key = $1 AND state IN ('ready', 'claimed')`, [uuidToDb(id)]);
   return new Map(rows.map(row => [String(row.name), Number(row.at)]));
 }
 
 async function makeDue(id: string, name: string): Promise<void> {
-  const { rowCount } = await pool.query(`UPDATE filing_deadline_queue SET due_at = now() WHERE row_key = $1 AND name = $2 AND state IN ('ready', 'claimed')`, [uuidToDb(id), name]);
+  const { rowCount } = await raw(`UPDATE filing_deadline_queue SET due_at = now() WHERE row_key = $1 AND name = $2 AND state IN ('ready', 'claimed')`, [uuidToDb(id), name]);
   expect(rowCount).toBe(1);
 }
 
@@ -139,7 +186,52 @@ const workers = {
   filingDeadlinesRecurrenceReminded: hear('reminded'),
   filingDeadlinesRecurrenceMissed: hear('missed'),
 };
-const worker = () => filingDeadlinesQueues(pool, orm, workers, logger as never) as WorkerQueue[];
+const worker = (): WorkerQueue[] => (onSQLite ? sqliteQueues() : (filingDeadlinesQueues(pool, orm, workers, logger as never) as WorkerQueue[]));
+
+/** The caller the generated FilingDeadlines' commands run as. */
+const workerCaller: CoreCaller = { subject: 'fixture-recurrence-api/FilingDeadlines', permissions: ['filings.work', 'filings.manage'] };
+
+/**
+ * FilingDeadlines' queues on SQLite: the generated filingDeadlinesQueues'
+ * handlers over the SQLite queue client, as a server under stack dev
+ * claims a sqlite-first database's messages (sqliteQueue): each deadline
+ * and change run through the repository in one transaction with its
+ * message's completion, and each event handed to the Workers method of
+ * its kind in the transaction that spends its claim.
+ */
+function sqliteQueues(): WorkerQueue[] {
+  const queue = (definition: unknown, handle: (claim: { id: string; token: string; message: any }) => Promise<void>): WorkerQueue => {
+    const q = sqliteQueue(sqlite!, definition as never);
+    return {
+      name: q.name,
+      leaseSeconds: q.leaseSeconds,
+      claim: async (n: number, leaseSeconds?: number) =>
+        (await q.claim(n, leaseSeconds)).map(claim => ({ id: claim.id, token: claim.token, attempt: claim.attempt, handle: () => handle(claim as never) })),
+      extend: (id: string, token: string, leaseSeconds?: number) => q.extend(id, token, leaseSeconds),
+      // The handler completes its message in the transaction that runs it.
+      complete: async () => {},
+      fail: (id: string, token: string, cause: unknown) => q.fail(id, token, cause),
+      release: (id: string, token: string) => q.release(id, token),
+      prune: (limit?: number) => q.prune(limit),
+      nextDue: () => q.nextDue(),
+    } as unknown as WorkerQueue;
+  };
+  const filing = (tx: unknown) => (tx as { filing: any }).filing;
+  const method = (kind: string) => (workers as Record<string, (event: { key: string; payload: { key: string } }) => Promise<void>>)[`filingDeadlinesRecurrence${kind[0]!.toUpperCase()}${kind.slice(1)}`]!;
+  return [
+    queue(filingDeadlineQueue, async claim => {
+      await orm.transaction(tx => filing(tx).runDeadline(claim.message, { claim: { id: claim.id, token: claim.token }, caller: workerCaller }));
+    }),
+    queue(filingChangeQueue, async claim => {
+      await orm.transaction(tx => filing(tx).runChange(claim.message, { claim: { id: claim.id, token: claim.token }, caller: workerCaller }));
+    }),
+    queue(filingEventQueue, async claim => {
+      await orm
+        .withBehaviorCaller(workerCaller)
+        .transaction(tx => filing(tx).runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => method(claim.message.kind)({ key: claim.message.rowKey, payload: claim.message.payload })));
+    }),
+  ];
+}
 
 async function workUntil(done: () => Promise<boolean>): Promise<void> {
   const stop = new AbortController();
@@ -257,6 +349,6 @@ test('a raw SQL write of a filing holiday calendar is heard by the worker, which
   const id = await newFiling();
   expect((await call('manager', id, 'set-recurrence', { anchor: 'calendar', rule: 'FREQ=MONTHLY', start })).status).toBe(200);
   expect((await occurrences(id))[0]!.shifted).toBeNull();
-  await pool.query(`UPDATE filing SET holiday_calendar = 'west' WHERE id = $1`, [uuidToDb(id)]);
+  await raw(`UPDATE filing SET holiday_calendar = 'west' WHERE id = $1`, [uuidToDb(id)]);
   await workUntil(async () => (await occurrences(id))[0]!.shifted === 'holiday');
 });

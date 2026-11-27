@@ -5,7 +5,7 @@
 // `make ts` runs, checks it, and fails on an expected error
 // (@ts-expect-error) that no longer errors.
 import type { Nullable } from "@superschematic/schema";
-import type { AudienceOptions, Constants, ConstantsOn, FieldOf, PresenceOn, Relation, StateRules, StateRulesOn, Workflow } from "./index";
+import type { ApprovalsGateOn, AudienceOptions, Constants, ConstantsOn, FieldOf, PresenceOn, Relation, StateRules, StateRulesOn, Workflow } from "./index";
 
 export abstract class Authority {
   id: string;
@@ -31,6 +31,22 @@ export const oneWay: ConstantsOn<AccessRequest> = { fields: ["title"], oneWay: {
 // @audience's owner takes a relation by its name or by its key.
 export const ownedByKey: AudienceOptions<AccessRequest> = { owner: "actingForId" };
 export const ownedByName: AudienceOptions<AccessRequest> = { owner: "actingFor" };
+// Approvals' gates read values of the row too (D200): each field a gate
+// names, its resetOn, pinOn, excludeSubjectsIn, conditions and the list
+// its rows' keys are in, names a relation by its key.
+export const gate: ApprovalsGateOn<AccessRequest> = {
+  count: 1,
+  permission: "requests.approve",
+  resetOn: ["authorityId"],
+  pinOn: ["authorityId"],
+  excludeSubjectsIn: ["actingForId"],
+  when: [{ field: "authorityId", test: "contains", values: ["a"] }],
+};
+export const rowsGate: ApprovalsGateOn<AccessRequest> = { resetOn: ["authorityId"], requirementsFrom: { schema: "Rule", link: "request" } };
+// @ts-expect-error authority is a relation: name authorityId.
+export const pinByName: ApprovalsGateOn<AccessRequest> = { count: 1, permission: "requests.approve", pinOn: ["authority"] };
+// @ts-expect-error authority is a relation: name authorityId.
+export const rowsResetByName: ApprovalsGateOn<AccessRequest> = { resetOn: ["authority"], requirementsFrom: { schema: "Rule", link: "request" } };
 // An untyped config names any field.
 export const untyped: ConstantsOn<any> = { fields: ["anything"] };
 

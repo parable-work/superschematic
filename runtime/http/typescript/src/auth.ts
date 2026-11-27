@@ -48,6 +48,21 @@ export interface Principal {
   readonly grants?: readonly GrantReach[];
   /** The credential the call came with, for the access log (D114, D156): an API key's or a grant's id; absent for a session. */
   readonly credential?: { readonly kind: 'apiKey' | 'grant'; readonly id: string };
+  /**
+   * How the authenticator verified the principal for this call (D200),
+   * which an Approvals requirement's proof reads: when its session last
+   * signed in, and whether the call carried a passkey assertion with user
+   * verification bound to it. Absent proves nothing.
+   */
+  readonly assurance?: Assurance;
+}
+
+/** How an authenticator verified a principal for one call (D200). */
+export interface Assurance {
+  /** When the principal's session last signed in, in epoch milliseconds. */
+  readonly signedInAt?: number;
+  /** Whether the call carried a passkey assertion with user verification, over a challenge bound to it. */
+  readonly userVerified?: boolean;
 }
 
 /**

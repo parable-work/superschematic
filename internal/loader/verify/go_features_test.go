@@ -139,7 +139,7 @@ func TestGoServerSQLiteErrRefusesRecurrenceAndTheCalendar(t *testing.T) {
 	db.Types["Filing"] = &ir.TypeDef{Name: "Filing", Role: ir.RoleDBTable, Behaviors: []ir.BehaviorRef{{Name: "Recurrence", Implements: true}}, CalendarSources: []ir.CalendarSourceDef{{Occurrences: true}}}
 	db.Types["Note"] = &ir.TypeDef{Name: "Note", Role: ir.RoleDBTable, Searchable: &ir.SearchableDef{}}
 	err := GoServerSQLiteErr(api, db, []string{"sqlite", "postgres"})
-	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Filing: Recurrence, Filing: @calendarSource, Note: @searchable on Postgres alone so far (D152, D155, D157, D158, D187, D192)") {
+	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Filing: Recurrence, Filing: @calendarSource, Note: @searchable on Postgres alone so far (D152, D153, D155, D157, D158, D187, D190, D192)") {
 		t.Fatalf("sqlite first: %v", err)
 	}
 	// The parties' and agents' tables are Postgres's alone too (D192).
@@ -166,12 +166,31 @@ func TestGoServerSQLiteErrRefusesRecurrenceAndTheCalendar(t *testing.T) {
 // Postgres statements alone (D155, D187), now that the loader lets the
 // database's Go types declare it on SQLite (D186); over a database that
 // lists postgres first it is served.
+// TestGoServerSQLiteErrRefusesTheNotifier: a Go server over a database
+// that lists sqlite first is refused a table's events, notifier and
+// channel identities, which the Go notifier reads by Postgres's statements
+// alone (D190); the loader serves them on SQLite in TypeScript (D189), so
+// this is the Go server's own refusal. Postgres first is not refused.
+func TestGoServerSQLiteErrRefusesTheNotifier(t *testing.T) {
+	api := ir.NewSchema("app-api", ir.SchemaKindAPI)
+	db := ir.NewSchema("app-db", ir.SchemaKindDB)
+	db.Types["Alert"] = &ir.TypeDef{Name: "Alert", Role: ir.RoleDBTable, Events: []*ir.EventDef{{Kind: "alert.raised"}}, Notifier: &ir.NotifierDef{}}
+	db.Types["Identity"] = &ir.TypeDef{Name: "Identity", Role: ir.RoleDBTable, ChannelIdentities: &ir.ChannelIdentitiesDef{}}
+	err := GoServerSQLiteErr(api, db, []string{"sqlite", "postgres"})
+	if err == nil || !strings.Contains(err.Error(), "serves Alert: @event, Alert: @notifier, Identity: @channelIdentities on Postgres alone") {
+		t.Fatalf("sqlite first: %v", err)
+	}
+	if err := GoServerSQLiteErr(api, db, []string{"postgres", "sqlite"}); err != nil {
+		t.Fatalf("postgres first: %v", err)
+	}
+}
+
 func TestGoServerSQLiteErrRefusesSearch(t *testing.T) {
 	api := ir.NewSchema("app-api", ir.SchemaKindAPI)
 	db := ir.NewSchema("app-db", ir.SchemaKindDB)
 	db.Types["Note"] = &ir.TypeDef{Name: "Note", Role: ir.RoleDBTable, Searchable: &ir.SearchableDef{}}
 	err := GoServerSQLiteErr(api, db, []string{"sqlite", "postgres"})
-	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Note: @searchable on Postgres alone so far (D152, D155, D157, D158, D187, D192)") {
+	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Note: @searchable on Postgres alone so far (D152, D153, D155, D157, D158, D187, D190, D192)") {
 		t.Fatalf("sqlite first: %v", err)
 	}
 	if err := GoServerSQLiteErr(api, db, []string{"postgres", "sqlite"}); err != nil {

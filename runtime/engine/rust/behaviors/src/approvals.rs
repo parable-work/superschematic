@@ -53,8 +53,11 @@
 //! What only a table's Approvals takes (D104), whose declaration the engine
 //! shares, the engine refuses rather than ignores: a gate's `resetOn`, the
 //! fields whose change consumes its sign-offs, and `pinned`, and the
-//! config's `status`, each at define, naming the table form, and
-//! `signOff`'s `version`, as a bad parameter. Ignoring a rule of what a
+//! config's `status`, each at define, naming the table form, D200's
+//! requirement members (`requirementsFrom`, `pinOn`, `callers`, `proof`,
+//! `proofWithinMs`, `excludeCreatorPerson`, `excludeSubjectsIn`,
+//! `recheckPermission`, `when`) the same way, and `signOff`'s `version`
+//! and `read`, as a bad parameter. Ignoring a rule of what a
 //! sign-off holds to would be a hole, and an engine type can be defined at
 //! run time, past any build's check. The engine never answers `stale`.
 
@@ -77,6 +80,20 @@ use crate::staterules::status_of;
 // How a refusal of what only a table's Approvals takes names the table form
 // (D104).
 const TABLE_FORM: &str = "implements Approvals<T, { ... }> on a DB table, D104";
+
+// The gate members D200 adds, each a table's Approvals' alone, in the
+// order the engine refuses them.
+const TABLE_REQUIREMENT_MEMBERS: [&str; 9] = [
+    "requirementsFrom",
+    "pinOn",
+    "callers",
+    "proof",
+    "proofWithinMs",
+    "excludeCreatorPerson",
+    "excludeSubjectsIn",
+    "recheckPermission",
+    "when",
+];
 
 /// One gate of an Approvals config, parsed: `excludeCreator` filled in.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -648,6 +665,16 @@ fn table_member(raw: &Value) -> Option<String> {
                     "the gate on \"{state}\" sets pinned, which a table's Approvals takes ({TABLE_FORM}): an engine type's sign-off names no version"
                 ));
             }
+            // D200's requirement members and pins, which only the core's
+            // Approvals reads.
+            if let Some(member) = TABLE_REQUIREMENT_MEMBERS
+                .iter()
+                .find(|member| gate.get(**member).is_some())
+            {
+                return Some(format!(
+                    "the gate on \"{state}\" names {member}, which a table's Approvals takes ({TABLE_FORM}, D200): an engine type's gate is a count and a permission"
+                ));
+            }
         }
     }
     if raw.get("status").is_some() {
@@ -674,16 +701,18 @@ fn guard(
         ..
     } = request
     {
-        if params.get("version").is_some() {
-            return Err(EngineError::operation_params(
-                NAME,
-                "signOff",
-                vec![SchemaIssue::new(
-                    "/version",
-                    format!("version is a table's Approvals' ({TABLE_FORM}): an engine type's signOff takes state and note alone"),
-                )],
-            )
-            .into());
+        for member in ["version", "read"] {
+            if params.get(member).is_some() {
+                return Err(EngineError::operation_params(
+                    NAME,
+                    "signOff",
+                    vec![SchemaIssue::new(
+                        format!("/{member}"),
+                        format!("{member} is a table's Approvals' ({TABLE_FORM}): an engine type's signOff takes state and note alone"),
+                    )],
+                )
+                .into());
+            }
         }
     }
     let GuardRequest::Operation {

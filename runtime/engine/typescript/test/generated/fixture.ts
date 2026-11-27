@@ -823,7 +823,7 @@ export type SpecListDependentsResult = {
   next: string | null;
 };
 
-/** The parameters of Approvals' signOff: Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
+/** The parameters of Approvals' signOff: Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
 export type SpecSignOffParams = {
   /** Why, for the others. */
   note?: string;
@@ -835,7 +835,7 @@ export type SpecSignOffParams = {
 export type SpecSignOffResult = {
   /** When, in epoch milliseconds. */
   at: number;
-  /** How many the gate needs. */
+  /** How many the gate needs: its count, or for a gate that reads its requirements from rows, the count of the first requirement the sign-off counts toward. */
   count: number;
   note?: string;
   /** Every subject whose sign-off for the state is not yet consumed, in the order they signed. */
@@ -854,6 +854,10 @@ export type SpecWithdrawSignOffParams = {
 
 /** The sign-off withdrawn. */
 export type SpecWithdrawSignOffResult = {
+  /** The subject the caller acted for. */
+  actingFor?: string;
+  /** The Agent whose run the caller was. */
+  agent?: string;
   /** When it was signed, in epoch milliseconds. */
   at: number;
   note?: string;
@@ -876,6 +880,10 @@ export type SpecListSignOffsParams = {
 /** What Approvals' listSignOffs returns. */
 export type SpecListSignOffsResult = {
   items: Array<{
+    /** The subject the caller acted for. */
+    actingFor?: string;
+    /** The Agent whose run the caller was. */
+    agent?: string;
     /** When, in epoch milliseconds. */
     at: number;
     /** When a change of the own fields, entering the state or a new version without its gate consumed it; absent while it counts. */
@@ -966,7 +974,7 @@ export interface SpecClient {
   listBlockers(id: string, params?: SpecListBlockersParams, options?: SpecWriteOptions): Promise<SpecListBlockersResult>;
   /** Dependencies' listDependents: Lists the instances this one blocks, of every schema the caller may read, in the order they were added, one page at a time. */
   listDependents(id: string, params?: SpecListDependentsParams, options?: SpecWriteOptions): Promise<SpecListDependentsResult>;
-  /** Approvals' signOff: Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
+  /** Approvals' signOff: Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
   signOff(id: string, params: SpecSignOffParams, options?: SpecWriteOptions): Promise<SpecSignOffResult>;
   /** Approvals' withdrawSignOff: Withdraws the caller's sign-off for a gated state, one not yet consumed. */
   withdrawSignOff(id: string, params: SpecWithdrawSignOffParams, options?: SpecWriteOptions): Promise<SpecWithdrawSignOffResult>;

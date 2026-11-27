@@ -240,7 +240,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
       hidden: false,
       name: `Task approvals: sign off`,
       handle: 'task_approvals_sign_off',
-      description: `Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
+      description: `Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
       invocationPolicy: 'auto',
       _meta: {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
     },
@@ -251,7 +251,7 @@ export const toolDefinitions: Record<ToolName, ToolDefinition> = {
     guidance: {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
     requiredPermissions: [],
     replay: null,
-    description: `Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
+    description: `Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
     namespace: 'task',
     methodName: 'approvals.signOff',
     requiresAuth: true,
@@ -413,7 +413,7 @@ export const openAIFunctions: OpenAIFunction[] = [
   },
   {
     name: 'task.approvals.signOff',
-    description: `Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
+    description: `Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
     parameters: {
       type: 'object',
       additionalProperties: false,
@@ -491,7 +491,7 @@ export const anthropicTools: AnthropicTool[] = [
   },
   {
     name: 'task.approvals.signOff',
-    description: `Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
+    description: `Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.`,
     input_schema: {
       type: 'object',
       additionalProperties: false,

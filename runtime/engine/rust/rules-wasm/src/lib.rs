@@ -415,8 +415,9 @@ mod tests {
         assert_eq!(files[4]["name"], "Approvals");
         assert_eq!(files[4]["tables"][0]["name"], "signOffs");
         assert_eq!(files[4]["tables"][0]["key"], "number");
+        assert_eq!(files[4]["tables"][0]["fields"][12]["name"], "at");
         assert_eq!(
-            files[4]["tables"][0]["fields"][4]["type"],
+            files[4]["tables"][0]["fields"][12]["type"],
             "Temporal.DateTime"
         );
         assert_eq!(files[5]["name"], "Timers");

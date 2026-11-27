@@ -1,0 +1,2355 @@
+{
+  "dialect": "sqlite",
+  "rawSql": [
+    {
+      "checksum": "27d4e989bd8ab2f56ba9a831a8681547d3415386271aceac92e355c74a250f42",
+      "down": [
+        "DROP TRIGGER IF EXISTS \"search_index_fts_delete\"",
+        "DROP TRIGGER IF EXISTS \"search_index_fts_update\"",
+        "DROP TRIGGER IF EXISTS \"search_index_fts_insert\"",
+        "DROP TABLE IF EXISTS \"search_index_fts\""
+      ],
+      "id": "search_index_fts",
+      "origin": "SearchIndex",
+      "position": "indexes",
+      "statements": [
+        "CREATE VIRTUAL TABLE \"search_index_fts\" USING fts5(title, body, comments, files, ref, source_table UNINDEXED, source_key UNINDEXED, tokenize = 'unicode61 remove_diacritics 0')",
+        "CREATE TRIGGER \"search_index_fts_insert\" AFTER INSERT ON \"search_index\" FOR EACH ROW\nBEGIN\n  -- An index row's words (D186).\n  INSERT INTO \"search_index_fts\" (title, body, comments, files, ref, source_table, source_key)\n    VALUES (NEW.title, NEW.body, NEW.comments, NEW.files, 'r' || hex(NEW.source_table || char(31) || NEW.source_key), NEW.source_table, NEW.source_key);\nEND",
+        "CREATE TRIGGER \"search_index_fts_update\" AFTER UPDATE OF title, body, comments, files, source_table, source_key ON \"search_index\" FOR EACH ROW\nBEGIN\n  -- An index row's words, written again (D186).\n  DELETE FROM \"search_index_fts\" WHERE \"search_index_fts\" MATCH 'ref : \"' || 'r' || hex(OLD.source_table || char(31) || OLD.source_key) || '\"';\n  INSERT INTO \"search_index_fts\" (title, body, comments, files, ref, source_table, source_key)\n    VALUES (NEW.title, NEW.body, NEW.comments, NEW.files, 'r' || hex(NEW.source_table || char(31) || NEW.source_key), NEW.source_table, NEW.source_key);\nEND",
+        "CREATE TRIGGER \"search_index_fts_delete\" AFTER DELETE ON \"search_index\" FOR EACH ROW\nBEGIN\n  -- An index row's words, deleted with it (D186).\n  DELETE FROM \"search_index_fts\" WHERE \"search_index_fts\" MATCH 'ref : \"' || 'r' || hex(OLD.source_table || char(31) || OLD.source_key) || '\"';\nEND"
+      ]
+    }
+  ],
+  "service": "fixture-search-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Account.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "email",
+          "origin": "Account.email",
+          "type": "TEXT COLLATE NOCASE"
+        }
+      ],
+      "kind": "entity",
+      "name": "account",
+      "origin": "Account",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "account_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "email"
+          ],
+          "name": "account_email_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Contract.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Contract.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "summary",
+          "nullable": true,
+          "origin": "Contract.summary",
+          "type": "TEXT"
+        },
+        {
+          "name": "terms",
+          "nullable": true,
+          "origin": "Contract.terms",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "contract",
+      "origin": "Contract",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "contract_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "ContractParty.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "contract_id",
+          "origin": "ContractParty.contract",
+          "type": "TEXT"
+        },
+        {
+          "name": "party",
+          "origin": "ContractParty.party",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "contract_id"
+          ],
+          "name": "fk_contract_party_contract_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "contract"
+        }
+      ],
+      "kind": "entity",
+      "name": "contract_party",
+      "origin": "ContractParty",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "contract_party_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Document.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "folder_id",
+          "nullable": true,
+          "origin": "Document.folder",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Document.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "text",
+          "nullable": true,
+          "origin": "Document.text",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Document.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_by",
+          "origin": "Document.createdBy",
+          "type": "TEXT"
+        },
+        {
+          "default": "'inherit'",
+          "name": "audience",
+          "origin": "Document.audience",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "audience_named",
+          "nullable": true,
+          "origin": "Document.audienceNamed",
+          "type": "TEXT"
+        },
+        {
+          "default": "'followRole'",
+          "name": "agent_access",
+          "origin": "Document.agentAccess",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "effective_audience",
+          "nullable": true,
+          "origin": "Document.effectiveAudience",
+          "type": "TEXT"
+        },
+        {
+          "default": "'followRole'",
+          "name": "effective_agents",
+          "origin": "Document.effectiveAgents",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "folder_id"
+          ],
+          "name": "fk_document_folder_id",
+          "onDelete": "SET NULL",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "folder"
+        }
+      ],
+      "kind": "entity",
+      "name": "document",
+      "origin": "Document",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "document_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "object_key",
+          "origin": "FileReleased.objectKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "content_hash",
+          "nullable": true,
+          "origin": "FileReleased.contentHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "reason",
+          "origin": "FileReleased.reason",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_file_released_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_file_released_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_file_released_queue_updated_at",
+          "where": "state = 'done'"
+        }
+      ],
+      "kind": "entity",
+      "name": "file_released_queue",
+      "origin": "FileReleased",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "file_released_queue_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Folder.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Folder.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "owner",
+          "origin": "Folder.owner",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Folder.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "'everyone'",
+          "name": "audience",
+          "origin": "Folder.audience",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "audience_named",
+          "nullable": true,
+          "origin": "Folder.audienceNamed",
+          "type": "TEXT"
+        },
+        {
+          "default": "'followRole'",
+          "name": "agent_access",
+          "origin": "Folder.agentAccess",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "effective_audience",
+          "nullable": true,
+          "origin": "Folder.effectiveAudience",
+          "type": "TEXT"
+        },
+        {
+          "default": "'followRole'",
+          "name": "effective_agents",
+          "origin": "Folder.effectiveAgents",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "folder",
+      "origin": "Folder",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "folder_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Grant.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "holder",
+          "origin": "Grant.holder",
+          "type": "TEXT"
+        },
+        {
+          "name": "holder_kind",
+          "origin": "Grant.holderKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "role",
+          "origin": "Grant.role",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_type",
+          "origin": "Grant.targetType",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_id",
+          "origin": "Grant.targetId",
+          "type": "TEXT"
+        },
+        {
+          "name": "starts_at",
+          "origin": "Grant.startsAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "ends_at",
+          "nullable": true,
+          "origin": "Grant.endsAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "ends_when_field",
+          "nullable": true,
+          "origin": "Grant.endsWhenField",
+          "type": "TEXT"
+        },
+        {
+          "name": "ends_when_state",
+          "nullable": true,
+          "origin": "Grant.endsWhenState",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "Grant.revokedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "nullable": true,
+          "origin": "Grant.tokenHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Grant.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_by",
+          "nullable": true,
+          "origin": "Grant.createdBy",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "holder"
+          ],
+          "method": "BTREE",
+          "name": "idx_grant_holder"
+        },
+        {
+          "columns": [
+            "target_type",
+            "target_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_grant_target"
+        }
+      ],
+      "kind": "entity",
+      "name": "grant",
+      "origin": "Grant",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "grant_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "grant_token_hash_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Note.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "project",
+          "origin": "Note.project",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Note.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "text",
+          "nullable": true,
+          "origin": "Note.text",
+          "type": "TEXT"
+        },
+        {
+          "name": "deleted_at",
+          "nullable": true,
+          "origin": "Note.deletedAt",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "note",
+      "origin": "Note",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "note_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Request.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "unit_id",
+          "origin": "Request.unit",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Request.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "details",
+          "nullable": true,
+          "origin": "Request.details",
+          "type": "TEXT"
+        },
+        {
+          "name": "resolution",
+          "nullable": true,
+          "origin": "Request.resolution",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "name": "fk_request_unit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "unit"
+        }
+      ],
+      "kind": "entity",
+      "name": "request",
+      "origin": "Request",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "request_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Role.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Role.name",
+          "type": "TEXT COLLATE NOCASE"
+        },
+        {
+          "default": "'[]'",
+          "element": "TEXT",
+          "holds": "list",
+          "name": "permissions",
+          "origin": "Role.permissions",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "reaches",
+          "nullable": true,
+          "origin": "Role.reaches",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "role",
+      "origin": "Role",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "role_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "name"
+          ],
+          "name": "role_name_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "SearchIndex.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "source_table",
+          "origin": "SearchIndex.sourceTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "source_key",
+          "origin": "SearchIndex.sourceKey",
+          "type": "TEXT"
+        },
+        {
+          "default": "''",
+          "name": "title",
+          "origin": "SearchIndex.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "body",
+          "nullable": true,
+          "origin": "SearchIndex.body",
+          "type": "TEXT"
+        },
+        {
+          "name": "comments",
+          "nullable": true,
+          "origin": "SearchIndex.comments",
+          "type": "TEXT"
+        },
+        {
+          "name": "files",
+          "nullable": true,
+          "origin": "SearchIndex.files",
+          "type": "TEXT"
+        },
+        {
+          "name": "scope",
+          "nullable": true,
+          "origin": "SearchIndex.scope",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "audience",
+          "nullable": true,
+          "origin": "SearchIndex.audience",
+          "type": "TEXT"
+        },
+        {
+          "default": "'followRole'",
+          "name": "agents",
+          "origin": "SearchIndex.agents",
+          "type": "TEXT"
+        },
+        {
+          "name": "text_hash",
+          "nullable": true,
+          "origin": "SearchIndex.textHash",
+          "type": "TEXT"
+        },
+        {
+          "element": "REAL",
+          "holds": "list",
+          "name": "embedding",
+          "nullable": true,
+          "origin": "SearchIndex.embedding",
+          "type": "TEXT"
+        },
+        {
+          "name": "embedding_model",
+          "nullable": true,
+          "origin": "SearchIndex.embeddingModel",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "indexed_at",
+          "origin": "SearchIndex.indexedAt",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "scope"
+          ],
+          "method": "BTREE",
+          "name": "idx_search_index_scope"
+        },
+        {
+          "columns": [
+            "source_table",
+            "source_key"
+          ],
+          "method": "BTREE",
+          "name": "uq_search_index_source",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "search_index",
+      "origin": "SearchIndex",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "search_index_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "source_table",
+          "origin": "SearchIndexing.sourceTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "source_key",
+          "origin": "SearchIndexing.sourceKey",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_search_indexing_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_search_indexing_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_search_indexing_queue_updated_at",
+          "where": "state = 'done'"
+        },
+        {
+          "columns": [
+            "source_table",
+            "source_key"
+          ],
+          "method": "BTREE",
+          "name": "uq_search_indexing_queue_claimed_key",
+          "unique": true,
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "source_table",
+            "source_key"
+          ],
+          "method": "BTREE",
+          "name": "uq_search_indexing_queue_ready_key",
+          "unique": true,
+          "where": "state = 'ready'"
+        }
+      ],
+      "kind": "entity",
+      "name": "search_indexing_queue",
+      "origin": "SearchIndexing",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "search_indexing_queue_pkey"
+      },
+      "queue": {
+        "keys": [
+          "source_table",
+          "source_key"
+        ],
+        "onDuplicate": "skip",
+        "serialize": true
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Session.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "Session.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "origin": "Session.tokenHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Session.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "expires_at",
+          "origin": "Session.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_seen_at",
+          "nullable": true,
+          "origin": "Session.lastSeenAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "Session.revokedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_session_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_session_user"
+        }
+      ],
+      "kind": "entity",
+      "name": "session",
+      "origin": "Session",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "session_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "session_token_hash_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Unit.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Unit.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "notes",
+          "nullable": true,
+          "origin": "Unit.notes",
+          "type": "TEXT"
+        },
+        {
+          "name": "contract_id",
+          "origin": "Unit.contract",
+          "type": "TEXT"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "INTEGER"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "contract_id"
+          ],
+          "name": "fk_unit_contract_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "contract"
+        }
+      ],
+      "kind": "entity",
+      "name": "unit",
+      "origin": "Unit",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "unit_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UnitAttachments.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "unit_id",
+          "origin": "UnitAttachments.unit",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "UnitAttachments.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "media_type",
+          "origin": "UnitAttachments.mediaType",
+          "type": "TEXT"
+        },
+        {
+          "name": "size",
+          "origin": "UnitAttachments.size",
+          "type": "INTEGER"
+        },
+        {
+          "name": "content_hash",
+          "origin": "UnitAttachments.contentHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "object_key",
+          "origin": "UnitAttachments.objectKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "caption",
+          "nullable": true,
+          "origin": "UnitAttachments.caption",
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "state",
+          "origin": "UnitAttachments.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "uploaded_by",
+          "nullable": true,
+          "origin": "UnitAttachments.uploadedBy",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "uploaded_at",
+          "origin": "UnitAttachments.uploadedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "expires_at",
+          "nullable": true,
+          "origin": "UnitAttachments.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "filed_from",
+          "nullable": true,
+          "origin": "UnitAttachments.filedFrom",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "extraction",
+          "origin": "UnitAttachments.extraction",
+          "type": "TEXT"
+        },
+        {
+          "name": "extracted_text",
+          "nullable": true,
+          "origin": "UnitAttachments.extractedText",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "preview",
+          "origin": "UnitAttachments.preview",
+          "type": "TEXT"
+        },
+        {
+          "name": "preview_object",
+          "nullable": true,
+          "origin": "UnitAttachments.previewObject",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "name": "fk_unit_attachments_unit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "unit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "object_key"
+          ],
+          "method": "BTREE",
+          "name": "idx_unit_attachments_object"
+        },
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_unit_attachments_row"
+        }
+      ],
+      "kind": "entity",
+      "name": "unit_attachments",
+      "origin": "UnitAttachments",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "unit_attachments_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "name": "conversation",
+          "origin": "UnitCommentsConversations.conversation",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_message",
+          "nullable": true,
+          "origin": "UnitCommentsConversations.lastMessage",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_reaction",
+          "nullable": true,
+          "origin": "UnitCommentsConversations.lastReaction",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_stand",
+          "nullable": true,
+          "origin": "UnitCommentsConversations.lastStand",
+          "type": "INTEGER"
+        },
+        {
+          "default": "1",
+          "name": "_version",
+          "type": "INTEGER"
+        }
+      ],
+      "kind": "entity",
+      "name": "unit_comments_conversations",
+      "origin": "UnitCommentsConversations",
+      "primaryKey": {
+        "columns": [
+          "conversation"
+        ],
+        "name": "unit_comments_conversations_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "unit_id",
+          "origin": "UnitCommentsDeliveries.unit",
+          "type": "TEXT"
+        },
+        {
+          "name": "delivery",
+          "origin": "UnitCommentsDeliveries.delivery",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.message",
+          "type": "INTEGER"
+        },
+        {
+          "name": "subject",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.subject",
+          "type": "TEXT"
+        },
+        {
+          "name": "mention",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.mention",
+          "type": "INTEGER"
+        },
+        {
+          "name": "reply",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.reply",
+          "type": "INTEGER"
+        },
+        {
+          "name": "state",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "due_at",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.dueAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "token",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.token",
+          "type": "TEXT"
+        },
+        {
+          "name": "claimed_by",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.claimedBy",
+          "type": "TEXT"
+        },
+        {
+          "name": "attempts",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.attempts",
+          "type": "INTEGER"
+        },
+        {
+          "name": "error",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.error",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_at",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "settled_at",
+          "nullable": true,
+          "origin": "UnitCommentsDeliveries.settledAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "name": "fk_unit_comments_deliveries_unit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "unit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "unit_id",
+            "delivery"
+          ],
+          "method": "BTREE",
+          "name": "idx_unit_comments_deliveries_unit_delivery",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "unit_comments_deliveries",
+      "origin": "UnitCommentsDeliveries",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "unit_comments_deliveries_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "unit_id",
+          "origin": "UnitCommentsDrafts.unit",
+          "type": "TEXT"
+        },
+        {
+          "name": "chunk",
+          "origin": "UnitCommentsDrafts.chunk",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "UnitCommentsDrafts.message",
+          "type": "INTEGER"
+        },
+        {
+          "name": "chunk_offset",
+          "nullable": true,
+          "origin": "UnitCommentsDrafts.chunkOffset",
+          "type": "INTEGER"
+        },
+        {
+          "name": "text",
+          "nullable": true,
+          "origin": "UnitCommentsDrafts.text",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "name": "fk_unit_comments_drafts_unit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "unit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "unit_id",
+            "chunk"
+          ],
+          "method": "BTREE",
+          "name": "idx_unit_comments_drafts_unit_chunk",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "unit_comments_drafts",
+      "origin": "UnitCommentsDrafts",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "unit_comments_drafts_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "unit_id",
+          "origin": "UnitCommentsEdits.unit",
+          "type": "TEXT"
+        },
+        {
+          "name": "edit",
+          "origin": "UnitCommentsEdits.edit",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "UnitCommentsEdits.message",
+          "type": "INTEGER"
+        },
+        {
+          "name": "number",
+          "nullable": true,
+          "origin": "UnitCommentsEdits.number",
+          "type": "INTEGER"
+        },
+        {
+          "name": "body",
+          "nullable": true,
+          "origin": "UnitCommentsEdits.body",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "blocks",
+          "nullable": true,
+          "origin": "UnitCommentsEdits.blocks",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "mentions",
+          "nullable": true,
+          "origin": "UnitCommentsEdits.mentions",
+          "type": "TEXT"
+        },
+        {
+          "name": "by",
+          "nullable": true,
+          "origin": "UnitCommentsEdits.by",
+          "type": "TEXT"
+        },
+        {
+          "name": "for_subject",
+          "nullable": true,
+          "origin": "UnitCommentsEdits.forSubject",
+          "type": "TEXT"
+        },
+        {
+          "name": "at",
+          "nullable": true,
+          "origin": "UnitCommentsEdits.at",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "name": "fk_unit_comments_edits_unit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "unit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "unit_id",
+            "edit"
+          ],
+          "method": "BTREE",
+          "name": "idx_unit_comments_edits_unit_edit",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "unit_comments_edits",
+      "origin": "UnitCommentsEdits",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "unit_comments_edits_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "unit_id",
+          "origin": "UnitCommentsFollows.unit",
+          "type": "TEXT"
+        },
+        {
+          "name": "follow",
+          "origin": "UnitCommentsFollows.follow",
+          "type": "TEXT"
+        },
+        {
+          "name": "thread",
+          "nullable": true,
+          "origin": "UnitCommentsFollows.thread",
+          "type": "INTEGER"
+        },
+        {
+          "name": "subject",
+          "nullable": true,
+          "origin": "UnitCommentsFollows.subject",
+          "type": "TEXT"
+        },
+        {
+          "name": "followed",
+          "nullable": true,
+          "origin": "UnitCommentsFollows.followed",
+          "type": "INTEGER"
+        },
+        {
+          "name": "read_up_to",
+          "nullable": true,
+          "origin": "UnitCommentsFollows.readUpTo",
+          "type": "INTEGER"
+        },
+        {
+          "name": "updated_at",
+          "nullable": true,
+          "origin": "UnitCommentsFollows.updatedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "name": "fk_unit_comments_follows_unit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "unit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "unit_id",
+            "follow"
+          ],
+          "method": "BTREE",
+          "name": "idx_unit_comments_follows_unit_follow",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "unit_comments_follows",
+      "origin": "UnitCommentsFollows",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "unit_comments_follows_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "unit_id",
+          "origin": "UnitCommentsMessages.unit",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "origin": "UnitCommentsMessages.message",
+          "type": "TEXT"
+        },
+        {
+          "name": "thread",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.thread",
+          "type": "INTEGER"
+        },
+        {
+          "name": "quotes",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.quotes",
+          "type": "INTEGER"
+        },
+        {
+          "name": "author",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.author",
+          "type": "TEXT"
+        },
+        {
+          "name": "for_subject",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.forSubject",
+          "type": "TEXT"
+        },
+        {
+          "name": "state",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "body",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.body",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "blocks",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.blocks",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "mentions",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.mentions",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_at",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "posted_at",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.postedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "stand",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.stand",
+          "type": "INTEGER"
+        },
+        {
+          "name": "edited_at",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.editedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "edits",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.edits",
+          "type": "INTEGER"
+        },
+        {
+          "name": "pinned",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.pinned",
+          "type": "INTEGER"
+        },
+        {
+          "name": "client_id",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.clientId",
+          "type": "TEXT"
+        },
+        {
+          "name": "resolved_by",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.resolvedBy",
+          "type": "TEXT"
+        },
+        {
+          "name": "resolved_for",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.resolvedFor",
+          "type": "TEXT"
+        },
+        {
+          "name": "resolved_at",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.resolvedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "draft_length",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.draftLength",
+          "type": "INTEGER"
+        },
+        {
+          "name": "last_append_at",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.lastAppendAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "name": "fk_unit_comments_messages_unit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "unit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "unit_id",
+            "message"
+          ],
+          "method": "BTREE",
+          "name": "idx_unit_comments_messages_unit_message",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "unit_comments_messages",
+      "origin": "UnitCommentsMessages",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "unit_comments_messages_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "unit_id",
+          "origin": "UnitCommentsReactions.unit",
+          "type": "TEXT"
+        },
+        {
+          "name": "reaction",
+          "origin": "UnitCommentsReactions.reaction",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "UnitCommentsReactions.message",
+          "type": "INTEGER"
+        },
+        {
+          "name": "emoji",
+          "nullable": true,
+          "origin": "UnitCommentsReactions.emoji",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject",
+          "nullable": true,
+          "origin": "UnitCommentsReactions.subject",
+          "type": "TEXT"
+        },
+        {
+          "name": "for_subject",
+          "nullable": true,
+          "origin": "UnitCommentsReactions.forSubject",
+          "type": "TEXT"
+        },
+        {
+          "name": "at",
+          "nullable": true,
+          "origin": "UnitCommentsReactions.at",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "name": "fk_unit_comments_reactions_unit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "unit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "unit_id",
+            "reaction"
+          ],
+          "method": "BTREE",
+          "name": "idx_unit_comments_reactions_unit_reaction",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "unit_comments_reactions",
+      "origin": "UnitCommentsReactions",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "unit_comments_reactions_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "unit_id",
+          "origin": "UnitCommentsReads.unit",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject",
+          "origin": "UnitCommentsReads.subject",
+          "type": "TEXT"
+        },
+        {
+          "name": "up_to",
+          "nullable": true,
+          "origin": "UnitCommentsReads.upTo",
+          "type": "INTEGER"
+        },
+        {
+          "name": "read_at",
+          "nullable": true,
+          "origin": "UnitCommentsReads.readAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "unit_id"
+          ],
+          "name": "fk_unit_comments_reads_unit_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "unit"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "unit_id",
+            "subject"
+          ],
+          "method": "BTREE",
+          "name": "idx_unit_comments_reads_unit_subject",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "unit_comments_reads",
+      "origin": "UnitCommentsReads",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "unit_comments_reads_pkey"
+      }
+    },
+    {
+      "checks": [
+        {
+          "column": "name",
+          "maxLength": 100,
+          "minLength": 1,
+          "name": "ck_user_api_key_name"
+        }
+      ],
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UserApiKey.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserApiKey.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "UserApiKey.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "origin": "UserApiKey.tokenHash",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "permissions",
+          "nullable": true,
+          "origin": "UserApiKey.permissions",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "UserApiKey.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "expires_at",
+          "origin": "UserApiKey.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_used_at",
+          "nullable": true,
+          "origin": "UserApiKey.lastUsedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "UserApiKey.revokedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_api_key_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_user_api_key_user"
+        }
+      ],
+      "kind": "entity",
+      "name": "user_api_key",
+      "origin": "UserApiKey",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_api_key_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "user_api_key_token_hash_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UserCredential.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserCredential.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "password_hash",
+          "origin": "UserCredential.passwordHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "password_changed_at",
+          "origin": "UserCredential.passwordChangedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "disabled_at",
+          "nullable": true,
+          "origin": "UserCredential.disabledAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "pending_at",
+          "nullable": true,
+          "origin": "UserCredential.pendingAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_credential_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "kind": "entity",
+      "name": "user_credential",
+      "origin": "UserCredential",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_credential_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "user_credential_user_id_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UserRoleGrant.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserRoleGrant.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "role_id",
+          "origin": "UserRoleGrant.role",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "granted_at",
+          "origin": "UserRoleGrant.grantedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "role_id"
+          ],
+          "name": "fk_user_role_grant_role_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "role"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_role_grant_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id",
+            "role_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_user_role_grant_user_role",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "user_role_grant",
+      "origin": "UserRoleGrant",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_role_grant_pkey"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER \"trg_contract_search_delete\" AFTER DELETE ON \"contract\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Contract (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Contract' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_contract_search_delete",
+      "origin": "Contract",
+      "table": "contract"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_contract_search_insert\" AFTER INSERT ON \"contract\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Contract (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Contract', CAST(NEW.\"id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_contract_search_insert",
+      "origin": "Contract",
+      "table": "contract"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_contract_search_update\" AFTER UPDATE ON \"contract\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Contract (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Contract' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT) AND OLD.\"id\" IS NOT NEW.\"id\";\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Contract', CAST(NEW.\"id\" AS TEXT) WHERE (OLD.\"id\" IS NOT NEW.\"id\"\n      OR OLD.\"name\" IS NOT NEW.\"name\"\n      OR OLD.\"summary\" IS NOT NEW.\"summary\")\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_contract_search_update",
+      "origin": "Contract",
+      "table": "contract"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_document_audience_insert\" AFTER INSERT ON \"document\" FOR EACH ROW\nBEGIN\n  -- The @audience of Document (D156, D182): the row's audience resolved into\n  -- effective_audience and effective_agents, whatever writes the row.\n  SELECT RAISE(ABORT, 'document.audience is none of everyone, private, named, inherit') WHERE NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named', 'inherit');\n  SELECT RAISE(ABORT, 'document.agent_access is none of followRole, readOnly, none') WHERE NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none');\n  UPDATE \"document\" SET \"effective_audience\" = CASE \"document\".\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN \"document\".\"created_by\" IS NULL THEN '[]' ELSE json_array(\"document\".\"created_by\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT \"document\".\"created_by\" AS value WHERE \"document\".\"created_by\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(\"document\".\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN \"document\".\"folder_id\" IS NOT NULL AND EXISTS (SELECT 1 FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") THEN (SELECT audience_parent.\"effective_audience\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") ELSE CASE WHEN \"document\".\"created_by\" IS NULL THEN '[]' ELSE json_array(\"document\".\"created_by\") END END END,\n    \"effective_agents\" = CASE WHEN \"document\".\"audience\" = 'inherit' AND \"document\".\"folder_id\" IS NOT NULL AND EXISTS (SELECT 1 FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") AND CASE (SELECT audience_parent.\"effective_agents\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") WHEN 'followRole' THEN 0 WHEN 'readOnly' THEN 1 WHEN 'none' THEN 2 END \u003e CASE \"document\".\"agent_access\" WHEN 'followRole' THEN 0 WHEN 'readOnly' THEN 1 WHEN 'none' THEN 2 END THEN (SELECT audience_parent.\"effective_agents\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") ELSE \"document\".\"agent_access\" END\n    WHERE \"document\".\"id\" = NEW.\"id\";\nEND",
+      "name": "trg_document_audience_insert",
+      "origin": "Document",
+      "refuses": true,
+      "table": "document"
+    },
+    {
+      "backfill": "UPDATE \"document\" SET \"audience\" = \"audience\"",
+      "backfillNote": "Backfilling trg_document_audience_update resolves the audience of every row of document.",
+      "definition": "CREATE TRIGGER \"trg_document_audience_update\" AFTER UPDATE ON \"document\" FOR EACH ROW\nWHEN NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named', 'inherit')\n  OR NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none')\n  OR NEW.\"effective_audience\" IS NOT CASE NEW.\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN NEW.\"created_by\" IS NULL THEN '[]' ELSE json_array(NEW.\"created_by\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT NEW.\"created_by\" AS value WHERE NEW.\"created_by\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(NEW.\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN NEW.\"folder_id\" IS NOT NULL AND EXISTS (SELECT 1 FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = NEW.\"folder_id\") THEN (SELECT audience_parent.\"effective_audience\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = NEW.\"folder_id\") ELSE CASE WHEN NEW.\"created_by\" IS NULL THEN '[]' ELSE json_array(NEW.\"created_by\") END END END\n  OR NEW.\"effective_agents\" IS NOT CASE WHEN NEW.\"audience\" = 'inherit' AND NEW.\"folder_id\" IS NOT NULL AND EXISTS (SELECT 1 FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = NEW.\"folder_id\") AND CASE (SELECT audience_parent.\"effective_agents\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = NEW.\"folder_id\") WHEN 'followRole' THEN 0 WHEN 'readOnly' THEN 1 WHEN 'none' THEN 2 END \u003e CASE NEW.\"agent_access\" WHEN 'followRole' THEN 0 WHEN 'readOnly' THEN 1 WHEN 'none' THEN 2 END THEN (SELECT audience_parent.\"effective_agents\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = NEW.\"folder_id\") ELSE NEW.\"agent_access\" END\nBEGIN\n  -- The @audience of Document (D156, D182): the row's audience resolved into\n  -- effective_audience and effective_agents, whatever writes the row.\n  SELECT RAISE(ABORT, 'document.audience is none of everyone, private, named, inherit') WHERE NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named', 'inherit');\n  SELECT RAISE(ABORT, 'document.agent_access is none of followRole, readOnly, none') WHERE NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none');\n  UPDATE \"document\" SET \"effective_audience\" = CASE \"document\".\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN \"document\".\"created_by\" IS NULL THEN '[]' ELSE json_array(\"document\".\"created_by\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT \"document\".\"created_by\" AS value WHERE \"document\".\"created_by\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(\"document\".\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN \"document\".\"folder_id\" IS NOT NULL AND EXISTS (SELECT 1 FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") THEN (SELECT audience_parent.\"effective_audience\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") ELSE CASE WHEN \"document\".\"created_by\" IS NULL THEN '[]' ELSE json_array(\"document\".\"created_by\") END END END,\n    \"effective_agents\" = CASE WHEN \"document\".\"audience\" = 'inherit' AND \"document\".\"folder_id\" IS NOT NULL AND EXISTS (SELECT 1 FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") AND CASE (SELECT audience_parent.\"effective_agents\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") WHEN 'followRole' THEN 0 WHEN 'readOnly' THEN 1 WHEN 'none' THEN 2 END \u003e CASE \"document\".\"agent_access\" WHEN 'followRole' THEN 0 WHEN 'readOnly' THEN 1 WHEN 'none' THEN 2 END THEN (SELECT audience_parent.\"effective_agents\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") ELSE \"document\".\"agent_access\" END\n    WHERE \"document\".\"id\" = NEW.\"id\";\nEND",
+      "name": "trg_document_audience_update",
+      "origin": "Document",
+      "refuses": true,
+      "table": "document"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_document_search_delete\" AFTER DELETE ON \"document\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Document (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Document' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_document_search_delete",
+      "origin": "Document",
+      "table": "document"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_document_search_insert\" AFTER INSERT ON \"document\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Document (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Document', CAST(NEW.\"id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_document_search_insert",
+      "origin": "Document",
+      "table": "document"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_document_search_update\" AFTER UPDATE ON \"document\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Document (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Document' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT) AND OLD.\"id\" IS NOT NEW.\"id\";\n  UPDATE \"search_index\" SET \"audience\" = NEW.\"effective_audience\", \"agents\" = NEW.\"effective_agents\"\n    WHERE \"source_table\" = 'Document' AND \"source_key\" = CAST(NEW.\"id\" AS TEXT)\n      AND (\"audience\" IS NOT NEW.\"effective_audience\" OR \"agents\" IS NOT NEW.\"effective_agents\");\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Document', CAST(NEW.\"id\" AS TEXT) WHERE (OLD.\"id\" IS NOT NEW.\"id\"\n      OR OLD.\"title\" IS NOT NEW.\"title\"\n      OR OLD.\"text\" IS NOT NEW.\"text\")\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_document_search_update",
+      "origin": "Document",
+      "table": "document"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_folder_audience_cascade\" AFTER UPDATE ON \"folder\" FOR EACH ROW\nWHEN NEW.\"effective_audience\" IS NOT OLD.\"effective_audience\" OR NEW.\"effective_agents\" IS NOT OLD.\"effective_agents\"\nBEGIN\n  -- The children that inherit the audience of Folder (D156, D182), resolved\n  -- again when its own resolved audience changes.\n  UPDATE \"document\" SET \"effective_audience\" = CASE \"document\".\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN \"document\".\"created_by\" IS NULL THEN '[]' ELSE json_array(\"document\".\"created_by\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT \"document\".\"created_by\" AS value WHERE \"document\".\"created_by\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(\"document\".\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN \"document\".\"folder_id\" IS NOT NULL AND EXISTS (SELECT 1 FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") THEN (SELECT audience_parent.\"effective_audience\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") ELSE CASE WHEN \"document\".\"created_by\" IS NULL THEN '[]' ELSE json_array(\"document\".\"created_by\") END END END,\n    \"effective_agents\" = CASE WHEN \"document\".\"audience\" = 'inherit' AND \"document\".\"folder_id\" IS NOT NULL AND EXISTS (SELECT 1 FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") AND CASE (SELECT audience_parent.\"effective_agents\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") WHEN 'followRole' THEN 0 WHEN 'readOnly' THEN 1 WHEN 'none' THEN 2 END \u003e CASE \"document\".\"agent_access\" WHEN 'followRole' THEN 0 WHEN 'readOnly' THEN 1 WHEN 'none' THEN 2 END THEN (SELECT audience_parent.\"effective_agents\" FROM \"folder\" AS audience_parent WHERE audience_parent.\"id\" = \"document\".\"folder_id\") ELSE \"document\".\"agent_access\" END\n    WHERE \"document\".\"audience\" = 'inherit' AND \"document\".\"folder_id\" = NEW.\"id\";\nEND",
+      "name": "trg_folder_audience_cascade",
+      "origin": "Folder",
+      "table": "folder"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_folder_audience_insert\" AFTER INSERT ON \"folder\" FOR EACH ROW\nBEGIN\n  -- The @audience of Folder (D156, D182): the row's audience resolved into\n  -- effective_audience and effective_agents, whatever writes the row.\n  SELECT RAISE(ABORT, 'folder.audience is none of everyone, private, named') WHERE NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named');\n  SELECT RAISE(ABORT, 'folder.agent_access is none of followRole, readOnly, none') WHERE NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none');\n  UPDATE \"folder\" SET \"effective_audience\" = CASE \"folder\".\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN \"folder\".\"owner\" IS NULL THEN '[]' ELSE json_array(\"folder\".\"owner\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT \"folder\".\"owner\" AS value WHERE \"folder\".\"owner\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(\"folder\".\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN \"folder\".\"owner\" IS NULL THEN '[]' ELSE json_array(\"folder\".\"owner\") END END,\n    \"effective_agents\" = \"folder\".\"agent_access\"\n    WHERE \"folder\".\"id\" = NEW.\"id\";\nEND",
+      "name": "trg_folder_audience_insert",
+      "origin": "Folder",
+      "refuses": true,
+      "table": "folder"
+    },
+    {
+      "backfill": "UPDATE \"folder\" SET \"audience\" = \"audience\"",
+      "backfillNote": "Backfilling trg_folder_audience_update resolves the audience of every row of folder.",
+      "definition": "CREATE TRIGGER \"trg_folder_audience_update\" AFTER UPDATE ON \"folder\" FOR EACH ROW\nWHEN NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named')\n  OR NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none')\n  OR NEW.\"effective_audience\" IS NOT CASE NEW.\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN NEW.\"owner\" IS NULL THEN '[]' ELSE json_array(NEW.\"owner\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT NEW.\"owner\" AS value WHERE NEW.\"owner\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(NEW.\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN NEW.\"owner\" IS NULL THEN '[]' ELSE json_array(NEW.\"owner\") END END\n  OR NEW.\"effective_agents\" IS NOT NEW.\"agent_access\"\nBEGIN\n  -- The @audience of Folder (D156, D182): the row's audience resolved into\n  -- effective_audience and effective_agents, whatever writes the row.\n  SELECT RAISE(ABORT, 'folder.audience is none of everyone, private, named') WHERE NEW.\"audience\" IS NULL OR NEW.\"audience\" NOT IN ('everyone', 'private', 'named');\n  SELECT RAISE(ABORT, 'folder.agent_access is none of followRole, readOnly, none') WHERE NEW.\"agent_access\" IS NULL OR NEW.\"agent_access\" NOT IN ('followRole', 'readOnly', 'none');\n  UPDATE \"folder\" SET \"effective_audience\" = CASE \"folder\".\"audience\" WHEN 'everyone' THEN NULL WHEN 'private' THEN CASE WHEN \"folder\".\"owner\" IS NULL THEN '[]' ELSE json_array(\"folder\".\"owner\") END WHEN 'named' THEN (SELECT json_group_array(audience_member.value) FROM (SELECT \"folder\".\"owner\" AS value WHERE \"folder\".\"owner\" IS NOT NULL UNION ALL SELECT value FROM json_each(COALESCE(\"folder\".\"audience_named\", '[]')) WHERE value IS NOT NULL) AS audience_member) ELSE CASE WHEN \"folder\".\"owner\" IS NULL THEN '[]' ELSE json_array(\"folder\".\"owner\") END END,\n    \"effective_agents\" = \"folder\".\"agent_access\"\n    WHERE \"folder\".\"id\" = NEW.\"id\";\nEND",
+      "name": "trg_folder_audience_update",
+      "origin": "Folder",
+      "refuses": true,
+      "table": "folder"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_folder_search_delete\" AFTER DELETE ON \"folder\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Folder (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Folder' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_folder_search_delete",
+      "origin": "Folder",
+      "table": "folder"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_folder_search_insert\" AFTER INSERT ON \"folder\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Folder (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Folder', CAST(NEW.\"id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_folder_search_insert",
+      "origin": "Folder",
+      "table": "folder"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_folder_search_update\" AFTER UPDATE ON \"folder\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Folder (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Folder' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT) AND OLD.\"id\" IS NOT NEW.\"id\";\n  UPDATE \"search_index\" SET \"audience\" = NEW.\"effective_audience\", \"agents\" = NEW.\"effective_agents\"\n    WHERE \"source_table\" = 'Folder' AND \"source_key\" = CAST(NEW.\"id\" AS TEXT)\n      AND (\"audience\" IS NOT NEW.\"effective_audience\" OR \"agents\" IS NOT NEW.\"effective_agents\");\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Folder', CAST(NEW.\"id\" AS TEXT) WHERE (OLD.\"id\" IS NOT NEW.\"id\"\n      OR OLD.\"name\" IS NOT NEW.\"name\")\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_folder_search_update",
+      "origin": "Folder",
+      "table": "folder"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_note_search_delete\" AFTER DELETE ON \"note\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Note (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Note' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_note_search_delete",
+      "origin": "Note",
+      "table": "note"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_note_search_insert\" AFTER INSERT ON \"note\" FOR EACH ROW\nWHEN NEW.\"deleted_at\" IS NULL\nBEGIN\n  -- The search index row of a row of Note (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Note', CAST(NEW.\"id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_note_search_insert",
+      "origin": "Note",
+      "table": "note"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_note_search_update\" AFTER UPDATE ON \"note\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Note (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Note' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT) AND OLD.\"id\" IS NOT NEW.\"id\";\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Note' AND \"source_key\" = CAST(NEW.\"id\" AS TEXT) AND NEW.\"deleted_at\" IS NOT NULL;\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Note', CAST(NEW.\"id\" AS TEXT) WHERE NEW.\"deleted_at\" IS NULL\n    AND (OLD.\"id\" IS NOT NEW.\"id\"\n      OR OLD.\"deleted_at\" IS NOT NULL\n      OR OLD.\"title\" IS NOT NEW.\"title\"\n      OR OLD.\"text\" IS NOT NEW.\"text\"\n      OR OLD.\"project\" IS NOT NEW.\"project\")\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_note_search_update",
+      "origin": "Note",
+      "table": "note"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_request_search_delete\" AFTER DELETE ON \"request\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Request (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Request' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_request_search_delete",
+      "origin": "Request",
+      "table": "request"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_request_search_insert\" AFTER INSERT ON \"request\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Request (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Request', CAST(NEW.\"id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_request_search_insert",
+      "origin": "Request",
+      "table": "request"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_request_search_update\" AFTER UPDATE ON \"request\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Request (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Request' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT) AND OLD.\"id\" IS NOT NEW.\"id\";\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Request', CAST(NEW.\"id\" AS TEXT) WHERE (OLD.\"id\" IS NOT NEW.\"id\"\n      OR OLD.\"title\" IS NOT NEW.\"title\"\n      OR OLD.\"details\" IS NOT NEW.\"details\"\n      OR OLD.\"resolution\" IS NOT NEW.\"resolution\"\n      OR OLD.\"unit_id\" IS NOT NEW.\"unit_id\")\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_request_search_update",
+      "origin": "Request",
+      "table": "request"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_attachments_release\" AFTER DELETE ON \"unit_attachments\" FOR EACH ROW\nBEGIN\n  -- The object the file of UnitAttachments deleted named (D154, D182), released\n  -- once no file of the table names it: its worker deletes it once no\n  -- file of any table does.\n  INSERT INTO \"file_released_queue\" (\"object_key\", \"content_hash\", \"reason\")\n    SELECT OLD.\"object_key\", OLD.\"content_hash\", 'detached' WHERE NOT EXISTS (SELECT 1 FROM \"unit_attachments\" WHERE \"object_key\" = OLD.\"object_key\");\nEND",
+      "name": "trg_unit_attachments_release",
+      "origin": "UnitAttachments",
+      "table": "unit_attachments"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_attachments_search_delete\" AFTER DELETE ON \"unit_attachments\" FOR EACH ROW\nBEGIN\n  -- The row of Unit whose text the write of UnitAttachments changed (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(OLD.\"unit_id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_unit_attachments_search_delete",
+      "origin": "UnitAttachments",
+      "table": "unit_attachments"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_attachments_search_insert\" AFTER INSERT ON \"unit_attachments\" FOR EACH ROW\nBEGIN\n  -- The row of Unit whose text the write of UnitAttachments changed (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(NEW.\"unit_id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_unit_attachments_search_insert",
+      "origin": "UnitAttachments",
+      "table": "unit_attachments"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_attachments_search_update\" AFTER UPDATE ON \"unit_attachments\" FOR EACH ROW\nBEGIN\n  -- The row of Unit whose text the write of UnitAttachments changed (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(NEW.\"unit_id\" AS TEXT) WHERE (OLD.\"state\" IS NOT NEW.\"state\" OR OLD.\"extracted_text\" IS NOT NEW.\"extracted_text\" OR OLD.\"unit_id\" IS NOT NEW.\"unit_id\")\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(OLD.\"unit_id\" AS TEXT) WHERE OLD.\"unit_id\" IS NOT NEW.\"unit_id\"\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_unit_attachments_search_update",
+      "origin": "UnitAttachments",
+      "table": "unit_attachments"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_bump_version\" AFTER UPDATE ON \"unit\" FOR EACH ROW WHEN NEW._version = OLD._version BEGIN UPDATE \"unit\" SET _version = OLD._version + 1 WHERE rowid = NEW.rowid; END",
+      "name": "trg_unit_bump_version",
+      "origin": "Unit",
+      "table": "unit"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_comments_conversations_bump_version\" AFTER UPDATE ON \"unit_comments_conversations\" FOR EACH ROW WHEN NEW._version = OLD._version BEGIN UPDATE \"unit_comments_conversations\" SET _version = OLD._version + 1 WHERE rowid = NEW.rowid; END",
+      "name": "trg_unit_comments_conversations_bump_version",
+      "origin": "UnitCommentsConversations",
+      "table": "unit_comments_conversations"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_comments_messages_search_delete\" AFTER DELETE ON \"unit_comments_messages\" FOR EACH ROW\nBEGIN\n  -- The row of Unit whose text the write of UnitCommentsMessages changed (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(OLD.\"unit_id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_unit_comments_messages_search_delete",
+      "origin": "UnitCommentsMessages",
+      "table": "unit_comments_messages"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_comments_messages_search_insert\" AFTER INSERT ON \"unit_comments_messages\" FOR EACH ROW\nBEGIN\n  -- The row of Unit whose text the write of UnitCommentsMessages changed (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(NEW.\"unit_id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_unit_comments_messages_search_insert",
+      "origin": "UnitCommentsMessages",
+      "table": "unit_comments_messages"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_comments_messages_search_update\" AFTER UPDATE ON \"unit_comments_messages\" FOR EACH ROW\nBEGIN\n  -- The row of Unit whose text the write of UnitCommentsMessages changed (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(NEW.\"unit_id\" AS TEXT) WHERE (OLD.\"body\" IS NOT NEW.\"body\" OR OLD.\"state\" IS NOT NEW.\"state\" OR OLD.\"unit_id\" IS NOT NEW.\"unit_id\")\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(OLD.\"unit_id\" AS TEXT) WHERE OLD.\"unit_id\" IS NOT NEW.\"unit_id\"\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_unit_comments_messages_search_update",
+      "origin": "UnitCommentsMessages",
+      "table": "unit_comments_messages"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_search_delete\" AFTER DELETE ON \"unit\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Unit (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Unit' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_unit_search_delete",
+      "origin": "Unit",
+      "table": "unit"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_search_insert\" AFTER INSERT ON \"unit\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Unit (D155, D186).\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(NEW.\"id\" AS TEXT) WHERE 1\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_unit_search_insert",
+      "origin": "Unit",
+      "table": "unit"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_unit_search_update\" AFTER UPDATE ON \"unit\" FOR EACH ROW\nBEGIN\n  -- The search index row of a row of Unit (D155, D186).\n  DELETE FROM \"search_index\" WHERE \"source_table\" = 'Unit' AND \"source_key\" = CAST(OLD.\"id\" AS TEXT) AND OLD.\"id\" IS NOT NEW.\"id\";\n  INSERT INTO \"search_indexing_queue\" (\"source_table\", \"source_key\")\n    SELECT 'Unit', CAST(NEW.\"id\" AS TEXT) WHERE (OLD.\"id\" IS NOT NEW.\"id\"\n      OR OLD.\"name\" IS NOT NEW.\"name\"\n      OR OLD.\"notes\" IS NOT NEW.\"notes\")\n    ON CONFLICT (source_table, source_key) WHERE state = 'ready' DO NOTHING;\nEND",
+      "name": "trg_unit_search_update",
+      "origin": "Unit",
+      "table": "unit"
+    }
+  ],
+  "version": 1
+}

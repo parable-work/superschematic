@@ -9,9 +9,9 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 use superschematic_rules::{
-    merge_patch, Action, Answer, Caller, ChangeSet, Command, Core, DeadlineChange, KeyedRow,
-    LinkedRows, Outcome, ReadRequest, Refusal, Row, RowWrite, SharedRow, SharedRowChange, Source,
-    SubRow, SubRowChange, TypeSpec,
+    key_of, merge_patch, Action, Answer, Caller, ChangeSet, Command, Core, DeadlineChange,
+    KeyedRow, LinkedRows, Outcome, ReadRequest, Refusal, Row, RowWrite, SharedRow, SharedRowChange,
+    Source, SubRow, SubRowChange, TypeSpec,
 };
 
 pub const START: i64 = 1_000_000;
@@ -34,6 +34,10 @@ pub struct Memory {
     /// rule that reads another type's rows reads (Revisions' evidence).
     pub others: BTreeMap<(String, String), Row>,
     pub specs: BTreeMap<String, TypeSpec>,
+    /// The permissions each subject holds now, which a permissions read
+    /// answers (D200); a subject absent here is one the host cannot answer
+    /// for.
+    pub permissions: BTreeMap<String, Vec<String>>,
 }
 
 impl Source for Memory {
@@ -78,6 +82,41 @@ impl Source for Memory {
                     more,
                 }))
             }
+            // The rows of `others` of a type whose own field holds a key,
+            // in key order (Approvals' requirement rows, D200).
+            ReadRequest::Linked {
+                type_name,
+                field,
+                key,
+                after,
+                limit,
+            } => {
+                let rows: Vec<KeyedRow> = self
+                    .others
+                    .iter()
+                    .filter(|((named, row_key), row)| {
+                        named == type_name
+                            && after.as_ref().is_none_or(|after| row_key > after)
+                            && row.own.get(field).and_then(key_of).as_deref() == Some(key.as_str())
+                    })
+                    .map(|((_, row_key), row)| KeyedRow::new(row_key.clone(), row.clone()))
+                    .collect();
+                let more = rows.len() > *limit;
+                Ok(Answer::Linked(LinkedRows {
+                    rows: rows.into_iter().take(*limit).collect(),
+                    more,
+                }))
+            }
+            ReadRequest::Permissions { subjects } => Ok(Answer::Permissions(
+                subjects
+                    .iter()
+                    .filter_map(|subject| {
+                        self.permissions
+                            .get(subject)
+                            .map(|held| (subject.clone(), held.clone()))
+                    })
+                    .collect(),
+            )),
             ReadRequest::SharedRow {
                 use_id, table, key, ..
             } => Ok(Answer::SharedRow(
