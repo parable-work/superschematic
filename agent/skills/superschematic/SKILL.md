@@ -387,6 +387,16 @@ Most are load errors; knowing them saves a build round-trip:
   SQL write of one is not refused, so an operator can repair a row, but
   it skips the behavior's rules: do not write one to move a state, in a
   migration, a seed or a handler.
+- A pattern the core's behaviors do not cover can be the project's own
+  behavior (D103's step 5): an abstract class marked `@declaresBehavior`
+  from `@superschematic/db`, in the directory `behaviors` names in
+  `superschematic.toml`, named `<prefix>.<Name>`, with the Rust crate
+  that runs it on the core (`crate`). A table implements it with
+  `implements Behavior<typeof Rating, Movie, { ... }>`, and the build
+  writes the project's rules crate (`rules/rust/<schema>`), whose archive
+  a Go server links in the stock one's place. Write the class's bodies as
+  abstract signatures: a class declares and never implements. The
+  extension guide's "A behavior declared by a class" lists its form.
 - A status no writer may move out of order, and that needs no permission
   (a ledger entry, a payment, a run), is an enum field with a
   `@stateMachine` on its class, from `@superschematic/schema` (D118), not

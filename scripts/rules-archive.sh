@@ -17,6 +17,8 @@
 # Usage:
 #   scripts/rules-archive.sh          # build and stage, print the -L flag
 #   scripts/rules-archive.sh --print  # print the -L flag only
+#   scripts/rules-archive.sh --crate <rules crate> --out <dir>
+#                                     # stage a project's core (D103's step 5)
 #
 # Put the -L flag in CGO_LDFLAGS beside scripts/superscalar-dep.sh --print,
 # scripts/versiongraph-archive.sh --print and scripts/engine-archive.sh
@@ -33,10 +35,26 @@ goos="$(go env GOOS)"
 goarch="$(go env GOARCH)"
 DEST="$GO_DIR/lib/${goos}_${goarch}"
 
+# A project's rules crate (D103's step 5, internal/generator/rulescore)
+# builds in its place: --crate <dir> --out <dir> stages that crate's
+# staticlib as <out>/libsuperschematic_rules.a, which the Go binding links
+# when CGO_LDFLAGS names <out> before the binding's own directory. Its lock
+# is the crate's own, and no stamp is written: a new -L path relinks.
+PROJECT=""
 case "${1:-}" in
   --print)
     echo "-L$DEST"
     exit 0
+    ;;
+  --crate)
+    if [ "$#" -ne 4 ] || [ "$3" != "--out" ]; then
+      echo "usage: scripts/rules-archive.sh --crate <rules crate> --out <dir>" >&2
+      exit 2
+    fi
+    CRATE="$(cd "$2" && pwd)"
+    mkdir -p "$4"
+    DEST="$(cd "$4" && pwd)"
+    PROJECT=1
     ;;
   "")
     ;;
@@ -73,7 +91,11 @@ trap 'rm -f "$BUILD_LOG" "$NEW_STAMP"' EXIT
 # the package whose manifest is rules-wasm's. The crate is a member of the
 # engine's workspace, so it builds against the workspace's committed lock
 # file.
-cargo build --release --locked --manifest-path "$CRATE/Cargo.toml" \
+LOCKED=--locked
+if [ -n "$PROJECT" ]; then
+  LOCKED=""
+fi
+cargo build --release $LOCKED --manifest-path "$CRATE/Cargo.toml" \
   --message-format=json-render-diagnostics >"$BUILD_LOG"
 ARCHIVE="$(python3 - "$BUILD_LOG" "$CRATE/Cargo.toml" <<'PY'
 import json, os, sys
@@ -105,6 +127,11 @@ fi
 
 mkdir -p "$DEST"
 cp "$ARCHIVE" "$DEST/$ARCHIVE_NAME"
+if [ -n "$PROJECT" ]; then
+  echo "rules archive of $CRATE staged under $DEST" >&2
+  echo "-L$DEST"
+  exit 0
+fi
 
 DIGEST="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$DEST/$ARCHIVE_NAME")"
 STAMP="$GO_DIR/archive_stamp_${goos}_${goarch}.go"

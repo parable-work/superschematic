@@ -95,7 +95,7 @@ func Expand(schema *ir.Schema, reg *registry.Registry) ([]string, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	heardBy := HeardBy(schema)
+	heardBy := HeardBy(schema, reg)
 	var scalars []string
 	for _, name := range names {
 		td := schema.Types[name]
@@ -349,7 +349,7 @@ func expandStorage(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) ([
 // Reactions reads task.project. A use of a table that composes behaviors as
 // a table alone listens; a listen that names no table of schema is left
 // out, which the verification pass refuses.
-func HeardBy(schema *ir.Schema) map[string][]string {
+func HeardBy(schema *ir.Schema, reg *registry.Registry) map[string][]string {
 	if schema == nil {
 		return nil
 	}
@@ -360,7 +360,7 @@ func HeardBy(schema *ir.Schema) map[string][]string {
 			continue
 		}
 		for _, use := range td.TableBehaviors() {
-			for _, listen := range registry.BehaviorListens(use.Name, use.Config) {
+			for _, listen := range reg.BehaviorListens(use.Name, use.Config) {
 				if heard := schema.Types[listen.Type]; heard == nil || heard.Role != ir.RoleDBTable {
 					continue
 				}

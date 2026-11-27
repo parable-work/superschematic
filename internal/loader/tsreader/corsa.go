@@ -104,6 +104,42 @@ const (
 	kindBinaryExpression            = tsast.KindBinaryExpression
 )
 
+// Node kinds the shim does not name, which a behavior's class (D103) is
+// read with. Each is found by its name in the compiler's Kind enum once,
+// so a release that renumbers the enum keeps them, as the aliases above
+// do; one the compiler no longer has is Kind -1, which no node is.
+var (
+	kindClassExpression  = kindNamed("KindClassExpression")
+	kindIndexSignature   = kindNamed("KindIndexSignature")
+	kindNamedTupleMember = kindNamed("KindNamedTupleMember")
+	kindStaticKeyword    = kindNamed("KindStaticKeyword")
+	kindTypeQuery        = kindNamed("KindTypeQuery")
+)
+
+// isStatic reports whether node, a class member, is static.
+func isStatic(node *astNode) bool {
+	modifiers := node.Modifiers()
+	if modifiers == nil {
+		return false
+	}
+	for _, m := range modifiers.Nodes {
+		if m.Kind == kindStaticKeyword {
+			return true
+		}
+	}
+	return false
+}
+
+// kindNamed is the Kind whose name is name, or -1.
+func kindNamed(name string) tsast.Kind {
+	for k := tsast.Kind(0); k < 1024; k++ {
+		if k.String() == name {
+			return k
+		}
+	}
+	return -1
+}
+
 // Modifier flags.
 const (
 	modifierFlagsExport   = tsast.ModifierFlagsExport

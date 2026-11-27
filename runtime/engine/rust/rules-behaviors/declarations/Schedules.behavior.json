@@ -819,51 +819,11 @@
       "kind": "run",
       "description": "A run of a schedule fell due and fired: its name, which run and which attempt of it, its kind and spec, the time zone of a cron line, when the schedule was set, when the run was due and when it fired, and the schedule's next regular run when it has one. Delivery is at least once, so a handler is idempotent by the row's key, the name, setAt, the run and the attempt, which no two fires share, and reports the run's outcome with reportRun, naming the run and the attempt.",
       "payloadSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "name",
-          "run",
-          "attempt",
-          "kind",
-          "spec",
-          "setAt",
-          "dueAt",
-          "firedAt"
-        ],
         "properties": {
-          "name": {
-            "description": "The schedule's name.",
-            "type": "string"
-          },
-          "run": {
-            "description": "Which run of the name it is, from 1, counted on across a replace and a finished name set again.",
-            "type": "integer",
-            "minimum": 1
-          },
           "attempt": {
             "description": "Which attempt of the run it is: 1, and one more for each retry.",
-            "type": "integer",
-            "minimum": 1
-          },
-          "kind": {
-            "description": "after, every or cron.",
-            "enum": [
-              "after",
-              "every",
-              "cron"
-            ]
-          },
-          "spec": {
-            "description": "The delay or the interval in milliseconds, as its digits, or the cron line.",
-            "type": "string"
-          },
-          "timeZone": {
-            "description": "The time zone a cron line is read in; absent for after and every.",
-            "type": "string"
-          },
-          "setAt": {
-            "description": "When the schedule whose run it is was set, in epoch milliseconds: a name pruned and set again has a later one.",
+            "minimum": 1,
             "type": "integer"
           },
           "dueAt": {
@@ -874,11 +834,51 @@
             "description": "When it fired, in epoch milliseconds: the later of its due time and the worker's clock.",
             "type": "integer"
           },
+          "kind": {
+            "description": "after, every or cron.",
+            "enum": [
+              "after",
+              "every",
+              "cron"
+            ]
+          },
+          "name": {
+            "description": "The schedule's name.",
+            "type": "string"
+          },
           "nextAt": {
             "description": "When the schedule's next regular run falls due, in epoch milliseconds; absent when it has none.",
             "type": "integer"
+          },
+          "run": {
+            "description": "Which run of the name it is, from 1, counted on across a replace and a finished name set again.",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "setAt": {
+            "description": "When the schedule whose run it is was set, in epoch milliseconds: a name pruned and set again has a later one.",
+            "type": "integer"
+          },
+          "spec": {
+            "description": "The delay or the interval in milliseconds, as its digits, or the cron line.",
+            "type": "string"
+          },
+          "timeZone": {
+            "description": "The time zone a cron line is read in; absent for after and every.",
+            "type": "string"
           }
-        }
+        },
+        "required": [
+          "name",
+          "run",
+          "attempt",
+          "kind",
+          "spec",
+          "setAt",
+          "dueAt",
+          "firedAt"
+        ],
+        "type": "object"
       }
     }
   ],

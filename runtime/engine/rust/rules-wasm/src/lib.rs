@@ -80,6 +80,16 @@
 //! thread shares it, since [`Core`] is `Send` and `Sync`, so the Go
 //! binding's goroutines, on whatever threads cgo runs them, run one core.
 //!
+//! A project whose tables compose a behavior a class declares and a Rust
+//! crate implements (D103's step 5) builds a core of its own: the core's
+//! behaviors and its crates', which the project's rules crate (the build's
+//! rulescore generator) assembles and exports behind this ABI with
+//! [`export_rules_abi`], depending on this crate without its default
+//! `abi` feature, which exports the stock core's. Its archive and module
+//! stand in the stock ones' place: the Go binding links whichever archive
+//! named `libsuperschematic_rules.a` its `CGO_LDFLAGS` find first, and
+//! `@superschematic/rules` loads the module a host names.
+//!
 //! [`Step`]: superschematic_rules::Step
 //! [`Refusal`]: superschematic_rules::Refusal
 
@@ -106,6 +116,24 @@ const _: () = {
     const fn shared<T: Send + Sync>() {}
     shared::<Core>();
 };
+
+/// The core's type, for [`export_rules_abi`]'s expansion in another crate.
+#[doc(hidden)]
+pub use superschematic_rules::Core as __Core;
+
+/// The stock core's behaviors' declaration files, in its order.
+#[cfg(feature = "abi")]
+fn stock_declarations() -> Vec<&'static str> {
+    superschematic_rules_behaviors::DECLARATIONS.to_vec()
+}
+
+// The stock core's ABI: every behavior ported so far, which a project with
+// no crate of its own runs.
+#[cfg(feature = "abi")]
+export_rules_abi!(
+    core = superschematic_rules_behaviors::core,
+    declarations = stock_declarations
+);
 
 /// An operation of the ABI.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -150,7 +178,19 @@ struct CheckInput {
 /// Runs an operation on its JSON input and returns its output document,
 /// with true for the operation's output and false for an error document.
 pub fn run_json(op: Op, input: &[u8]) -> (String, bool) {
-    match output(op, input) {
+    run_json_on(
+        &CORE,
+        &superschematic_rules_behaviors::DECLARATIONS,
+        op,
+        input,
+    )
+}
+
+/// Runs an operation on core, whose behaviors' declaration files are
+/// declarations in its order, as [`run_json`] runs it on the stock core: a
+/// project's core ([`export_rules_abi`]) answers through it.
+pub fn run_json_on(core: &Core, declarations: &[&str], op: Op, input: &[u8]) -> (String, bool) {
+    match output_on(core, declarations, op, input) {
         Ok(value) => (value.to_string(), true),
         Err((code, message)) => (error_document(code, &message), false),
     }
@@ -161,14 +201,15 @@ pub fn error_document(code: &str, message: &str) -> String {
     json!({ "error": { "code": code, "message": message } }).to_string()
 }
 
-fn output(op: Op, input: &[u8]) -> Result<Value, (&'static str, String)> {
-    output_on(&CORE, op, input)
-}
-
-fn output_on(core: &Core, op: Op, input: &[u8]) -> Result<Value, (&'static str, String)> {
+fn output_on(
+    core: &Core,
+    declarations: &[&str],
+    op: Op,
+    input: &[u8],
+) -> Result<Value, (&'static str, String)> {
     match op {
         Op::Declarations => Ok(Value::Array(
-            superschematic_rules_behaviors::DECLARATIONS
+            declarations
                 .iter()
                 .map(|text| serde_json::from_str(text).unwrap_or(Value::Null))
                 .collect(),

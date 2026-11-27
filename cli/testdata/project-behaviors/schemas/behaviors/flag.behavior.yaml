@@ -1,0 +1,21 @@
+# A behavior the project declares as data (D103's step 5): the declaration
+# `superschematic behaviors` writes, with the crate that runs it.
+name: notes.Flag
+description: A flag on the row that its operations raise and lower.
+crate:
+  crate: notes-rules
+  path: crates/rules
+  register: notes_rules::Flag
+fields:
+  - name: flagged
+    description: Whether the row is flagged.
+    type: boolean
+operations:
+  - name: raise
+    description: Raises the flag.
+    paramsSchema:
+      type: object
+      additionalProperties: false
+    resultSchema:
+      type: boolean
+    writes: true

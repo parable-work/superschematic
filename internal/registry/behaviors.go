@@ -41,6 +41,14 @@ type BehaviorSpec struct {
 	// behavior, depends on and registers. Optional; the core's behaviors
 	// are the engine's own crates and name none.
 	Rust BehaviorRust
+	// Rules is the Rust crate whose implementation of the core's hooks runs
+	// the behavior on the behaviors' core (D103's step 5): a crate whose
+	// Register value implements superschematic_rules::Behavior, which a
+	// project's rules crate (the rulescore generator's) depends on and adds
+	// to the core's behaviors (Core::with), so a table may implement or
+	// carry the behavior as it does the core's. Optional; the core's own
+	// behaviors are the core's crate and name none.
+	Rules BehaviorRust
 	// Declaration is the behavior's JSON declaration.
 	Declaration json.RawMessage
 }
@@ -86,6 +94,14 @@ type BehaviorDeclaration struct {
 	// ConfigSchema is the JSON Schema of the config a type gives the
 	// behavior. Absent means the behavior takes no config.
 	ConfigSchema json.RawMessage `json:"configSchema,omitempty"`
+	// References are the members of the config that name a part of the
+	// table its use sits on (D103's step 5): a field, a Workflow use, a
+	// state of it, or a table whose writes the use hears. The build holds
+	// a use's config to them (verify's checkConfigReferences) and derives
+	// what reads them (BehaviorListens) from them, as per-behavior code did
+	// before. Only a behavior a table composes names them; an engine's
+	// declaration parser shifts the member out.
+	References []BehaviorReference `json:"references,omitempty"`
 	// CreateParamsSchema is the JSON Schema of the parameters a create
 	// gives the behavior for the new instance, which an engine passes to
 	// its initialize: an object schema that sets "additionalProperties",
@@ -311,6 +327,14 @@ type BehaviorOperation struct {
 	// tool: one of the values of the registry's ToolInvocationPolicy.
 	// Empty means the policy's default.
 	InvocationPolicy string `json:"invocationPolicy,omitempty"`
+	// Permissions are the config's members whose permissions the
+	// operation checks (D103's step 5), each a ConfigPath: Workflow's
+	// transition checks transitions[].permission and overridePermission.
+	// The permission catalog lists under the operation only the strings a
+	// use's config holds at them. A declaration none of whose operations
+	// lists any states none, and the catalog lists every permission its
+	// config names under each operation of its use.
+	Permissions []string `json:"permissions,omitempty"`
 }
 
 // BehaviorEvent is an event a behavior emits about a row (D104): its kind,
@@ -418,6 +442,9 @@ type Behavior struct {
 	// Rust is the Rust crate that implements it; the zero value when its
 	// spec names none.
 	Rust BehaviorRust
+	// Rules is the Rust crate that implements it on the behaviors' core
+	// (D103's step 5); the zero value when its spec names none.
+	Rules BehaviorRust
 
 	config         *validator.Schema
 	configRequired bool
@@ -525,10 +552,13 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rust); err != nil {
 		return err
 	}
+	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rules); err != nil {
+		return err
+	}
 	if _, dup := r.behaviors[decl.Name]; dup {
 		return fmt.Errorf("registry: behavior %q is already registered", decl.Name)
 	}
-	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package, Rust: spec.Rust}
+	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package, Rust: spec.Rust, Rules: spec.Rules}
 	if len(decl.ConfigSchema) > 0 {
 		compiled, err := compileSchema(decl.ConfigSchema, "superschematic://behaviors/"+decl.Name+"/config.json")
 		if err != nil {
@@ -573,6 +603,9 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 		return err
 	}
 	if err := checkBehaviorVetoes(decl); err != nil {
+		return err
+	}
+	if err := checkBehaviorPaths(decl); err != nil {
 		return err
 	}
 	r.behaviors[decl.Name] = b

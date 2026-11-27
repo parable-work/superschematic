@@ -32,9 +32,19 @@ func (w *walker) behaviorCarrier(node *astNode) (registry.Behavior, symbolIdenti
 	if node == nil || node.Kind != kindTypeReference {
 		return registry.Behavior{}, symbolIdentity{}, false
 	}
-	id, ok := w.identityOf(node.AsTypeReferenceNode().TypeName)
+	ref := node.AsTypeReferenceNode()
+	id, ok := w.identityOf(ref.TypeName)
 	if !ok {
 		return registry.Behavior{}, symbolIdentity{}, false
+	}
+	if id.is(behaviorFieldPackage, classFieldCarrier) {
+		// score: BehaviorField<typeof Score, { ... }>, a behavior a class
+		// declares (D103's step 5).
+		if ref.TypeArguments == nil || len(ref.TypeArguments.Nodes) == 0 {
+			return registry.Behavior{}, symbolIdentity{}, false
+		}
+		behavior, ok := w.classDeclaredBehavior(ref.TypeArguments.Nodes[0])
+		return behavior, id, ok
 	}
 	behavior, ok := w.behaviorOfIdentity(id)
 	return behavior, id, ok
@@ -87,6 +97,10 @@ func (w *walker) behaviorFieldOf(class string, member *astNode) (use fieldUse, h
 	var args []*astNode
 	if list := prop.Type.AsTypeReferenceNode().TypeArguments; list != nil {
 		args = list.Nodes
+	}
+	if id.is(behaviorFieldPackage, classFieldCarrier) {
+		// BehaviorField<typeof B, C>: the class, then the config.
+		args = args[1:]
 	}
 	if valueFromCreate(behavior) {
 		// A value a create gives is typed by the field (D147: Aliased<T,
@@ -158,12 +172,78 @@ func valueOptional(behavior registry.Behavior) bool {
 // carriers (D103), `implements Timers<Ticket, { ... }>`, resolved by its
 // origin as a field type's is.
 func (w *walker) implementsCarrier(t *astNode) (registry.Behavior, symbolIdentity, bool) {
-	id, ok := w.identityOf(t.AsExpressionWithTypeArguments().Expression)
+	expr := t.AsExpressionWithTypeArguments()
+	id, ok := w.identityOf(expr.Expression)
 	if !ok {
 		return registry.Behavior{}, symbolIdentity{}, false
 	}
+	if id.is(behaviorFieldPackage, classCarrier) {
+		// implements Behavior<typeof Rating, Movie, { ... }>: a behavior
+		// a class declares (D103's step 5).
+		var args []*astNode
+		if expr.TypeArguments != nil {
+			args = expr.TypeArguments.Nodes
+		}
+		if len(args) == 0 {
+			return registry.Behavior{}, symbolIdentity{}, false
+		}
+		behavior, ok := w.classDeclaredBehavior(args[0])
+		return behavior, id, ok
+	}
 	behavior, ok := w.behaviorOfIdentity(id)
 	return behavior, id, ok
+}
+
+// The carriers of a behavior a class declares (D103's step 5), whose first
+// type argument is typeof the class: Behavior<typeof B, T, C> on a table,
+// BehaviorField<typeof B, C> on a field.
+const (
+	classCarrier      = "Behavior"
+	classFieldCarrier = "BehaviorField"
+)
+
+// classDeclaredBehavior reports the registered behavior node, a carrier's
+// first type argument, names: typeof a class marked @declaresBehavior,
+// registered under the name its options give or its own (D103's step 5).
+func (w *walker) classDeclaredBehavior(node *astNode) (registry.Behavior, bool) {
+	if node == nil || node.Kind != kindTypeQuery {
+		return registry.Behavior{}, false
+	}
+	id, ok := w.identityOf(node.AsTypeQueryNode().ExprName)
+	if !ok || id.decl == nil || id.decl.Kind != kindClassDeclaration {
+		return registry.Behavior{}, false
+	}
+	name := id.decl.Name().Text()
+	var marker *decoratorRef
+	for _, d := range id.decl.Decorators() {
+		expr := d.AsDecorator().Expression
+		target := expr
+		if expr.Kind == kindCallExpression {
+			target = expr.AsCallExpression().Expression
+		}
+		if did, ok := w.identityOf(target); ok && did.is(behaviorFieldPackage, declaresBehaviorDecorator) {
+			ref := decoratorRef{id: did, node: d}
+			if expr.Kind == kindCallExpression && expr.AsCallExpression().Arguments != nil {
+				ref.args = expr.AsCallExpression().Arguments.Nodes
+			}
+			marker = &ref
+		}
+	}
+	if marker == nil {
+		return registry.Behavior{}, false
+	}
+	if len(marker.args) == 1 && marker.args[0].Kind == kindObjectLiteralExpression {
+		for _, p := range marker.args[0].AsObjectLiteralExpression().Properties.Nodes {
+			if p.Kind == kindPropertyAssignment && p.Name().Text() == "name" {
+				if value, serr := w.evaluateExpression(p.AsPropertyAssignment().Initializer); serr == nil {
+					if s, ok := value.(string); ok {
+						name = s
+					}
+				}
+			}
+		}
+	}
+	return w.reg.Behavior(name)
 }
 
 // behaviorImplementsOf reads an implements-clause entry that names a
@@ -180,6 +260,14 @@ func (w *walker) behaviorImplementsOf(class, t *astNode, behavior registry.Behav
 	if args := t.AsExpressionWithTypeArguments().TypeArguments; args != nil {
 		typeArgs = args.Nodes
 	}
+	if id.is(behaviorFieldPackage, classCarrier) {
+		// Behavior<typeof B, T, C>: the class, then the table and config.
+		typeArgs = typeArgs[1:]
+		if len(typeArgs) == 1 {
+			// A behavior that takes no config may leave it out.
+			typeArgs = append(typeArgs, nil)
+		}
+	}
 	if len(typeArgs) != 2 {
 		return fieldUse{}, errorAtNode(t, "type %s: implements %s takes two type arguments, the table and its config: implements %s<%s, { ... }> (D103)", name, id.name, id.name, name)
 	}
@@ -195,14 +283,19 @@ func (w *walker) behaviorImplementsOf(class, t *astNode, behavior registry.Behav
 	}
 	at := typeArgs[1]
 	where := fmt.Sprintf("type %s: behavior %s config", name, behavior.Name)
-	reader := configReader{w: w, where: where, root: at}
-	value, serr := reader.value(w.checker.GetTypeFromTypeNode(at), at, "", 0)
-	if serr != nil {
-		return fieldUse{}, serr
-	}
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return fieldUse{}, errorAtNode(at, "%s: %v", where, err)
+	var raw json.RawMessage
+	if at == nil {
+		at = t
+	} else {
+		reader := configReader{w: w, where: where, root: at}
+		value, serr := reader.value(w.checker.GetTypeFromTypeNode(at), at, "", 0)
+		if serr != nil {
+			return fieldUse{}, serr
+		}
+		var err error
+		if raw, err = json.Marshal(value); err != nil {
+			return fieldUse{}, errorAtNode(at, "%s: %v", where, err)
+		}
 	}
 	refs := []ir.BehaviorRef{{Name: behavior.Name, Implements: true, Config: raw}}
 	if err := ir.CanonicalizeBehaviors(refs); err != nil {

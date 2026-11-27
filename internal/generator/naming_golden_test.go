@@ -45,12 +45,14 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 	// registered provider rather than naming an output, and the core
 	// registers only one, so it is exempt. TypeComments and PrivateRemarks
 	// say how the reader reads a comment and name no output, so they are
-	// exempt too.
+	// exempt too, as is Behaviors, the directory of the project's own
+	// behaviors (D103's step 5), and the unexported directory the file was
+	// read from.
 	defaults := reflect.ValueOf(naming.Default())
 	fixture := reflect.ValueOf(names)
 	for i := 0; i < fixture.NumField(); i++ {
 		field := fixture.Type().Field(i)
-		if field.Type.Kind() != reflect.String || field.Name == "AuthProvider" || field.Name == "TypeComments" || field.Name == "PrivateRemarks" {
+		if field.Type.Kind() != reflect.String || !field.IsExported() || field.Name == "AuthProvider" || field.Name == "TypeComments" || field.Name == "PrivateRemarks" || field.Name == "Behaviors" {
 			continue
 		}
 		if fixture.Field(i).String() == defaults.Field(i).String() {

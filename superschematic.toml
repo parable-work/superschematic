@@ -86,6 +86,13 @@ auth_provider = "session"
 type_comments = "attached"
 private_remarks = "keep"
 
+# The directory of the project's own behaviors (D103's step 5), relative to
+# the schemas root: the classes of its *.behavior.ts files and the
+# declarations its *.behavior.json and *.behavior.yaml files hold, which
+# every command registers before it reads a schema. Unset by default:
+#
+#   behaviors = "behaviors"
+
 # The TypeScript packages a .schema.ts file may import symbols from. A
 # distribution that republishes them under its own names lists those names
 # here and maps each to the declaring package in [package_aliases]:

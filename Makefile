@@ -179,7 +179,10 @@ generic-schemas:
 generic-schemas-check:
 	go run ./internal/tools/providerschemas -check
 
-# The engine's behaviors crate, the work queue's crate (D58), the
+# The core's behaviors a class declares (D103) derive their declarations
+# from it (internal/registry/behaviors/<name>.behavior.ts, read by the
+# TypeScript reader, behaviorclasses), which needs superscalar's checkout
+# in third_party. Then the engine's behaviors crate, the work queue's crate (D58), the
 # commerce crate (D70) and the behaviors' core (rules-behaviors, for the
 # behaviors no engine implements, D104) implement the core's behaviors over
 # a copy of each declaration (internal/registry/behaviors), which the core
@@ -193,12 +196,14 @@ COMMERCE_RUST_DECLARATIONS := runtime/engine-commerce/rust/declarations
 RULES_RUST_DECLARATIONS := runtime/engine/rust/rules-behaviors/declarations
 
 behaviors:
+	go run ./internal/tools/behaviorclasses
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS)
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/rules --out $(RULES_RUST_DECLARATIONS)
 
 behaviors-check:
+	go run ./internal/tools/behaviorclasses -check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS) --check
 	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS) --check

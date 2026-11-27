@@ -22,7 +22,6 @@
       "identity": false,
       "operations": [
         "AccountPoolMarkOutHandler",
-        "AccountPoolPickHandler",
         "AccountPoolReportRoomHandler"
       ]
     }
