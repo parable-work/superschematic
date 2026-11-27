@@ -2140,8 +2140,9 @@ Left:
   the row plans again on its own write, at a fire, or at `setRecurrence`.
 - The generated router mounting `calendarRoutes` and the calendar MCP
   tool; an app wires them, as it wires `grantAuthenticator` (D156).
-- The Go and Rust servers: Recurrence's operations through their adapters
-  end to end, and the calendar read and feed.
+- The Rust server: Recurrence's operations through its adapter end to
+  end, and the calendar read and feed. D187 serves them in Go, on
+  Postgres; a Go server on SQLite is refused them.
 - A hand-written scenario of Recurrence that every adapter replays.
 - The SDK types narrowed by the config (`behaviortypes`: the anchors).
 - A calendar source's permission in the schema, beside the route's option;
@@ -2216,7 +2217,8 @@ kept while the text holds and fall back to the text order.
 
 Left:
 
-- The Go and Rust repositories and servers, and Python's.
+- The Rust repositories and servers, and Python's. D187 serves search in
+  the Go repositories and the Go schema runtime, on Postgres.
 - The generated router mounting `searchRoutes` and the MCP tool, and a
   generated handler for the indexing queue; an app wires them.
 - A list operation's row rule (`by`), which is its operation's and not
@@ -2579,9 +2581,9 @@ Left:
   TypeScript's does; a generated table operation runs in one.
 - TypeScript's `accessConditions` keeps the values of the branches before
   a `*` path bound.
-- The Go server's calendar, search, notifier, parties and agents, which
-  later Go workstreams port. References, attachments and provider slots
-  are D184's.
+- The Go server's notifier, parties and agents, which later Go
+  workstreams port. References, attachments and provider slots are
+  D184's, and Recurrence, the calendar and search D187's.
 - A held table that composes behaviors, through the Go behaviors' core:
   its create fills neither default of `audience` and `agentAccess`, so a
   create that names neither fails their checks, and its reads of the
@@ -2914,3 +2916,59 @@ Left:
   either declaration there (D182), which TypeScript alone serves.
 - A provider package named by its Go module path alone, resolved from
   the module cache rather than a directory.
+
+## D187. The Go server serves D152's Recurrence and calendar and D155's search across tables on Postgres, through a schema runtime package the generated ORM hosts, a read across tables takes its caller, and a stop never strands a claim (D152, D155, D180 amended)
+
+D152 and D155 built Recurrence's routes and worker, the calendar and its
+feed, and search across tables in the TypeScript runtime; D180 refused
+them in a Go server. This entry ports them to Go, on Postgres, with the
+TypeScript tables, statements, ranking, states and refusals. The Rust
+chain ports the same two in D188, and Go keeps to it where the languages
+allow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Go server serves a table that composes Recurrence through the adapter it serves every behavior through: its `recurrence` routes run `setRecurrence`, `complete`, `skip`, `moveOne` and `listOccurrences` through the core, and the behavior worker's generated queues fire the `open`, `remind`, `overdue` and `plan` deadlines, hear a raw write on the change queue, and hand `opened`, `reminded` and `missed` to the Workers methods. The refusal was lifted; what was missing was the ORM of a table the core writes for another's behavior with no use, deadline, change or event of its own (a relative anchor's target), which imported `encoding/json` for nothing and so never compiled: it keeps the import in use (`Repository.BehaviorsWithoutJSON`). | A Recurrence module of the Go runtime, a second runner beside the adapter's. |
+| The calendar and search are one package of the Go schema runtime, `crosstable`: `ReadCalendar`, the feed (`IssueFeed`, `RotateFeed`, `RevokeFeed`, `FeedOf`), `CalendarICS`, `CalendarRoutes` and the MCP tool; `SearchTables`, `IndexSearch`, `ReindexSearch`, `SearchRoutes`, `SearchMCPTool` and `CallSearchTool`. ormgen writes `crosstable.go` for a database with a calendar source or a `@searchable` table: the definitions, and `Database.CrossTables()`, the `crosstable.Host` over its pool, its access predicate and its grants. Routes are `http.Handler`s and take an `Authenticate` of the request. | The HTTP runtime, which the ORM cannot import (D184 kept `rowrefs` in the schema runtime for the same reason); two packages, which would repeat the host and the caller. |
+| A Go read across tables reads a table's rows by one statement held to the caller by the predicate the table's repository applies (`AccessConditions`, D180) and its live condition, where TypeScript and Rust read them through the repository by its fields: a Go repository is typed per table and has no filter by a field's name. So the calendar's definition holds the columns, quoted, its title, field, end and owner are of, and the search's is tsgen's, member for member. A calendar source titled by an `Encrypted<T>` field, whose column holds it sealed, is refused in a Go server. | A generated read per table and source, which would repeat the repository; reading the rows' titles back through `GetManyByIDs`, a second read per source. |
+| A read across tables takes its `Caller`, a principal and the permissions it holds, and binds the principal itself (`Host.As`, `orm.WithPrincipal`), as Rust's takes its principal (D188): a feed's fetch reads as the feed's holder, not the request's caller. Go's `access.Principal` holds no permissions, which a source's or a table's permission is checked against, so the caller carries them beside it. | Reading the ambient caller of the context, which a feed's route would have to rebind; a permissions member on `access.Principal`, which every other reader of it would carry. |
+| Search's audience is checked on the index row's copied columns by the package's own condition, the generated `audienceCondition`'s over `si.audience` and `si.agents`, since the ORM's predicate names a table's own columns; a caller with grants is held by an `EXISTS` back to each table with `Host.Conditions`. | Copying the grant reach into the index, which D155 turned down. |
+| `IndexSearch` runs in a transaction of its own on the host and embeds after it commits, as `indexSearch` and Rust's `index_search` do. | The caller's transaction, which would hold the share lock across the model's call. |
+| Embeddings re-rank through `providers.SearchEmbeddingsOf`, which refuses at once a model provider that implements no `providers.ModelEmbedder` (D184), telling it by its type, where Rust asks the provider to embed nothing. A search's `Embedder` is an interface, with `EmbedderFunc`, so a test or an app gives its own. | Asking at the first search, which would fail one late. |
+| The Go worker no longer cancels a claim in flight at a stop: it runs the claim to its answer within its own timeout and releases what it claimed, whose handlers never start. Cancelling it could leave messages the database had claimed with no handler until their lease ran out, as D188 found in Rust; a test that stops its worker between fires runs into it. | Starting the claimed handlers at the stop, which the grace then waits for. |
+| A Go server whose database lists `sqlite` first is refused Recurrence and a calendar source (`verify.GoServerSQLiteErr`, which the generator calls with the database's dialects), as rustrestgen refuses a Rust server; `@searchable` on SQLite stays the loader's refusal for every language. | Serving the calendar on SQLite, D152's left for every language. |
+
+Built: the refusals of D180 lose `@calendarSource`, Recurrence and
+`@searchable` (`verify/go_features.go`), and gain the sealed title and
+`GoServerSQLiteErr` (`internal/generator/crosstable_go.go`);
+`runtime/schema/go/crosstable` and its tests; ormgen's `crosstable.go`
+(`ormgen/crosstable.go`, `templates/crosstable.tmpl`, goldens of
+fixture-recurrence-db, fixture-access-go-db and fixture-search-db) and
+`BehaviorsWithoutJSON`; `providers.SearchEmbeddingsOf`; the claim at a
+stop (`worker.go`); fixture-access-go-db's document calendar source.
+`TestGoRecurrenceEndToEnd` runs D152's cases through a generated Go
+server and worker on Postgres: the plan to the horizon off a holiday with
+its deadlines, a rule change that leaves the open occurrence, the remind
+deadline on the worker and its events, `complete` and an afterDone
+recurrence, the refusals, the calendar merging a date and occurrences,
+and a raw write heard. `TestGoAccessEndToEnd` gains the feed's case: a
+feed shows what its principal reads, busy or in full, is no credential
+elsewhere, and is refused once rotated or revoked. `TestGoSearchEndToEnd`
+runs D155's six cases through the Go repositories and `crosstable`, a
+party's and an agent run's grants among them, with embeddings through a
+model provider and `ReindexSearch`.
+`TestAGoServerOnSQLiteRefusesRecurrenceAndTheCalendar` holds the
+refusal. The guides' Go sections.
+
+Left:
+
+- Go on SQLite: Recurrence on a Go server and the calendar (D152's "the
+  calendar on SQLite and D1"), and search (D155's).
+- A generated Go server that mounts `CalendarRoutes` and `SearchRoutes`
+  and serves the two MCP tools; an app mounts them, as in TypeScript
+  (D152's and D155's left).
+- A generated handler for a `@searchable` declaration's queue, which an
+  app's `@worker` writes, calling `IndexSearch`.
+- A calendar source titled by an `Encrypted<T>` field in Go.
+- A parity file of the calendar's reference and iCalendar text, which
+  each language's tests hold to the same algorithm on their own.
