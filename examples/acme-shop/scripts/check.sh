@@ -28,11 +28,9 @@
 #      entrypoints of the storefront and the wishlist and bundle.ts beside
 #      each main.ts, and brings the Cargo workspace's
 #      lockfile up to date, which fails the check when that changes it;
-#   1a. shop-db's engine archive builds from the project's engine crate the
-#      build writes, with the commerce crate (D70), and every Go module
-#      below links it;
 #   2. every generated Go module builds and vets, the entrypoints of
-#      shop-stack's Go servers, job and worker included, and shop-stack's
+#      shop-stack's Go servers, jobs and workers included, shop-api's
+#      behavior worker CheckoutTimers among them, and shop-stack's
 #      Rust server, shop-stock, and its Rust job and worker check with its
 #      implementation in rust-impl/shop-stock, and its app Backoffice with
 #      its program in apps/backoffice, frozen to the committed lockfile;
@@ -57,8 +55,10 @@
 #      the Rust server in rust-server/ builds, and its lists page and its
 #      reviews search alike in memory and over SQLite;
 #   4. the Go app in go/ builds, vets and passes its tests, which sell,
-#      book and refund through shop-db's engine on SQLite with acmepay
-#      in-process (go/commerce_test.go), call the
+#      book, expire and refund through shop-db's tables and their behaviors
+#      (D70, D103) with acmepay in-process (go/commerce_test.go), on a SQLite
+#      file of shop-db's SQLite DDL, and on Postgres too when
+#      ACME_SHOP_DATABASE_URL names a server, call the
 #      generated Go server through the generated Go SDK, then run the
 #      TypeScript, Python and Rust clients against the same server and
 #      compare what they print; then run all four clients against
@@ -71,9 +71,11 @@
 #      runs, `superschematic-topcoat stack dev` runs shop-stack's Dev
 #      environment, Postgres, fake-gcs-server with shop-api's bucket
 #      shop-media, both Go servers, shop-stock's Rust server, which cargo
-#      builds, and its app Backoffice, and shop-cart's and the storefront's TypeScript servers on Bun, each on its generated
-#      entrypoint, shop-db's engine runner, shop-orders' worker, shop-stock's
-#      Rust worker and the site shop-web, and the test
+#      builds, and its app Backoffice, and shop-cart's and the storefront's
+#      TypeScript servers on Bun, each on its generated entrypoint, the
+#      behavior workers of shop-db's tables, shop-api's CheckoutTimers and
+#      shop-cart's TicketReactions, shop-cart's deriver, shop-orders' worker,
+#      shop-stock's Rust worker and the site shop-web, and the test
 #      calls each Go and Rust API through its Go SDK and the storefront over
 #      HTTP, uploads a product's image to shop-media through the URL
 #      shop-api signs and reads it back (D54), counts a product's stock on
@@ -82,7 +84,8 @@
 #      whose signed webhook places the checkout, sees its order written
 #      and the sale reported to shop-stock with shop-orders' service
 #      credential (D57, D70), and a refund two members of staff sign off
-#      made by SettlePayments; sees shop-orders' worker fulfil each order
+#      through shop-api made by SettlePayments; sees a support ticket
+#      triaged and assigned; sees shop-orders' worker fulfil each order
 #      placed from shop-db's queue (D53), reads
 #      the site and its config, and checks shop-api's CORS for the site's
 #      origin (milestones 1 and 7 of docs/stack-model.md), then sees
@@ -92,8 +95,8 @@
 #      shop-stock's Rust worker file the product's restock request, and its
 #      Rust job, run with `stack run`, order it, then runs stack dev and the
 #      job once more into an output root of the test's own (D65);
-#      and staff sign in to the Backoffice and receive stock through its
-#      engine console's Inventory page, which shop-stock counts (D78);
+#      and staff sign in to the Backoffice and book a delivery in on a
+#      product's stock page, which shop-stock counts (D78);
 #      `superschematic stack dev` runs storefront-stack's Dev, the storefront
 #      alone on Bun, and the test puts a tea in a cart and reads it (D64);
 #      and it runs wishlist-stack's Dev, the wishlist on Bun over a SQLite
@@ -235,16 +238,16 @@ elif ! diff -u "$COMMITTED_CARGO_LOCK" "$DIST/Cargo.lock" >&2; then
   exit 1
 fi
 
-echo "==> shop-db's engine archive"
-# shop-db's engine types compose the commerce behaviors (D70), which the
-# core's engine archive leaves out, so its build writes the project's engine
-# crate, whose archive every Go module that opens the engine links in the
-# core's place, as stack dev's Go servers do: the Go tests of a checkout run
-# on it. It builds from the engine's lock file into Cargo's target directory.
-ENGINE_ARCHIVE="$OUT/engine"
-CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$DIST/target}" \
-  "$REPO_ROOT/scripts/engine-archive.sh" --crate "$DIST/engine/rust/shop-db/ffi" --out "$ENGINE_ARCHIVE" >/dev/null
-export CGO_LDFLAGS="-L$ENGINE_ARCHIVE $CGO_LDFLAGS"
+echo "==> the behaviors' core: its archive and its npm package"
+# shop-db's tables implement the commerce and support behaviors (D70,
+# D103), which the generated repositories run through the behaviors' core:
+# the Go ORM links its static archive, which the rules module's binding
+# finds where scripts/rules-archive.sh stages it in this checkout, and the
+# TypeScript repositories load its WebAssembly module from
+# @superschematic/rules, which the output root's Bun workspace takes from
+# runtime/rules/typescript, built here.
+"$REPO_ROOT/scripts/rules-archive.sh" >/dev/null
+(cd "$REPO_ROOT/runtime/rules/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
 
 echo "==> rust-server/identity.sql holds shop-db's identity tables"
 # The Rust server, the Topcoat app in memory and the Go test of the Rust
@@ -282,7 +285,7 @@ done
 # superschematic writes no go.sum for an entrypoint, and go mod tidy would
 # resolve the imports of go/'s tests too; -mod=mod fills it as the build
 # reads each module, as stack dev's build does.
-for entrypoint in shop-api shop-orders shop-orders-ship-orders shop-orders-settle-payments shop-orders-fulfil-orders shop-db-engine-runner; do
+for entrypoint in shop-api shop-api-checkout-timers shop-orders shop-orders-ship-orders shop-orders-settle-payments shop-orders-fulfil-orders; do
   echo "    server/shop-stack/$entrypoint"
   (cd "$DIST/server/shop-stack/$entrypoint" && GOFLAGS=-mod=mod go build ./... && GOFLAGS=-mod=mod go vet ./...)
 done
@@ -302,12 +305,6 @@ echo "==> TypeScript: the generated packages, the storefront's entrypoint and im
 RUNTIME="$REPO_ROOT/runtime/http/typescript"
 APP="$EXAMPLE_DIR/typescript"
 (cd "$RUNTIME" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null)
-# shop-cart's server and implementation import the engine's package, whose
-# types the type-check reads from its build, and whose addon, the core's,
-# which carries the commerce behaviors (D70), shop-cart's server opens
-# shop-db's engine with under stack dev.
-(cd "$REPO_ROOT/runtime/engine/typescript" && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null &&
-  "$REPO_ROOT/scripts/engine-napi.sh" >/dev/null)
 # The output root is one Bun workspace of the generated TypeScript packages,
 # the stack's TypeScript server and the packages in typescript/: the
 # storefront's implementation and the clients (D51). Installing it links
@@ -449,7 +446,7 @@ echo "==> the Go app: build, vet, test; every SDK calls the Go server and the Ru
 # default ten minutes: each run has twenty to come up, and the tests
 # forty-five in all.
 (cd "$EXAMPLE_DIR/go" &&
-  ACME_SHOP_CLIENTS=1 ACME_SHOP_ENGINE=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
+  ACME_SHOP_CLIENTS=1 ACME_SHOP_PYTHON="$PYTHON" ACME_SHOP_PYTHONPATH="$ACME_PYTHONPATH" \
     ACME_SHOP_RUST_CLIENT="$RUST_CLIENT" ACME_SHOP_RUST_SERVER="$RUST_SERVER" \
     ACME_SHOP_SUPERSCHEMATIC="$OUT/superschematic" ACME_SHOP_SUPERSCHEMATIC_TOPCOAT="$OUT/superschematic-topcoat" \
     SUPERSCHEMATIC_MIGRATE="$OUT/superschematic-migrate" \
@@ -466,6 +463,7 @@ if docker info >/dev/null 2>&1; then
 fi
 grep -q '^--- PASS: TestStackDevRunsTheStorefront ' "$OUT/go-test.log"
 grep -q '^--- PASS: TestACheckoutHoldsPaysPlacesAndRefunds ' "$OUT/go-test.log"
+grep -q '^--- PASS: TestAHeldCheckoutExpires ' "$OUT/go-test.log"
 grep -q '^--- PASS: TestStackDevRunsTheWishlist ' "$OUT/go-test.log"
 
 echo "==> the wishlist's second version: expand, both versions, contract"
