@@ -789,14 +789,18 @@ func (n *Notifier) render(notice Notice, channel string) Rendered {
 	return Rendered{Subject: notice.Title, Body: fmt.Sprintf("#%d %s%s%s", notice.Reference, notice.Title, body, ask)}
 }
 
-// createNotice writes recipient's notice of event, nil when it has one. Its
-// reference is the recipient's next, taken in a savepoint: a concurrent
-// notice of theirs that took it first is met by the unique index, and the
-// notice tries again, the caller's transaction intact.
-func (n *Notifier) createNotice(ctx context.Context, h notifications.Host, recipient RecipientRef, event raisedEvent, urgency, route string) (*Notice, error) {
-	existing, err := n.findOne(ctx, h, n.inbox.where().eq("eventId", event.ID).eq("recipient", recipient.ID), "")
-	if err != nil || existing != nil {
-		return nil, err
+// noticeTitle is the title of event's notices, read once for a fan-out's
+// recipients, when its first notice is written.
+type noticeTitle struct {
+	read bool
+	text string
+}
+
+// of is the title of event's notices: its record's declared title field,
+// or its kind and key.
+func (t *noticeTitle) of(ctx context.Context, n *Notifier, h notifications.Host, event raisedEvent) (string, error) {
+	if t.read {
+		return t.text, nil
 	}
 	title := event.Kind
 	if event.Key != "" {
@@ -805,12 +809,73 @@ func (n *Notifier) createNotice(ctx context.Context, h notifications.Host, recip
 	if declared, ok := n.defs.EventOf(event.Table, event.Kind); ok && declared.Title != "" && event.Table != "" && event.Key != "" {
 		record, found, err := h.Record(n.system(ctx), event.Table, event.Key)
 		if err != nil {
-			return nil, err
+			return "", err
 		}
 		if found && record[declared.Title] != nil {
 			title = textOf(record[declared.Title])
 		}
 	}
+	t.read, t.text = true, title
+	return title, nil
+}
+
+// noticed is the recipients, by SameID, who already hold a notice of event,
+// of recipients, in one read.
+func (n *Notifier) noticed(ctx context.Context, h notifications.Host, event raisedEvent, recipients []RecipientRef) (map[string]bool, error) {
+	out := map[string]bool{}
+	var ids []string
+	for _, r := range recipients {
+		if n.inbox.holds("recipient", r.ID) {
+			ids = append(ids, r.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := n.find(ctx, h, n.inbox.where().eq("eventId", event.ID).in("recipient", ids...), "", len(ids))
+	if err != nil {
+		return nil, err
+	}
+	for _, r := range rows {
+		out[SameID(r.str("recipient"))] = true
+	}
+	return out, nil
+}
+
+// notifyAll writes and dispatches the notice of event to each recipient
+// that reads its record and holds none yet. The existing notices are read
+// once for them all, and the title once, not once each.
+func (n *Notifier) notifyAll(ctx context.Context, h notifications.Host, recipients []RecipientRef, event raisedEvent, title *noticeTitle, urgency, route string) error {
+	noticed, err := n.noticed(ctx, h, event, recipients)
+	if err != nil {
+		return err
+	}
+	for _, recipient := range recipients {
+		if noticed[SameID(recipient.ID)] || !n.reads(ctx, h, recipient, event.Table, event.Key) {
+			continue
+		}
+		text, err := title.of(ctx, n, h, event)
+		if err != nil {
+			return err
+		}
+		notice, err := n.createNotice(ctx, h, recipient, event, text, urgency, route)
+		if err != nil {
+			return err
+		}
+		noticed[SameID(recipient.ID)] = true
+		if err := n.dispatchNotice(ctx, h, *notice, recipient, urgency); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// createNotice writes recipient's notice of event, titled title: the
+// caller has found that it holds none (notifyAll). Its reference is the
+// recipient's next, taken in a savepoint: a concurrent notice of theirs
+// that took it first is met by the unique index, and the notice tries
+// again, the caller's transaction intact.
+func (n *Notifier) createNotice(ctx context.Context, h notifications.Host, recipient RecipientRef, event raisedEvent, title, urgency, route string) (*Notice, error) {
 	state := "unread"
 	if urgency == Record {
 		state = "read"
@@ -960,6 +1025,8 @@ func (n *Notifier) route(ctx context.Context, event raisedEvent) error {
 			return err
 		}
 		declared, _ := n.defs.EventOf(event.Table, event.Kind)
+		// The notices' title, read once for every route's recipients.
+		var title noticeTitle
 		for _, r := range candidates {
 			if subject := r.str("subjectTable"); subject != "" && subject != event.Table {
 				continue
@@ -994,20 +1061,8 @@ func (n *Notifier) route(ctx context.Context, event raisedEvent) error {
 			if err != nil {
 				return err
 			}
-			for _, recipient := range recipients {
-				if !n.reads(ctx, h, recipient, event.Table, event.Key) {
-					continue
-				}
-				notice, err := n.createNotice(ctx, h, recipient, event, urgency, r.str("id"))
-				if err != nil {
-					return err
-				}
-				if notice == nil {
-					continue
-				}
-				if err := n.dispatchNotice(ctx, h, *notice, recipient, urgency); err != nil {
-					return err
-				}
+			if err := n.notifyAll(ctx, h, recipients, event, &title, urgency, r.str("id")); err != nil {
+				return err
 			}
 			steps := stepsOf(r["escalation"])
 			if urgency == Urgent && len(steps) > 0 && len(recipients) > 0 {
@@ -1258,19 +1313,9 @@ func (n *Notifier) escalate(ctx context.Context, noticeID string) error {
 			if err != nil {
 				return err
 			}
-			for _, r := range more {
-				if !n.reads(ctx, h, r, event.Table, event.Key) {
-					continue
-				}
-				added, err := n.createNotice(ctx, h, r, event, Urgent, notice.Route)
-				if err != nil {
-					return err
-				}
-				if added != nil {
-					if err := n.dispatchNotice(ctx, h, *added, r, Urgent); err != nil {
-						return err
-					}
-				}
+			var title noticeTitle
+			if err := n.notifyAll(ctx, h, more, event, &title, Urgent, notice.Route); err != nil {
+				return err
 			}
 		}
 		if index+1 < len(steps) {
