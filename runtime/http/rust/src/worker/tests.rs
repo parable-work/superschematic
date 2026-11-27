@@ -30,6 +30,9 @@ enum PruneDoes {
 enum ClaimDoes {
     Fail,
     Hang,
+    /// Answers after so many seconds, as a claim the database is slow to
+    /// answer does.
+    Slow(f64),
 }
 
 #[derive(Default)]
@@ -115,6 +118,9 @@ impl WorkerQueue for Memory {
         match does {
             Some(ClaimDoes::Fail) => return Err(QueueError::Failed("the database is down".into())),
             Some(ClaimDoes::Hang) => std::future::pending::<()>().await,
+            Some(ClaimDoes::Slow(seconds)) => {
+                tokio::time::sleep(Duration::from_secs_f64(seconds)).await
+            }
             None => {}
         }
         let mut state = self.state.lock().unwrap();
@@ -250,6 +256,33 @@ async fn the_running_handlers_never_pass_the_concurrency() {
     }
     shutdown.cancel();
     run.await.unwrap().unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_claim_that_answers_after_the_stop_releases_its_messages_at_once() {
+    let queue = Memory::new(LEASE, 2);
+    queue.script([ClaimDoes::Slow(2.0)]);
+    let ran = Arc::new(AtomicUsize::new(0));
+    let counting = Arc::clone(&ran);
+    let (shutdown, run) = spawn(
+        &queue,
+        move |_| {
+            counting.fetch_add(1, Ordering::SeqCst);
+            async { Ok(()) }
+        },
+        Options {
+            concurrency: 2,
+            ..Options::default()
+        },
+    );
+    wait(1.0).await;
+    shutdown.cancel();
+    run.await.unwrap().unwrap();
+    // The claim ran to its answer, and its messages went back, with no
+    // handler, rather than waiting out their lease.
+    assert_eq!(ran.load(Ordering::SeqCst), 0);
+    assert_eq!(queue.of(released), ["m1", "m2"]);
+    assert_eq!(queue.times(is_claim), [0.0]);
 }
 
 #[tokio::test(start_paused = true)]

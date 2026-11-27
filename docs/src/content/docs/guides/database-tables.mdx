@@ -599,6 +599,34 @@ model that fails leaves the text order.
 | a vector costs 8 bytes a dimension a row, a model call per changed text and one per search | a 1536-dimension model is about 12 GB a million rows; a search reads at most 200 vectors |
 | leaving out the option switches embeddings off | no call is made and no search re-ranks; `reindexSearch` embeds every row again after a change of model |
 
+In Rust, the runtime's `orm::search_tables` runs the same statements over
+the Postgres definition of the generated types crate, which carries each
+`@searchable` table's index (D188). `search_tables` takes the caller's
+principal, since Rust has no ambient caller, and opens the repositories for
+it; `index_search` builds a row's index row in a transaction of its own on
+the client it is given, as a worker's handler calls it. A model provider's
+`embed` re-ranks through `search_embeddings_of`, which refuses a provider
+that embeds nothing:
+
+```rust
+use superschematic_http_runtime::orm::search_tables::{index_search, search_embeddings_of, search_tables, SearchOptions, SearchRequest};
+
+let options = SearchOptions {
+    embeddings: Some(search_embeddings_of(deps.providers.model("MODEL")?, "text-embedding-1", None).await?),
+    ..SearchOptions::default()
+};
+// The worker of the SearchIndexing queue, for each message.
+index_search(&mut client, postgres_definition()?, &message, &options).await?;
+// A search, as the caller.
+let found = search_tables(Repositories::new(&client)?.untyped(), Some(&principal), &SearchRequest { q, ..SearchRequest::default() }, &options).await?;
+```
+
+`search_routes(SearchRoutes::new(tables, authenticator))` serves
+`GET /api/search`, and `search_mcp_tool` with `call_search_tool` the MCP
+tool; an app merges the route into its router. A party's or an agent run's
+search, through `access::GrantAuthenticator`, keeps to the rows its grants
+reach, as in TypeScript.
+
 Search across tables is Postgres alone: the build refuses `@searchable` in
 a service that lists `sqlite`.
 
@@ -3683,9 +3711,30 @@ another, and `DELETE /api/calendar/feeds/<id>` revokes it.
 The generated router mounts neither `calendarRoutes` nor the calendar's
 MCP tool: an app wires them itself, as it wires `grantAuthenticator`
 (`examples/recurring-duties`). Recurrence and the calendar are served end
-to end by a TypeScript server on Postgres. The Go and Rust servers do not
-run Recurrence's operations end to end or serve the calendar yet, and the
-calendar has no SQLite or D1 form.
+to end by a TypeScript server and a Rust one on Postgres. The Go server
+does not run Recurrence's operations end to end or serve the calendar yet,
+and the calendar has no SQLite or D1 form.
+
+A Rust server serves Recurrence on Postgres as the TypeScript one does
+(D188): the router's `recurrence` routes run the operations through the
+behaviors' core, and the behavior worker's generated queues fire the
+`open`, `remind`, `overdue` and `plan` deadlines and hear a raw write. The
+runtime's `orm::calendar` reads the calendar over the Postgres definition,
+which carries each table's calendar sources:
+
+```rust
+use superschematic_http_runtime::orm::calendar::{calendar_routes, read_calendar, CalendarOptions, CalendarRead, CalendarRoutes};
+
+let read = CalendarRead { from: "2026-12-01".into(), to: "2027-01-01".into(), ..CalendarRead::default() };
+let calendar = read_calendar(Repositories::new(&client)?.untyped(), Some(&principal), &read, &CalendarOptions::default()).await?;
+// GET /api/calendar, the feed and its issue, rotation and revocation.
+let routes = calendar_routes(CalendarRoutes::new(Tables::new(pool, postgres_definition), authenticator));
+```
+
+`call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes,
+and `issue_calendar_feed`, `rotate_calendar_feed` and
+`revoke_calendar_feed` are the feed's operations. A Rust server whose
+database lists `sqlite` first is refused Recurrence and a calendar source.
 
 ### A pool of members
 
