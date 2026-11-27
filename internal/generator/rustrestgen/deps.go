@@ -452,9 +452,11 @@ func (o *APIOutput) DepsExports() string {
 
 // HasDatabaseTypes reports whether the crate re-exports its database's
 // Rust types as database_types: for its workers' messages and queues,
-// a behavior worker's among them (D65, D103).
+// a behavior worker's among them (D65, D103), and for the repositories its
+// table operations, graph operations and, on a database whose rows keep
+// to a caller, behavior operations read through (D106, D138, D181).
 func (o *APIOutput) HasDatabaseTypes() bool {
-	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations())
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations() || o.BehaviorsHeld())
 }
 
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
@@ -476,12 +478,13 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 // on the crate name: for the database's Rust types of an API with table
 // operations, graph operations or a deriver of tables, the feature of the
 // database's dialect, which the repositories they are served from, or
-// pulled and settled through, are behind (D116, D138, D146), and of an API
+// pulled and settled through, are behind (D116, D138, D146), of an API
 // whose database has a calendar source or a @searchable table, whose
-// calendar and search read the repositories' definition (D188); empty for
-// any other crate.
+// calendar and search read the repositories' definition (D188), and of an
+// API whose behavior operations check the caller's reach of a row through
+// the repositories (BehaviorsHeld, D181); empty for any other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasTableDerivers() && !o.ReadsAcrossTables) {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasTableDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
