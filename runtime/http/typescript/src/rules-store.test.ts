@@ -87,7 +87,8 @@ const ticketLayout: RulesLayout = {
 
 /**
  * A table whose own fields hold subjects (D104): asked_of, an own UUID
- * column, and created_by, the audit column the repositories stamp (D87),
+ * column, watchers, a list of them (a uuid[] on Postgres, JSON text on
+ * SQLite, as an @audience table's audience ids, D156), and created_by, the audit column the repositories stamp (D87),
  * which the layout lists apart from the own columns, a row read holds among
  * the own fields and no change set writes; withdrawing a question is made
  * by the subject its createdBy holds.
@@ -102,6 +103,7 @@ const questionLayout: RulesLayout = {
       own: [
         { field: 'prompt', column: 'prompt', type: 'string' },
         { field: 'askedOf', column: 'asked_of', type: 'Identity.UUID' },
+        { field: 'watchers', column: 'watchers', type: 'Identity.UUID', list: true },
       ],
       audit: [{ field: 'createdBy', column: 'created_by', type: 'Identity.UUID' }],
       uses: [
@@ -122,6 +124,7 @@ const questionLayout: RulesLayout = {
         fields: [
           { name: 'prompt', type: 'string' },
           { name: 'askedOf', type: 'Identity.UUID' },
+          { name: 'watchers', type: 'Identity.UUID' },
           { name: 'createdBy', type: 'Identity.UUID' },
         ],
       },
@@ -418,6 +421,7 @@ for (const dialect of dialects) {
   id ${t.key},
   prompt ${t.text} NOT NULL,
   asked_of ${uuid},
+  watchers ${db.dialect === 'postgres' ? 'UUID[]' : 'TEXT'},
   created_by ${uuid},
   status ${t.text},
   status_entered_at ${t.timestamp},
@@ -699,6 +703,29 @@ for (const dialect of dialects) {
       expect(await withdraw({ subject: DANA.column, permissions: [] })).toEqual({ from: 'open', to: 'withdrawn' });
       const [row] = await db.rows(`SELECT created_by, status, _version FROM question WHERE id = ${p(1)}`, ['q1']);
       expect({ createdBy: String(row!.created_by), status: row!.status, version: Number(row!._version) }).toEqual({ createdBy: DANA.column, status: 'withdrawn', version: 2 });
+    });
+
+    test('a list of UUIDs reads back as their base62 forms, and writes as a uuid[] on Postgres and its JSON text on SQLite', async () => {
+      const onQuestions = (store: RulesStore): RulesHost => ({ core: core(), layout: questionLayout, store, now: () => clock });
+      const held = (ids: readonly string[]) => (db.dialect === 'postgres' ? ids : JSON.stringify(ids));
+      // Written past the adapter, as an @audience table's trigger writes its
+      // ids: the hyphenated text of each.
+      await db.exec(`INSERT INTO question (id, prompt, watchers, created_by, status) VALUES (${p(1)}, ${p(2)}, ${p(3)}, ${p(4)}, 'open')`, ['q3', 'Which lamp?', held([ERIN.column, DANA.column]), DANA.column]);
+      const read = () => db.transaction(store => readRow(onQuestions(store), 'Question', 'q3'));
+      expect((await read())?.own).toEqual({ prompt: 'Which lamp?', watchers: [ERIN.wire, DANA.wire], createdBy: DANA.wire });
+      // An empty list is a list.
+      await db.exec(`INSERT INTO question (id, prompt, watchers, status) VALUES (${p(1)}, ${p(2)}, ${p(3)}, 'open')`, ['q4', 'Which rug?', held([])]);
+      expect((await db.transaction(store => readRow(onQuestions(store), 'Question', 'q4')))?.own).toEqual({ prompt: 'Which rug?', watchers: [] });
+      // The core's write of the list, in either of a UUID's forms, binds the hyphenated text of each.
+      await db.transaction(store => runUpdate(onQuestions(store), 'Question', 'q3', { watchers: [DANA.wire, ERIN.column] }, alice));
+      const [row] = await db.rows(`SELECT watchers FROM question WHERE id = ${p(1)}`, ['q3']);
+      expect(row!.watchers).toEqual(held([DANA.column, ERIN.column]));
+      expect((await read())?.own.watchers).toEqual([DANA.wire, ERIN.wire]);
+      // The operations on the row read it whole, its list among it.
+      expect(await db.transaction(store => runOperation(onQuestions(store), 'Question', 'q3', 'status', 'transition', { to: 'withdrawn' }, { subject: DANA.wire, permissions: [] }))).toEqual({
+        from: 'open',
+        to: 'withdrawn',
+      });
     });
 
     /** A host over a transaction of the database with docLayout, at the test's clock. */
