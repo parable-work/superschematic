@@ -1101,6 +1101,98 @@ mod tests {
         assert!(param(&bound("yesterday")).is_err());
     }
 
+    /// A table with createdAt and updatedAt, its statements as sqlutil
+    /// writes them on SQLite.
+    const NOTE: &str = r#"{
+  "dialect": "sqlite",
+  "clauses": {
+    "eq": "%s = ?%d", "ne": "%s IS DISTINCT FROM ?%d", "gt": "%s > ?%d", "gte": "%s >= ?%d",
+    "lt": "%s < ?%d", "lte": "%s <= ?%d", "ilike": "%s LIKE ?%d ESCAPE '\\'", "in": "%s IN (%s)",
+    "noneOf": "(%s IN (%s)) IS NOT TRUE", "isNull": "%s IS NULL", "isNotNull": "%s IS NOT NULL",
+    "search": "%s LIKE ?%d ESCAPE '\\'", "exists": "EXISTS (%s)", "notExists": "NOT EXISTS (%s)",
+    "set": "%s = ?%d", "setNull": "%s = NULL", "pageKey": "page_key.%s", "placeholder": "?%d",
+    "default": "", "or": " OR ", "group": "(%s)", "where": " WHERE ", "and": " AND ",
+    "orderBy": " ORDER BY ", "orderTerm": "%s %s", "limit": " LIMIT %d", "offset": " OFFSET %d",
+    "changed": "(%s) IS DISTINCT FROM (%s)", "never": "FALSE", "null": "NULL"
+  },
+  "defaultLimit": 100,
+  "tables": [{
+    "name": "Note",
+    "table": "note",
+    "key": "id",
+    "columns": [
+      {"name": "id", "column": "id", "field": "id", "qualified": "note.id", "key": true, "auto": true, "required": true},
+      {"name": "title", "column": "title", "field": "title", "qualified": "note.title", "required": true, "filter": ["eq"]},
+      {"name": "createdAt", "column": "created_at", "field": "createdAt", "qualified": "note.created_at", "timestamp": true, "audit": "createdAt", "required": true},
+      {"name": "updatedAt", "column": "updated_at", "field": "updatedAt", "qualified": "note.updated_at", "timestamp": true, "audit": "updatedAt", "required": true}
+    ],
+    "statements": {
+      "columns": "\"id\", \"title\", \"created_at\", \"updated_at\"",
+      "getOne": "SELECT \"id\", \"title\", \"created_at\", \"updated_at\" FROM note WHERE id = ?1",
+      "findMany": "SELECT %s FROM note%s%s%s",
+      "count": "SELECT COUNT(*) FROM note%s",
+      "insert": "INSERT INTO note (%s) VALUES (%s) RETURNING %s",
+      "update": "UPDATE note SET %s WHERE id = ?%d",
+      "returning": " RETURNING \"id\", \"title\", \"created_at\", \"updated_at\"",
+      "updateMany": "UPDATE note SET %s%s",
+      "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+      "updatedBy": "updated_by = ?%d",
+      "delete": "DELETE FROM note WHERE id = ?1"
+    }
+  }]
+}"#;
+
+    /// A row's times are the database's clock's alone: an update stamps
+    /// updated_at from SQLite's clock, as the insert's default stamps
+    /// created_at, so a server whose clock (the session's) runs an hour
+    /// behind the database's stamps no row earlier than its insert.
+    #[test]
+    fn an_update_stamps_updated_at_from_the_database_clock() {
+        let definition = Definition::parse(NOTE).expect("the definition");
+        let connection = Connection::open_in_memory().expect("open");
+        connection
+            .execute_batch(
+                "CREATE TABLE note (id INTEGER PRIMARY KEY, title TEXT NOT NULL, \
+                 created_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL, \
+                 updated_at TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL)",
+            )
+            .expect("create the table");
+        let behind = std::time::SystemTime::now() - std::time::Duration::from_secs(60 * 60);
+        let orm = Repositories::new(&connection, &definition)
+            .expect("the repositories")
+            .with_session(Session {
+                now: Some(behind),
+                ..Session::default()
+            });
+        let notes = orm.table("Note").expect("the table");
+        let input = |title: &str| {
+            let mut values = Values::new();
+            values.insert("title".to_owned(), Value::from(title));
+            values
+        };
+        let at = |row: &Values, member: &str| row[member].as_str().expect("a time").to_owned();
+        let created = notes.create_one(&input("Draft")).expect("create the note");
+        assert_eq!(at(&created, "updatedAt"), at(&created, "createdAt"));
+        let updated = notes
+            .update_one(&created["id"], &input("Final"), &WriteOptions::default())
+            .expect("update the note");
+        assert!(
+            at(&updated, "updatedAt") >= at(&created, "createdAt"),
+            "updated at {}, before its insert at {}",
+            at(&updated, "updatedAt"),
+            at(&created, "createdAt")
+        );
+        assert_eq!(
+            notes
+                .update_many(None, &input("Filed"))
+                .expect("update the notes"),
+            1
+        );
+        let filed = notes.get_one(&created["id"]).expect("read the note");
+        assert!(at(&filed, "updatedAt") >= at(&updated, "updatedAt"));
+        assert_eq!(at(&filed, "createdAt"), at(&created, "createdAt"));
+    }
+
     #[test]
     fn a_constraint_names_its_columns() {
         assert_eq!(

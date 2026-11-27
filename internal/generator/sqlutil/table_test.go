@@ -150,7 +150,8 @@ func TestTableStatementsOfALedger(t *testing.T) {
 
 // TestSQLiteTableStatementsOfALedger holds the statements a repository runs
 // on SQLite (D116): Postgres's, with ?n for a parameter, an upsert that
-// does not say whether it inserted, and no ILIKE.
+// does not say whether it inserted, no ILIKE, and SQLite's clock for an
+// update's updatedAt.
 func TestSQLiteTableStatementsOfALedger(t *testing.T) {
 	tables := ledgerTables(t)
 	entry := SQLiteTableStatementsOf(tables["Entry"])
@@ -165,6 +166,7 @@ func TestSQLiteTableStatementsOfALedger(t *testing.T) {
 		// But for its parameters and the upsert's last column, a
 		// statement is Postgres's.
 		want := strings.ReplaceAll(strings.ReplaceAll(postgres.AllStatements()[i].SQL, "$%d", "?%d"), ", (xmax = 0) AS _inserted", "")
+		want = strings.ReplaceAll(want, PostgresStampNow, strings.ReplaceAll(SQLiteStampNow, "%", "%%"))
 		for n := 9; n >= 1; n-- {
 			want = strings.ReplaceAll(want, fmt.Sprintf("$%d", n), fmt.Sprintf("?%d", n))
 		}
@@ -176,7 +178,7 @@ func TestSQLiteTableStatementsOfALedger(t *testing.T) {
 		"getOne":        `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id = ?1`,
 		"pageKeyExists": "SELECT EXISTS (SELECT 1 FROM entry WHERE entry.id = ?1)",
 		"update":        "UPDATE entry SET %s WHERE id = ?%d",
-		"updatedAt":     "updated_at = ?%d",
+		"updatedAt":     "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
 		"softDelete":    "UPDATE entry SET deleted_at = ?1, deleted_by = ?2 WHERE id = ?3 AND deleted_at IS NULL",
 		"delete":        "DELETE FROM entry WHERE id = ?1",
 	} {

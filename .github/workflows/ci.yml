@@ -54,6 +54,13 @@ name: ci
 # gofmt, golangci-lint and the drift checks run in a job of their own,
 # go-lint, so they report in minutes and not behind the go job's tests.
 #
+# The two longest jobs run in shards, a job each: go's five
+# (scripts/go-test-shard.sh) and engine-rust's four
+# (scripts/engine_rust_shards.py). Each script says what its shards run and
+# gives what no shard names to the last, rest, so the shards together run
+# what the one job ran; scripts/test_engine_rust_shards.py holds the
+# matrices below to the scripts' shards.
+#
 # Every Postgres a job starts runs with fsync, synchronous_commit and
 # full_page_writes off. The container goes with the runner, so nothing in it
 # has to survive a crash, and the tests, which create and drop a schema or a
@@ -128,20 +135,28 @@ jobs:
         # release-pr.yml refuses to bump a tree whose sites disagree; catch
         # drift (a hand-edited package.json) on the pull request instead.
         run: python3 scripts/bump_version.py check
-      - name: bump_version.py and npm_local_specs.py tests
+      - name: The scripts' tests (bump_version.py, npm_local_specs.py, prebuilt_deps.py, engine_rust_shards.py)
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   go:
-    name: go (build / vet / test / cli smoke)
+    # The eleven modules' build, vet and tests in shards, a job each:
+    # scripts/go-test-shard.sh says what a shard runs, and why. Every shard
+    # sets up the same tools and databases, so a test finds what it found
+    # when one job ran them all.
+    name: go (${{ matrix.shard }})
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    # The quick tier finishes in about fifty minutes. The full tier compiles
-    # and runs every generated module, and its packages queue on one Cargo
-    # target directory, so it needs longer than an hour: at sixty minutes
-    # the release candidate was cancelled in the root module's tests, with
-    # the ten modules after it and every later step not started. The whole
-    # job takes two hours and a quarter there, the root module's tests a
-    # hundred minutes of it.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [sqlmigrate, loader, generators, modules, rest]
+    # As one job the quick tier took about fifty minutes. The full tier
+    # compiles and runs every generated module, and its packages queue on
+    # one Cargo target directory, so it needed longer than an hour: at
+    # sixty minutes the release candidate was cancelled in the root
+    # module's tests. The whole job took two hours and a quarter there, the
+    # root module's tests a hundred minutes of it. The limits are that
+    # job's, and a shard is well inside them.
     timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 200 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -151,29 +166,33 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Setup Go
-        # A build cache of this job's own. setup-go keys its cache on these
-        # files alone and never saves over a key that exists, so with the
-        # default, the root go.sum, this job shared one key with jobs that
-        # set Go up and compile nothing: one of those finished first, saved
-        # an empty cache, and every run after it built and vetted the root
-        # module from nothing. Each job that compiles Go names a set of
-        # files no other job names; one that only reads `go env` turns the
-        # cache off.
+        # The build cache is the next step's, not setup-go's. setup-go keys
+        # its cache on go.sum alone, never saves over a key that exists, and
+        # saves from every pull request that misses. Jobs that shared its
+        # default key left an empty cache under it, which every run then
+        # restored; a key to each job had every pull request save more than
+        # a gigabyte of its own, against the ten the repository may keep.
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: |
-            go.sum
-            ir/go.sum
-            runtime/schema/go/go.sum
-            runtime/http/go/go.sum
-            runtime/migrate/go/go.sum
-            extensions/gcp/go.sum
-            extensions/cloudflare/go.sum
-            extensions/embedded/go.sum
-            extensions/pulumi/go.sum
-            extensions/topcoat/go.sum
-            cmd/superschematic/go.sum
+          cache: false
+
+      - name: Restore the Go build cache
+        # One cache for the jobs that compile the root module and the
+        # modules over it: this job's shards, go-lint and engine-rust. The
+        # rest shard saves it, since it builds every module, and only
+        # outside a pull request: on main that is the release candidate's
+        # run, whose caches every pull request reads. A go.sum that moved
+        # starts from the cache before it.
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-
 
       - name: Setup Bun
         # The superscalar TypeScript binding is built alongside the Go
@@ -261,7 +280,7 @@ jobs:
 
       - name: Cache the engine's Rust build
         # The full tier's engine addon, below.
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && matrix.shard == 'generators'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
@@ -272,8 +291,9 @@ jobs:
         # the Rust engine's Node-API addon (D58), as a TypeScript server
         # does: the package's dist/, over the http runtime's, and the core's
         # addon in its native/, a debug build, which compiles faster than the
-        # release's and loads the same.
-        if: github.event_name != 'pull_request'
+        # release's and loads the same. The tests that load it are all
+        # under internal/generator, the generators shard.
+        if: github.event_name != 'pull_request' && matrix.shard == 'generators'
         run: |
           (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)
           (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build)
@@ -386,7 +406,7 @@ jobs:
         with:
           pulumi-version: ${{ env.PULUMI_VERSION }}
 
-      - name: Build, vet, test every module
+      - name: Build, vet, test (this shard's part of every module)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
@@ -455,15 +475,23 @@ jobs:
           # internal/generator and internal/sqlmigrate thirty-two to
           # thirty-eight minutes each.
           GO_TEST_TIMEOUT: ${{ github.event_name == 'pull_request' && '30m' || '90m' }}
+          SHARD: ${{ matrix.shard }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/rules-archive.sh --print)"
-          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/embedded extensions/pulumi extensions/topcoat cmd/superschematic; do
-            echo "==> $m"
-            (cd "$m" && go build ./... && go vet ./... && go test -count=1 -timeout "$GO_TEST_TIMEOUT" -short="$GO_TEST_SHORT" ./...)
-          done
+          scripts/go-test-shard.sh "$SHARD"
+
+      - name: Save the Go build cache
+        # After a failed test too: what was built is as good a start.
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && matrix.shard == 'rest' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
       - name: CLI smoke (the core with no extension builds DB, API and General fixtures)
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && matrix.shard == 'rest'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -477,7 +505,7 @@ jobs:
       # on the Postgres above, and fails when an output the page quotes
       # (examples/migrations/testdata/generated/) is stale.
       - name: examples/migrations (plan, gate and apply a migration on SQLite and Postgres)
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && matrix.shard == 'rest'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
@@ -502,30 +530,28 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Setup Go
-        # A build cache of this job's own (the go job's Setup Go says why):
-        # the lint configuration is in the key to keep it apart from that
-        # job's.
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: |
-            .golangci.yml
-            go.sum
-            ir/go.sum
-            runtime/schema/go/go.sum
-            runtime/http/go/go.sum
-            runtime/migrate/go/go.sum
-            extensions/gcp/go.sum
-            extensions/cloudflare/go.sum
-            extensions/embedded/go.sum
-            extensions/pulumi/go.sum
-            extensions/topcoat/go.sum
-            cmd/superschematic/go.sum
+          cache: false
 
       - name: gofmt
         run: |
           out="$(gofmt -l $(git ls-files '*.go'))"
           if [ -n "$out" ]; then echo "gofmt: files need formatting:"; echo "$out"; exit 1; fi
+
+      - name: Restore the Go build cache
+        # The go job's, which its rest shard saves (that job's Setup Go
+        # says why); this job only reads it.
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-
 
       - name: Restore the superscalar checkout
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -1291,11 +1317,21 @@ jobs:
     # --workspace builds, lints and tests them too, and the behaviors'
     # core's crates (D103): the core, its behaviors, its reference host, its
     # wasm binding and the Rust adapter (rules-adapter).
-    name: engine-rust (the Rust engine's workspace)
+    #
+    # The tests run in shards, a job each: scripts/engine_rust_shards.py
+    # says what a shard runs, and why. The rest shard also runs fmt and
+    # clippy, builds the two binaries rules-runtime's tests run, whose
+    # tests are its own, and saves the Rust cache, since it builds the most.
+    name: engine-rust (${{ matrix.shard }})
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    # The job takes 26 to 29 minutes on most runs, and a slow runner took it
-    # past a thirty-minute limit in its last doc-tests, with no test failing.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [replay, core, behaviors, rest]
+    # As one job this took 26 to 29 minutes on most runs, and a slow runner
+    # took it past a thirty-minute limit in its last doc-tests, with no
+    # test failing. A shard is well inside the limit.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1312,6 +1348,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
+          save-if: ${{ matrix.shard == 'rest' }}
 
       - name: Cache the superscalar checkout
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -1347,14 +1384,24 @@ jobs:
           exit 1
 
       - name: Setup Go
-        # A build cache of this job's own, for the two binaries below (the
-        # go job's Setup Go says why).
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: |
-            go.sum
-            runtime/migrate/go/go.sum
+          cache: false
+
+      - name: Restore the Go build cache
+        # The go job's, which its rest shard saves (that job's Setup Go
+        # says why); this job only reads it, for the two binaries below.
+        if: matrix.shard == 'rest'
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-
 
       # Runtime mode's scenarios (rules-runtime, D117) run the two binaries
       # a runtime environment carries: the compiler's planner, here the
@@ -1362,6 +1409,7 @@ jobs:
       # Go migration runner, which needs no cgo. Without them the scenarios
       # say so and pass.
       - name: Build the planner and the migration runner runtime mode's scenarios run
+        if: matrix.shard == 'rest'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -1370,7 +1418,7 @@ jobs:
           go build -o "$GITHUB_WORKSPACE/bin/superschematic-core" ./internal/cmd/superschematic-core
           (cd runtime/migrate/go && CGO_ENABLED=0 go build -o "$GITHUB_WORKSPACE/bin/superschematic-migrate" ./cmd/superschematic-migrate)
 
-      # The same commands as `make engine-rust`, inline: the Makefile runs
+      # The same lints as `make engine-rust`, inline: the Makefile runs
       # the superscalar and version-graph scripts when it is parsed. Clippy
       # runs on every feature combination (each database alone, both, and
       # neither, and the axum router over one database, as a Rust server
@@ -1378,6 +1426,7 @@ jobs:
       # the test addon's bridge (all features) and without it (the
       # defaults, as an addon ships).
       - name: fmt / clippy (every feature combination)
+        if: matrix.shard == 'rest'
         working-directory: runtime/engine/rust
         run: |
           cargo fmt --all --check
@@ -1403,20 +1452,21 @@ jobs:
       # Runtime mode publishes through the binaries the step above built,
       # in process and through a job, and holds its lists in SQL to
       # development mode's answers.
-      - name: test (SQLite and Postgres)
-        working-directory: runtime/engine/rust
+      - name: test (this shard, on SQLite and Postgres)
         env:
+          SHARD: ${{ matrix.shard }}
           SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_BIN: ${{ github.workspace }}/bin/superschematic-core
           SUPERSCHEMATIC_MIGRATE_BIN: ${{ github.workspace }}/bin/superschematic-migrate
-        run: cargo test --workspace --all-features
+        run: python3 scripts/engine_rust_shards.py run "$SHARD"
 
       # Schedules' calendar as a project's Cargo graph may build it, jiff's
       # tzdb-zoneinfo turned on by feature unification: a zone is still the
       # bundled database's, never the host's zone files (TZDIR), so every
       # host computes the same runs (D104).
       - name: test (the calendar with jiff's host zone files on)
+        if: matrix.shard == 'rest'
         working-directory: runtime/engine/rust
         run: cargo test -p superschematic-rules-behaviors --features jiff/tzdb-zoneinfo --test calendar_zones
 

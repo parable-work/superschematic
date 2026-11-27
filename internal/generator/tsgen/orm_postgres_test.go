@@ -112,6 +112,7 @@ var repositoryCases = []repositoryCase{
 		"a sync of 500 lines is one statement, which reports each line inserted, then updated or unchanged, and an unchanged line keeps its stamp and enqueues nothing",
 		"a batch takes a statement per batch in one transaction, a line without the key is inserted, and a failed batch rolls the others back",
 		"upsertOneResult says what it did, and only if changed compares a location as its text and reads back a line it left",
+		"an update stamps updatedAt from the database's clock, as the insert's default stamps createdAt, so a host clock behind it stamps no line earlier than its insert",
 		"findMany with count false reads the rows without counting them, and in on a time and a boolean keeps the rows that hold one",
 		"a transaction begins at its isolation, read only or not, and a nested one is a savepoint a throw rolls back to",
 		"a raw query reads its rows through a table definition as the repository does, on the ORM and in a transaction",

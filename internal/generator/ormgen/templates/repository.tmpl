@@ -3444,9 +3444,7 @@ func (r *{{ .Name }}) upsertRow(ctx context.Context, input *types.{{ .TypeName }
 		// Set updated_at
 		{{- range .Fields }}
 		{{- if eq .Name "updatedAt" }}
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, {{ printf "%q" (filled $.SQL.UpdatedAt) }})
 		{{- end }}
 		{{- end }}
 
@@ -3748,8 +3746,7 @@ func (r *{{ .Name }}) upsertBatches(ctx context.Context, inputs []*types.{{ .Typ
 		} else {
 			{{- range .Fields }}
 			{{- if eq .Name "updatedAt" }}
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, len(values)))
+			assignments = append(assignments, {{ printf "%q" (filled $.SQL.UpdatedAt) }})
 			{{- end }}
 			{{- end }}
 			{{- range .Fields }}
@@ -4336,9 +4333,7 @@ func (r *{{ .Name }}) updateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 	// Set updated_at
 	{{- range .Fields }}
 	{{- if eq .Name "updatedAt" }}
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, {{ printf "%q" (filled $.SQL.UpdatedAt) }})
 	{{- end }}
 	{{- end }}
 
@@ -4551,9 +4546,7 @@ func (r *{{ .Name }}) UpdateMany(ctx context.Context, filter *{{ .TypeName }}Fil
 	// Set updated_at
 	{{- range .Fields }}
 	{{- if eq .Name "updatedAt" }}
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf({{ printf "%q" $.SQL.UpdatedAt }}, paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, {{ printf "%q" (filled $.SQL.UpdatedAt) }})
 	{{- end }}
 	{{- end }}
 
@@ -5384,7 +5377,7 @@ func (r *{{ .Name }}) corePatch(update *{{ .TypeName }}Update) map[string]any {
 	return patch
 }
 
-{{ docComment "" (printf "updateColumns are the columns UpdateOne sets of update, by column, each bound as its statement binds it, with updatedAt and updatedBy. A column the behaviors own is the core's to refuse, and %sUpdate holds none." .TypeName) }}
+{{ docComment "" (printf "updateColumns are the columns UpdateOne sets of update, by column, each bound as its statement binds it, with updatedBy; updatedAt takes the database's clock (nowColumns). A column the behaviors own is the core's to refuse, and %sUpdate holds none." .TypeName) }}
 func (r *{{ .Name }}) updateColumns(ctx context.Context, update *{{ .TypeName }}Update) (map[string]any, error) {
 	columns := map[string]any{}
 	{{- range .Fields }}
@@ -5417,9 +5410,6 @@ func (r *{{ .Name }}) updateColumns(ctx context.Context, update *{{ .TypeName }}
 		columns[{{ printf "%q" .DBColumnName }}] = update.{{ toGoName .FieldName }}ID.ToUUID()
 	}
 	{{- end }}
-	{{- if .HasField "updatedAt" }}
-	columns[{{ printf "%q" (.FieldColumn "updatedAt") }}] = time.Now()
-	{{- end }}
 	{{- if .HasField "updatedBy" }}
 	if update.UpdatedBy != nil {
 		columns[{{ printf "%q" (.FieldColumn "updatedBy") }}] = *update.UpdatedBy
@@ -5441,15 +5431,12 @@ func (r *{{ .Name }}) updateColumns(ctx context.Context, update *{{ .TypeName }}
 func (r *{{ .Name }}) operationOptions(ctx context.Context) *rules.ExecuteOptions {
 	{{- if or (.HasField "updatedAt") (.HasField "updatedBy") }}
 	columns := map[string]any{}
-	{{- if .HasField "updatedAt" }}
-	columns[{{ printf "%q" (.FieldColumn "updatedAt") }}] = time.Now()
-	{{- end }}
 	{{- if .HasField "updatedBy" }}
 	if HasUserID(ctx) {
 		columns[{{ printf "%q" (.FieldColumn "updatedBy") }}] = GetUserID(ctx)
 	}
 	{{- end }}
-	return &rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}
+	return &rules.ExecuteOptions{OwnColumns: columns{{ template "nowColumns" . }}{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}
 	{{- else if .Preconditions }}
 	return &rules.ExecuteOptions{Preconditions: behaviorPreconditions(ctx)}
 	{{- else }}
@@ -5735,10 +5722,12 @@ func (r *{{ .Name }}) UpdateOne(ctx context.Context, id {{ .PrimaryKeyType }}, u
 		if err != nil {
 			return nil, err
 		}
+		{{- if not (.HasField "updatedAt") }}
 		if len(patch) == 0 && len(columns) == 0 {
 			return nil, fmt.Errorf("no fields to update")
 		}
-		if err := rules.RunUpdate(ctx, rulesHost(tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}); err != nil {
+		{{- end }}
+		if err := rules.RunUpdate(ctx, rulesHost(tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns{{ template "nowColumns" . }}{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}); err != nil {
 			return nil, behaviorNotFound(err, {{ printf "%q" .TypeName }}, id)
 		}
 		return repo.GetOne(ctx, id, nil)
@@ -5858,7 +5847,7 @@ func (r *{{ .Name }}) updateThroughCore(ctx context.Context, id {{ .PrimaryKeyTy
 	if err != nil {
 		return nil, err
 	}
-	if err := rules.RunUpdate(ctx, rulesHost(r.tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}); err != nil {
+	if err := rules.RunUpdate(ctx, rulesHost(r.tx), {{ printf "%q" .TypeName }}, {{ .WireKey "id" }}, patch, behaviorCaller(ctx), &rules.ExecuteOptions{OwnColumns: columns{{ template "nowColumns" . }}{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}); err != nil {
 		return nil, behaviorNotFound(err, {{ printf "%q" .TypeName }}, id)
 	}
 	return r.GetOne(ctx, id, nil)
@@ -6054,3 +6043,6 @@ func (r *{{ .Name }}) upsertUpdate(input *types.{{ .TypeName }}, fields {{ .Type
 	return update
 }
 {{- end }}
+
+{{- /* nowColumns is the field of a write's rules.ExecuteOptions that names the columns the core's update of the row sets to the database's clock: updated_at, which its insert's default stamped from that clock too. */ -}}
+{{ define "nowColumns" }}{{ if .HasField "updatedAt" }}, NowColumns: []string{ {{- printf "%q" (.FieldColumn "updatedAt") -}} }{{ end }}{{ end }}

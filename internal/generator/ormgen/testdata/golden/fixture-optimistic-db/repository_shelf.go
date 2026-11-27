@@ -1188,9 +1188,7 @@ func (r *ShelfRepository) upsertRow(ctx context.Context, input *types.Shelf, on 
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 		// Set updated_by
 		if update.UpdatedBy != nil {
@@ -1412,8 +1410,7 @@ func (r *ShelfRepository) upsertBatches(ctx context.Context, inputs []*types.She
 			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			assignments = append(assignments, "updated_at = statement_timestamp()")
 			if HasUserID(ctx) {
 				values = append(values, GetUserID(ctx))
 				assignments = append(assignments, fmt.Sprintf("updated_by = $%d", len(values)))
@@ -1789,9 +1786,7 @@ func (r *ShelfRepository) updateOne(ctx context.Context, id types.IdentityUUID, 
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 	if update.UpdatedBy != nil {
@@ -1890,9 +1885,7 @@ func (r *ShelfRepository) UpdateMany(ctx context.Context, filter *ShelfFilter, u
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 	if update.UpdatedBy != nil {

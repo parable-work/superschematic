@@ -40,8 +40,8 @@ database's system actor, which a job's or a worker's writes act as. A
 write the Go ORM refuses without one, a create of a table with createdBy
 and any delete of a soft-deletable table, throws NoUserError here too, and
 so does an update of a table with updatedBy when the DB service sets
-requireUpdatedBy. updatedAt is the time of each update; createdAt the
-database's default.
+requireUpdatedBy. updatedAt is the database's time of each update, as
+createdAt is its default's, so the host's clock stamps neither.
 
 A soft-deletable table, one with deletedAt, stamps deletedAt (and
 deletedBy) on deleteOne and deleteMany, and leaves its deleted rows out of
@@ -2524,10 +2524,9 @@ class TableRepository {
 
   private stamp(sets: string[], update: Values, args: unknown[]): void {
     const s = this.def.statements;
-    if (this.audit('updatedAt')) {
-      args.push(new Date());
-      sets.push(fill(s.updatedAt, args.length));
-    }
+    // The database's clock, which its insert's default read too, so the
+    // host's can't stamp a row earlier than its insert.
+    if (this.audit('updatedAt')) sets.push(fill(s.updatedAt));
     const updatedBy = this.audit('updatedBy');
     if (updatedBy) {
       const by = update[updatedBy.name] ?? this.user;
@@ -3357,7 +3356,7 @@ class TableRepository {
     return out;
   }
 
-  /** An update's own columns as its set binds them, by unquoted column, with updatedAt and updatedBy, as updateOne writes them; an owned column is left to the core, which refuses it. */
+  /** An update's own columns as its set binds them, by unquoted column, with updatedBy, as updateOne writes them (updatedAt is nowColumns'); an owned column is left to the core, which refuses it. */
   private updateColumns(update: Values): Values {
     const owned = this.ownedColumns();
     const out: Values = {};
@@ -3372,8 +3371,6 @@ class TableRepository {
       }
       out[columnKey(column.column)] = this.encode(value, column, 'update');
     }
-    const updatedAt = this.audit('updatedAt');
-    if (updatedAt) out[columnKey(updatedAt.column)] = new Date();
     const updatedBy = this.audit('updatedBy');
     if (updatedBy) {
       const by = update[updatedBy.name] ?? this.user;
@@ -3383,14 +3380,18 @@ class TableRepository {
     return out;
   }
 
-  /** The stamps an operation's write of the row sets: updatedAt, and updatedBy when the ORM acts as a user. */
+  /** The stamps an operation's write of the row binds: updatedBy when the ORM acts as a user (updatedAt is nowColumns'). */
   private operationColumns(): Values {
     const out: Values = {};
-    const updatedAt = this.audit('updatedAt');
-    if (updatedAt) out[columnKey(updatedAt.column)] = new Date();
     const updatedBy = this.audit('updatedBy');
     if (updatedBy && this.user !== undefined) out[columnKey(updatedBy.column)] = this.encode(this.user, updatedBy, 'updatedBy');
     return out;
+  }
+
+  /** The columns the core's write of the row sets to the database's clock, as updateOne's statement stamps them: updatedAt. */
+  private nowColumns(): string[] {
+    const updatedAt = this.audit('updatedAt');
+    return updatedAt ? [columnKey(updatedAt.column)] : [];
   }
 
   /** The key a command names, in its wire form. */
@@ -3412,9 +3413,10 @@ class TableRepository {
     const sealed = this.sealedUpdate(update, id, 'update');
     const patch = this.coreOwn(sealed);
     const ownColumns = this.updateColumns(sealed);
-    if (Object.keys(patch).length === 0 && Object.keys(ownColumns).length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
+    const nowColumns = this.nowColumns();
+    if (Object.keys(patch).length === 0 && Object.keys(ownColumns).length === 0 && nowColumns.length === 0) throw new Error(`orm: update ${this.def.name}: no fields to update`);
     try {
-      await runUpdate(this.rulesHost(), this.def.name, this.wireKey(id), patch, this.caller(), { ownColumns, preconditions });
+      await runUpdate(this.rulesHost(), this.def.name, this.wireKey(id), patch, this.caller(), { ownColumns, nowColumns, preconditions });
     } catch (error) {
       throw this.notFound(error, id);
     }
@@ -3492,7 +3494,7 @@ class TableRepository {
       const action = { kind: 'operation' as const, key: repo.wireKey(key), useId, operation, params: params ?? {} };
       const command = { caller: options.caller ?? repo.caller(), now: Date.now(), action };
       try {
-        return (await execute(host, repo.def.name, command, { ownColumns: repo.operationColumns(), preconditions: options.preconditions })).result;
+        return (await execute(host, repo.def.name, command, { ownColumns: repo.operationColumns(), nowColumns: repo.nowColumns(), preconditions: options.preconditions })).result;
       } catch (error) {
         throw repo.notFound(error, key);
       }
@@ -3521,7 +3523,7 @@ class TableRepository {
     return this.atomically(async repo => {
       const key = repo.wireKey(deadline.rowKey);
       const due = { key, useId: deadline.useId, name: deadline.name, at: Number(deadline.at), payload: deadline.payload ?? null };
-      return runDeadline(repo.rulesHost(), repo.def.name, due, options.caller ?? repo.caller(), { claim: options.claim, ownColumns: repo.operationColumns() });
+      return runDeadline(repo.rulesHost(), repo.def.name, due, options.caller ?? repo.caller(), { claim: options.claim, ownColumns: repo.operationColumns(), nowColumns: repo.nowColumns() });
     });
   }
 
@@ -3536,7 +3538,7 @@ class TableRepository {
   async runChange(change: { readonly rowKey: unknown; readonly write: string; readonly at: number | string; readonly before?: unknown; readonly after?: unknown }, options: RunChangeOptions = {}): Promise<ChangeRun> {
     return this.atomically(async repo => {
       const message = { key: repo.wireKey(change.rowKey), write: change.write, at: change.at, before: change.before, after: change.after };
-      return runChange(repo.rulesHost(), repo.def.name, message, options.caller ?? repo.caller(), { claim: options.claim, ownColumns: repo.operationColumns() });
+      return runChange(repo.rulesHost(), repo.def.name, message, options.caller ?? repo.caller(), { claim: options.claim, ownColumns: repo.operationColumns(), nowColumns: repo.nowColumns() });
     });
   }
 

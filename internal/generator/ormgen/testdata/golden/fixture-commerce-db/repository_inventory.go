@@ -613,8 +613,9 @@ func (r *InventoryRepository) corePatch(update *InventoryUpdate) map[string]any 
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and InventoryUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and InventoryUpdate holds none.
 func (r *InventoryRepository) updateColumns(ctx context.Context, update *InventoryUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Title != nil {

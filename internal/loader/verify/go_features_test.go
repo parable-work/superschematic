@@ -29,8 +29,12 @@ func TestGoServerDatabaseErrRefusesTheDatabasesFeatures(t *testing.T) {
 		t.Fatalf("a plain database: %v", err)
 	}
 	db.Types["Ticket"].Party = &ir.PartyDef{}
-	if err := GoServerDatabaseErr(api, db); err == nil || !strings.Contains(err.Error(), "the Go server of app-api, over app-db, does not serve @party on Ticket yet (D157, D180)") {
-		t.Fatalf("a party table: %v", err)
+	if err := GoServerDatabaseErr(api, db); err == nil || !strings.Contains(err.Error(), "the Go server of app-api, over app-db, serves @party on Ticket through the notifier's host (D190, D192), and the database declares no @notifier(\"dispatch\") queue") {
+		t.Fatalf("a party table with no notifier: %v", err)
+	}
+	db.Types["NoticeWork"] = &ir.TypeDef{Name: "NoticeWork", Role: ir.RoleDBTable, Notifier: &ir.NotifierDef{Part: ir.NotifierDispatch}}
+	if err := GoServerDatabaseErr(api, db); err != nil {
+		t.Fatalf("a party table with the notifier: %v", err)
 	}
 }
 
@@ -48,15 +52,17 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 		schema.Types[name] = td
 		return schema
 	}
+	// Parties, conversations, run requests and agents are served (D192),
+	// through the notifier's host, which a database with none of the
+	// notifier's tables has not.
 	for _, tc := range []struct {
 		feature string
 		edit    func(*ir.TypeDef)
-		want    string
 	}{
-		{"@party", func(td *ir.TypeDef) { td.Party = &ir.PartyDef{} }, "@party on Duty yet (D157, D180)"},
-		{"@conversations", func(td *ir.TypeDef) { td.Conversations = &ir.ConversationsDef{} }, "@conversations on Duty yet (D157, D180)"},
-		{"@runRequests", func(td *ir.TypeDef) { td.RunRequests = &ir.RunRequestsDef{} }, "@runRequests on Duty yet (D157, D180)"},
-		{"@agents", func(td *ir.TypeDef) { td.Agents = &ir.AgentsDef{} }, "@agents on Duty yet (D158, D180)"},
+		{"@party", func(td *ir.TypeDef) { td.Party = &ir.PartyDef{} }},
+		{"@conversations", func(td *ir.TypeDef) { td.Conversations = &ir.ConversationsDef{} }},
+		{"@runRequests", func(td *ir.TypeDef) { td.RunRequests = &ir.RunRequestsDef{} }},
+		{"@agents", func(td *ir.TypeDef) { td.Agents = &ir.AgentsDef{} }},
 	} {
 		t.Run(tc.feature, func(t *testing.T) {
 			schema := table("Duty", tc.edit)
@@ -66,8 +72,12 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 			}
 			api := ir.NewSchema("app-api", ir.SchemaKindAPI)
 			got := goFeatureFindings(api, Input{GoServer: true, Database: schema})
-			if len(got) != 1 || !strings.Contains(got[0], "the Go server of app-api, over app-db, does not serve "+tc.want) {
-				t.Fatalf("the Go server: %v, want %q", got, tc.want)
+			if want := "the Go server of app-api, over app-db, serves " + tc.feature + " on Duty through the notifier's host"; len(got) != 1 || !strings.Contains(got[0], want) {
+				t.Fatalf("the Go server: %v, want %q", got, want)
+			}
+			schema.Types["NoticeWork"] = &ir.TypeDef{Name: "NoticeWork", Role: ir.RoleDBTable, Notifier: &ir.NotifierDef{Part: ir.NotifierDispatch}}
+			if got := goFeatureFindings(api, Input{GoServer: true, Database: schema}); len(got) != 0 {
+				t.Fatalf("the Go server with the notifier: %v", got)
 			}
 			// An API served in TypeScript serves it.
 			if got := goFeatureFindings(api, Input{Database: schema}); len(got) != 0 {
@@ -114,7 +124,7 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 	api.Providers = append(api.Providers, &ir.RuntimeProvider{Name: "relay-b", Implements: "channel", Path: "providers/relay-b"})
 	api.OperationSets = []*ir.OperationSet{{Name: "Duties", Operations: []*ir.FieldDef{{Name: "closeDuty", Autonomy: &ir.OperationAutonomy{}}}}}
 	got := goFeatureFindings(api, Input{GoServer: true})
-	if len(got) != 2 || !strings.Contains(got[0], "the Go server of app-api cannot link runtime provider relay-b (providers/relay-b): its directory holds no Go module") || !strings.Contains(got[1], "@autonomy on Duties.closeDuty yet (D158, D180)") {
+	if len(got) != 2 || !strings.Contains(got[0], "the Go server of app-api cannot link runtime provider relay-b (providers/relay-b): its directory holds no Go module") || !strings.Contains(got[1], "does not serve @autonomy on Duties.closeDuty yet (D158, D183, D192): it holds an agent run's calls of the API's MCP tools, and a Go server serves no MCP endpoint") {
 		t.Fatalf("a provider of no Go module and autonomy: %v", got)
 	}
 }
@@ -129,9 +139,17 @@ func TestGoServerSQLiteErrRefusesRecurrenceAndTheCalendar(t *testing.T) {
 	db.Types["Filing"] = &ir.TypeDef{Name: "Filing", Role: ir.RoleDBTable, Behaviors: []ir.BehaviorRef{{Name: "Recurrence", Implements: true}}, CalendarSources: []ir.CalendarSourceDef{{Occurrences: true}}}
 	db.Types["Note"] = &ir.TypeDef{Name: "Note", Role: ir.RoleDBTable, Searchable: &ir.SearchableDef{}}
 	err := GoServerSQLiteErr(api, db, []string{"sqlite", "postgres"})
-	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Filing: Recurrence, Filing: @calendarSource, Note: @searchable on Postgres alone so far (D152, D155, D187)") {
+	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Filing: Recurrence, Filing: @calendarSource, Note: @searchable on Postgres alone so far (D152, D155, D157, D158, D187, D192)") {
 		t.Fatalf("sqlite first: %v", err)
 	}
+	// The parties' and agents' tables are Postgres's alone too (D192).
+	db.Types["Contact"] = &ir.TypeDef{Name: "Contact", Role: ir.RoleDBTable, Party: &ir.PartyDef{}}
+	db.Types["Run"] = &ir.TypeDef{Name: "Run", Role: ir.RoleDBTable, Agents: &ir.AgentsDef{Part: ir.AgentRuns}}
+	if err := GoServerSQLiteErr(api, db, []string{"sqlite"}); err == nil || !strings.Contains(err.Error(), "Contact: @party, Filing: Recurrence, Filing: @calendarSource, Note: @searchable, Run: @agents") {
+		t.Fatalf("parties and agents on sqlite: %v", err)
+	}
+	delete(db.Types, "Contact")
+	delete(db.Types, "Run")
 	if err := GoServerSQLiteErr(api, db, []string{"postgres", "sqlite"}); err != nil {
 		t.Fatalf("postgres first: %v", err)
 	}
@@ -153,7 +171,7 @@ func TestGoServerSQLiteErrRefusesSearch(t *testing.T) {
 	db := ir.NewSchema("app-db", ir.SchemaKindDB)
 	db.Types["Note"] = &ir.TypeDef{Name: "Note", Role: ir.RoleDBTable, Searchable: &ir.SearchableDef{}}
 	err := GoServerSQLiteErr(api, db, []string{"sqlite", "postgres"})
-	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Note: @searchable on Postgres alone so far (D152, D155, D187)") {
+	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Note: @searchable on Postgres alone so far (D152, D155, D157, D158, D187, D192)") {
 		t.Fatalf("sqlite first: %v", err)
 	}
 	if err := GoServerSQLiteErr(api, db, []string{"postgres", "sqlite"}); err != nil {

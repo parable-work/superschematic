@@ -35,7 +35,10 @@ quoted: the `Order` class is the `"order"` table.
 - A class that other tables extend, like `Auditable`, is not a table: its
   fields become columns of each table that extends it. `createdAt` and
   `updatedAt` are audit timestamps: a required one defaults to
-  `CURRENT_TIMESTAMP`, and the ORM's `UpdateOne` sets `updatedAt`.
+  `CURRENT_TIMESTAMP`, and every update sets `updatedAt` from the
+  database's clock too (`statement_timestamp()` on Postgres, `'now'` on
+  SQLite), so a row's times never mix the database's clock with the
+  server's.
 - `@unique` on a field adds a unique constraint on its column.
 - The class comment becomes `COMMENT ON TABLE`.
 

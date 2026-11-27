@@ -642,7 +642,7 @@ fn many_rows_are_upserted_a_statement_a_batch() {
         assert!(
             statements[1].contains("VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8), (?9, ")
                 && statements[1].contains(
-                    "ON CONFLICT (account_id, external_id) WHERE deleted_at IS NULL DO UPDATE SET amount_cents = EXCLUDED.amount_cents, updated_at = ?25"
+                    "ON CONFLICT (account_id, external_id) WHERE deleted_at IS NULL DO UPDATE SET amount_cents = EXCLUDED.amount_cents, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), updated_by = ?25"
                 ),
             "{}",
             statements[1]
