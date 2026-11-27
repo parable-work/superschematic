@@ -24,6 +24,7 @@ const (
 	uuidScalar     = "Identity.UUID"
 	dateTimeScalar = "Temporal.DateTime"
 	floatScalar    = "Generic.Float64"
+	sha256Scalar   = "Crypto.SHA256"
 )
 
 // Expand adds the search index to a schema with a @searchable table when
@@ -41,7 +42,7 @@ func Expand(schema *ir.Schema) []string {
 	for _, td := range tables {
 		fill(schema, td.Searchable.Queue)
 	}
-	scalars := []string{uuidScalar, dateTimeScalar, floatScalar}
+	scalars := []string{uuidScalar, dateTimeScalar, floatScalar, sha256Scalar}
 	for _, name := range scalars {
 		if schema.Scalars[name] == nil {
 			schema.Scalars[name] = &ir.ScalarDef{Name: name}
@@ -98,7 +99,7 @@ func indexTable(owner string) *ir.TypeDef {
 			{Name: ir.SearchScopeField, Description: "The value of its scope field as text; null for none.", TypeRef: ir.TypeRef{Name: "string"}},
 			{Name: ir.SearchAudienceField, Description: "Its effective audience, copied by its table's trigger: null for everyone (D156).", TypeRef: ir.TypeRef{Name: uuidScalar, IsArray: true}},
 			{Name: ir.SearchAgentsField, Description: "Its effective agent access, copied by its table's trigger (D156).", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Default: text(ir.AgentsFollowRole)},
-			{Name: ir.SearchTextHashField, Description: "The SHA-256 of the text its embedding is of; null until embedded.", TypeRef: ir.TypeRef{Name: "string"}},
+			{Name: ir.SearchTextHashField, Description: "The SHA-256 of the text its embedding is of; null until embedded.", TypeRef: ir.TypeRef{Name: sha256Scalar}},
 			{Name: ir.SearchEmbeddingField, Description: "Its embedding, of unit length; null until embedded, or with embeddings off.", TypeRef: ir.TypeRef{Name: floatScalar, IsArray: true}},
 			{Name: ir.SearchEmbeddingModelField, Description: "The model its embedding is from.", TypeRef: ir.TypeRef{Name: "string"}},
 			{Name: ir.SearchIndexedAtField, Description: "When its text was last indexed.", TypeRef: ir.TypeRef{Name: dateTimeScalar}, Required: true, Default: text(codegen.DefaultNow)},

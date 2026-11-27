@@ -7,12 +7,14 @@ import {
   addNestedErrors,
 } from 'superscalar/validation';
 import type { ScalarValidationResult, ValidationResult } from 'superscalar/validation';
-import { expectNumber, expectString } from '../primitives';
+import { expectString } from '../primitives';
 import { load as loadYaml } from 'js-yaml';
 import { ParseError } from '../errors';
 import type { TicketProvenanceRecords, JSDate, Ticket } from '../../types';
 
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
+
+import { validateGenericProbabilityRequired, validateGenericProbability } from '../scalars/generic_probability';
 
 import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
 
@@ -73,7 +75,12 @@ export function validateTicketProvenanceRecords(value: TicketProvenanceRecords |
     }
   }
 
-  expectNumber(errors, "confidence", value.confidence);
+  if (value.confidence !== null && value.confidence !== undefined) {
+    const [valid, fieldErrors] = validateGenericProbability(value.confidence);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "confidence", fieldErrors);
+    }
+  }
 
   expectString(errors, "review", value.review);
 

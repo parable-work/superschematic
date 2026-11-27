@@ -428,10 +428,12 @@ func (r *UserRoleGrantRepository) GetOne(ctx context.Context, id types.IdentityU
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple UserRoleGrant records by their IDs in a single query
+// GetManyByIDs retrieves multiple UserRoleGrant records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *UserRoleGrantRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.UserRoleGrant, error) {
+	resultMap := make(map[types.IdentityUUID]*types.UserRoleGrant, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.UserRoleGrant{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -443,7 +445,22 @@ func (r *UserRoleGrantRepository) GetManyByIDs(ctx context.Context, ids []types.
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *UserRoleGrantRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.UserRoleGrant, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -514,7 +531,6 @@ func (r *UserRoleGrantRepository) GetManyByIDs(ctx context.Context, ids []types.
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -1779,7 +1795,9 @@ func (r *UserRoleGrantRepository) heldOfKey(ctx context.Context, on UserRoleGran
 	return row, nil
 }
 
-// CreateMany inserts multiple UserRoleGrant records in a single statement
+// CreateMany inserts multiple UserRoleGrant records and returns them in the
+// inputs' order: a statement of at most 16383 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *UserRoleGrantRepository) CreateMany(ctx context.Context, inputs []*types.UserRoleGrant) ([]*types.UserRoleGrant, error) {
 	if len(inputs) == 0 {
 		return []*types.UserRoleGrant{}, nil
@@ -1832,18 +1850,40 @@ func (r *UserRoleGrantRepository) CreateMany(ctx context.Context, inputs []*type
 		}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 16383 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.UserRoleGrant, error) {
+		return (&UserRoleGrantRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "user_id", "role_id", "granted_at"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 16383 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *UserRoleGrantRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.UserRoleGrant, error) {
+	results := make([]*types.UserRoleGrant, 0, len(batch))
+	for start := 0; start < len(batch); start += 16383 {
+		created, err := r.createBatch(ctx, batch[start:min(start+16383, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *UserRoleGrantRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.UserRoleGrant, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO user_role_grant (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"id", "user_id", "role_id", "granted_at"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -1855,48 +1895,17 @@ func (r *UserRoleGrantRepository) CreateMany(ctx context.Context, inputs []*type
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.UserRoleGrant{}
+	results := make([]*types.UserRoleGrant, 0, len(batch))
 	for rows.Next() {
-		result := &types.UserRoleGrant{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		var tempRelUser *types.IdentityUUID
-		var tempRelRole *types.IdentityUUID
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.Id,
-
-			&tempRelUser,
-
-			&tempRelRole,
-
-			&result.GrantedAt,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		// Set relationship IDs from scanned FK values
-		if tempRelUser != nil {
-			result.User.Id = userRoleGrantUUIDPtr(*tempRelUser)
-		}
-		if tempRelRole != nil {
-			result.Role.Id = userRoleGrantUUIDPtr(*tempRelRole)
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

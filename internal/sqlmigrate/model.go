@@ -1,5 +1,5 @@
 // Package sqlmigrate plans the migration of a DB service's database from
-// one version of its schema to another (D27 in docs/DECISIONS.md).
+// one version of its schema to another (D27).
 //
 // Both versions are resolved to a [Model], the relational schema sqlgen
 // builds from the IR before it renders create.sql. [Diff] compares two

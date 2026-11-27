@@ -208,8 +208,26 @@ pub fn looks_like_code(text: &str) -> bool {
     (4..=12).contains(&text.len()) && text.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
+/// The minutes of the day of a time of day: `HH:MM`, or the `HH:MM:SS` a
+/// `Temporal.Time` is stored as, its seconds dropped.
 fn minutes_of(text: &str) -> Option<u32> {
-    let (hour, minute) = text.split_once(':')?;
+    let (hour, rest) = text.split_once(':')?;
+    let minute = match rest.split_once(':') {
+        Some((minute, seconds)) => {
+            let (whole, fraction) = seconds.split_once('.').unwrap_or((seconds, "0"));
+            if whole.len() != 2
+                || fraction.is_empty()
+                || !whole
+                    .chars()
+                    .chain(fraction.chars())
+                    .all(|c| c.is_ascii_digit())
+            {
+                return None;
+            }
+            minute
+        }
+        None => rest,
+    };
     if hour.is_empty()
         || hour.len() > 2
         || minute.len() != 2

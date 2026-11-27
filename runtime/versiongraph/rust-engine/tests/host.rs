@@ -492,3 +492,252 @@ fn primary_refs_and_entity_patches_read_an_entitys_history_on_the_fixed_layout_o
     );
     tx.commit().expect("commit");
 }
+
+/// A host that keeps the statements it executes.
+struct Counting<'h> {
+    host: &'h mut dyn HostTx,
+    executed: Vec<String>,
+}
+
+impl Counting<'_> {
+    /// How many statements it executed that begin with `prefix` and name
+    /// `table`.
+    fn count(&self, prefix: &str, table: &str) -> usize {
+        self.executed
+            .iter()
+            .filter(|sql| sql.starts_with(prefix) && sql.contains(table))
+            .count()
+    }
+}
+
+impl HostTx for Counting<'_> {
+    fn query(&mut self, sql: &str, args: &[SqlValue]) -> Result<Vec<Vec<SqlValue>>, ClientError> {
+        self.host.query(sql, args)
+    }
+
+    fn execute(&mut self, sql: &str, args: &[SqlValue]) -> Result<u64, ClientError> {
+        self.executed.push(sql.to_owned());
+        self.host.execute(sql, args)
+    }
+
+    fn begin(&mut self) -> Result<(), ClientError> {
+        self.host.begin()
+    }
+
+    fn commit(&mut self) -> Result<(), ClientError> {
+        self.host.commit()
+    }
+
+    fn rollback(&mut self) -> Result<(), ClientError> {
+        self.host.rollback()
+    }
+}
+
+/// Patches, a snapshot's entries and released rows, more of each than one
+/// statement takes, are written 100 to a statement, in the order given,
+/// and read back as given, each column of the type one statement a row
+/// stored: keys of digits alone text, versions and sequences integers. A
+/// released key the upserts repeat keeps its first row's place and takes
+/// its last row, which on Postgres one statement could not write twice.
+fn batched_writes(dialect: Dialect, host: &mut dyn HostTx) {
+    use superschematic_versiongraph_engine::storage::{
+        NewCommit, NewRef, Patch, SnapshotEntry, Storage,
+    };
+
+    const N: i64 = 250;
+    let operations = ["ADD", "UPDATE", "DELETE"];
+    let patches: Vec<Patch> = (0..N)
+        .map(|i| Patch {
+            commit: String::new(),
+            kind: "step".to_owned(),
+            entity_key: (i + 1).to_string(),
+            entity_id: (1000 + i).to_string(),
+            entity_version: i + 1,
+            operation: operations[(i % 3) as usize].to_owned(),
+        })
+        .collect();
+    let entries: Vec<SnapshotEntry> = patches
+        .iter()
+        .map(|p| SnapshotEntry {
+            kind: p.kind.clone(),
+            entity_key: p.entity_key.clone(),
+            entity_id: p.entity_id.clone(),
+            entity_version: p.entity_version,
+        })
+        .collect();
+    let mut upsert: Vec<serde_json::Value> = (1..=N)
+        .map(|i| json!({"entity_key": i.to_string(), "heading": format!("Part {i}"), "rank": i.to_string()}))
+        .collect();
+    upsert.push(json!({"entity_key": "200", "heading": "Again", "rank": "200"}));
+    let delete: Vec<String> = (1..=150).map(|i: i64| i.to_string()).collect();
+
+    let adapter = adapter(dialect);
+    let mut counting = Counting {
+        host,
+        executed: Vec::new(),
+    };
+    let (commit, patches_read, entries_read) = {
+        let storage = adapter.bind(HostClient::new(&mut counting));
+        ready(async {
+            let mut tx = storage.begin().await?;
+            let line = tx
+                .create_ref(NewRef {
+                    root: BREAD.to_owned(),
+                    name: "batch".to_owned(),
+                    actor: COOK.to_owned(),
+                    ..NewRef::default()
+                })
+                .await?;
+            let commit = tx
+                .insert_commit(NewCommit {
+                    root: BREAD.to_owned(),
+                    ref_id: line.id,
+                    content_hash: "h".to_owned(),
+                    sequence: Some(1),
+                    actor: COOK.to_owned(),
+                    ..NewCommit::default()
+                })
+                .await?
+                .id;
+            tx.insert_patches(&commit, &patches).await?;
+            tx.insert_snapshot(&commit, &entries).await?;
+            let patches = tx.patches(std::slice::from_ref(&commit)).await?;
+            let entries = tx.snapshot(&commit).await?;
+            tx.commit().await?;
+            Ok::<_, Error>((commit, patches, entries))
+        })
+        .expect("one poll")
+        .expect("write and read the patches and the snapshot")
+    };
+    assert_eq!(counting.count("INSERT INTO", "graph_patch"), 3);
+    assert_eq!(counting.count("INSERT INTO", "graph_snapshot_entry"), 3);
+    let mut patches_read = patches_read;
+    patches_read.sort_by_key(|p| p.entity_version);
+    for p in &mut patches_read {
+        assert_eq!(p.commit, commit);
+        p.commit.clear();
+    }
+    assert_eq!(patches_read, patches);
+    let mut entries_read = entries_read;
+    entries_read.sort_by_key(|e| e.entity_version);
+    assert_eq!(entries_read, entries);
+
+    let write =
+        |sequence: i64, upsert: Vec<serde_json::Value>, delete: Vec<String>| ReleasedWrite {
+            root: BREAD.to_owned(),
+            commit: commit.clone(),
+            sequence,
+            replace: false,
+            upsert,
+            delete,
+        };
+    write_released(
+        &adapter,
+        &mut counting,
+        "part",
+        write(7, upsert, Vec::new()),
+    )
+    .expect("upsert the released rows");
+    assert_eq!(counting.count("INSERT INTO", "graph_released"), 3);
+    write_released(
+        &adapter,
+        &mut counting,
+        "part",
+        write(8, Vec::new(), delete),
+    )
+    .expect("delete released rows");
+    assert_eq!(counting.count("DELETE FROM", "graph_released"), 2);
+
+    let order = match dialect {
+        Dialect::Sqlite => "rowid",
+        Dialect::Postgres => "ctid",
+    };
+    for table in ["graph_patch", "graph_snapshot_entry"] {
+        let rows = counting
+            .query(
+                &format!("SELECT entity_key, entity_version FROM \"{table}\" ORDER BY {order}"),
+                &[],
+            )
+            .expect("read the rows");
+        let want: Vec<Vec<SqlValue>> = (1..=N)
+            .map(|i| vec![SqlValue::Text(i.to_string()), SqlValue::Int(i)])
+            .collect();
+        assert_eq!(rows, want, "{table}");
+    }
+    let rows = counting
+        .query(
+            &format!("SELECT entity_key, sequence, data FROM \"graph_released\" ORDER BY {order}"),
+            &[],
+        )
+        .expect("read the released rows");
+    let want: Vec<Vec<SqlValue>> = (151..=N)
+        .map(|i| {
+            let heading = if i == 200 {
+                "Again".to_owned()
+            } else {
+                format!("Part {i}")
+            };
+            vec![
+                SqlValue::Text(i.to_string()),
+                SqlValue::Int(7),
+                SqlValue::Text(format!(
+                    "{{\"heading\":\"{heading}\",\"parent_key\":null,\"rank\":\"{i}\"}}"
+                )),
+            ]
+        })
+        .collect();
+    assert_eq!(rows, want);
+}
+
+#[cfg(feature = "rusqlite")]
+#[test]
+fn patches_a_snapshot_and_released_rows_are_written_a_hundred_to_a_statement_on_sqlite() {
+    use superschematic_versiongraph_engine::sqlite;
+    use support::hosts::RusqliteHost;
+
+    let mut connection = rusqlite::Connection::open_in_memory().expect("open a database");
+    connection
+        .execute_batch("PRAGMA foreign_keys = ON")
+        .expect("foreign keys on");
+    let name = &fixed::default_table_name;
+    let released = sqlite::released_layout(name).expect("the released layout");
+    for statement in sqlite::layout(name)
+        .expect("the layout")
+        .into_iter()
+        .chain(released)
+    {
+        connection
+            .execute_batch(&statement)
+            .expect("create the layout");
+    }
+    let tx = connection.transaction().expect("the host's transaction");
+    batched_writes(Dialect::Sqlite, &mut RusqliteHost { connection: &tx });
+    tx.commit().expect("commit");
+}
+
+#[test]
+fn patches_a_snapshot_and_released_rows_are_written_a_hundred_to_a_statement_on_postgres() {
+    let Some(dsn) = support::database(
+        "patches_a_snapshot_and_released_rows_are_written_a_hundred_to_a_statement_on_postgres",
+    ) else {
+        return;
+    };
+    let schema = PostgresSchema::create(&dsn, "vg_rust_host");
+    let mut client = schema.connect();
+    let name = &fixed::default_table_name;
+    let mut layout = fixed::layout(Dialect::Postgres, name).expect("the layout");
+    layout.extend(fixed::released_layout(Dialect::Postgres, name).expect("the released layout"));
+    let mut tx = client.transaction().expect("a transaction");
+    for statement in &layout {
+        tx.batch_execute(statement).expect("create the layout");
+    }
+    tx.commit().expect("commit the layout");
+    let mut tx = client.transaction().expect("the host's transaction");
+    batched_writes(
+        Dialect::Postgres,
+        &mut PostgresHost {
+            transaction: &mut tx,
+        },
+    );
+    tx.commit().expect("commit");
+}

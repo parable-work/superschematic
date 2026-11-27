@@ -616,8 +616,9 @@ fn sql_type(postgres: bool, column: &Column) -> &'static str {
         return t.timestamp;
     }
     match column.type_name.as_str() {
-        "string" => t.text,
-        "number" => t.number,
+        // The scalars a declaration types a text field by (D201) are text.
+        "string" | "Crypto.SHA256" | "Temporal.TimeZone" | "Text.Markdown" => t.text,
+        "number" | "Generic.Probability" => t.number,
         "Generic.Int64" => t.integer,
         "boolean" => t.boolean,
         _ => t.json,

@@ -130,7 +130,7 @@
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -439,7 +439,7 @@
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -709,7 +709,7 @@
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -1018,7 +1018,7 @@
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",

@@ -1,5 +1,5 @@
-// Package migrate applies a migration plan to a database (D27 in
-// docs/DECISIONS.md). The compiler writes plans (superschematic migrate
+// Package migrate applies a migration plan to a database (D27).
+// The compiler writes plans (superschematic migrate
 // plan); this package reads them, checks them and runs their steps, and it
 // never computes one. runtime/migrate/README.md is the contract between the
 // two: the plan document, its canonical JSON and hashes, the state tables

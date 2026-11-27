@@ -8,11 +8,10 @@ public. Pull requests also build the site (the `docs` job in `ci.yml`); that
 is a recorded deviation from superscalar, which only builds docs in
 `release.yml` (D9).
 
-`docs/DECISIONS.md` holds the decisions that are not built yet. A built
-decision leaves it; every entry up to D119 is in the file at commit
-e8e685a51. `docs/extension-model.md` is the design of the extension seam
-and `docs/stack-model.md` is the design of the stack model (D30). None is
-a Starlight page; source comments cite them by path.
+Decisions are GitHub issues labeled `decision` ("Decisions" in
+`CONTRIBUTING.md`). `docs/extension-model.md` is the design of the
+extension seam and `docs/stack-model.md` is the design of the stack model
+(D30). Neither is a Starlight page; source comments cite them by path.
 
 ## Local development
 
@@ -53,7 +52,6 @@ docs/
   src/components/Snippet.astro  quotes a file of examples/acme-shop, examples/engine-notes, examples/engine-jobs or examples/migrations
   src/lib/snippet.ts      picks the declaration or line range a page quotes
   src/content/i18n/en.json  empty UI-string overrides; keeps the i18n collection non-empty
-  DECISIONS.md            decisions not built yet (not a Starlight page)
   extension-model.md      extension seam design (not a Starlight page)
   stack-model.md          stack model design (not a Starlight page)
 ```

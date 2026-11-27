@@ -13,7 +13,7 @@
 # directories the build reads; BuildKit, Docker's default builder, reads it.
 #
 # The generated code links superscalar's static archive, and the version
-# graph's, through cgo (D3 in docs/DECISIONS.md), so the server cannot build
+# graph's, through cgo (D3), so the server cannot build
 # with CGO_ENABLED=0, and no module the module proxy serves carries them.
 # superschematic 1.2.3, which wrote this file, ships both for each
 # platform beside its binaries, built with one Rust release so that they

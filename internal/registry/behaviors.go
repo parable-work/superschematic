@@ -17,8 +17,8 @@ import (
 )
 
 // BehaviorSpec registers one behavior: code that adds fields, operations,
-// checks and storage to a type when an engine runs the schema (D16 in
-// docs/DECISIONS.md). The declaration is one JSON document that sits beside
+// checks and storage to a type when an engine runs the schema (D16).
+// The declaration is one JSON document that sits beside
 // the Go package registering it, which embeds it; its shape is
 // BehaviorDeclaration. See docs/extension-model.md section 3.16.
 type BehaviorSpec struct {

@@ -217,9 +217,18 @@ func LooksLikeCode(text string) bool {
 	return true
 }
 
-// minutesOf is HH:MM as minutes of the day, false for any other text.
+// minutesOf is a time of day as minutes of the day, false for any other
+// text: HH:MM, or the HH:MM:SS a Temporal.Time is stored as, its seconds
+// dropped.
 func minutesOf(text string) (int, bool) {
 	hour, minute, ok := strings.Cut(text, ":")
+	if rest, seconds, more := strings.Cut(minute, ":"); more {
+		whole, fraction, dotted := strings.Cut(seconds, ".")
+		if len(whole) != 2 || (dotted && fraction == "") || strings.Trim(whole+fraction, "0123456789") != "" {
+			return 0, false
+		}
+		minute = rest
+	}
 	if !ok || hour == "" || len(hour) > 2 || len(minute) != 2 || strings.Trim(hour+minute, "0123456789") != "" {
 		return 0, false
 	}

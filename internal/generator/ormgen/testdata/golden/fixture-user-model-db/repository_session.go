@@ -373,10 +373,12 @@ func (r *SessionRepository) GetOne(ctx context.Context, id types.IdentityUUID, o
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple Session records by their IDs in a single query
+// GetManyByIDs retrieves multiple Session records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *SessionRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Session, error) {
+	resultMap := make(map[types.IdentityUUID]*types.Session, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.Session{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -388,7 +390,22 @@ func (r *SessionRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *SessionRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.Session, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -471,7 +488,6 @@ func (r *SessionRepository) GetManyByIDs(ctx context.Context, ids []types.Identi
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -1840,7 +1856,9 @@ func (r *SessionRepository) heldOfKey(ctx context.Context, on SessionUniqueKey, 
 	return row, nil
 }
 
-// CreateMany inserts multiple Session records in a single statement
+// CreateMany inserts multiple Session records and returns them in the
+// inputs' order: a statement of at most 10922 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *SessionRepository) CreateMany(ctx context.Context, inputs []*types.Session) ([]*types.Session, error) {
 	if len(inputs) == 0 {
 		return []*types.Session{}, nil
@@ -1908,18 +1926,40 @@ func (r *SessionRepository) CreateMany(ctx context.Context, inputs []*types.Sess
 		}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 10922 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.Session, error) {
+		return (&SessionRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 10922 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *SessionRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.Session, error) {
+	results := make([]*types.Session, 0, len(batch))
+	for start := 0; start < len(batch); start += 10922 {
+		created, err := r.createBatch(ctx, batch[start:min(start+10922, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *SessionRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.Session, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO "session" (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"id", "user_id", "token_hash", "created_at", "expires_at", "last_seen_at", "revoked_at"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -1931,62 +1971,17 @@ func (r *SessionRepository) CreateMany(ctx context.Context, inputs []*types.Sess
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.Session{}
+	results := make([]*types.Session, 0, len(batch))
 	for rows.Next() {
-		result := &types.Session{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		var tempLastSeenAt *types.TemporalDateTime
-		var tempRevokedAt *types.TemporalDateTime
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		var tempRelUser *types.IdentityUUID
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.Id,
-
-			&tempRelUser,
-
-			&result.TokenHash,
-
-			&result.CreatedAt,
-
-			&result.ExpiresAt,
-
-			&tempLastSeenAt,
-
-			&tempRevokedAt,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		if tempLastSeenAt != nil {
-			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-			result.LastSeenAt = tempLastSeenAt
-		}
-		if tempRevokedAt != nil {
-			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-			result.RevokedAt = tempRevokedAt
-		}
-
-		// Set relationship IDs from scanned FK values
-		if tempRelUser != nil {
-			result.User.Id = sessionUUIDPtr(*tempRelUser)
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

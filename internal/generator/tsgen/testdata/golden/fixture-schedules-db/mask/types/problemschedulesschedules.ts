@@ -15,7 +15,7 @@ export function maskSecretsProblemSchedulesSchedules(value: ProblemSchedulesSche
     name: value.name,
     kind: value.kind !== undefined ? value.kind : null,
     spec: value.spec !== undefined ? value.spec : null,
-    timeZone: value.timeZone !== undefined ? value.timeZone : null,
+    timeZone: value.timeZone,
     state: value.state !== undefined ? value.state : null,
     setAt: value.setAt,
     nextAt: value.nextAt,

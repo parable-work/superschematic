@@ -1,5 +1,5 @@
 // Package behaviorlayout is the layout of the tables that compose behaviors
-// (D103 in docs/DECISIONS.md): how a host's adapter maps the pure core's
+// (D103, #587): how a host's adapter maps the pure core's
 // logical names onto a build-time project's tables and columns. A
 // behavior adds no code to any adapter or generator; each reads the layout
 // document this package writes, which the generated TypeScript ORM embeds

@@ -1,7 +1,7 @@
 # Version graph (Python)
 
 `superschematic-versiongraph` (module `superschematic_versiongraph`) is the
-version graph for Python (D17 and D19 in `docs/DECISIONS.md`): the core
+version graph for Python (D17 and D19): the core
 (`runtime/versiongraph/rust`) as a PyO3 extension module built with
 maturin, with typed `compose`, `merge`, `diff`, `content_hash`, `validate`,
 `order_keys` and `arrange` over its JSON contract
@@ -146,8 +146,10 @@ engine = Engine(descriptor, adapter.storage(client), schema_epoch=1, snapshot_ev
 ```
 
 - The SQLite adapter is the TypeScript package's
-  (`runtime/versiongraph/README.md`, "SQLite"), statement for statement and
-  stored form for stored form, so a file one writes the other reads: nine
+  (`runtime/versiongraph/README.md`, "SQLite"), statement for statement
+  (but that it writes patches, snapshot entries and released rows 100 to a
+  statement) and stored form for stored form, so a file one writes the
+  other reads: nine
   `STRICT` tables, the same for every graph, each row carrying its graph's
   name, history written in the statements that change a row, and every
   value stored canonical. It reads only the descriptor's kinds.
