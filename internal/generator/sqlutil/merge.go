@@ -89,6 +89,30 @@ type MergeStep struct {
 	// keeps them. A row a collision stamped deleted is repointed by that
 	// statement, so no row is counted by both.
 	Repoint MergeStatement
+
+	// Reach is the rows the step writes as per-record access holds them
+	// (D156): a merge for a caller held to it refuses, before it writes,
+	// when one of them is a row the caller may not write. Nil for a step
+	// whose rows are the merged rows' own: an Aliased use's aliases and
+	// names (D147), and the pairs of a @manyToMany the merged table
+	// declares, which are `from`'s, which the caller may write.
+	Reach *MergeReach
+}
+
+// MergeReach is the rows of a merge's step as per-record access holds them
+// (D156): the rows of Type that the step's statements repoint or delete, a
+// row that references `from`, deleted rows among them; and for a join
+// table's step, the rows of the declaring type whose pairs name `from`,
+// since a pair is its declaring row's.
+type MergeReach struct {
+	// Type is the table type whose access holds the rows.
+	Type string
+
+	// Rows reads them: SELECT 1 FROM Type's table, unaliased, WHERE a
+	// condition that takes the key of `from` as $1, to which an ORM adds
+	// AND and the condition that keeps a write of Type's rows to its
+	// caller, numbering that condition's values from $2.
+	Rows string
 }
 
 // MergeStatement is one statement of a merge.
@@ -341,6 +365,7 @@ func mergeStep(td *ir.TypeDef, source *TableModel, column *ColumnModel, name str
 		}
 	}
 	step.Repoint = repointOf(source, column.Quoted, ref)
+	step.Reach = &MergeReach{Type: source.Type, Rows: "SELECT 1 FROM " + t + " WHERE " + ref + " = $1"}
 	return step, nil
 }
 
@@ -404,6 +429,9 @@ func SQLiteMergePlanOf(schema *ir.Schema, tables []TableModel, name string) (*Me
 		s.Before = sqliteMergeStatements(step.Before)
 		s.Collisions = sqliteMergeStatements(step.Collisions)
 		s.Repoint.SQL = sqliteMergeSQL(step.Repoint.SQL)
+		if step.Reach != nil {
+			s.Reach = &MergeReach{Type: step.Reach.Type, Rows: sqliteMergeSQL(step.Reach.Rows)}
+		}
 		out.Steps[i] = s
 	}
 	return &out, nil
@@ -574,9 +602,17 @@ func mergeHiddenSteps(schema *ir.Schema, tables []TableModel, target *TableModel
 					}
 				}
 				if other.Type == target.Type {
-					steps = append(steps, side(right, left))
+					// A pair is its declaring row's: the rows of owner
+					// whose pairs name `from` are the rows it writes.
+					step := side(right, left)
+					step.Reach = &MergeReach{
+						Type: owner.Type,
+						Rows: "SELECT 1 FROM " + owner.Quoted + " WHERE " + Qualify(owner.Name, owner.Key) + " IN (SELECT " + left + " FROM " + join + " WHERE " + right + " = $1)",
+					}
+					steps = append(steps, step)
 				}
 				if owner.Type == target.Type {
+					// The pairs `from` declares are its own.
 					steps = append(steps, side(left, right))
 				}
 			case f.HasMany && owner.Type == target.Type:
@@ -587,7 +623,13 @@ func mergeHiddenSteps(schema *ir.Schema, tables []TableModel, target *TableModel
 					continue
 				}
 				quoted := QuoteIdentifier(column)
-				steps = append(steps, MergeStep{Source: other.Type, Field: column, Repoint: repointOf(other, quoted, Qualify(other.Name, column))})
+				qualified := Qualify(other.Name, column)
+				steps = append(steps, MergeStep{
+					Source:  other.Type,
+					Field:   column,
+					Repoint: repointOf(other, quoted, qualified),
+					Reach:   &MergeReach{Type: other.Type, Rows: "SELECT 1 FROM " + other.Quoted + " WHERE " + qualified + " = $1"},
+				})
 			}
 		}
 	}

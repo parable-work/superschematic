@@ -98,7 +98,8 @@ type TagLabelResolveParams struct {
 
 // TagLabelResolveResult is what label's resolve returns.
 type TagLabelResolveResult struct {
-	// Row is the row that holds the name; null when none does.
+	// Row is the row that holds the name; null when none does, and to a caller
+	// held to per-record access who may not read the row that does (D156).
 	Row *TagLabelResolveResultRow `json:"row"`
 }
 
@@ -131,7 +132,8 @@ type TagLabelOperations interface {
 	// first. An alias the row does not hold is answered unchanged.
 	RemoveAlias(ctx context.Context, id types.IdentityUUID, params TagLabelRemoveAliasParams) (*TagLabelRemoveAliasResult, error)
 	// Resolve finds the row whose name or alias a name names, in its normalized
-	// form: a read of the table as a whole that writes nothing.
+	// form: a read of the table as a whole that writes nothing. A row the caller
+	// may not read is none (D156).
 	Resolve(ctx context.Context, params TagLabelResolveParams) (*TagLabelResolveResult, error)
 }
 

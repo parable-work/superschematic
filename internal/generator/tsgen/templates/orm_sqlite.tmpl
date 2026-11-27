@@ -110,6 +110,9 @@ export const {{.Const}}: TableDefinition = {
         ],
 {{- end}}
         repoint: { sql: {{jsonString .Repoint.SQL}}{{if .Repoint.Actor}}, actor: {{jsonString .Repoint.Actor}}{{end}} },
+{{- with .Reach}}
+        reach: { type: {{jsonString .Type}}, rows: {{jsonString .Rows}} },
+{{- end}}
       },
 {{- end}}
     ],

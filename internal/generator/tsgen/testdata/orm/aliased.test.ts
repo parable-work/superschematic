@@ -9,7 +9,8 @@
 // and the generated repository itself (createOrm). So the generator's
 // layout, its DDL, its sub-table of aliases and shared table of names and
 // the adapter are held to one another: a name another row holds is
-// refused with its key; a rename keeps the old name as an alias; resolve
+// refused, naming nothing of that row; a rename keeps the old name as an
+// alias; resolve
 // finds the row a name or an alias names; a removed alias, and a deleted
 // row's names, are freed for another row; and on Postgres a merge moves the
 // aliases of the row merged away, its name among them, to the row that
@@ -27,11 +28,12 @@ import { alice, database, dsn } from './harness';
 
 const names = layout.types.Company!.uses.find(use => use.id === 'name')!.shared!.find(table => table.name === 'names')!;
 
-/** A refusal's code and veto, as either path throws it. */
+/** A refusal's code and veto, as either path throws it, its veto's details and its text. */
 interface Refused {
   readonly code?: string;
   readonly vetoCode?: string;
-  readonly holder?: string;
+  readonly vetoDetails?: Record<string, unknown>;
+  readonly text: string;
 }
 
 /** What a case runs through: on Postgres the generated repository, on bun:sqlite the adapter over the generated layout. */
@@ -60,9 +62,11 @@ async function refusalOf(run: Promise<unknown>): Promise<Refused> {
   try {
     await run;
   } catch (error) {
-    const e = error as { code?: string; details?: { vetoCode?: string; vetoDetails?: { holder?: string } }; refusal?: { code?: string; details?: { vetoCode?: string; vetoDetails?: { holder?: string } } } };
+    type Details = { vetoCode?: string; vetoDetails?: Record<string, unknown> };
+    const e = error as { code?: string; message?: string; details?: Details; refusal?: { code?: string; message?: string; details?: Details } };
     const refusal = e.refusal ?? e;
-    return { code: refusal.code, vetoCode: refusal.details?.vetoCode, holder: refusal.details?.vetoDetails?.holder };
+    const text = `${e.message ?? ''} ${refusal.message ?? ''} ${JSON.stringify(refusal.details ?? {})}`;
+    return { code: refusal.code, vetoCode: refusal.details?.vetoCode, vetoDetails: refusal.details?.vetoDetails, text };
   }
   throw new Error('not refused');
 }
@@ -166,13 +170,17 @@ for (const dialect of dialects) {
       await t?.close();
     });
 
-    test(`a name another row holds, as its name or an alias, is refused with its key, on ${dialect.name}`, async () => {
+    test(`a name another row holds, as its name or an alias, is refused naming nothing of that row, on ${dialect.name}`, async () => {
       const acme = await t.company('Acme', 'Oslo');
       await t.invoke(acme, 'addAlias', { alias: 'Acme Corp' });
       const refused = await refusalOf(t.company('ACME', 'Bergen'));
       expect(refused.code).toBe('vetoed');
       expect(refused.vetoCode).toBe('name_taken');
-      expect(uuidText(String(refused.holder))).toBe(uuidText(acme));
+      // The name alone: neither the key of the row that holds it nor its fields (D156).
+      expect(refused.vetoDetails).toEqual({ name: 'ACME', normalized: 'acme' });
+      expect(refused.text).not.toContain(acme);
+      expect(refused.text).not.toContain(uuidText(acme));
+      expect(refused.text).not.toContain('Oslo');
       expect((await refusalOf(t.company('  acme   corp ', 'Bergen'))).vetoCode).toBe('name_taken');
       const globex = await t.company('Globex', 'Bergen');
       expect((await refusalOf(t.invoke(globex, 'rename', { name: 'acme corp' }))).vetoCode).toBe('name_taken');

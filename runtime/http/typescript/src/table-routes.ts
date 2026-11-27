@@ -291,6 +291,10 @@ function refusalOf(operation: TableOperation, columns: readonly ColumnShape[], e
   if (name === 'NotFoundError') return notFound(`${operation.type} not found`, { cause: error });
   if (name === 'NoUserError') return unauthorized(undefined, { cause: error });
   if (name === 'PageKeyError') return refusedCursor();
+  // A merge that would write a row of another table the caller may not write (D156).
+  if (name === 'MergeError' && (error as { code?: unknown }).code === 'out_of_reach') {
+    return forbidden(error instanceof Error ? error.message : `${operation.type} cannot be merged by its caller`, { cause: error });
+  }
   // A merge of a row into itself, or into a row under it (D147).
   if (name === 'MergeError') return conflict(error instanceof Error ? error.message : `${operation.type} cannot be merged so`, { cause: error });
   // A party's or an agent run's write that leaves a row its grants do not reach (D156).
@@ -677,8 +681,10 @@ export function tableUpdate(orm: object, operation: TableOperation, ctx: Request
  * mergeInto, which repoints every relation that references the one, an
  * Aliased field's aliases and names among them, and deletes it, in the
  * route's transaction; a merge of a row into itself, or into a row that
- * references it through a relation of the table to itself, is 409. It
- * answers the view of the row that stays as the merge left it.
+ * references it through a relation of the table to itself, is 409, and one
+ * that would repoint or delete a row of another table the caller may not
+ * write is 403 (D156). It answers the view of the row that stays as the
+ * merge left it.
  */
 export function tableMerge(orm: object, operation: TableOperation, ctx: RequestContext, request: TableRequest): Promise<unknown> {
   return inTransaction(orm, operation, ctx, async (repository, tx) => {

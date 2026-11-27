@@ -339,6 +339,17 @@ export interface MergeStep {
   readonly collisions?: readonly MergeStatement[];
   /** Repoints every row that references the row merged away. */
   readonly repoint: MergeStatement;
+  /**
+   * The rows the step writes as per-record access holds them (D156): type,
+   * the table whose access holds them, and rows, the read of one of them,
+   * SELECT 1 FROM that table WHERE a condition that takes the key of the row
+   * merged away as $1, which the conditions of the caller's write of type's
+   * rows are added to. A merge for a caller refuses, before it writes, when
+   * one of them is a row the caller may not write. Absent for a step whose
+   * rows are the merged rows' own: an Aliased use's, and the pairs of a
+   * @manyToMany the table declares.
+   */
+  readonly reach?: { readonly type: string; readonly rows: string };
 }
 
 /** What mergeInto of a table that implements Mergeable runs (D147), written at build time from the schema's relations and unique indexes. */
@@ -377,20 +388,30 @@ export interface MergeableRepository<Key> {
    * repoints every other row that references from, deleted rows among
    * them, the rows of a @manyToMany's join table and a @hasMany's
    * back-reference too. Then it deletes from as deleteOne does.
-   * NotFoundError when either is no live row; MergeError when they are one
-   * row, or when into references from through a relation of the table to
-   * itself (it checks no longer cycle); NoUserError, before it writes, when
-   * it stamps a row deleted and no user acts. Its writes of the referencing
-   * tables are set-based, as updateMany's are, and do not go through the
-   * behaviors' core.
+   * NotFoundError when either is no live row, or in an operation one the
+   * caller may not write (D156); MergeError when they are one row, when
+   * into references from through a relation of the table to itself (it
+   * checks no longer cycle), and in an operation when a row it would
+   * repoint or delete is one the caller may not write (out_of_reach,
+   * naming its table); NoUserError, before it writes, when it stamps a row
+   * deleted and no user acts. Its writes of the referencing tables are
+   * set-based, as updateMany's are, and do not go through the behaviors'
+   * core.
    */
   mergeInto(input: { readonly from: Key; readonly into: Key }): Promise<MergeResult>;
 }
 
-/** The error of a merge the repository refuses before it writes: of a row into itself (self), or into a row that references the one merged away through a relation of the table to itself (self_reference). */
+/**
+ * The error of a merge the repository refuses before it writes: of a row
+ * into itself (self), into a row that references the one merged away
+ * through a relation of the table to itself (self_reference), or, in an
+ * operation (D156), one that would repoint or delete a row of another
+ * table the caller may not write (out_of_reach), which a table operation
+ * answers 403.
+ */
 export class MergeError extends Error {
   constructor(
-    readonly code: 'self' | 'self_reference',
+    readonly code: 'self' | 'self_reference' | 'out_of_reach',
     message: string
   ) {
     super(message);
@@ -1679,6 +1700,13 @@ class TableRepository {
   private peer(member: string): TableRepository {
     const peer = this.peers[member];
     if (!peer) throw new Error(`orm: ${this.def.name}'s relation reads ${member}, which the ORM has no repository of`);
+    return peer;
+  }
+
+  /** The repository of the table of type name, on the same runner and caller. */
+  private peerOfType(name: string): TableRepository {
+    const peer = Object.values(this.peers).find(repository => repository.def.name === name);
+    if (!peer) throw new Error(`orm: ${this.def.name}'s merge writes rows of ${name}, which the ORM has no repository of`);
     return peer;
   }
 
@@ -3218,6 +3246,11 @@ class TableRepository {
     const from = this.encode(input.from, keyColumn, 'from');
     const into = this.encode(input.into, keyColumn, 'into');
     if (String(from) === String(into)) throw new MergeError('self', `${this.def.name} ${String(input.from)} cannot be merged into itself`);
+    // A row the caller may not write is not there (D156): each of the two,
+    // as a delete of from and an update of into would ask, before a
+    // statement repoints a row of another table.
+    await this.requireReach(input.from, true);
+    await this.requireReach(input.into, true);
     // The merge stamps a row deleted, which records who deleted it.
     if (merge.requiresUser) this.requireUser();
     const fold = async (repo: TableRepository): Promise<MergeResult> => {
@@ -3227,6 +3260,23 @@ class TableRepository {
       const found = locked.rows.map(row => Object.values(row as Record<string, unknown>)[0] === true);
       if (!found.includes(true)) throw new NotFoundError(`${this.def.name} ${String(input.from)} not found`);
       if (!found.includes(false)) throw new NotFoundError(`${this.def.name} ${String(input.into)} not found`);
+      // Every row a step would repoint or delete is one the caller may
+      // write (D156), read with both rows locked: one the caller may not
+      // write refuses the merge, naming its table, before a statement writes.
+      for (const step of merge.steps) {
+        if (step.reach === undefined) continue;
+        // The conditions are written by the repository of the step's
+        // table, which keeps to the same caller; the read runs here.
+        const held = this.peerOfType(step.reach.type);
+        const values: unknown[] = [from];
+        const conditions = held.accessConditions(values, 1, true);
+        if (conditions.length === 0) continue;
+        const writable = fill(this.group, conditions.join(this.clauses.and));
+        const { rows } = await run(runner, `${step.reach.rows} AND NOT COALESCE(${writable}, FALSE) LIMIT 1`, values);
+        if (rows.length > 0) {
+          throw new MergeError('out_of_reach', `${this.def.name} ${String(input.from)} cannot be merged away: ${step.reach.type} holds a row that references it, which the caller may not write`);
+        }
+      }
       const args = (statement: MergeStatement): unknown[] => {
         if (statement.actor === undefined) return [from, into];
         if (repo.user === undefined) return [from, into, null];
@@ -3485,10 +3535,31 @@ class TableRepository {
    * (D104), a command without a row, in a transaction, as options.caller,
    * and resolves to its result: a read-only one writes nothing, and a
    * writing one writes only the rows its calls write, each held to its
-   * version.
+   * version. The core reads every row, so an answer that names one of the
+   * table's rows (the layout's answersRow, Aliased's resolve) keeps to the
+   * caller (D156): a row the caller does not see is null there, as for an
+   * answer of no row.
    */
   private async operateTable(useId: string, operation: string, params: unknown, options: RulesTableCallOptions = {}): Promise<unknown> {
-    return this.atomically(async repo => runTableOperation(repo.rulesHost(), repo.def.name, useId, operation, params, options.caller ?? repo.caller()));
+    return this.atomically(async repo => {
+      const result = await runTableOperation(repo.rulesHost(), repo.def.name, useId, operation, params, options.caller ?? repo.caller());
+      const row = this.behaviors?.uses.find(use => use.id === useId)?.operations.find(op => op.name === operation)?.answersRow;
+      return row === undefined ? result : this.keepAnsweredRow(result, row);
+    });
+  }
+
+  /** result, a table operation's answer, with the row it names under member null when the caller does not see it (D156). */
+  private async keepAnsweredRow(result: unknown, member: string): Promise<unknown> {
+    if (!this.held || result === null || typeof result !== 'object') return result;
+    const named = (result as Record<string, unknown>)[member];
+    if (named === null || named === undefined || typeof named !== 'object') return result;
+    try {
+      await this.requireReach((named as Record<string, unknown>).key, false);
+      return result;
+    } catch (error) {
+      if (!(error instanceof NotFoundError)) throw error;
+      return { ...(result as Record<string, unknown>), [member]: null };
+    }
   }
 
   /**

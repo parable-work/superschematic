@@ -3,7 +3,8 @@
 //! tables: the declaration file's members, among them the value a create
 //! gives (`fromCreate`) and the shared table's holder; the config's
 //! normalize; a create that takes its name, and one refused for a name
-//! another row holds, as a name or an alias, with that row's key; rename,
+//! another row holds, as a name or an alias, naming nothing of that row;
+//! rename,
 //! which keeps the old name as an alias, makes an alias the name and only
 //! rewrites one whose normalized form stays; addAlias and removeAlias, a
 //! removed alias freeing its name for another row; the answers that change
@@ -170,9 +171,11 @@ fn a_create_needs_a_name_that_names_something() {
 }
 
 /// A name another row holds, as its name or an alias, in its normalized
-/// form, refuses a create, a rename and an addAlias, with that row's key.
+/// form, refuses a create, a rename and an addAlias. The refusal says the
+/// name is taken and names nothing of the row that holds it, neither its key
+/// nor a field (D156): the caller may be one that row is hidden from.
 #[test]
-fn a_name_another_row_holds_is_refused_with_its_key() {
+fn a_name_another_row_holds_is_refused_naming_nothing_of_that_row() {
     let mut host = host(json!({}));
     changed(create(&mut host, "c1", json!({"name": "Acme"})));
     changed(invoke(
@@ -183,13 +186,13 @@ fn a_name_another_row_holds_is_refused_with_its_key() {
     ));
     let (code, details) = veto_of(create(&mut host, "c2", json!({"name": "ACME"})));
     assert_eq!(code, "name_taken");
-    assert_eq!(
-        details,
-        json!({"name": "ACME", "normalized": "acme", "holder": "c1"})
+    assert_eq!(details, json!({"name": "ACME", "normalized": "acme"}));
+    let error = refused(create(&mut host, "c2", json!({"name": " acme   corp"})));
+    assert_eq!(error["details"]["vetoCode"], "name_taken");
+    assert!(
+        !error.to_string().contains("c1"),
+        "the refusal names the row that holds the name: {error}"
     );
-    let (code, details) = veto_of(create(&mut host, "c2", json!({"name": " acme   corp"})));
-    assert_eq!(code, "name_taken");
-    assert_eq!(details["holder"], "c1");
     changed(create(&mut host, "c2", json!({"name": "Globex"})));
     let (code, details) = veto_of(invoke(
         &mut host,
@@ -198,7 +201,10 @@ fn a_name_another_row_holds_is_refused_with_its_key() {
         json!({"name": "acme corp"}),
     ));
     assert_eq!(code, "name_taken");
-    assert_eq!(details["holder"], "c1");
+    assert_eq!(
+        details,
+        json!({"name": "acme corp", "normalized": "acme corp"})
+    );
     let (code, _) = veto_of(invoke(
         &mut host,
         "c2",
@@ -433,7 +439,7 @@ fn two_creates_of_one_name_run_one_after_the_other() {
     changed(create(&mut host, "c1", json!({"name": "Acme"})));
     let (code, details) = veto_of(create(&mut host, "c2", json!({"name": "Acme"})));
     assert_eq!(code, "name_taken");
-    assert_eq!(details["holder"], "c1");
+    assert_eq!(details, json!({"name": "Acme", "normalized": "acme"}));
 }
 
 /// No update sets the name: only rename does.

@@ -92,7 +92,7 @@ var aliasedRulesTest string
 // TestRepositoriesMergeAnAliasedTable runs fixture-aliased-db's Company,
 // whose name is an Aliased field and which implements Mergeable (D147), on
 // both dialects: a name another company holds, as a name or an alias, is
-// refused with that company's key; a rename keeps the old name as an
+// refused, naming nothing of that company; a rename keeps the old name as an
 // alias, which resolve finds; a removed alias and a deleted company's
 // names are freed; and merge_into, on SQLite and on Postgres, moves the
 // aliases of the company merged away, its name among them, its names and
@@ -124,6 +124,28 @@ var mergeRulesTest string
 // the database the Postgres half is skipped, and the test says so.
 func TestRepositoriesMergeOnSQLiteAndPostgres(t *testing.T) {
 	runBehaviorRepositoriesWith(t, "fixture-merge-sqlite-db", "merge_rules", mergeRulesTest, true)
+}
+
+//go:embed testdata/orm/merge_access_rules.rs
+var mergeAccessRulesTest string
+
+// TestRepositoriesMergeKeepToTheirCaller runs fixture-merge-access-db's
+// labels, notes and brands on Postgres through repositories opened for a
+// caller (D147, D156, D181), as ormgen's TestMergeIntoKeepsToTheCallerOnPostgres
+// holds the Go ORM: a merge of a label the caller may not write, or into
+// one, is not found; one that would repoint a note the caller may not write
+// is refused, out_of_reach naming the table and no key of the note, and
+// writes nothing, where repositories opened for no caller repoint it; a
+// party merges two labels only when its grants reach the notes on the one
+// merged away; and Aliased's resolve answers a party no row for a brand its
+// grants do not reach, a name another brand holds is refused naming nothing
+// of it, and a party whose grants reach two brands merges one into the
+// other.
+//
+// It needs cargo, which it skips without, and runs outside -short. Without
+// the database it compiles the cases and runs none, and says so.
+func TestRepositoriesMergeKeepToTheirCaller(t *testing.T) {
+	runBehaviorRepositoriesWith(t, "fixture-merge-access-db", "merge_access_rules", mergeAccessRulesTest, true)
 }
 
 // runBehaviorRepositories generates fixture's Rust types with both

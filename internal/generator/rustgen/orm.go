@@ -262,6 +262,16 @@ type ormMergeStep struct {
 	Before        []ormMergeStatement `json:"before,omitempty"`
 	Collisions    []ormMergeStatement `json:"collisions,omitempty"`
 	Repoint       ormMergeStatement   `json:"repoint"`
+	// Reach is the rows the step writes as per-record access holds them
+	// (D156, sqlutil.MergeStep.Reach), the runtime's orm::MergeReach; nil
+	// for the merged rows' own.
+	Reach *ormMergeReach `json:"reach,omitempty"`
+}
+
+// ormMergeReach is sqlutil.MergeReach as the runtime reads it.
+type ormMergeReach struct {
+	Type string `json:"type"`
+	Rows string `json:"rows"`
 }
 
 // ormMergeStatement is a merge's statement, its actor "uuid" for a
@@ -294,6 +304,9 @@ func ormMergeOf(plan *sqlutil.MergePlan, tables []sqlutil.TableModel) *ormMerge 
 	out := &ormMerge{Lock: plan.Lock, HistoryActor: plan.HistoryActor, RequiresUser: plan.RequiresUser, Steps: []ormMergeStep{}}
 	for _, step := range plan.Steps {
 		s := ormMergeStep{Source: step.Source, Field: step.Field, SelfReference: step.SelfReference, Repoint: statement(step.Source, step.Repoint)}
+		if step.Reach != nil {
+			s.Reach = &ormMergeReach{Type: step.Reach.Type, Rows: step.Reach.Rows}
+		}
 		for _, before := range step.Before {
 			s.Before = append(s.Before, statement(step.Source, before))
 		}
@@ -334,6 +347,20 @@ type ormFence struct {
 type ormBehaviors struct {
 	Owned    []string `json:"owned"`
 	NoUpsert bool     `json:"noUpsert,omitempty"`
+	// Answers are the table's operations of the table as a whole whose
+	// answer names one of its rows (the layout's answersRow), which the
+	// runtime keeps to the caller (D156).
+	Answers []ormAnsweredRow `json:"answers,omitempty"`
+}
+
+// ormAnsweredRow is an operation of the table as a whole whose answer
+// names one of the table's rows, the runtime's orm::AnsweredRow: the member
+// its use's operations sit under, the operation, and the member of its
+// answer that holds the row, {key, ...} or null (Aliased's resolve's row).
+type ormAnsweredRow struct {
+	Member    string `json:"member"`
+	Operation string `json:"operation"`
+	Row       string `json:"row"`
 }
 
 type ormColumn struct {
@@ -572,6 +599,11 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				// insert.
 				if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 					behaviors.NoUpsert = true
+				}
+				for _, op := range use.Operations {
+					if op.AnswersRow != "" {
+						behaviors.Answers = append(behaviors.Answers, ormAnsweredRow{Member: use.Member, Operation: op.Name, Row: op.AnswersRow})
+					}
 				}
 			}
 			typed.Behaviors, info.Rules = true, true

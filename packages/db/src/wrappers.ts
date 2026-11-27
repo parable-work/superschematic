@@ -560,8 +560,9 @@ export interface AliasedConfig {
  * the table). Its aliases are a sub-table of the row (company_name_aliases)
  * and every name a row holds a row of a table of the use's own, kept for
  * the table as a whole and keyed by the normalized form (company_name_names),
- * which the database holds unique. A name another row holds is refused
- * with that row's key, the veto name_taken. A delete frees the row's
+ * which the database holds unique. A name another row holds is refused,
+ * the veto name_taken, which names nothing of that row; resolve answers
+ * the row to a caller who may read it (D156). A delete frees the row's
  * names, and a merge (Mergeable) moves the row merged away's aliases to
  * the row that stays, its name among them. T is the name's type, string.
  */
