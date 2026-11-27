@@ -18,6 +18,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -356,8 +357,36 @@ func compileArgs(spec DecoratorSpec) (*validator.Schema, error) {
 	return compiled, nil
 }
 
+// compiledSchemas holds what compileSchema returned for each document it
+// has compiled, by the document's url and bytes. A compile reads nothing
+// else, and each one loads and checks the draft's meta-schema again, which
+// is most of its cost: a registry compiles some hundred documents, the
+// core behaviors' among them, and a process that builds a registry a load
+// (the tests do, thousands of times) spent most of its time compiling the
+// same documents. A compiled schema is never written to, so every registry
+// in the process can hold the one copy.
+var compiledSchemas sync.Map // compiledSchemaKey -> compiledSchemaResult
+
+type compiledSchemaKey struct{ url, schema string }
+
+type compiledSchemaResult struct {
+	schema *validator.Schema
+	err    error
+}
+
 // compileSchema compiles one JSON Schema document registered under url.
 func compileSchema(schema []byte, url string) (*validator.Schema, error) {
+	key := compiledSchemaKey{url: url, schema: string(schema)}
+	if cached, ok := compiledSchemas.Load(key); ok {
+		result := cached.(compiledSchemaResult)
+		return result.schema, result.err
+	}
+	compiled, err := compileSchemaDocument(schema, url)
+	compiledSchemas.Store(key, compiledSchemaResult{schema: compiled, err: err})
+	return compiled, err
+}
+
+func compileSchemaDocument(schema []byte, url string) (*validator.Schema, error) {
 	resource, err := validator.UnmarshalJSON(bytes.NewReader(schema))
 	if err != nil {
 		return nil, err
