@@ -305,7 +305,9 @@ path for when the store is unavailable.
   A Go and a Rust server serve search, Recurrence and the calendar too,
   through the Go schema runtime's `crosstable` package over the ORM's
   `CrossTables()` (D187) and the Rust runtime's `orm::search_tables` and
-  `orm::calendar` (D188).
+  `orm::calendar` (D188). A Go server serves the notifier too, through
+  the Go HTTP runtime's `notify` package over the ORM's
+  `Notifications()` (D190).
   - One search over many tables, ranked, holding each caller's access:
     `@searchable<T>({ title, body?, scope?, queue })`, `searchTables`
     (D155; `guides/database-tables/#search-across-tables`).

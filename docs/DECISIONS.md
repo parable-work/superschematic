@@ -2327,8 +2327,9 @@ is refused `done`; and password reset sends through the email adapter.
 
 Left:
 
-- Go and Rust: the notifier, `@event` raising, the reply entry point and
-  password reset, and SQLite and D1.
+- Rust: the notifier, `@event` raising, the reply entry point and
+  password reset; and SQLite and D1 in every language (Go's on Postgres
+  is D190's).
 - Comments raising its mentions and replies into the inbox, and the core's
   Comments `inbox` operation retired.
 - A generated server that builds the notifier into its `Deps` (with D159's
@@ -2583,9 +2584,9 @@ Left:
   TypeScript's does; a generated table operation runs in one.
 - TypeScript's `accessConditions` keeps the values of the branches before
   a `*` path bound.
-- The Go server's notifier, parties and agents, which later Go
-  workstreams port. References, attachments and provider slots are
-  D184's, and Recurrence, the calendar and search D187's.
+- The Go server's parties and agents, which later Go workstreams port.
+  References, attachments and provider slots are D184's, Recurrence, the
+  calendar and search D187's, and the notifier D190's.
 - A held table that composes behaviors, through the Go behaviors' core:
   its create fills neither default of `audience` and `agentAccess`, so a
   create that names neither fails their checks, and its reads of the
@@ -3025,3 +3026,56 @@ Left:
 - A calendar source titled by an `Encrypted<T>` field in Go.
 - A parity file of the calendar's reference and iCalendar text, which
   each language's tests hold to the same algorithm on their own.
+
+## D190. The Go runtime serves D153's notifier on Postgres: the generated ORM hosts it, `notify` raises, routes, delivers, escalates and reads replies as the TypeScript notifier does, and an approval's approve and deny are two reply actions (D153, D180 amended)
+
+D153 built the notifier in the TypeScript runtime, and D180 refused
+`@event`, `@notifier` and `@channelIdentities` in a Go server. This entry
+ports it to Go, on Postgres, with the TypeScript tables, statements,
+states and refusals, and keeps to the points the Rust port of the same
+decision (D191) settled where the languages allow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The notifier is the Go HTTP runtime's `notify` package, since it sends through the channel adapters an environment configures (D159), which the ORM cannot import. What it runs through is the schema runtime's `notifications.Host`, which the generated ORM of a database that uses the notifier implements in `notifications.go` (`Database.Notifications()`): its pool or a transaction, its dispatch queue, its access predicate and each table's repository, with the definitions it is generated with: the notifier's tables by part and their columns, and every table's key, events and to-one relations (`ormgen/notifications.go`). | One package in the schema runtime, as D187's `crosstable`, which would need the providers and the worker of the HTTP runtime; a generated notifier per database, which would repeat the notifier in every ORM. |
+| The notifier's own tables are the loader's, the same fields in every database, so `notify` reads and writes them by statements over the columns the definitions name, a UUID in base62 as the Go types write one. An application's table it reads through that table's repository (`Host.Record`, `Find`, `Update`): a route's filter, a brief's saved query and an approval's update are JSON in the repositories' syntax, which the ORM reads into the table's typed filter or update, refusing a member it has no field for. | Statements over the application's tables, as `crosstable` reads them, which would leave a soft delete, a sealed field and the audience to the notifier; a filter compiler of the notifier's own beside the ORM's. |
+| Go has an ambient caller, the context. A recipient's read of the record is the repository's read in a context bound to the recipient (`Host.As`, the ORM's `WithPrincipal`): a user by its id, a party or an agent run with its active grants. A reply's action runs in a transaction of the database as the sender (`Host.Acting`: `WithPrincipal`, and `WithBehaviorCaller` with the permissions the channel's trust leaves it), and its `ReplyContext` holds that transaction as the ORM's `TxInterface`. | Repositories opened for the principal, as Rust's are (D191), which Go's typed repositories need no second set of. |
+| `Raise`, `FromBehaviorEvent`, `Cleared` and `ScheduleSubscription` take the caller's transaction as the ORM's `TxInterface` (`Host.In`), so the event commits with the change; nil opens a transaction of its own. `FromBehaviorEvent` takes the event as the Go behaviors adapter hands a project's Workers method: its kind, the row's key and its payload. | A transaction type of the notifier's own, which a Workers method would have to convert to. |
+| As in Rust: the wall time of quiet hours and of a digest's date is read from Postgres (`AT TIME ZONE`), and the pure rule over it (`QuietDelaySeconds`) is shared; a notice's next reference is taken in a savepoint of the routing transaction (the ORM's nested `Transaction`) and tried again when another notice of the recipient took it; a reply action (`notify.ReplyAction`: permission, describe, `Run`, `Undo`) and `ApprovalReplies(table, permission)`, the `approve` and `deny` of `approval.requested`, which decide the approval as the replier within the channel's trust, refuse an agent run and a decided approval, and write D158's `state`, `decidedBy`, `decidedVia` and `decidedAt`. | |
+| Whether an adapter reports statuses or reads inbound messages is its definition's optional operations, which Go reads as the interfaces it implements, `providers.ChannelStatusReader` and `ChannelInboundReader`: `Providers` binds an adapter so it implements exactly the ones its instance does (`CheckInstance`). | A list of operations beside the adapter, which in Go is the interface's own answer. |
+| A trust row's permissions are `nil` for no cap and empty for none (`ReplyAllows`, `NarrowedPermissions`), as Rust's `Option` and TypeScript's `null`. | A pointer to a slice. |
+| The pure parts are read from `runtime/http/testdata/notify_parity.json` (D191's), which TypeScript's `notify-parity.test.ts` writes: `NormaliseAddress`, `ReadReplyText`, `LooksLikeCode`, `QuietDelaySeconds`, `ReplyAllows`, `NarrowedPermissions`, `CodeHash` and `SameID`. | |
+| Password reset is `notify.PasswordReset` over the identity service's new `UserOfLogin` and `ResetPassword`, which ends every session of the user. | |
+
+Built: the refusals of D180 lose `@event`, `@notifier` and
+`@channelIdentities` (`verify/go_features.go`); the schema runtime's
+`notifications` package; ormgen's `notifications.go`
+(`ormgen/notifications.go`, `templates/notifications.tmpl`, golden of
+fixture-notifications-db); the HTTP runtime's `notify` package
+(`runtime/http/go/notify`) and its parity test; `identity.Service`'s
+`UserOfLogin` and `ResetPassword`; fixture-notifications-db's `Approval`
+table, TypeScript's exported pure functions, the parity file and its
+test, as D191 has them. `TestGoNotificationsEndToEnd` runs D153's cases,
+the TypeScript repositories' ten, and the approval case of the Rust ones,
+through the Go repositories and `notify` on Postgres over a stand-in SMS
+relay and mail relay: an urgent event reaches two recipients, skips one
+who cannot read the record, and escalates to email; `ack`, `done 142` and
+`undo` as their sender with the audit; SMS refused `done`, and an address
+entered by hand only acknowledging; a reply by reference; a code
+verifying an address and an unknown sender reaching nothing; a failed
+send falling through and an adapter down alerted once; quiet hours,
+digests and record; statuses, inbound, a cleared reference and a
+behavior's event; password reset by email; and an approval asked of its
+approvers, refused by SMS, approved and denied by email, and decided
+once. The guides' Go sections.
+
+Left:
+
+- Go on SQLite, as in every language (D153's).
+- A route to an agent in Go, which is logged and reaches no one, and a
+  party's channel identity that lapsed with its grants (D157's
+  `identityLapsed`), which the Go notifier does not ask: D192's, which
+  ports parties and agents to Go.
+- A generated Go server that builds the notifier into its `Deps`, mounts
+  the inbox and the relay routes, and fills a `@worker` of the dispatch
+  queue with `Handle`; an app wires them, as in TypeScript (D153's left).

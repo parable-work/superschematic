@@ -240,6 +240,12 @@ type ORMOutput struct {
 	// crosstable.go, and go.mod requires the schema runtime, whose
 	// crosstable package reads them.
 	CrossTables *CrossTablesModel
+
+	// Notifications is the database's notifier (D153, D190), nil for a
+	// database that does not use it: it writes notifications.go, and
+	// go.mod requires the schema runtime, whose notifications package
+	// holds the host.
+	Notifications *NotificationsModel
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -1184,6 +1190,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	notifier, err := notificationsOf(schema, tables, repositories)
+	if err != nil {
+		return nil, err
+	}
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
@@ -1331,6 +1341,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Access:                   access,
 		RowFeatures:              rowFeatures,
 		CrossTables:              crossTables,
+		Notifications:            notifier,
 	}
 
 	return output, nil

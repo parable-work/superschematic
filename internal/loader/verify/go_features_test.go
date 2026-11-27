@@ -53,9 +53,6 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 		edit    func(*ir.TypeDef)
 		want    string
 	}{
-		{"@event", func(td *ir.TypeDef) { td.Events = []*ir.EventDef{{Kind: "duty.due"}} }, "@event on Duty yet (D153, D180)"},
-		{"@notifier", func(td *ir.TypeDef) { td.Notifier = &ir.NotifierDef{} }, "@notifier on Duty yet (D153, D180)"},
-		{"@channelIdentities", func(td *ir.TypeDef) { td.ChannelIdentities = &ir.ChannelIdentitiesDef{} }, "@channelIdentities on Duty yet (D153, D180)"},
 		{"@party", func(td *ir.TypeDef) { td.Party = &ir.PartyDef{} }, "@party on Duty yet (D157, D180)"},
 		{"@conversations", func(td *ir.TypeDef) { td.Conversations = &ir.ConversationsDef{} }, "@conversations on Duty yet (D157, D180)"},
 		{"@runRequests", func(td *ir.TypeDef) { td.RunRequests = &ir.RunRequestsDef{} }, "@runRequests on Duty yet (D157, D180)"},
@@ -80,7 +77,8 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 	}
 
 	// Per-record access is served (D180), references and attachments
-	// (D184), and Recurrence, the calendar and search (D187).
+	// (D184), Recurrence, the calendar and search (D187), and events, the
+	// notifier and channel identities (D190).
 	served := table("Document", func(td *ir.TypeDef) {
 		td.Audience = &ir.AudienceDef{}
 		td.RowReferences = &ir.RowReferencesDef{}
@@ -88,12 +86,15 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 		td.CalendarSources = []ir.CalendarSourceDef{{Field: "dueOn", Title: "title"}}
 		td.Behaviors = []ir.BehaviorRef{{Name: "Recurrence", Implements: true}}
 		td.Searchable = &ir.SearchableDef{}
+		td.Events = []*ir.EventDef{{Kind: "document.filed"}}
 		td.Fields = []*ir.FieldDef{{Name: "title", TypeRef: ir.TypeRef{Name: "string"}}}
 	})
 	served.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
 	served.Types["AccessEntry"] = &ir.TypeDef{Name: "AccessEntry", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
+	served.Types["Notice"] = &ir.TypeDef{Name: "Notice", Role: ir.RoleDBTable, Notifier: &ir.NotifierDef{Part: ir.NotifierInbox}}
+	served.Types["ChannelIdentity"] = &ir.TypeDef{Name: "ChannelIdentity", Role: ir.RoleDBTable, ChannelIdentities: &ir.ChannelIdentitiesDef{}}
 	if got := goFeatureFindings(ir.NewSchema("app-api", ir.SchemaKindAPI), Input{GoServer: true, Database: served}); len(got) != 0 {
-		t.Fatalf("an audience, grants, the access log, references, attachments, Recurrence, the calendar and search in Go: %v", got)
+		t.Fatalf("an audience, grants, the access log, references, attachments, Recurrence, the calendar, search, events, the notifier and channel identities in Go: %v", got)
 	}
 	// A calendar source titled by a sealed field is not: the Go calendar
 	// reads a title from its column.

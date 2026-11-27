@@ -39,6 +39,12 @@ import (
 // lists sqlite first is refused Recurrence and the calendar
 // (GoServerSQLiteErr), as Rust's is (D188).
 //
+// Events and the notifier (D153) are served on Postgres (D190): the
+// generated ORM of a database that uses the notifier carries its tables'
+// events and notifier parts and hosts the HTTP runtime's notify package,
+// which raises, routes, delivers, escalates and reads replies. The loader
+// refuses the notifier on SQLite for every language (checkNotifications).
+//
 // The Rust and SQLite ports refuse their own in files of their own; a
 // later Go workstream that serves one of these removes its line here.
 //
@@ -116,15 +122,6 @@ func checkGoTables(schema *ir.Schema, where string, r *Result) {
 			if fd := sqlutil.FieldNamed(td, source.Title); fd != nil && fd.EncryptedAtRest {
 				r.errorf(td.Owner, "%s does not serve @calendarSource %s titled by %s, an Encrypted<T> field (D152, D187): the Go calendar reads a title from its column, sealed; title it by a plain field, or serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\")", where, ir.CalendarSourceName(td, i), source.Title)
 			}
-		}
-		if len(td.Events) > 0 {
-			goUnserved(r, td.Owner, where, on("@event"), "D153")
-		}
-		if td.Notifier != nil {
-			goUnserved(r, td.Owner, where, on("@notifier"), "D153")
-		}
-		if td.ChannelIdentities != nil {
-			goUnserved(r, td.Owner, where, on("@channelIdentities"), "D153")
 		}
 		if td.Party != nil {
 			goUnserved(r, td.Owner, where, on("@party"), "D157")
