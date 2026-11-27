@@ -40,6 +40,7 @@ import (
 	"github.com/parable-work/superschematic/runtime/http/go/notify"
 	"github.com/parable-work/superschematic/runtime/http/go/providers"
 	"github.com/parable-work/superschematic/runtime/http/go/worker"
+	rules "github.com/parable-work/superschematic/runtime/rules/go"
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
 	"github.com/parable-work/superschematic/runtime/schema/go/crosstable"
 	"github.com/parable-work/superschematic/runtime/schema/go/orchestration"
@@ -49,7 +50,6 @@ import (
 	vaultbroker "example.com/runtime-providers/vault-broker"
 
 	orm "example.com/schemas/orm/fixture-agent-runs-db"
-	rules "github.com/parable-work/superschematic/runtime/rules/go"
 	types "example.com/schemas/types/go/fixture-agent-runs-db"
 )
 

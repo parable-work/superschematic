@@ -144,8 +144,10 @@ func RunAgentInstance(ctx context.Context, options AgentInstanceOptions) (AgentI
 		if err != nil {
 			return 0, nil, err
 		}
-		defer response.Body.Close()
 		answer, err := io.ReadAll(response.Body)
+		if closeErr := response.Body.Close(); err == nil {
+			err = closeErr
+		}
 		return response.StatusCode, answer, err
 	}
 	tc := SandboxToolContext{

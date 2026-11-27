@@ -300,7 +300,9 @@ func newWorld(t *testing.T, approve func(body string) inbound.Decision) *world {
 	files := &memoryBucket{objects: map[string][]byte{}}
 	options := inbound.Options{Notifier: n, Providers: p, Bucket: files, InboundAddress: inbox, RateLimit: inbound.RateLimit{Messages: 3, Seconds: 3600}}
 	if approve != nil {
-		options.Approve = inbound.ApprovalFunc(func(_ context.Context, input inbound.SendInput) (inbound.Decision, error) { return approve(input.Body), nil })
+		options.Approve = inbound.ApprovalFunc(func(_ context.Context, input inbound.SendInput) (inbound.Decision, error) {
+			return approve(input.Body), nil
+		})
 	}
 	in := must(inbound.New(host, options))
 	w := &world{t: t, pool: pool, db: db, host: host, notifier: n, inbound: in, relays: r, files: files}

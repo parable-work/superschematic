@@ -547,11 +547,11 @@ func targetsOf(run orchestration.Row) []rowrefs.RowRef {
 // TranscriptEntry is one entry of a run's transcript, redacted as it is
 // written.
 type TranscriptEntry struct {
-	At         string          `json:"at,omitempty"`
-	Kind       string          `json:"kind"`
-	Role       string          `json:"role,omitempty"`
-	Content    string          `json:"content,omitempty"`
-	ToolCallID string          `json:"toolCallId,omitempty"`
+	At         string           `json:"at,omitempty"`
+	Kind       string           `json:"kind"`
+	Role       string           `json:"role,omitempty"`
+	Content    string           `json:"content,omitempty"`
+	ToolCallID string           `json:"toolCallId,omitempty"`
 	ToolCalls  []TranscriptCall `json:"toolCalls,omitempty"`
 	// ProviderState is a completion's providerState, which the turns after
 	// it pass back on its assistant message: the one member kept
@@ -715,8 +715,8 @@ func (a *Agents) fits(ctx context.Context, typeName, key string) (bool, error) {
 // standing is where the agent stands: paused (itself or every agent), and
 // whether it or every agent is over its cap.
 type standing struct {
-	paused                  bool
-	reason                  string
+	paused                   bool
+	reason                   string
 	agentCapped, totalCapped bool
 }
 
@@ -970,7 +970,7 @@ func (a *Agents) finish(ctx context.Context, runID, outcome, detail string) erro
 	if entries == nil {
 		entries = []TranscriptEntry{}
 	}
-	var transcriptObject any = nullable(run.Str("transcriptObject"))
+	transcriptObject := nullable(run.Str("transcriptObject"))
 	var transcript any = entries
 	if a.opts.Transcripts != nil {
 		name := "agent-runs/" + runID + ".json"
