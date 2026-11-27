@@ -1,15 +1,7 @@
 package tsgen
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/parable-work/superschematic/internal/generator/naming"
-	"github.com/parable-work/superschematic/internal/loader"
-	"github.com/parable-work/superschematic/internal/registry"
 )
 
 // notificationsFixture is the DB service whose tickets raise events and
@@ -53,6 +45,32 @@ var notificationsCases = []string{
 	"password reset sends a code through the email adapter and the code sets the password",
 }
 
+// notificationsSQLiteCheck is what tsc checks the package against on
+// SQLite (D189): the notifier of the ./d1 entry over the ./orm/sqlite
+// entry's repositories, its dispatch queue claimed over the SqlDatabase.
+const notificationsSQLiteCheck = `import { createNotifier, type Notifier, type SqlDatabase, type WorkerQueue } from '@superschematic/http-runtime/d1';
+import { createOrm } from './orm-sqlite';
+import { noticeWorkQueue } from './queues';
+
+export function notifier(db: SqlDatabase): [Notifier, WorkerQueue] {
+  const notifier = createNotifier({ orm: createOrm(db), dispatch: noticeWorkQueue });
+  return [notifier, notifier.workerQueue(db)];
+}
+`
+
+// notificationsRun is the notifier's end-to-end test (D153) on either
+// dialect.
+var notificationsRun = featureRun{
+	fixture:     notificationsFixture,
+	test:        "notifications.test.ts",
+	stubs:       notificationsProviders,
+	check:       map[string]string{"notifications.check.ts": notificationsCheck},
+	sqliteCheck: map[string]string{"notifications.check.ts": notificationsSQLiteCheck},
+	cases:       notificationsCases,
+	keep:        "NOTIFY_KEEP",
+	secrets:     []string{"relay-token"},
+}
+
 // TestNotificationsEndToEnd generates fixture-notifications-db's
 // TypeScript package, type-checks it against notificationsCheck, and runs
 // testdata/orm/notifications.test.ts in it with bun over the generated
@@ -61,76 +79,14 @@ var notificationsCases = []string{
 // example's SMS and mail stubs as the channels: every case of
 // notificationsCases must pass. It skips without the database.
 func TestNotificationsEndToEnd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping the generated repositories' end-to-end check in -short mode")
-	}
-	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
-		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the notifier against Postgres")
-	}
-	reg := registry.New(naming.Default())
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, notificationsFixture), loader.WithRegistry(reg))
-	if err != nil {
-		t.Fatalf("load %s: %v", notificationsFixture, err)
-	}
-	files := map[string]string{"create.sql": createSQLOf(t, schema, notificationsFixture)}
-	for _, name := range []string{"harness.ts", "notifications.test.ts"} {
-		source, err := ormTests.ReadFile("testdata/orm/" + name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		files[name] = string(source)
-	}
-	for name, path := range notificationsProviders {
-		source, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		files[name] = string(source)
-	}
-	typesRoot, bunPath := buildTSPackages(t, []tsPackageCase{{
-		name:     notificationsFixture,
-		schema:   schema,
-		registry: reg,
-		extra:    map[string]string{"notifications.check.ts": notificationsCheck},
-	}})
-	dir := filepath.Join(typesRoot, notificationsFixture)
-	for name, text := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if keep := os.Getenv("NOTIFY_KEEP"); keep != "" {
-		_ = exec.Command("cp", "-R", dir, keep).Run()
-	}
-	report := filepath.Join(dir, "notifications.junit.xml")
-	run := exec.Command(bunPath, "test", "./notifications.test.ts", "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)
-	run.Dir = dir
-	out, err := run.CombinedOutput()
-	if err != nil {
-		t.Fatalf("the end-to-end test failed: %v\n%s", err, out)
-	}
-	junit, err := os.ReadFile(report)
-	if err != nil {
-		t.Fatalf("read bun's report: %v\n%s", err, out)
-	}
-	cases, err := junitTestcases(junit)
-	if err != nil {
-		t.Fatalf("parse bun's report: %v\n%s", err, junit)
-	}
-	for _, name := range notificationsCases {
-		tc, ok := cases[name]
-		switch {
-		case !ok:
-			t.Errorf("bun did not run %q:\n%s", name, junit)
-		case tc.Failure != nil || tc.Skipped != nil:
-			t.Errorf("%q did not pass:\n%s", name, junit)
-		}
-	}
-	if len(cases) != len(notificationsCases) {
-		t.Errorf("bun ran %d cases, and notificationsCases names %d:\n%s", len(cases), len(notificationsCases), junit)
-	}
-	if strings.Contains(string(out), "relay-token") {
-		t.Errorf("a relay's token reached the test's output:\n%s", out)
-	}
-	t.Logf("bun ran the end-to-end test:\n%s", out)
+	runFeature(t, notificationsRun, false)
+}
+
+// TestNotificationsEndToEndOnSQLite runs the same cases on SQLite (D189):
+// the notifier over the ./orm/sqlite entry's repositories on openSqlite's
+// connection to a file the database's SQLite create.sql made, its dispatch
+// queue's delays, escalations and claims on the file. It needs no
+// database server.
+func TestNotificationsEndToEndOnSQLite(t *testing.T) {
+	runFeature(t, notificationsRun, true)
 }

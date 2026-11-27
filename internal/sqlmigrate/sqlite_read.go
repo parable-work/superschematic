@@ -38,7 +38,8 @@ from the schema's model for the tables and columns both hold, by name, a
 table or a column --rename names by its new name, and leaves it empty for
 the rest:
 
-  - a table's kind and origin, and its queue's key; a table the schema
+  - a table's kind and origin, its history's name and what the history
+    leaves out (a @versioned table's, D189), and its queue's key; a table the schema
     does not declare is an entity table with no origin;
   - a column's origin, and what a TEXT column holds as JSON (Holds,
     Element): the file's text is taken to hold what the schema says it
@@ -499,6 +500,9 @@ func (r *databaseReader) table(t *InspectedTable) (*Table, error) {
 	table := &Table{Name: t.Name, Kind: TableEntity, Columns: []*Column{}}
 	if peer != nil {
 		table.Kind, table.Origin = peer.Kind, peer.Origin
+		// A @versioned table's history and what its images leave out
+		// (D189), which only the compiler knows.
+		table.History, table.HistoryExclude = peer.History, append([]string(nil), peer.HistoryExclude...)
 	}
 	unmodeled := append([]string(nil), def.unmodeled...)
 	if t.WithoutRowID {

@@ -6,6 +6,8 @@ import * as d1 from './d1';
 import { UNREADABLE, type QueueDefinition, type QueueStatements } from './queue-core';
 import { enqueueSqlite, enqueueStatement, sqliteColumnValue, sqliteMemberValue, sqliteQueue, utcTimestamp } from './queue-sqlite';
 import { ClaimLostError, openSqlite, type SqliteDatabase } from './sqlite';
+import { claimsOver, enqueue, workerQueueOf } from './queue-orm';
+import { sqliteOrmPool } from './orm-sqlite';
 
 /** A message of every kind of column a queue's message writes on SQLite. */
 interface OrderPlaced {
@@ -562,5 +564,63 @@ describe('a queue with a key on SQLite (D80)', () => {
     };
     for (const quantity of [1, 2, 3]) await db.batch([enqueueStatement(db, definition, { sku: 'SKU-1', quantity })]);
     expect(await db.prepare('SELECT sku, quantity FROM stock_checked_queue').raw()).toEqual([['SKU-1', 1]]);
+  });
+});
+
+describe('the enqueue in an ORM transaction and the claims over a SqlDatabase (D189)', () => {
+  type Client = { query(config: { text: string; values: unknown[] }): Promise<{ rows: unknown[]; rowCount: number | null }> };
+  /** What a transaction of sqliteOrm's is to enqueue: its dialect, and a query on its connection. */
+  const over = (client: Client) => ({
+    [Symbol.for('superschematic.orm.dialect')]: 'sqlite',
+    query: (config: { text: string; values: unknown[] }) => client.query(config),
+  });
+
+  test("enqueue writes SQLite's statement in the ORM's transaction, which a rollback undoes, with a delay by the database's clock", async () => {
+    const [db] = database();
+    const pool = sqliteOrmPool(db);
+    await pool.transaction('BEGIN', client => enqueue(over(client), orderPlaced, MESSAGE, { delaySeconds: 600 }));
+    await expect(
+      pool.transaction('BEGIN', async client => {
+        await enqueue(over(client), orderPlaced, { ...MESSAGE, orderId: '0c7a0e14-6a43-4f0e-8f1b-5d6c7e8f9a0b' });
+        throw new Error('the change failed');
+      })
+    ).rejects.toThrow('the change failed');
+    const rows = await db.prepare(`SELECT order_id, (julianday(due_at) - julianday('now')) * 86400 AS due_in FROM order_placed_queue`).all<{ order_id: string; due_in: number }>();
+    expect(rows.results.map(r => r.order_id)).toEqual(['6f1c2f2e-7d1a-4b4a-9d43-3c7a1b2c3d4e']);
+    expect(rows.results[0]!.due_in).toBeGreaterThan(590);
+    // Due later: no claim takes it yet.
+    expect(await claimsOver(db, orderPlaced).claim(5)).toEqual([]);
+  });
+
+  test("claimsOver claims over a SqlDatabase in the connection's turn, after a transaction open on it", async () => {
+    const [db] = database();
+    await enqueueSqlite(db, ping, {});
+    const pool = sqliteOrmPool(db);
+    const queue = claimsOver(db, ping);
+    const order: string[] = [];
+    let open!: () => void;
+    const held = new Promise<void>(resolve => (open = resolve));
+    const handler = pool.transaction('BEGIN', async client => {
+      await held;
+      await client.query({ text: 'INSERT INTO orders (id) VALUES (?1)', values: ['held'] });
+      order.push('committed');
+    });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    // A claim the worker makes while a handler's transaction is open waits for it.
+    const claimed = queue.claim(1).then(claims => order.push(`claimed ${claims.length}`));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    open();
+    await handler;
+    await claimed;
+    expect(order).toEqual(['committed', 'claimed 1']);
+    // A worker's queue of the claims hands each message to its handler.
+    await enqueueSqlite(db, ping, { sentAt: '2026-11-26T10:00:00Z' });
+    const handled: unknown[] = [];
+    const worker = workerQueueOf(queue, async message => void handled.push(message));
+    const [message] = await worker.claim(1, 30);
+    await message!.handle(new AbortController().signal);
+    await worker.complete(message!.id, message!.token);
+    expect(handled).toEqual([{ sentAt: new Date('2026-11-26T10:00:00Z') }]);
+    expect(worker.slot).toBeUndefined();
   });
 });

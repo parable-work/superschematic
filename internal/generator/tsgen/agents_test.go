@@ -1,15 +1,7 @@
 package tsgen
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
-
-	"github.com/parable-work/superschematic/internal/generator/naming"
-	"github.com/parable-work/superschematic/internal/loader"
-	"github.com/parable-work/superschematic/internal/registry"
 )
 
 // agentsFixture is the DB service of the agent orchestration (D158): tasks
@@ -61,6 +53,33 @@ var agentsCases = []string{
 	"a run's token is refused by the plain grant authenticator, and the dispatcher's authenticator resolves it as the run, narrowed to whom it acts for",
 }
 
+// agentsSQLiteCheck is what tsc checks the package against on SQLite
+// (D189): the dispatcher of the ./d1 entry over the ./orm/sqlite entry's
+// repositories, its requests claimed over the SqlDatabase.
+const agentsSQLiteCheck = `import { createAgents, type Agents, type SqlDatabase, type WorkerQueue } from '@superschematic/http-runtime/d1';
+import { createOrm } from './orm-sqlite';
+import { agentRunRequestQueue } from './queues';
+
+export function agents(db: SqlDatabase): [Agents, WorkerQueue] {
+  const agents = createAgents({ orm: createOrm(db), requests: agentRunRequestQueue, endpoint: 'http://localhost/api/agents' });
+  return [agents, agents.workerQueue(db)];
+}
+`
+
+// agentsRun is the agent dispatcher's end-to-end test (D158) on either
+// dialect.
+var agentsRun = featureRun{
+	fixture:     agentsFixture,
+	test:        "agents.test.ts",
+	files:       []string{"agent_runner.ts"},
+	stubs:       agentsProviders,
+	check:       map[string]string{"agents.check.ts": agentsCheck},
+	sqliteCheck: map[string]string{"agents.check.ts": agentsSQLiteCheck},
+	cases:       agentsCases,
+	keep:        "AGENTS_KEEP",
+	secrets:     []string{"site-key-4b9e17c2", "vault-broker-token-9d2c", "grant_"},
+}
+
 // TestAgentRunsEndToEnd generates fixture-agent-runs-db's TypeScript
 // package, type-checks it against agentsCheck, and runs
 // testdata/orm/agents.test.ts in it with bun over the generated create.sql
@@ -71,79 +90,14 @@ var agentsCases = []string{
 // agentsCases must pass, and no credential value or run token may reach
 // the test's output. It skips without the database.
 func TestAgentRunsEndToEnd(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping the generated repositories' end-to-end check in -short mode")
-	}
-	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
-		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the agent orchestration against Postgres")
-	}
-	reg := registry.New(naming.Default())
-	schema, err := loader.LoadService(filepath.Join(fixturesDir, agentsFixture), loader.WithRegistry(reg))
-	if err != nil {
-		t.Fatalf("load %s: %v", agentsFixture, err)
-	}
-	files := map[string]string{"create.sql": createSQLOf(t, schema, agentsFixture)}
-	for _, name := range []string{"harness.ts", "agents.test.ts", "agent_runner.ts"} {
-		source, err := ormTests.ReadFile("testdata/orm/" + name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		files[name] = string(source)
-	}
-	for name, path := range agentsProviders {
-		source, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		files[name] = string(source)
-	}
-	typesRoot, bunPath := buildTSPackages(t, []tsPackageCase{{
-		name:     agentsFixture,
-		schema:   schema,
-		registry: reg,
-		extra:    map[string]string{"agents.check.ts": agentsCheck},
-	}})
-	dir := filepath.Join(typesRoot, agentsFixture)
-	for name, text := range files {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if keep := os.Getenv("AGENTS_KEEP"); keep != "" {
-		_ = exec.Command("cp", "-R", dir, keep).Run()
-	}
-	report := filepath.Join(dir, "agents.junit.xml")
-	run := exec.Command(bunPath, "test", "./agents.test.ts", "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)
-	run.Dir = dir
-	run.Env = append(os.Environ(), "AGENT_RUNNER_BUN="+bunPath)
-	out, err := run.CombinedOutput()
-	if err != nil {
-		t.Fatalf("the end-to-end test failed: %v\n%s", err, out)
-	}
-	junit, err := os.ReadFile(report)
-	if err != nil {
-		t.Fatalf("read bun's report: %v\n%s", err, out)
-	}
-	cases, err := junitTestcases(junit)
-	if err != nil {
-		t.Fatalf("parse bun's report: %v\n%s", err, junit)
-	}
-	for _, name := range agentsCases {
-		tc, ok := cases[name]
-		switch {
-		case !ok:
-			t.Errorf("bun did not run %q:\n%s", name, junit)
-		case tc.Failure != nil || tc.Skipped != nil:
-			t.Errorf("%q did not pass:\n%s", name, junit)
-		}
-	}
-	if len(cases) != len(agentsCases) {
-		t.Errorf("bun ran %d cases, and agentsCases names %d:\n%s", len(cases), len(agentsCases), junit)
-	}
-	for _, secret := range []string{"site-key-4b9e17c2", "vault-broker-token-9d2c", "grant_"} {
-		if strings.Contains(string(out), secret) {
-			t.Errorf("%q reached the test's output:\n%s", secret, out)
-		}
-	}
-	t.Logf("bun ran the end-to-end test:\n%s", out)
+	runFeature(t, agentsRun, false)
+}
+
+// TestAgentRunsEndToEndOnSQLite runs the same cases on SQLite (D189): the
+// dispatcher over the ./orm/sqlite entry's repositories on openSqlite's
+// connection to a file the database's SQLite create.sql made, the runs'
+// Lease, Retries and Budget through the core in its transactions, and
+// every queue claimed on the file. It needs no database server.
+func TestAgentRunsEndToEndOnSQLite(t *testing.T) {
+	runFeature(t, agentsRun, true)
 }

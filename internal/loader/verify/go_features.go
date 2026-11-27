@@ -45,16 +45,17 @@ import (
 // Events and the notifier (D153) are served on Postgres (D190): the
 // generated ORM of a database that uses the notifier carries its tables'
 // events and notifier parts and hosts the HTTP runtime's notify package,
-// which raises, routes, delivers, escalates and reads replies. The loader
-// refuses the notifier on SQLite for every language (checkNotifications).
+// which raises, routes, delivers, escalates and reads replies. On SQLite
+// the notifier runs in TypeScript alone (D189), and GoServerSQLiteErr
+// refuses it to a Go server over a database that lists sqlite first.
 //
 // Parties, the inbound path and conversations (D157) and the agent
 // dispatcher (D158), with D183's trust and narrowed paths, are served on
 // Postgres (D192): the generated ORM of a database with them hosts the
 // HTTP runtime's inbound and agents packages through the notifier's host,
-// so a database with them and no notifier is refused, and the loader
-// refuses them on SQLite for every language (checkParties, checkAgents),
-// which GoServerSQLiteErr holds too. An operation's @autonomy stays
+// so a database with them and no notifier is refused. On SQLite they run
+// in TypeScript alone (D189), and GoServerSQLiteErr refuses them to a Go
+// server over a database that lists sqlite first. An operation's @autonomy stays
 // refused: it holds an agent run's calls of the API's MCP tools, and a Go
 // server serves no MCP endpoint (D81, D116).
 //
@@ -90,12 +91,15 @@ func GoServerDatabaseErr(api, db *ir.Schema) error {
 
 // GoServerSQLiteErr is the refusal of the features of db, the database of
 // api, a Go server, that a Go server on a database that lists sqlite
-// first does not serve (D187, D192), or nil: a table that composes
+// first does not serve (D187, D190, D192), or nil: a table that composes
 // Recurrence, whose operations and deadline worker the Go adapter runs on
 // Postgres, a calendar source, and a @searchable table, which the
-// crosstable package reads and ranks with Postgres statements alone, and
-// the parties' and agents' tables, which the inbound path and the
-// dispatcher read by Postgres's statements. The generator calls it with
+// crosstable package reads and ranks with Postgres statements alone, a
+// table's events and notifications, which the notify package reads and
+// writes by Postgres's statements, and the parties' and agents' tables,
+// which the inbound path and the dispatcher read by Postgres's statements.
+// Since D189 the loader serves the notifier, the parties and the agents on
+// SQLite in TypeScript, so this is the Go server's own refusal of them. The generator calls it with
 // the database's dialects for every Go server over a database.
 func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 	if api == nil || db == nil || len(dialects) == 0 || dialects[0] != registry.SQLDialectSQLite {
@@ -116,6 +120,9 @@ func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 		if td.Searchable != nil {
 			features = append(features, name+": @searchable")
 		}
+		for _, mark := range notifierMarks(td) {
+			features = append(features, name+": "+mark)
+		}
 		for _, mark := range orchestrationMarks(td) {
 			features = append(features, name+": "+mark)
 		}
@@ -123,7 +130,7 @@ func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 	if len(features) == 0 {
 		return nil
 	}
-	return fmt.Errorf("the Go server of %s is over %s, whose DB service lists sqlite first, and serves %s on Postgres alone so far (D152, D155, D157, D158, D187, D192); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", api.Name, db.Name, strings.Join(features, ", "), db.Name)
+	return fmt.Errorf("the Go server of %s is over %s, whose DB service lists sqlite first, and serves %s on Postgres alone so far (D152, D153, D155, D157, D158, D187, D190, D192); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", api.Name, db.Name, strings.Join(features, ", "), db.Name)
 }
 
 // checkGoTables refuses the table features of schema, a Go server's
@@ -158,6 +165,23 @@ func checkGoTables(schema *ir.Schema, where string, r *Result) {
 
 // orchestrationMarks are td's marks of D157's parties and conversations
 // and D158's agents.
+// notifierMarks are the marks of td's events and notifications (D153), which
+// the Go notifier reads and writes by Postgres's statements alone (D190):
+// on SQLite the notifier runs in TypeScript alone (D189).
+func notifierMarks(td *ir.TypeDef) []string {
+	var out []string
+	if len(td.Events) > 0 {
+		out = append(out, "@event")
+	}
+	if td.Notifier != nil {
+		out = append(out, "@notifier")
+	}
+	if td.ChannelIdentities != nil {
+		out = append(out, "@channelIdentities")
+	}
+	return out
+}
+
 func orchestrationMarks(td *ir.TypeDef) []string {
 	var out []string
 	if td.Party != nil {

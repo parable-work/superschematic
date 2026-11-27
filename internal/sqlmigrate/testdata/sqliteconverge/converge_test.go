@@ -240,10 +240,20 @@ func catalog(t *testing.T, ctx context.Context, conn *sql.Conn) []string {
 			tables = append(tables, parts[1])
 		}
 	}
+	// A virtual table takes no index, so its columns' collations are not
+	// probed: an FTS5 table's (D186) are its module's.
+	virtual := map[string]bool{}
+	for _, name := range rows(t, ctx, conn, `SELECT name FROM sqlite_schema WHERE type = 'table' AND sql LIKE 'CREATE VIRTUAL TABLE%'`) {
+		virtual[name] = true
+	}
 	for _, table := range tables {
 		for _, col := range rows(t, ctx, conn, `SELECT name, type, "notnull", dflt_value, pk, hidden FROM pragma_table_xinfo(?)`, table) {
 			name := strings.Fields(col)[0]
-			out = append(out, fmt.Sprintf("column %s.%s collate %s", table, col, collation(t, ctx, conn, table, name)))
+			coll := "virtual"
+			if !virtual[table] {
+				coll = collation(t, ctx, conn, table, name)
+			}
+			out = append(out, fmt.Sprintf("column %s.%s collate %s", table, col, coll))
 		}
 		for _, idx := range rows(t, ctx, conn, `SELECT name, "unique", origin, partial FROM pragma_index_list(?)`, table) {
 			name := strings.Fields(idx)[0]

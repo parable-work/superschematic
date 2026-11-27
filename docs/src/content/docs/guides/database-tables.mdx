@@ -662,8 +662,40 @@ handler on its router. `ReindexSearch` builds every row's index row again.
 A Go server whose database lists `sqlite` first is refused a `@searchable`
 table, since `crosstable` ranks by Postgres statements alone.
 
-Search across tables is Postgres alone: the build refuses `@searchable` in
-a service that lists `sqlite`.
+### On SQLite and D1
+
+A database that lists `sqlite` keeps the same `search_index`, its audience
+a JSON array of ids, and its words in an FTS5 table beside it,
+`search_index_fts`, which triggers on the index keep in the statement that
+writes an index row (D186). The `@searchable` tables' triggers are row
+triggers, one after each insert, update and delete, which delete, copy and
+enqueue as Postgres's do. `searchTables`, `indexSearch`, `reindexSearch`,
+`searchRoutes` and `callSearchTool` take the `./orm/sqlite` entry's ORM and
+come from the runtime's `./d1` entry, which a Worker bundles:
+
+```ts
+import { indexSearch, searchTables } from "@superschematic/http-runtime/d1";
+import { createOrm } from "@acme/work-db-types/orm/sqlite";
+
+const orm = createOrm(env.DB, { rules: initSync(rulesWasm) });
+await indexSearch(orm, message);
+const { items, total } = await searchTables(orm, principal, { q: "walnut desk" });
+```
+
+| On SQLite and D1 | Why |
+| --- | --- |
+| each word is a phrase of the words FTS5's `unicode61` tokenizer finds in it, folded to lower case, with no diacritic removed and none stemmed; a row holds every word | the words Postgres's `simple` configuration reads |
+| hits rank by `bm25`, the title weighed 1, the body 0.4, the conversation 0.2 and the files 0.1, then table and key | Postgres's four weight classes, in FTS5's ranking; the two rank alike in order, not in score |
+| access is checked inside the query: the audience through `json_each` over the index row's copy, a grant's reach by an `EXISTS` back to each table | the same exact totals and pages as on Postgres |
+| `indexSearch` writes an index row with the row's access columns read by the write itself | D1 holds no transaction open, so an audience change between its reads and its write is still copied as it stands |
+| embeddings are refused: a search with `vector` is a 400, and `embeddings` in the options throws | vectors are stored and compared on Postgres alone |
+| the FTS5 table is a piece of the model's SQL of its own, after every object | the migration model has no form of a virtual table; a plan that adds the index runs it, and a table made `@searchable` with rows needs `reindexSearch` once |
+
+The triggers keep a row's index row whichever ORM writes it, so a
+service's Go types are built beside it. Go's search (D187) and Rust's
+(D188) run on Postgres alone: a Go server is refused search over a
+database that lists `sqlite` first, and a service that lists `sqlite` and
+declares `@searchable` takes no Rust types.
 
 ## Pages
 
@@ -2432,8 +2464,6 @@ text, so its `eq`, `ne`, `in` and `notIn` compare the nodes `json_tree`
 reads of each value, a number written `2` or `2.0` the same.
 
 The repositories do not read a `@versioned` table's history yet; the Go
-ORM does. They run on Postgres alone: the Rust repositories run on a
-SQLite file too ([Rust](#rust)).
 ORM does.
 
 ### On SQLite and D1
@@ -2492,7 +2522,7 @@ Postgres refuses to change a row twice in one statement (D89).
 | on D1 a transaction's statements each commit as they run, and a throw rolls none back | D1 runs no interactive transaction; a write the repositories make in one statement, a trigger's work with it, is atomic there as anywhere, and an implementation that needs several so writes a batch |
 | no advisory lock | a transaction on SQLite holds the database's one write lock, and D1 runs each statement alone |
 | `fieldKeys` takes a `FieldKeyring` | reading a key secret needs `node:crypto`, which Bun has (`parseFieldKeys` of `./sqlite`) and a Worker does not, so an `Encrypted<T>` field is Postgres's and Bun's alone so far |
-| a table that composes behaviors writes through the core, over the rules module's SQLite store, and upserts a row at a time: its `upsertMany` is refused | the core's change set is one batch, a savepoint of the file's transaction and D1's atomic unit; the Rust repositories upsert such a table a row at a time too, and the Go ones on SQLite refuse its upserts |
+| a table that composes behaviors writes its rows and runs its operations, deadlines and changes through the core (D186), over the rules module's SQLite store, and upserts a row at a time: its `upsertMany` is refused | the core's change set is one batch, a savepoint of the file's transaction and D1's atomic unit: a row, its sub-table rows, its deadline and event messages and a worker's spent claim land together, and the batch first checks each read made under a lock, so a command a write raced runs again; the Rust repositories upsert such a table a row at a time too, and the Go ones on SQLite refuse its upserts |
 | on D1 a write whose later statement needs an earlier one's answer is refused by name: an upsert that seals an `Encrypted<T>` field, and `runEvent` | D1 runs no interactive transaction, so its statements would commit apart |
 | `mergeInto` is refused | a merge's plan runs on Postgres alone so far |
 | a table SQLite's repositories cannot hold is left out of the entry, with why | the Rust repositories leave out the same tables (`SQLiteTableRefusal`) |
@@ -4007,7 +4037,7 @@ The generated router mounts neither `calendarRoutes` nor the calendar's
 MCP tool: an app wires them itself, as it wires `grantAuthenticator`
 (`examples/recurring-duties`). Recurrence and the calendar are served end
 to end by a TypeScript server, a Rust one and a Go one on Postgres, and
-the calendar has no SQLite or D1 form.
+by a TypeScript one on SQLite and D1 too.
 
 A Rust server serves Recurrence on Postgres as the TypeScript one does
 (D188): the router's `recurrence` routes run the operations through the
@@ -4052,6 +4082,21 @@ ORM's `AuthenticateGrant` refuses a feed's token on every other route. A
 Go server whose database lists `sqlite` first is refused Recurrence, a
 calendar source and search, and one whose calendar source is titled by an
 `Encrypted<T>` field is refused it.
+
+On SQLite and D1 the `./orm/sqlite` entry's repositories run Recurrence
+through the core as Postgres's do (D186): the `occurrences` sub-table, its
+times as RFC 3339 text, the four deadlines on the table's deadline queue
+and its events. `readCalendar`, the feed and its routes come from the
+runtime's `./d1` entry too, and hold each row to its audience and the
+caller's grants as on Postgres. On D1, which holds no transaction open,
+each change set is one batch: a plan's occurrences and the deadlines it
+arms land together or not at all, and a deadline's fire spends its
+worker's claim in the batch that writes the occurrence, so a claim another
+worker holds spends and writes nothing. A Worker passes the core's module
+(`createOrm(env.DB, { rules: initSync(rulesWasm) })`); under Bun the rules
+package loads its own. The generated behavior worker claims through the
+Postgres queue client alone so far: over SQLite a worker runs the
+repository's `runDeadline` and `runChange` over `sqliteQueue`'s claims.
 
 ### A pool of members
 
