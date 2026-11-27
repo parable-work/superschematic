@@ -79,6 +79,7 @@ func TestRustNotificationsEndToEnd(t *testing.T) {
 	// The Go ORM, which a DB service always generates, imports its Go
 	// types.
 	types["go"] = map[string]any{"enabled": true}
+	rustOnPostgresAlone(cfg)
 	if _, err := Run(schema, cfg, Options{
 		OutputRoot:       outputRoot,
 		Paths:            paths,

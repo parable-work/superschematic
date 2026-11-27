@@ -35,11 +35,11 @@ var partiesRustCases = []string{
 }
 
 // rustRuntimeCrate builds db's Rust types (Rust and Go types enabled
-// beside its config's) under a temporary output root, writes a test crate
-// of manifest (given the types crate's name and directory and the HTTP
-// runtime's directory) with source as tests/<name>.rs and the database's
-// create.sql, and runs cargo clippy and cargo test in it with env: the
-// test's output.
+// beside its config's, for postgres alone) under a temporary output root,
+// writes a test crate of manifest (given the types crate's name and
+// directory and the HTTP runtime's directory) with source as
+// tests/<name>.rs and the database's create.sql, and runs cargo clippy and
+// cargo test in it with env: the test's output.
 func rustRuntimeCrate(t *testing.T, cargo, db, name, manifest, source string, env ...string) string {
 	t.Helper()
 	paths := testpaths.Local(t)
@@ -57,6 +57,7 @@ func rustRuntimeCrate(t *testing.T, cargo, db, name, manifest, source string, en
 	// The Go ORM, which a DB service always generates, imports its Go
 	// types.
 	types["go"] = map[string]any{"enabled": true}
+	rustOnPostgresAlone(cfg)
 	if _, err := Run(schema, cfg, Options{
 		OutputRoot:       outputRoot,
 		Paths:            paths,
@@ -145,6 +146,20 @@ func TestRustPartiesEndToEnd(t *testing.T) {
 	if strings.Contains(out, "relay-token") {
 		t.Errorf("a relay's token reached the test's output:\n%s", out)
 	}
+}
+
+// rustOnPostgresAlone builds cfg's DB service for postgres alone. Rust
+// serves the notifier (D191), the parties and the agents (D193) on
+// Postgres alone, and rustgen refuses them to the Rust types of a service
+// that lists sqlite (D181). Their fixtures list sqlite for TypeScript's
+// runs there (D189), so a Rust run of them leaves it out.
+func rustOnPostgresAlone(cfg *schemaconfig.SchemaConfig) {
+	sql, _ := cfg.Outputs["sql"].(map[string]any)
+	if sql == nil {
+		sql = map[string]any{}
+		cfg.Outputs["sql"] = sql
+	}
+	sql["dialects"] = []any{"postgres"}
 }
 
 // partiesRustManifest is the test crate's Cargo.toml, given the types

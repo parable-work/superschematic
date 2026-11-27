@@ -17,6 +17,13 @@ import (
 // in.
 func crossTablesOutput(t *testing.T, svc string) (*ORMOutput, string) {
 	t.Helper()
+	return ormOutputOf(t, svc, false)
+}
+
+// ormOutputOf is crossTablesOutput of a DB service that lists the sqlite
+// dialect when sqlite (Options.SQLite).
+func ormOutputOf(t *testing.T, svc string, sqlite bool) (*ORMOutput, string) {
+	t.Helper()
 	reg := registry.New(naming.Default())
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, svc), loader.WithRegistry(reg))
 	if err != nil {
@@ -28,6 +35,7 @@ func crossTablesOutput(t *testing.T, svc string) (*ORMOutput, string) {
 		TypesModule: "example.com/schemas/types/go/" + svc,
 		Registry:    reg,
 		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		SQLite:      sqlite,
 	})
 	if err != nil {
 		t.Fatalf("generate %s: %v", svc, err)

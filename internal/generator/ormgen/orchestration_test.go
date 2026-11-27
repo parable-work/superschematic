@@ -83,3 +83,28 @@ func TestWriteORMGoldenOrchestration(t *testing.T) {
 		t.Errorf("fixture-notifications-db wrote orchestration.go: %v", err)
 	}
 }
+
+// TestOrchestrationBesideSQLite checks that a database that also lists the
+// sqlite dialect, as fixture-parties-db and fixture-agent-runs-db do for
+// TypeScript's runs on SQLite (D189), still writes orchestration.go, the
+// same as its golden: the Go host is Database's, on Postgres (D192), and
+// the tables on SQLite are SQLiteDatabase's, which hosts none.
+func TestOrchestrationBesideSQLite(t *testing.T) {
+	for _, svc := range []string{"fixture-parties-db", "fixture-agent-runs-db"} {
+		output, dir := ormOutputOf(t, svc, true)
+		if output.Orchestration == nil || !output.SQLite {
+			t.Fatalf("%s on SQLite too: Orchestration %v, SQLite %v", svc, output.Orchestration, output.SQLite)
+		}
+		got, err := os.ReadFile(filepath.Join(dir, "orchestration.go"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := os.ReadFile(filepath.Join("testdata", "golden", svc, "orchestration.go"))
+		if err != nil || string(got) != string(want) {
+			t.Errorf("orchestration.go of %s beside SQLite differs from its golden: %v", svc, err)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "sqlite.go")); err != nil {
+			t.Errorf("%s on SQLite too wrote no sqlite.go: %v", svc, err)
+		}
+	}
+}

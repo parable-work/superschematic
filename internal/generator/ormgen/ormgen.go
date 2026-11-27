@@ -1393,11 +1393,15 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			}
 		}
 	}
-	// The inbound path and the dispatcher run on Postgres alone (D192).
-	if !opts.SQLite {
-		if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
-			return nil, err
-		}
+	// The inbound path and the dispatcher run on Postgres alone (D192), so
+	// orchestration.go hosts them on Database, as notifications.go hosts
+	// the notifier, whether or not the DB service also lists sqlite: a
+	// database's tables on SQLite are SQLiteDatabase's, which hosts
+	// neither. Since D189 a database with them may list sqlite for its
+	// TypeScript repositories, and GoServerSQLiteErr refuses them to a Go
+	// server over one that lists sqlite first.
+	if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
+		return nil, err
 	}
 
 	return output, nil
