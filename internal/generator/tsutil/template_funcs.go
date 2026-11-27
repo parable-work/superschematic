@@ -36,6 +36,7 @@ func BaseTemplateFuncs() template.FuncMap {
 		"toSnakeCase": ToSnakeCase,
 
 		// TypeScript-specific
-		"escapeString": EscapeString,
+		"escapeString":      EscapeString,
+		"typescriptVersion": func() string { return TypeScriptVersion },
 	}
 }
