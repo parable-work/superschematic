@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
@@ -22,7 +23,10 @@ var configMember = regexp.MustCompile(`(?m)^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*
 // @superschematic/schema. A behavior the behaviors' core alone implements
 // (registry.RulesPackage: Seats, Reconcile, Schedules, Pool, D104; Recurrence, D152) is left
 // out: no engine type composes it, so BehaviorConfigs names no type for it,
-// and the guide to tables (database-tables) describes it.
+// and the guide to tables (database-tables) describes it. So is one D103
+// folds into a schema feature (verify.FoldedBehaviors: Links, Search, Queue
+// and Branches), which the build refuses though its declaration stays
+// registered.
 func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	configTypes := map[string]string{}
 	for _, d := range typeDecls(exports) {
@@ -53,7 +57,7 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	b.WriteString("the JSON Schema the declaration checks them against.\n")
 
 	for _, beh := range reg.Behaviors() {
-		if !registry.EngineImplements(beh) {
+		if !registry.EngineImplements(beh) || verify.IsFoldedBehavior(beh.Name) {
 			continue
 		}
 		fmt.Fprintf(&b, "\n## `%s`\n\n", beh.Name)
