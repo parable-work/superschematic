@@ -29,7 +29,7 @@ var (
 	repositoryReads  = []string{"find_many", "find_one", "find_page", "get_one"}
 	repositoryWrites = []string{
 		"create_many", "create_one", "delete_one", "hard_delete_one", "merge_into", "operation",
-		"reencrypt", "table_operation", "untyped", "update_many", "update_one", "upsert_one",
+		"reencrypt", "table_operation", "untyped", "update_many", "update_one", "upsert_many", "upsert_one",
 	}
 )
 

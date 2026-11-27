@@ -122,7 +122,8 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 	}
 	// An API over the user model in that database, whose identity store
 	// runs on the Hyperdrive pool, hashing with the runtime's portable
-	// argon2id (D92); over a sqlite-first one, it is refused as on Bun.
+	// argon2id (D92); over a sqlite-first one, a D1 binding on Workers, it
+	// is refused, where on Bun it runs over the file (D116).
 	identity := func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 		postgresDB(o, c)
 		o.Identity = &tsrestgen.IdentityInfo{AuthDB: "shop-db"}
@@ -140,7 +141,7 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 		{"the identity runtime over D1", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 			sqliteDB(o, c)
 			o.Identity = &tsrestgen.IdentityInfo{AuthDB: "shop-db"}
-		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over shop-db, its authDb, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)", false},
+		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over shop-db, its authDb, whose DB service lists sqlite first, and an environment places the server on Cloudflare Workers, where the database is a D1 binding: an identity store runs on a SQLite file or on Postgres, and none over D1 is built (D50, D92)", false},
 		{"an engine database", sqliteDB, false, "server shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the server on a platform whose artifact is a bundle, Cloudflare Workers, which cannot load the engine: it is a native addon, the Rust engine through Node-API (D64); place the server on a platform that builds an image", true},
 		{"a job's engine database", sqliteDB, true, "job shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the job on a platform whose artifact is a bundle", true},
 		{"an engine database that lists postgres first", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {

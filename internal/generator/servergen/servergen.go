@@ -576,6 +576,11 @@ type API struct {
 	// mounts its routes, the first on the database, on a server.
 	Engine       *Engine
 	MountsEngine bool
+
+	// Providers is true for an API whose Deps holds runtime providers
+	// (D159, D184), which the entrypoint reads from its config with the
+	// API package's ProvidersOf.
+	Providers bool
 }
 
 // Call is a client in an API's Deps.
@@ -669,6 +674,11 @@ type Database struct {
 	// enqueue starts the queue's worker where it runs in drain mode
 	// (D145).
 	Queues bool
+
+	// SQLite is a database whose DB service lists sqlite first (D116): the
+	// entrypoint opens its SQLite file in a pool's place, and the ORM's
+	// repositories, the identity store and the idempotency keys run on it.
+	SQLite bool
 }
 
 // Client is an SDK client of an API called, built once for every API
@@ -909,6 +919,9 @@ func Plan(in Input) (*Server, error) {
 			Module:  o.ModulePath,
 			Import:  a.Implementation.Import,
 			Config:  o.HasEnvConfig(),
+			// Deps holds the runtime providers of the API's slots, which
+			// the entrypoint reads from its config (D159, D184).
+			Providers: o.Deps.Providers != nil && o.HasEnvConfig(),
 		}
 		if !s.Background() {
 			// A job or a worker serves no request: it mounts no routes, a
@@ -970,6 +983,14 @@ func Plan(in Input) (*Server, error) {
 					d.FieldKeys = api.Var + "Config." + keys
 				}
 				d.Queues = o.Deps.Queues
+				if o.Deps.SQLite {
+					// A Go server and job open the SQLite file (D116); a
+					// worker claims its queue on Postgres alone.
+					if s.Worker != nil {
+						return nil, fmt.Errorf("stack %s: %s %s serves %s on %s, whose DB service lists sqlite first; a Go server and job open a SQLite file, and a Go worker claims its queue on Postgres alone (D116)", in.Stack, s.Kind, in.Server, o.SchemaName, db)
+					}
+					d.SQLite, d.FieldKeys = true, ""
+				}
 				databases[db] = d
 				s.Databases = append(s.Databases, d)
 				if slices.Contains(in.CloudSQL, db) {
@@ -1085,6 +1106,11 @@ func Plan(in Input) (*Server, error) {
 	}
 	if err := s.planEngines(in, apis, taken); err != nil {
 		return nil, err
+	}
+	for _, d := range s.Databases {
+		if d.SQLite && d.Engine != nil {
+			return nil, fmt.Errorf("stack %s: %s %s opens the engine of %s, whose DB service lists sqlite first; a Go server opens the ORM, the identity store and the idempotency keys on a SQLite file, and the engine on Postgres alone (D58, D116)", in.Stack, s.Kind, in.Server, d.Service)
+		}
 	}
 	s.APIs = apis
 	if s.Worker != nil {
@@ -1604,6 +1630,19 @@ func templateFuncs() template.FuncMap {
 		},
 		"anyQueues": func(databases []*Database) bool {
 			return slices.ContainsFunc(databases, func(d *Database) bool { return d.Queues })
+		},
+		// A database on Postgres is connected through a pool, and one on a
+		// SQLite file opened from it (D116); a Postgres one's identity
+		// store and idempotency keys read a database/sql handle over its
+		// pool.
+		"anyPostgres": func(databases []*Database) bool {
+			return slices.ContainsFunc(databases, func(d *Database) bool { return !d.SQLite })
+		},
+		"anySQLite": func(databases []*Database) bool {
+			return slices.ContainsFunc(databases, func(d *Database) bool { return d.SQLite })
+		},
+		"anyPostgresHandle": func(databases []*Database) bool {
+			return slices.ContainsFunc(databases, func(d *Database) bool { return !d.SQLite && (d.Identity || d.Idempotency) })
 		},
 		"anyCORS": func(apis []*API) bool {
 			return slices.ContainsFunc(apis, func(a *API) bool { return a.CORS })

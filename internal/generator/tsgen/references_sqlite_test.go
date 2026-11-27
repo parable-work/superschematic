@@ -33,15 +33,15 @@ export async function files(tx: FixtureReferencesDbTx, key: string): Promise<Att
 `
 
 // referencesSQLiteCases are the cases references_sqlite.test.ts runs:
-// D154's "done when" in the generated repositories on SQLite, and the
-// refusal of a write of a table whose behaviors run on Postgres alone.
+// D154's "done when" in the generated repositories on SQLite, and a
+// table that composes behaviors written through the core there (D103).
 var referencesSQLiteCases = []string{
 	"a file of one row is filed onto a second row, which lists the first in its backlinks",
 	"a ref block in a row's thread is a reference of the row, which the target lists",
 	"a caller who cannot read a referenced row sees neither the reference nor a count, and its owner sees a count",
 	"a target's delete clears the references to it and tells each row that held one",
 	"an upload's bytes are held to what it declared, a row to its bounds, and an object is deleted once no file names it",
-	"a write of a table that composes behaviors is refused, and its rows are read",
+	"a table that composes behaviors is read, and written through the core",
 }
 
 // TestReferencesTablesEndToEndOnSQLite generates fixture-references-db's
@@ -153,8 +153,9 @@ func TestTheWorkerdD1FixtureIsCurrent(t *testing.T) {
 	if !strings.Contains(string(orm), runtime) {
 		t.Fatalf("%s imports no %s", ORMSQLiteFile, runtime)
 	}
-	header := "// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// fixture-references-db's orm-sqlite.ts, its runtime the built dist/d1.js.\n"
+	header := "// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// fixture-references-db's orm-sqlite.ts, its runtime the built dist/d1.js and\n// its behaviors' core the rules package's built dist/index.js.\n"
 	records := header + strings.ReplaceAll(string(orm), runtime, "'../../../../dist/d1.js'")
+	records = strings.ReplaceAll(records, "'"+naming.Default().RulesNpmPackage+"'", "'../../../../../../rules/typescript/dist/index.js'")
 	model, err := sqlmigrate.BuildModel(schema, sqlgen.Options{SchemaName: referencesFixture}, sqlmigrate.SQLite)
 	if err != nil {
 		t.Fatal(err)

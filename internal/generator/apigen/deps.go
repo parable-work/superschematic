@@ -59,6 +59,12 @@ type DepsInfo struct {
 	// queues' workers (D145).
 	Queues bool
 
+	// SQLite reports whether Database's DB service lists sqlite first: an
+	// entrypoint then opens its SQLite file, and Deps.DB is the ORM's
+	// SQLiteDatabase, a DatabaseInterface as the Postgres Database is
+	// (D116).
+	SQLite bool
+
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
 
@@ -78,6 +84,11 @@ type DepsInfo struct {
 	// RateLimitStore is the memory store the API's @rateLimit routes count
 	// in, its config's rateLimitStore; empty when they count in process.
 	RateLimitStore string
+
+	// Providers are the runtime providers of the API's provider slots
+	// (D159, D184), which Deps.Providers holds; nil for an API whose
+	// config names no slot.
+	Providers *DepsProviders
 }
 
 // DepsMemoryStore is a memory store in Deps: the HTTP runtime's

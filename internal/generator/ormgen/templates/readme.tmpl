@@ -20,6 +20,12 @@ Generated at: {{ .Timestamp }}
 {{- range .Repositories }}
 - `repository_{{ toSnakeCase .TypeName }}.go` -- {{ .TypeName }} repository{{ if .Released }}, read-only: the released rows of {{ .ReleasedOf }}{{ end }}
 {{- end }}
+{{- if .HasSQLiteRepositories }}
+- `sqlite.go` -- the repositories on a SQLite file: `OpenSQLite`, `SQLiteDSN`, `SQLiteDatabase` and `SQLiteTx`, a `DatabaseInterface` and a `TxInterface` as the Postgres ones are
+{{- range .Repositories }}
+- `sqlite_{{ toSnakeCase .TypeName }}.go` -- {{ .TypeName }} repository on SQLite{{ if .SQLite.Refusal }}, which refuses every call: {{ .SQLite.Refusal }}{{ end }}
+{{- end }}
+{{- end }}
 {{- if .VersionGraphs }}
 {{- range .VersionGraphs }}
 - `versiongraph_{{ .FileName }}.go` -- the {{ .Name }} version graph: `db.{{ .Name }}Graph()`

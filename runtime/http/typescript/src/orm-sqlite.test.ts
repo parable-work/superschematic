@@ -106,6 +106,16 @@ describe('sqliteOrmPool', () => {
   });
 });
 
+describe('the codec on SQLite', () => {
+  test("reads a duration in the canonical text SQLite holds, as Postgres's INTERVAL text", async () => {
+    const { decodeValue } = await import('./pgcodec.js');
+    expect(decodeValue('1h30m0s', { interval: true })).toBe('1h30m0s');
+    expect(decodeValue('250ms', { interval: true })).toBe('250ms');
+    expect(decodeValue('1:30:00', { interval: true })).toBe('1h30m0s');
+    expect(() => decodeValue('soon', { interval: true })).toThrow();
+  });
+});
+
 describe('audienceConditions on SQLite', () => {
   test("compares the caller's ids with the effective audience's JSON array through json_each", () => {
     const args: unknown[] = ['x'];

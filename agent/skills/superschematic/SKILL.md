@@ -245,7 +245,8 @@ path for when the store is unavailable.
   of moves in a handler or write the trigger by hand (rules below).
 - **Syncs and imports upsert by a unique key, in batches.** The generated
   repositories' `upsertMany(inputs, on, fields, { onlyIfChanged: true })`
-  (Go `UpsertMany`) writes a batch in one statement and reports each row
+  (Go `UpsertMany`, Rust `upsert_many`, which runs on SQLite too) writes a
+  batch in one statement and reports each row
   `inserted`, `updated` or `unchanged`; an unchanged row is not rewritten,
   so it keeps its `updatedAt` and fires no `@enqueueOnChange`. Use it, or
   `upsertOneResult`, rather than a loop of `upsertOne` or a find then a
@@ -259,6 +260,12 @@ path for when the store is unavailable.
   caller, so it writes as `deps.orm.asSystem()` or `orm.AsSystem(ctx)`,
   the system actor `outputs.sql.systemActor` names; don't invent a user
   row for it.
+- **A sqlite-first database has repositories too.** A TypeScript API on
+  a DB service that lists `sqlite` first gets `Deps.orm` over its SQLite
+  file under `stack dev` and over its D1 binding on Workers: use it rather
+  than SQL by hand. D1 has no interactive transaction, so there
+  `orm.transaction(fn)` commits each statement as it runs; write what must
+  commit together as one `deps.db.batch([...])`.
 - **Two rows that are one are merged, not rewritten by hand.** Put
   `implements Mergeable` on a table of things people type (labels,
   customers, tags) and call `orm.label.mergeInto({ from, into })`
@@ -306,11 +313,13 @@ path for when the store is unavailable.
   TypeScript ORM has no replica.
 - **Search, calendars, notifications, parties and agents are declared;
   a TypeScript server wires them.** Each is Postgres alone, with no Go
-  or Rust server yet, and the generated server mounts none of their
-  routes or workers: call the helpers the guide names
+  server yet, and the generated server mounts none of their routes or
+  workers: call the helpers the guide names
   (`@superschematic/http-runtime/postgres`: `searchTables`,
   `readCalendar`, `createNotifier`, `createInbound`, `createAgents`) from
   your server, rather than building any of them from tables of your own.
+  A Rust server serves search, Recurrence and the calendar too, through
+  the Rust runtime's `orm::search_tables` and `orm::calendar` (D188).
   - One search over many tables, ranked, holding each caller's access:
     `@searchable<T>({ title, body?, scope?, queue })`, `searchTables`
     (D155; `guides/database-tables/#search-across-tables`).

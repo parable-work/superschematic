@@ -17,10 +17,11 @@ import (
 // enqueues a message for each row an @enqueueOnChange trigger would have
 // enqueued it for (D88). `superschematic stack
 // queue` writes it with the statements the compiler writes for the queue's
-// table on Postgres (sqlutil.PostgresQueueOperatorStatements), so the
-// runner runs the compiler's SQL as it runs a plan's, and writes none of
-// its own. These statements are Postgres's alone: a queue on SQLite, where
-// workers claim too (D53, amended), has no operator's statements yet.
+// table in its database's dialect (sqlutil.PostgresQueueOperatorStatements,
+// sqlutil.SQLiteQueueOperatorStatements), so the runner runs the
+// compiler's SQL as it runs a plan's, and writes none of its own. A
+// document of SQLite's statements names its dialect and runs on a SQLite
+// file or on D1 (D68); one that names none is Postgres's.
 
 // QueueVersion is the version of the queue document and of the result the
 // queue command prints.
@@ -51,6 +52,11 @@ type QueueDocument struct {
 	// `@queue` class.
 	Service string `json:"service"`
 	Queue   string `json:"queue"`
+
+	// Dialect is the dialect of the statements: empty or Postgres for
+	// Postgres's, SQLite for SQLite's, which run on a SQLite file and on
+	// D1.
+	Dialect Dialect `json:"dialect,omitempty"`
 
 	// Operation is what the document does.
 	Operation QueueOperation `json:"operation"`
@@ -111,6 +117,11 @@ func ReadQueueDocument(doc []byte) (*QueueDocument, error) {
 	}
 	if q.Service == "" || q.Queue == "" {
 		return nil, fmt.Errorf("queue document: it names no service or no queue")
+	}
+	switch q.Dialect {
+	case "", Postgres, SQLite:
+	default:
+		return nil, fmt.Errorf("queue document: dialect %q is not postgres or sqlite", q.Dialect)
 	}
 	switch q.Operation {
 	case QueueDead:
@@ -252,13 +263,45 @@ func (e *QueueRefusal) Error() string {
 		e.Document.Queue, e.Document.Service, len(e.Reasons), len(e.Document.IDs), verb, strings.Join(e.Reasons, "; "))
 }
 
-// RunQueue runs a queue document's operation on a Postgres database: the
-// listing in a read-only transaction, a retry or a drop in one that changes
-// every message it names or, when one of them is no dead message, none
-// (QueueRefusal), and a backfill in one that runs each table's statement.
+// DialectOf is the dialect of the document's statements: Postgres unless
+// it names SQLite.
+func (q *QueueDocument) DialectOf() Dialect {
+	if q.Dialect == "" {
+		return Postgres
+	}
+	return q.Dialect
+}
+
+// queueIDs is the argument a statement takes the document's IDs as: on
+// Postgres a text array, on SQLite the text of a JSON array, which the
+// statement reads with json_each.
+func queueIDs(doc *QueueDocument) (any, error) {
+	if doc.DialectOf() == Postgres {
+		return doc.IDs, nil
+	}
+	ids := doc.IDs
+	if ids == nil {
+		ids = []string{}
+	}
+	data, err := json.Marshal(ids)
+	return string(data), err
+}
+
+// RunQueue runs a queue document's operation on a database of its
+// statements' dialect: the listing in a read-only transaction, a retry or
+// a drop in one that changes every message it names or, when one of them
+// is no dead message, none (QueueRefusal), and a backfill in one that runs
+// each table's statement. On SQLite a retry or a drop is one statement
+// that changes every message named or none, so it holds on D1 too, which
+// runs each statement on its own; and a backfill's statements each run on
+// their own there, so on D1 each table's commits apart.
 func RunQueue(ctx context.Context, driver Driver, doc *QueueDocument) (*QueueResult, error) {
-	if driver.Dialect() != Postgres {
-		return nil, fmt.Errorf("queue %s of %s: a queue's dead messages are read, retried and dropped on Postgres alone, and the database is %s", doc.Queue, doc.Service, driver.Dialect())
+	if driver.Dialect() != doc.DialectOf() {
+		return nil, fmt.Errorf("queue %s of %s: the document's statements are %s's, and the database is %s; superschematic stack queue writes a document for the dialect of the queue's database", doc.Queue, doc.Service, doc.DialectOf(), driver.Dialect())
+	}
+	ids, err := queueIDs(doc)
+	if err != nil {
+		return nil, err
 	}
 	result := &QueueResult{Version: QueueVersion, Service: doc.Service, Queue: doc.Queue, Operation: doc.Operation}
 	if doc.Operation == QueueDead {
@@ -306,7 +349,7 @@ func RunQueue(ctx context.Context, driver Driver, doc *QueueDocument) (*QueueRes
 		}
 		return result, nil
 	}
-	statement, args := doc.Statements.Retry, []any{doc.IDs}
+	statement, args := doc.Statements.Retry, []any{ids}
 	switch {
 	case doc.Operation == QueueRetry && doc.All:
 		statement, args = doc.Statements.RetryAll, nil
@@ -315,7 +358,7 @@ func RunQueue(ctx context.Context, driver Driver, doc *QueueDocument) (*QueueRes
 	case doc.Operation == QueueDrop:
 		statement = doc.Statements.Drop
 	}
-	err := driver.Transact(ctx, TxOptions{}, func(ctx context.Context, conn Conn) error {
+	err = driver.Transact(ctx, TxOptions{}, func(ctx context.Context, conn Conn) error {
 		changed := map[string]bool{}
 		if err := conn.Query(ctx, statement, args, func(scan func(dest ...any) error) error {
 			var id string
@@ -332,7 +375,7 @@ func RunQueue(ctx context.Context, driver Driver, doc *QueueDocument) (*QueueRes
 			return nil
 		}
 		states := map[string]string{}
-		if err := conn.Query(ctx, doc.Statements.States, []any{doc.IDs}, func(scan func(dest ...any) error) error {
+		if err := conn.Query(ctx, doc.Statements.States, []any{ids}, func(scan func(dest ...any) error) error {
 			var id, state string
 			if err := scan(&id, &state); err != nil {
 				return err
@@ -346,6 +389,9 @@ func RunQueue(ctx context.Context, driver Driver, doc *QueueDocument) (*QueueRes
 		for _, id := range doc.IDs {
 			switch state, ok := states[id]; {
 			case changed[id]:
+			case ok && state == "":
+				// SQLite's: a message the operation would have changed,
+				// had none of the others stopped it.
 			case ok:
 				refusal.Reasons = append(refusal.Reasons, fmt.Sprintf("%s is %s", id, state))
 			default:

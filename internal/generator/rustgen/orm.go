@@ -71,6 +71,17 @@ type ORMInfo struct {
 	// D185).
 	References  bool
 	Attachments bool
+
+	// Calendar and Searchable are whether a table of the database is a
+	// calendar source (D152) or @searchable (D155), which the runtime's
+	// orm::calendar and orm::search_tables read on Postgres (D188).
+	Calendar   bool
+	Searchable bool
+
+	// Notifications is whether a table of the database declares an @event
+	// or is one of the notifier's (D153), which the runtime's notify module
+	// reads on Postgres (D191).
+	Notifications bool
 }
 
 // ORMUse is a use of a behavior on a table that has operations (D103), as
@@ -174,10 +185,14 @@ type ormDefinition struct {
 	// JSONClauses are the conditions of a Generic.JSON column's filter
 	// where they are not Clauses' (sqlutil.SQLiteJSONClauses); absent on
 	// Postgres, whose JSONB column compares its values itself.
-	JSONClauses      orderedStrings `json:"jsonClauses,omitempty"`
-	DefaultLimit     int            `json:"defaultLimit"`
-	SystemActor      *ormActor      `json:"systemActor,omitempty"`
-	RequireUpdatedBy bool           `json:"requireUpdatedBy,omitempty"`
+	JSONClauses  orderedStrings `json:"jsonClauses,omitempty"`
+	DefaultLimit int            `json:"defaultLimit"`
+	// MaxParameters is the most parameters one statement binds in the
+	// dialect, by which an upsert of many rows batches them (D89):
+	// sqlutil.MaxParameters on Postgres, SQLiteMaxParameters on SQLite.
+	MaxParameters    int       `json:"maxParameters"`
+	SystemActor      *ormActor `json:"systemActor,omitempty"`
+	RequireUpdatedBy bool      `json:"requireUpdatedBy,omitempty"`
 	// HistoryActorCTE and ClearHistoryActor are the statements a versioned
 	// table's hard delete runs around it, on Postgres (D17, D32).
 	HistoryActorCTE   string     `json:"historyActorCTE,omitempty"`
@@ -217,6 +232,16 @@ type ormTable struct {
 	// the table is to per-record access: grants, log or roles (D156).
 	Audience *ormAudience `json:"audience,omitempty"`
 	Access   string       `json:"access,omitempty"`
+	// Calendar are the table's @calendarSource declarations (D152), and
+	// Searchable its search index (D155), which the runtime's calendar and
+	// search read (D188); on Postgres alone.
+	Calendar   []rustCalendarSource `json:"calendar,omitempty"`
+	Searchable *rustSearchable      `json:"searchable,omitempty"`
+	// Events are the table's @event declarations, and Notifier what the
+	// table is to the notifier (D153), which the runtime's notify module
+	// reads (D191); on Postgres alone.
+	Events   []rustEvent `json:"events,omitempty"`
+	Notifier string      `json:"notifier,omitempty"`
 }
 
 // ormMerge is what merge_into of a table that implements Mergeable runs
@@ -421,6 +446,7 @@ var ormClauses = []string{
 	"eq", "ne", "gt", "gte", "lt", "lte", "ilike", "in", "noneOf", "isNull", "isNotNull", "search",
 	"exists", "notExists", "set", "setNull", "pageKey", "placeholder", "default", "or", "group",
 	"where", "and", "orderBy", "orderTerm", "limit", "offset", "changed", "never", "null",
+	"setExcluded", "excluded",
 }
 
 // named are the members of all that names lists, in its order.
@@ -493,8 +519,8 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		}
 	}
 	info := &ORMInfo{}
-	postgres := ormDefinition{Dialect: "postgres", Clauses: named(sqlutil.PostgresClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
-	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), JSONClauses: sqlutil.SQLiteJSONClauses().AllJSONClauses(), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
+	postgres := ormDefinition{Dialect: "postgres", Clauses: named(sqlutil.PostgresClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, MaxParameters: sqlutil.MaxParameters, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
+	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), JSONClauses: sqlutil.SQLiteJSONClauses().AllJSONClauses(), DefaultLimit: sqlutil.DefaultLimit, MaxParameters: sqlutil.SQLiteMaxParameters, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
 	if opts.Actor.SystemSet {
 		actor := &ormActor{ID: opts.Actor.SystemID, Name: opts.Actor.SystemName}
 		postgres.SystemActor, sqlite.SystemActor = actor, actor
@@ -630,6 +656,17 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			}
 			onPostgres.Merge = ormMergeOf(plan, tables)
 		}
+		if onPostgres.Calendar, err = calendarOf(schema, schema.Types[t.Type], tables); err != nil {
+			return nil, err
+		}
+		if onPostgres.Searchable, err = searchableOf(schema, schema.Types[t.Type], tables); err != nil {
+			return nil, err
+		}
+		info.Calendar = info.Calendar || len(onPostgres.Calendar) > 0
+		info.Searchable = info.Searchable || onPostgres.Searchable != nil
+		onPostgres.Events = eventsOfTable(schema.Types[t.Type])
+		onPostgres.Notifier = notifierOfTable(schema.Types[t.Type])
+		info.Notifications = info.Notifications || len(onPostgres.Events) > 0 || onPostgres.Notifier != ""
 		for _, k := range t.UniqueKeys {
 			onPostgres.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 		}

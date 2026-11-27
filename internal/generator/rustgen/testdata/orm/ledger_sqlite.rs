@@ -609,6 +609,174 @@ fn an_upsert_inserts_updates_or_leaves_a_row() {
 }
 
 #[test]
+fn many_rows_are_upserted_a_statement_a_batch() {
+    let connection = open();
+    let traced = std::sync::Mutex::new(Vec::<String>::new());
+    let trace = |sql: &str| traced.lock().unwrap().push(sql.to_owned());
+    let orm = acting(&connection, ADA).with_trace(&trace);
+    let checking = account(&orm, "Checking", "CHK");
+    let entries = orm.entry().unwrap();
+    let on = ["account", "externalId"];
+    let line = |external: &str, amount: i64| EntryCreate {
+        external_id: Some(external.to_owned()),
+        ..entry(&checking, amount, None)
+    };
+    let statuses = |upserted: &[Upserted<EntryRow>]| -> Vec<UpsertStatus> {
+        upserted.iter().map(|u| u.status).collect()
+    };
+    let sync = vec![line("t-1", 100), line("t-2", 200), line("t-3", 300)];
+
+    // A sync of three new lines is the read of the rows their keys hold,
+    // which holds none, and one insert, each line inserted.
+    traced.lock().unwrap().clear();
+    let first = entries
+        .upsert_many(&sync, &on, &["amountCents"], UpsertManyOptions::default())
+        .expect("upsert the sync");
+    assert_eq!(statuses(&first), vec![UpsertStatus::Inserted; 3]);
+    assert_eq!(amounts(&first.iter().map(|u| u.row.clone()).collect::<Vec<_>>()), vec![100, 200, 300]);
+    {
+        let statements = traced.lock().unwrap();
+        assert_eq!(statements.len(), 2, "{statements:#?}");
+        assert!(statements[0].starts_with("SELECT"), "{}", statements[0]);
+        assert!(statements[1].starts_with("INSERT INTO entry"), "{}", statements[1]);
+        assert!(
+            statements[1].contains("VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8), (?9, ")
+                && statements[1].contains(
+                    "ON CONFLICT (account_id, external_id) WHERE deleted_at IS NULL DO UPDATE SET amount_cents = EXCLUDED.amount_cents, updated_at = ?25"
+                ),
+            "{}",
+            statements[1]
+        );
+    }
+
+    // Again, one line changed: only if changed, the other two are left
+    // as they were, their stamps too; without, each is updated.
+    let mut again = sync.clone();
+    again[1].amount_cents = 250;
+    let only = UpsertManyOptions {
+        only_if_changed: true,
+        ..Default::default()
+    };
+    let second = entries.upsert_many(&again, &on, &["amountCents"], only).unwrap();
+    assert_eq!(
+        statuses(&second),
+        vec![UpsertStatus::Unchanged, UpsertStatus::Updated, UpsertStatus::Unchanged]
+    );
+    assert_eq!(second[0].row, first[0].row);
+    assert_eq!(second[2].row, first[2].row);
+    assert_eq!(second[1].row.id, first[1].row.id);
+    assert_eq!(second[1].row.amount_cents, 250);
+    let third = entries
+        .upsert_many(&again, &on, &["amountCents"], UpsertManyOptions::default())
+        .unwrap();
+    assert_eq!(statuses(&third), vec![UpsertStatus::Updated; 3]);
+    let kept = entries
+        .upsert_many(&again, &on, &[], UpsertManyOptions::default())
+        .unwrap();
+    assert_eq!(statuses(&kept), vec![UpsertStatus::Unchanged; 3]);
+    assert_eq!(kept[1].row, third[1].row);
+
+    // Inputs that set different columns are a statement per set of
+    // columns, since SQLite's VALUES take no DEFAULT: one sets a memo and
+    // a kind, the others leave them to the schema's and the column's
+    // default. In batches of two, the four lines are two batches.
+    let mut mixed = vec![line("t-3", 333), line("t-4", 400), line("t-5", 500), line("t-6", 600)];
+    mixed[1].memo = Some("Lunch".to_owned());
+    mixed[1].kind = Some(EntryKind::Credit);
+    traced.lock().unwrap().clear();
+    let fourth = entries
+        .upsert_many(
+            &mixed,
+            &on,
+            &["amountCents", "memo"],
+            UpsertManyOptions {
+                batch: Some(2),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        statuses(&fourth),
+        vec![UpsertStatus::Updated, UpsertStatus::Inserted, UpsertStatus::Inserted, UpsertStatus::Inserted]
+    );
+    assert_eq!(fourth[0].row.id, first[2].row.id);
+    assert_eq!(fourth[0].row.amount_cents, 333);
+    assert_eq!(memos(&fourth.iter().map(|u| u.row.clone()).collect::<Vec<_>>()), vec![None, Some("Lunch"), None, None]);
+    assert_eq!(fourth[1].row.kind, EntryKind::Credit);
+    assert_eq!(fourth[2].row.kind, EntryKind::Debit);
+    {
+        let statements = traced.lock().unwrap();
+        let inserts = statements.iter().filter(|sql| sql.starts_with("INSERT")).count();
+        assert_eq!(inserts, 3, "{statements:#?}");
+    }
+
+    // Two inputs of one batch that hold one key are refused before
+    // anything runs, as Postgres refuses them; in batches of one they are
+    // an insert and then an update.
+    let twice = vec![line("t-7", 1), line("t-8", 2), line("t-7", 3)];
+    assert!(matches!(
+        entries.upsert_many(&twice, &on, &["amountCents"], UpsertManyOptions::default()),
+        Err(Error::Invalid(message)) if message.contains("inputs 0 and 2 of one statement hold one account,externalId")
+    ));
+    let none = entries
+        .find_many(
+            Some(&EntryFilter {
+                external_id: Some(Text::eq("t-7".to_owned())),
+                ..Default::default()
+            }),
+            &FindOptions::default(),
+        )
+        .unwrap();
+    assert_eq!(none.rows.len(), 0);
+    let one_by_one = entries
+        .upsert_many(
+            &twice,
+            &on,
+            &["amountCents"],
+            UpsertManyOptions {
+                batch: Some(1),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        statuses(&one_by_one),
+        vec![UpsertStatus::Inserted, UpsertStatus::Inserted, UpsertStatus::Updated]
+    );
+    assert_eq!(one_by_one[2].row.id, one_by_one[0].row.id);
+    assert_eq!(one_by_one[2].row.amount_cents, 3);
+
+    // A field an update does not set, a key that is no unique key, and a
+    // batch of no rows are refused; no inputs answer none.
+    for fields in [&["id"][..], &["createdAt"][..], &["nothing"][..]] {
+        assert!(matches!(
+            entries.upsert_many(&sync, &on, fields, UpsertManyOptions::default()),
+            Err(Error::Invalid(_))
+        ));
+    }
+    assert!(matches!(
+        entries.upsert_many(&sync, &["memo"], &["amountCents"], UpsertManyOptions::default()),
+        Err(Error::Invalid(_))
+    ));
+    assert!(matches!(
+        entries.upsert_many(
+            &sync,
+            &on,
+            &["amountCents"],
+            UpsertManyOptions {
+                batch: Some(0),
+                ..Default::default()
+            }
+        ),
+        Err(Error::Invalid(_))
+    ));
+    assert!(entries
+        .upsert_many(&[], &on, &["amountCents"], UpsertManyOptions::default())
+        .unwrap()
+        .is_empty());
+}
+
+#[test]
 fn a_delete_stamps_a_row_and_a_hard_delete_removes_it() {
     let connection = open();
     let ada = acting(&connection, ADA);

@@ -373,5 +373,36 @@ func (o *APIOutput) checkSQLiteDeps(deps *DepsInfo) error {
 	if len(o.Derivers) > 0 || deps.Engine != nil {
 		return refuse("the Rust server opens an engine")
 	}
+	if len(o.PostgresFeatures) > 0 {
+		return refuse("the Rust server serves " + strings.Join(o.PostgresFeatures, ", ") + " (D152, D188)")
+	}
 	return nil
+}
+
+// postgresFeaturesOf are the features of databases a Rust server serves on
+// Postgres alone (D188), each "Type: feature", in type order: a table that
+// composes Recurrence, whose operations and deadline worker the Rust
+// adapter runs on Postgres, and a calendar source, which the runtime's
+// orm::calendar reads through the Postgres repositories.
+func postgresFeaturesOf(databases []*ir.Schema) []string {
+	var out []string
+	for _, database := range databases {
+		names := make([]string, 0, len(database.Types))
+		for name := range database.Types {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		for _, name := range names {
+			td := database.Types[name]
+			for _, ref := range td.ImplementsBehaviors() {
+				if ref.Name == "Recurrence" {
+					out = append(out, name+": Recurrence")
+				}
+			}
+			if len(td.CalendarSources) > 0 {
+				out = append(out, name+": @calendarSource")
+			}
+		}
+	}
+	return out
 }

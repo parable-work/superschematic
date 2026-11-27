@@ -479,6 +479,17 @@ type APIOutput struct {
 	// loader of the service's @envVars type and, for a crate with Deps,
 	// its EnvConfig (D57); lib.rs then declares it.
 	HasEnvConfig bool
+	// PostgresFeatures are the features of the databases the API reads
+	// that a Rust server serves on Postgres alone (D188): a table that
+	// composes Recurrence and a calendar source (D152), each "Type:
+	// feature". A Deps whose database lists sqlite first is refused them.
+	PostgresFeatures []string
+	// ReadsAcrossTables is whether a database the API reads has a calendar
+	// source (D152) or a @searchable table (D155): the crate's dependency
+	// on its Rust types then turns on their repositories, whose definition
+	// the runtime's orm::calendar and orm::search_tables read and an app's
+	// routes for them open (D188).
+	ReadsAcrossTables bool
 	// Providers are the API's runtime providers (D159, D185): its slots,
 	// the provider crates its config lists, which Cargo.toml depends on,
 	// and the config fields they read. src/providers.rs holds them, and
@@ -888,6 +899,12 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		output.IdempotencyTable = api.IdempotencyTable
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
+	output.PostgresFeatures = postgresFeaturesOf(databases)
+	for _, database := range databases {
+		for _, td := range database.Types {
+			output.ReadsAcrossTables = output.ReadsAcrossTables || len(td.CalendarSources) > 0 || td.Searchable != nil
+		}
+	}
 	// The runtime providers of the API's @providers slots and the crates
 	// its config lists (D159, D185).
 	providers, perr := providersOf(schema, opts.OutputDir)

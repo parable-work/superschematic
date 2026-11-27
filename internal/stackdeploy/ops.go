@@ -358,6 +358,20 @@ func RunQueue(ctx context.Context, o RunQueueOptions) ([]byte, error) {
 	if err := req.Check(); err != nil {
 		return nil, err
 	}
+	// The applied graph's outputs, read only when the runner asks, as a
+	// runner on D1 does for its database's uuid.
+	req.Outputs = func(ctx context.Context) (map[string]map[string]any, error) {
+		preq, cleanup, err := s.deployedRequest(ctx, false)
+		defer cleanup()
+		if err != nil {
+			return nil, err
+		}
+		outputs, err := s.prov.Outputs(ctx, preq)
+		if err != nil {
+			return nil, fmt.Errorf("read the outputs of %s: %w", s.run.Name(), err)
+		}
+		return outputs, nil
+	}
 	s.logf("run a queue operation on %s, in database %s of %s", o.Service, o.Database, s.run.Name())
 	return s.target.Queues.RunQueue(ctx, req)
 }

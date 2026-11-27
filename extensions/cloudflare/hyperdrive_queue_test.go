@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	ir "github.com/parable-work/superschematic/ir"
 	"github.com/parable-work/superschematic/registry"
 	"github.com/parable-work/superschematic/stack"
 
@@ -171,19 +172,119 @@ func TestQueueOperationOnTheOriginRefusals(t *testing.T) {
 	if want := "cloudflare: the queue operation on finances-db failed on database finances of db.example.com:5432 as finances: " + f.refusal; err == nil || err.Error() != want {
 		t.Errorf("a runner's refusal = %v\nwant %s", err, want)
 	}
+}
 
-	d1 := newMigrateFixture(t)
-	resolved, err := stack.Resolve(d1.reg, stack.Input{Stack: d1Stack(), Services: d1Services(), Environment: "Staging"})
+// reviewsDead is the queue document `stack queue dead` writes for
+// reviews-db's queue on D1, of SQLite's statements, and reviewsDeadResult
+// what the runner prints for it.
+const (
+	reviewsDead       = `{"version":1,"service":"reviews-db","queue":"ReviewFlagged","dialect":"sqlite","operation":"dead","limit":100}`
+	reviewsDeadResult = `{"version": 1, "service": "reviews-db", "queue": "ReviewFlagged", "operation": "dead", "total": 1, "messages": [
+  {"id": "00000000-0000-4000-8000-0000000000e1", "attempts": 5, "lastError": "the reviewer's address bounced", "diedAt": "2026-11-20T09:00:00Z", "message": {"review_id": "r-1"}}]}
+`
+)
+
+// d1QueueRequest is a queue operation's request for reviews-db of the D1
+// fixture's environment env, carrying document, whose outputs are the
+// fixture's.
+func (f *migrateFixture) d1QueueRequest(t *testing.T, env string, params map[string]string, document string) registry.QueueRequest {
+	t.Helper()
+	m := f.request(t, env, params, ir.MigrationExpand)
+	return registry.QueueRequest{
+		Run:      m.Run,
+		Database: "reviews-db",
+		Service:  "reviews-db",
+		Document: []byte(document),
+		Log:      new(bytes.Buffer),
+		Outputs:  m.Outputs,
+	}
+}
+
+// TestQueueOperationOnD1: a queue operation on reviews-db, a database on
+// D1, runs superschematic-migrate queue on this machine on the run's D1
+// database (D68): at its d1:// URL, the account's and the uuid the
+// deploy's outputs hold, a member of a preview its own, with the shell's
+// CLOUDFLARE_API_TOKEN, on the document, of SQLite's statements, which a
+// file of its own held. It returns what the runner printed, which the log
+// does not hold. A shell without a token, a run whose outputs hold no
+// uuid, a caller that reads no outputs and a runner's refusal are refused,
+// each naming what is missing.
+func TestQueueOperationOnD1(t *testing.T) {
+	f := newMigrateFixture(t)
+	f.result = reviewsDeadResult
+	req := f.d1QueueRequest(t, "Staging", nil, reviewsDead)
+	out, err := queues(t, f.reg).RunQueue(context.Background(), req)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = queues(t, d1.reg).RunQueue(context.Background(), registry.QueueRequest{
-		Run: registry.Run{Environment: resolved}, Database: "reviews-db", Service: "reviews-db", Document: []byte(plaidDead),
-	})
-	if want := "cloudflare: database reviews-db of environment Staging is on cloudflare.d1, where no worker claims; stack queue reaches a queue on cloudflare.hyperdrive, a Postgres outside Cloudflare, alone"; err == nil || err.Error() != want {
-		t.Errorf("a queue on D1 = %v", err)
+	if string(out) != reviewsDeadResult {
+		t.Errorf("RunQueue returned %s, want what the runner printed", out)
 	}
-	if len(d1.calls) != 0 {
-		t.Errorf("the runner ran %d times on D1", len(d1.calls))
+	if len(f.calls) != 1 {
+		t.Fatalf("the runner ran %d times, want once", len(f.calls))
+	}
+	call := f.calls[0]
+	if len(call.args) != 6 || call.args[0] != runnerPath || call.args[1] != "queue" || call.args[2] != "--queue" ||
+		call.args[4] != "--database-url" || call.args[5] != cloudflare.D1URL(accountID, reviewsUUID) {
+		t.Errorf("the runner ran as %v", call.args)
+	}
+	if call.token != "the-deployers-token" || call.queue != reviewsDead {
+		t.Errorf("the runner got the token %q and the document %s", call.token, call.queue)
+	}
+	if _, err := os.Stat(call.args[3]); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("the queue document's file is left behind: %v", err)
+	}
+	log := req.Log.(*bytes.Buffer).String()
+	if want := "  reviews-db: the queue operation on D1 database reviews-stack-staging-reviews-db (" + reviewsUUID + "), with " + runnerPath + " on this machine\n"; log != want {
+		t.Errorf("the log is %q, want %q", log, want)
+	}
+	if strings.Contains(log, "bounced") || strings.Contains(log, "the-deployers-token") {
+		t.Errorf("the log holds a message or the token: %q", log)
+	}
+
+	// A member of a preview runs on its own database.
+	f.calls = nil
+	if _, err := queues(t, f.reg).RunQueue(context.Background(), f.d1QueueRequest(t, "Preview", map[string]string{"pr": "123"}, reviewsDead)); err != nil {
+		t.Fatal(err)
+	}
+	if len(f.calls) != 1 || f.calls[0].args[5] != cloudflare.D1URL(accountID, reviewsPrUUID) {
+		t.Errorf("a preview member's operation ran as %v", f.calls)
+	}
+
+	for name, tc := range map[string]struct {
+		edit func(*migrateFixture, *registry.QueueRequest)
+		want string
+	}{
+		"no token": {
+			edit: func(f *migrateFixture, _ *registry.QueueRequest) { delete(f.shell, cloudflare.TokenEnv) },
+			want: "cloudflare: set CLOUDFLARE_API_TOKEN to an API token of the account; stack bootstrap --github sets the CI's",
+		},
+		"no uuid": {
+			edit: func(f *migrateFixture, _ *registry.QueueRequest) { delete(f.outputs, "Staging") },
+			want: "cloudflare: the queue operation on reviews-db: the outputs of Staging hold no uuid of node " + d1Node + ", D1 database reviews-stack-staging-reviews-db; deploy it first",
+		},
+		"no outputs": {
+			edit: func(_ *migrateFixture, req *registry.QueueRequest) { req.Outputs = nil },
+			want: "cloudflare: the queue operation on reviews-db: the command reads the runner no outputs, where the D1 database's uuid is",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newMigrateFixture(t)
+			req := f.d1QueueRequest(t, "Staging", nil, reviewsDead)
+			tc.edit(f, &req)
+			if _, err := queues(t, f.reg).RunQueue(context.Background(), req); err == nil || err.Error() != tc.want {
+				t.Fatalf("RunQueue = %v\nwant %s", err, tc.want)
+			}
+			if len(f.calls) != 0 {
+				t.Errorf("the runner ran %d times", len(f.calls))
+			}
+		})
+	}
+
+	f = newMigrateFixture(t)
+	f.fail, f.refusal = errors.New("exit status 1"), "queue ReviewFlagged of reviews-db: 1 of the 1 message(s) named are not dead, so none was dropped: 00000000-0000-4000-8000-0000000000e1 is ready"
+	_, err = queues(t, f.reg).RunQueue(context.Background(), f.d1QueueRequest(t, "Staging", nil, reviewsDead))
+	if want := "cloudflare: the queue operation on reviews-db failed on D1 database reviews-stack-staging-reviews-db (" + reviewsUUID + "): " + f.refusal; err == nil || err.Error() != want {
+		t.Errorf("a runner's refusal = %v\nwant %s", err, want)
 	}
 }

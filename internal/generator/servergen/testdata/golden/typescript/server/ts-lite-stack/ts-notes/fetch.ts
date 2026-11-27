@@ -37,6 +37,7 @@ import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono
 import { binding, perIsolate, requestIP, stackEnvOf } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import { ping, type SqlDatabase } from '@superschematic/http-runtime/d1';
+import { createOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm/sqlite';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
 
@@ -89,6 +90,7 @@ async function build(): Promise<Handle> {
   const tsNotesDeps: tsNotesApi.Deps = {
     config: tsNotesConfig,
     db: tsNotesDbDatabase,
+    orm: createTsNotesDbOrm(tsNotesDbDatabase),
     logger: logger.child({ api: 'ts-notes' }),
   };
   const tsNotesImplementations = await construct('ts-notes', 'implementation', () => tsNotesImpl.create(tsNotesDeps));

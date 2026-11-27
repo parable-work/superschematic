@@ -952,12 +952,13 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 
 // typeScriptORM is the type of the repositories the TypeScript API's
 // Deps.orm holds (D79), which the ./orm entry of db's TypeScript types
-// exports: db, the API's database, lists postgres first, so Deps.db is a
-// pool, generates TypeScript types, whose orm.ts runs on Postgres, and has
-// a table. Empty otherwise, and for a build that loads no dependency or has
-// no config for db.
+// exports: db, the API's database, generates TypeScript types, whose orm.ts
+// runs over Deps.db, a pool on Postgres or, for a DB service that lists
+// sqlite first, a SQLite file or a D1 binding on its statements there
+// (D116), and has a table. Empty otherwise, and for a build that loads no
+// dependency or has no config for db.
 func (r run) typeScriptORM(db, dialect string) (string, error) {
-	if dialect == registry.SQLDialectSQLite || r.Options.LoadDependency == nil {
+	if r.Options.LoadDependency == nil {
 		return "", nil
 	}
 	var cfg *schemaconfig.SchemaConfig
@@ -1376,6 +1377,17 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		if err := verify.GoServerDatabaseErr(r.Schema, schema); err != nil {
 			return deps, nil, err
 		}
+		// A Go API's Deps.DB is the ORM of its database's first dialect
+		// (D116): over a pool, or over the SQLite file.
+		if r.Options.DependencyConfig != nil {
+			if cfg, ok := r.Options.DependencyConfig(db); ok {
+				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+				if err != nil {
+					return deps, nil, fmt.Errorf("generator: schema config for %s: %w", db, err)
+				}
+				deps.SQLite = outputs.SQLDialects()[0] == registry.SQLDialectSQLite
+			}
+		}
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)
@@ -1436,6 +1448,25 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 	if ref := r.Schema.RateLimitStore; ref != nil {
 		deps.RateLimitStore = ref.Name
 	}
+	// The runtime providers of the API's slots (D159, D184), whose Go
+	// modules go.mod replaces with their directories.
+	providers, err := apigen.ProvidersOf(r.Schema, output.EnvConfig, deps.Access)
+	if err != nil {
+		return deps, nil, fmt.Errorf("generator: %w", err)
+	}
+	if providers != nil {
+		apiDir := APIDir(r.Options.OutputRoot, r.Config.Name)
+		for i := range providers.Modules {
+			m := &providers.Modules[i]
+			if m.Dir == "" {
+				return deps, nil, fmt.Errorf("generator: the Go server of %s links runtime provider %s, whose directory the loader did not read", r.Config.Name, m.Name)
+			}
+			if m.ReplacePath, err = naming.RelPath(apiDir, m.Dir); err != nil {
+				return deps, nil, err
+			}
+		}
+	}
+	deps.Providers = providers
 	return deps, roots, nil
 }
 

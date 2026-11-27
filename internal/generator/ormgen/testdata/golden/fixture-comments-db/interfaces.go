@@ -8,6 +8,7 @@ import (
 	types "example.com/schemas/types/go/fixture-comments-db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/parable-work/superschematic/runtime/schema/go/rowrefs"
 )
 
 // ReadOnlyReviewRepositoryInterface is the reads of ReviewRepositoryInterface (D150).
@@ -94,6 +95,7 @@ type DatabaseInterface interface {
 	GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface
 	GetTicketRepository() TicketRepositoryInterface
 	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
+	References() *rowrefs.References
 }
 
 // TxInterface defines repository access within a transaction.
@@ -105,6 +107,7 @@ type TxInterface interface {
 	GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface
 	GetTicketRepository() TicketRepositoryInterface
 	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
+	References() *rowrefs.References
 }
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.

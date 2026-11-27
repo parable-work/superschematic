@@ -1,0 +1,40 @@
+name: deps-go-stock
+kind: API
+types:
+  RestockView:
+    name: RestockView
+    role: APIView
+    fields:
+      - name: id
+        typeRef: { name: string }
+        required: true
+      - name: productId
+        typeRef: { name: string }
+        required: true
+      - name: status
+        typeRef: { name: string }
+        required: true
+operationSets:
+  - name: Restocks
+    operations:
+      - name: getRestock
+        typeRef: { name: RestockView }
+        required: true
+        httpMethod: GET
+        restPath: restocks/{id}
+        arguments:
+          - name: id
+            typeRef: { name: string }
+            required: true
+      - name: requestRestock
+        typeRef: { name: RestockView }
+        required: true
+        httpMethod: POST
+        restPath: restocks
+        arguments:
+          - name: productId
+            typeRef: { name: string }
+            required: true
+jobs:
+  - name: CloseRestocks
+    comment: Marks every open restock request closed.

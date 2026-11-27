@@ -57,6 +57,19 @@ func TestAudienceDeclarationsHoldToTheirTables(t *testing.T) {
 	if got := checked(schema, Input{Dialects: []string{"postgres", "sqlite"}, TypesLanguages: []string{"typescript"}}); len(got) != 0 {
 		t.Fatalf("a schema whose TypeScript types alone read it on SQLite has findings: %v", got)
 	}
+	// The grants and the access log run on SQLite in TypeScript, whose
+	// repositories alone keep a caller's reads to its grants there.
+	grants, _ := accessSchema()
+	grants.Types["Folder"].Audience, grants.Types["Note"].Audience, grants.Types["Document"].Audience = nil, nil, nil
+	grants.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
+	grants.Types["Log"] = &ir.TypeDef{Name: "Log", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
+	if got := checked(grants, Input{Dialects: []string{"postgres", "sqlite"}, TypesLanguages: []string{"typescript"}}); len(got) != 0 {
+		t.Fatalf("grants and an access log read on SQLite by TypeScript alone have findings: %v", got)
+	}
+	// On Postgres every language serves them (D180, D181).
+	if got := checked(grants, Input{Dialects: []string{"postgres"}, TypesLanguages: []string{"go", "typescript", "rust"}}); len(got) != 0 {
+		t.Fatalf("grants and an access log on Postgres have findings: %v", got)
+	}
 	for _, tc := range []struct {
 		name string
 		edit func(*ir.Schema, *Input)
@@ -79,6 +92,26 @@ func TestAudienceDeclarationsHoldToTheirTables(t *testing.T) {
 		{"a column the table declares", func(s *ir.Schema, _ *Input) {
 			s.Types["Folder"].Fields = append(s.Types["Folder"].Fields, &ir.FieldDef{Name: ir.AudienceField, TypeRef: ir.TypeRef{Name: "string"}})
 		}, "declares audience, a column @audience adds"},
+		{"grants on the sqlite dialect with Go's types", func(s *ir.Schema, in *Input) {
+			s.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
+			s.Types["Folder"].Audience, s.Types["Note"].Audience, s.Types["Document"].Audience = nil, nil, nil
+			in.Dialects, in.TypesLanguages = []string{"postgres", "sqlite"}, []string{"go", "typescript"}
+		}, "@accessGrants on Grant: docs-db lists the sqlite dialect and enables the Go types"},
+		{"an access log on the sqlite dialect with Go's types", func(s *ir.Schema, in *Input) {
+			s.Types["Log"] = &ir.TypeDef{Name: "Log", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
+			s.Types["Folder"].Audience, s.Types["Note"].Audience, s.Types["Document"].Audience = nil, nil, nil
+			in.Dialects, in.TypesLanguages = []string{"sqlite"}, []string{"go"}
+		}, "@accessLog on Log: docs-db lists the sqlite dialect and enables the Go types"},
+		{"grants on the sqlite dialect with Rust's types", func(s *ir.Schema, in *Input) {
+			s.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
+			s.Types["Folder"].Audience, s.Types["Note"].Audience, s.Types["Document"].Audience = nil, nil, nil
+			in.Dialects, in.TypesLanguages = []string{"postgres", "sqlite"}, []string{"typescript", "rust"}
+		}, "@accessGrants on Grant: docs-db lists the sqlite dialect and enables the Rust types"},
+		{"an access log on the sqlite dialect with Rust's types", func(s *ir.Schema, in *Input) {
+			s.Types["Log"] = &ir.TypeDef{Name: "Log", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
+			s.Types["Folder"].Audience, s.Types["Note"].Audience, s.Types["Document"].Audience = nil, nil, nil
+			in.Dialects, in.TypesLanguages = []string{"sqlite"}, []string{"rust"}
+		}, "@accessLog on Log: docs-db lists the sqlite dialect and enables the Rust types"},
 		{"two grants tables", func(s *ir.Schema, _ *Input) {
 			s.Types["GrantA"] = &ir.TypeDef{Name: "GrantA", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
 			s.Types["GrantB"] = &ir.TypeDef{Name: "GrantB", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}

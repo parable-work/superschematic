@@ -1,0 +1,489 @@
+{
+  "comment": "The notifier's pure parts (D153, D191): addresses is an address normalised by its kind (TypeScript's normaliseAddress, Rust's normalise_address); replies is a reply's words read (readReply, read_reply) and whether its text is shaped as a code (looksLikeCode, looks_like_code); quietHours is how many seconds a wall time waits out quiet hours (quietDelaySeconds at an instant in a zone, whose wall time is wall, and Rust's quiet_delay_seconds of the wall time); trust is a channel's trust over a principal's permissions (replyAllows, reply_allows; narrowedPermissions, narrowed_permissions), a null cap no cap; codeHashes is a code's stored hash (codeHash, code_hash); sameIds is an id in one form (sameId, same_id). runtime/http/typescript's notify-parity.test.ts writes the wants with NOTIFY_PARITY_WRITE=1.",
+  "addresses": [
+    {
+      "kind": "email",
+      "address": " Ann@Example.TEST ",
+      "want": "ann@example.test"
+    },
+    {
+      "kind": "email",
+      "address": "ben@example.test",
+      "want": "ben@example.test"
+    },
+    {
+      "kind": "phone",
+      "address": "+1 (555) 010-0001",
+      "want": "+15550100001"
+    },
+    {
+      "kind": "phone",
+      "address": "0044 20 7946 0000",
+      "want": "+442079460000"
+    },
+    {
+      "kind": "phone",
+      "address": "(555) 010-0002",
+      "want": "+5550100002"
+    },
+    {
+      "kind": "phone",
+      "address": "+0044 20",
+      "want": "+4420"
+    },
+    {
+      "kind": "handle",
+      "address": " @ann ",
+      "want": "@ann"
+    },
+    {
+      "kind": "handle",
+      "address": "Ann",
+      "want": "Ann"
+    }
+  ],
+  "replies": [
+    {
+      "text": "ack",
+      "want": {
+        "verb": "ack",
+        "reference": null,
+        "args": [],
+        "ack": true,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "ACK 1",
+      "want": {
+        "verb": "ack",
+        "reference": 1,
+        "args": [],
+        "ack": true,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "ok",
+      "want": {
+        "verb": "ok",
+        "reference": null,
+        "args": [],
+        "ack": true,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "Acknowledged #7",
+      "want": {
+        "verb": "acknowledged",
+        "reference": 7,
+        "args": [],
+        "ack": true,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "done 142",
+      "want": {
+        "verb": "done",
+        "reference": 142,
+        "args": [],
+        "ack": false,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "done 142 at the door",
+      "want": {
+        "verb": "done",
+        "reference": 142,
+        "args": [
+          "at",
+          "the",
+          "door"
+        ],
+        "ack": false,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "  done   142  ",
+      "want": {
+        "verb": "done",
+        "reference": 142,
+        "args": [],
+        "ack": false,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "undo 3",
+      "want": {
+        "verb": "undo",
+        "reference": 3,
+        "args": [],
+        "ack": false,
+        "undo": true,
+        "code": false
+      }
+    },
+    {
+      "text": "UNDO",
+      "want": {
+        "verb": "undo",
+        "reference": null,
+        "args": [],
+        "ack": false,
+        "undo": true,
+        "code": true
+      }
+    },
+    {
+      "text": "approve 12",
+      "want": {
+        "verb": "approve",
+        "reference": 12,
+        "args": [],
+        "ack": false,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "deny 12 not now",
+      "want": {
+        "verb": "deny",
+        "reference": 12,
+        "args": [
+          "not",
+          "now"
+        ],
+        "ack": false,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "#5",
+      "want": {
+        "verb": "#5",
+        "reference": null,
+        "args": [],
+        "ack": false,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "123456",
+      "want": {
+        "verb": "123456",
+        "reference": null,
+        "args": [],
+        "ack": false,
+        "undo": false,
+        "code": true
+      }
+    },
+    {
+      "text": "A1B2",
+      "want": {
+        "verb": "a1b2",
+        "reference": null,
+        "args": [],
+        "ack": false,
+        "undo": false,
+        "code": true
+      }
+    },
+    {
+      "text": "abc",
+      "want": {
+        "verb": "abc",
+        "reference": null,
+        "args": [],
+        "ack": false,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "ack 9x",
+      "want": {
+        "verb": "ack",
+        "reference": null,
+        "args": [
+          "9x"
+        ],
+        "ack": true,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "",
+      "want": {
+        "verb": "",
+        "reference": null,
+        "args": [],
+        "ack": false,
+        "undo": false,
+        "code": false
+      }
+    },
+    {
+      "text": "done #",
+      "want": {
+        "verb": "done",
+        "reference": null,
+        "args": [
+          "#"
+        ],
+        "ack": false,
+        "undo": false,
+        "code": false
+      }
+    }
+  ],
+  "quietHours": [
+    {
+      "at": "2027-03-10T23:30:00Z",
+      "zone": "UTC",
+      "start": "22:00",
+      "end": "07:00",
+      "wall": "23:30:00",
+      "want": 27000
+    },
+    {
+      "at": "2027-03-11T06:59:00Z",
+      "zone": "UTC",
+      "start": "22:00",
+      "end": "07:00",
+      "wall": "06:59:00",
+      "want": 60
+    },
+    {
+      "at": "2027-03-10T23:30:00Z",
+      "zone": "Europe/Paris",
+      "start": "22:00",
+      "end": "07:00",
+      "wall": "00:30:00",
+      "want": 23400
+    },
+    {
+      "at": "2027-03-10T12:00:00Z",
+      "zone": "UTC",
+      "start": "22:00",
+      "end": "07:00",
+      "wall": "12:00:00",
+      "want": 0
+    },
+    {
+      "at": "2027-03-10T12:00:00Z",
+      "zone": "UTC",
+      "start": "12:00",
+      "end": "13:00",
+      "wall": "12:00:00",
+      "want": 3600
+    },
+    {
+      "at": "2027-03-10T12:00:42Z",
+      "zone": "UTC",
+      "start": "12:00",
+      "end": "13:00",
+      "wall": "12:00:42",
+      "want": 3558
+    },
+    {
+      "at": "2027-03-10T12:00:00Z",
+      "zone": "UTC",
+      "start": null,
+      "end": null,
+      "wall": "12:00:00",
+      "want": 0
+    },
+    {
+      "at": "2027-03-10T12:00:00Z",
+      "zone": "UTC",
+      "start": "09:00",
+      "end": "09:00",
+      "wall": "12:00:00",
+      "want": 0
+    },
+    {
+      "at": "2027-03-10T13:00:00Z",
+      "zone": "UTC",
+      "start": "12:00",
+      "end": "13:00",
+      "wall": "13:00:00",
+      "want": 0
+    },
+    {
+      "at": "2027-03-10T12:00:00Z",
+      "zone": "UTC",
+      "start": "9:00",
+      "end": "noon",
+      "wall": "12:00:00",
+      "want": 0
+    },
+    {
+      "at": "2027-07-01T03:15:10Z",
+      "zone": "America/New_York",
+      "start": "22:00",
+      "end": "07:00",
+      "wall": "23:15:10",
+      "want": 27890
+    }
+  ],
+  "trust": [
+    {
+      "held": [
+        "tickets.work"
+      ],
+      "cap": null,
+      "need": "tickets.work",
+      "allows": true,
+      "narrowed": [
+        "tickets.work"
+      ]
+    },
+    {
+      "held": [
+        "tickets.work"
+      ],
+      "cap": [],
+      "need": "tickets.work",
+      "allows": false,
+      "narrowed": []
+    },
+    {
+      "held": [
+        "tickets"
+      ],
+      "cap": [
+        "tickets.work"
+      ],
+      "need": "tickets.work",
+      "allows": true,
+      "narrowed": [
+        "tickets.work"
+      ]
+    },
+    {
+      "held": [
+        "tickets.work"
+      ],
+      "cap": [
+        "tickets"
+      ],
+      "need": "tickets.work",
+      "allows": true,
+      "narrowed": [
+        "tickets.work"
+      ]
+    },
+    {
+      "held": [
+        "tickets.read"
+      ],
+      "cap": null,
+      "need": "tickets.work",
+      "allows": false,
+      "narrowed": [
+        "tickets.read"
+      ]
+    },
+    {
+      "held": [
+        "agents.approve",
+        "tickets.work"
+      ],
+      "cap": [
+        "agents.approve"
+      ],
+      "need": "tickets.work",
+      "allows": false,
+      "narrowed": [
+        "agents.approve"
+      ]
+    },
+    {
+      "held": [
+        "agents.approve",
+        "tickets.work"
+      ],
+      "cap": [
+        "agents.approve"
+      ],
+      "need": "agents.approve",
+      "allows": true,
+      "narrowed": [
+        "agents.approve"
+      ]
+    },
+    {
+      "held": [
+        "reports",
+        "reports.export"
+      ],
+      "cap": [
+        "reports.export",
+        "reports.read"
+      ],
+      "need": "reports.read",
+      "allows": true,
+      "narrowed": [
+        "reports.export",
+        "reports.read"
+      ]
+    }
+  ],
+  "codeHashes": [
+    {
+      "code": "123456",
+      "want": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92"
+    },
+    {
+      "code": " 123456 ",
+      "want": "8d969eef6ecad3c29a3a629280e686cf0c3f5d5a86aff3ca12020c923adc6c92"
+    },
+    {
+      "code": "a1b2",
+      "want": "b7e9e16ed1eaacb04679c1173b0982f87ab5dc3f05c87ce1aacfdf3443955830"
+    },
+    {
+      "code": "A1B2",
+      "want": "b7e9e16ed1eaacb04679c1173b0982f87ab5dc3f05c87ce1aacfdf3443955830"
+    },
+    {
+      "code": "",
+      "want": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "sameIds": [
+    {
+      "id": "0f8b6c4e-1b2a-4c3d-9e8f-123456789abc",
+      "want": "TKbHsHDO6x9RCjbs5c2u4"
+    },
+    {
+      "id": "0F8B6C4E-1B2A-4C3D-9E8F-123456789ABC",
+      "want": "TKbHsHDO6x9RCjbs5c2u4"
+    },
+    {
+      "id": "SMS",
+      "want": "SMS"
+    },
+    {
+      "id": "not an id",
+      "want": "not an id"
+    }
+  ]
+}

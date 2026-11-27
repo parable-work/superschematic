@@ -292,6 +292,14 @@ impl Providers {
         Ok(instance)
     }
 
+    /// The optional operations of its interface the provider of `slot`
+    /// implements, as its definition declares them: a channel adapter's
+    /// `status` and `inbound`, which the notifier asks before it waits on a
+    /// delivery report or reads a callback (D153, D191).
+    pub fn operations(&self, slot: &str) -> Result<&[String], ProviderNotConfiguredError> {
+        Ok(&self.entry(slot, None)?.definition.operations)
+    }
+
     /// The credential provider of `slot`.
     pub fn credentials(&self, slot: &str) -> Result<Arc<dyn CredentialProvider>, BoxError> {
         match self.get(slot, RuntimeInterface::Credentials)? {

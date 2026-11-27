@@ -31,10 +31,13 @@ export const lists: readonly string[] = fixtureAudienceBehaviorsDbRules.types.Ta
 `
 
 // audienceBehaviorsCases are the cases audience_behaviors.test.ts runs:
-// on bun:sqlite the adapter over the layout, always; on Postgres the
-// generated repository, when the database is set.
+// on bun:sqlite the adapter over the layout and the generated repositories
+// on SQLite, always; on Postgres the generated repository, when the
+// database is set.
 var audienceBehaviorsCases = []string{
 	"the core reads a private row's audience ids as a list of UUIDs, on bun:sqlite",
+	"a private row's behaviors answer its owner, and are not found for anyone else, on bun:sqlite",
+	"a named row's behaviors answer the principals it names, and are not found for anyone else, on bun:sqlite",
 	"a private row's behaviors answer its owner, and are not found for anyone else, on Postgres",
 	"a named row's behaviors answer the principals it names, and are not found for anyone else, on Postgres",
 }
@@ -44,7 +47,10 @@ var audienceBehaviorsCases = []string{
 // TypeScript package, type-checks it against audienceBehaviorsCheck, and
 // runs testdata/orm/audience_behaviors.test.ts in it with bun. On
 // bun:sqlite, the adapter over the layout reads a private row, whose
-// audience ids are SQLite's JSON text, as the core reads it. On Postgres,
+// audience ids are SQLite's JSON text, as the core reads it, and the
+// generated repositories on SQLite (orm-sqlite.ts, whose behaviors run
+// through the core over sqliteRulesStore, D182) answer as on Postgres
+// below. On Postgres,
 // over the generated create.sql in a schema of its own at
 // SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, a Workflow transition, a
 // Comments post and list, an update and a delete of a private row, and of
@@ -83,6 +89,7 @@ func TestAudienceBehaviorsEndToEnd(t *testing.T) {
 		name:     audienceBehaviorsFixture,
 		schema:   schema,
 		registry: reg,
+		sqlite:   true,
 		extra:    map[string]string{"audience_behaviors.check.ts": audienceBehaviorsCheck},
 	}})
 	dir := filepath.Join(typesRoot, audienceBehaviorsFixture)

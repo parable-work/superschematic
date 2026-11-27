@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@acme/shop-wishlist-api": "workspace:*",
+    "@acme/shop-wishlist-db-types": "workspace:*",
     "@acme/shop-wishlist-types": "workspace:*",
     "@superschematic/http-runtime": "*"
   },

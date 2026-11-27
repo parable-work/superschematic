@@ -3,6 +3,7 @@
 //! them. The SQLite client answers at once, and its repository polls each
 //! method once; the Postgres one awaits its server.
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 #[cfg(feature = "sqlite")]
 use std::pin::pin;
@@ -11,11 +12,11 @@ use std::task::{Context, Poll, Waker};
 
 use serde_json::Value;
 
-use super::plan::{DeletePlan, Plan, Statement};
+use super::plan::{row_key_text, DeletePlan, Plan, Statement};
 use super::{
     Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Dialect, Error,
-    FindOptions, Found, MergeResult, PageOptions, RowPage, Table, UpsertOptions, UpsertStatus,
-    Upserted, Values, WriteOptions,
+    FindOptions, Found, MergeResult, PageOptions, RowPage, Table, UpsertManyOptions,
+    UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
 };
 
 /// The alias a Postgres upsert returns whether it inserted a row as,
@@ -151,12 +152,13 @@ impl<C: Client> Runner<'_, C> {
         }
     }
 
-    /// Refuses an upsert of a table whose reads keep to a caller (D156):
-    /// its update could reach a row the caller does not see.
-    fn refuse_held_upsert(&self) -> Result<(), Error> {
+    /// Refuses an upsert, `upsert_one` or `upsert_many`, of a table whose
+    /// reads keep to a caller (D156): its update could reach a row the
+    /// caller does not see.
+    fn refuse_held_upsert(&self, method: &str) -> Result<(), Error> {
         if self.plan.kept(self.table) {
             return Err(Error::Definition(format!(
-                "upsert_one of {}: the table's rows keep to the operation's caller (D156), and an upsert's update could reach a row the caller does not see; create and update the row by its key",
+                "{method} of {}: the table's rows keep to the operation's caller (D156), and an upsert's update could reach a row the caller does not see; create and update the row by its key",
                 self.table.name
             )));
         }
@@ -334,7 +336,7 @@ impl<C: Client> Runner<'_, C> {
         update: &Values,
         options: UpsertOptions,
     ) -> Result<Upserted<Values>, Error> {
-        self.refuse_held_upsert()?;
+        self.refuse_held_upsert("upsert_one")?;
         if self.table.behaviors.is_some() {
             return self.core_upsert(input, on, update, options).await;
         }
@@ -386,6 +388,142 @@ impl<C: Client> Runner<'_, C> {
             }
         };
         self.resealed(upserted, update, &plan.sealing).await
+    }
+
+    /// An upsert of many rows (D89, `Plan::upsert_many`), batch by batch in
+    /// the caller's transaction, which rolls back the batches before one
+    /// that fails: each input's row and what the upsert did with it, in
+    /// the inputs' order. A returned row is its input's by the key's
+    /// values, and one whose key no input holds, as a key the database
+    /// writes, the next input's that sets none. Postgres's upsert says
+    /// whether it inserted each row; on SQLite a row whose key no row held
+    /// before the batch was inserted. A row the statement did not return
+    /// is one it left as it was, only if changed or when the update sets
+    /// no field, which is read back by its key, or a deleted one, which is
+    /// not found. An encrypted field the update sets is sealed under the
+    /// key of each row it updates by a second statement, as `upsert_one`
+    /// seals it.
+    pub(crate) async fn upsert_many(
+        &self,
+        inputs: &[Values],
+        on: &[&str],
+        fields: &[&str],
+        options: UpsertManyOptions,
+    ) -> Result<Vec<Upserted<Values>>, Error> {
+        self.refuse_held_upsert("upsert_many")?;
+        let plan = self.plan.upsert_many(inputs, on, fields, options)?;
+        let sqlite = self.plan.definition.dialect == Dialect::Sqlite;
+        let mut results: Vec<Option<Upserted<Values>>> = vec![None; inputs.len()];
+        for batch in &plan.batches {
+            let existed: HashSet<String> = match &batch.before {
+                Some(before) => self
+                    .rows(before, 0)
+                    .await?
+                    .iter()
+                    .filter_map(|(row, _)| row_key_text(&plan.key_columns, row))
+                    .collect(),
+                None => HashSet::new(),
+            };
+            let mut matched: Vec<Option<Upserted<Values>>> = vec![None; batch.inputs.len()];
+            for (statement, members) in &batch.statements {
+                let mut waiting: HashMap<&str, VecDeque<usize>> = HashMap::new();
+                let mut unkeyed: VecDeque<usize> = VecDeque::new();
+                for &i in members {
+                    match &batch.keys[i] {
+                        Some(text) => waiting.entry(text.as_str()).or_default().push_back(i),
+                        None => unkeyed.push_back(i),
+                    }
+                }
+                let extra = if sqlite { 0 } else { UPSERT_INSERTED };
+                for (row, extras) in self.rows(statement, extra).await? {
+                    let text = row_key_text(&plan.key_columns, &row);
+                    let i = text
+                        .as_deref()
+                        .and_then(|text| waiting.get_mut(text).and_then(VecDeque::pop_front))
+                        .or_else(|| unkeyed.pop_front())
+                        .ok_or_else(|| {
+                            Error::Database(format!(
+                                "upsert_many of {} wrote a row whose {} no input holds",
+                                self.table.name,
+                                on.join(",")
+                            ))
+                        })?;
+                    let inserted = if sqlite {
+                        batch.keys[i]
+                            .as_ref()
+                            .is_none_or(|key| !existed.contains(key))
+                    } else {
+                        extras.first().and_then(Value::as_bool) == Some(true)
+                    };
+                    matched[i] = Some(Upserted {
+                        row: self.plan.open(row)?,
+                        status: if inserted {
+                            UpsertStatus::Inserted
+                        } else if plan.sets {
+                            UpsertStatus::Updated
+                        } else {
+                            UpsertStatus::Unchanged
+                        },
+                    });
+                }
+            }
+            // A row no statement returned is one it left as it was, when the
+            // update sets no field or only if changed, or a deleted one.
+            let left: Vec<usize> = (0..matched.len())
+                .filter(|&i| matched[i].is_none())
+                .collect();
+            if !left.is_empty() {
+                if !options.only_if_changed && plan.sets {
+                    return Err(self.deleted(on));
+                }
+                let mut cells = Vec::with_capacity(left.len());
+                for &i in &left {
+                    cells.push(batch.key_cells[i].as_ref().ok_or_else(|| {
+                        Error::NotFound(format!(
+                            "no {} row holds an unset {}",
+                            self.table.name,
+                            on.join(",")
+                        ))
+                    })?);
+                }
+                let read = self
+                    .plan
+                    .rows_of_keys(plan.key, cells.into_iter())?
+                    .ok_or_else(|| self.deleted(on))?;
+                let mut held: HashMap<String, Values> = HashMap::new();
+                for (row, _) in self.rows(&read, 0).await? {
+                    if let Some(text) = row_key_text(&plan.key_columns, &row) {
+                        held.insert(text, row);
+                    }
+                }
+                for i in left {
+                    let row = batch.keys[i]
+                        .as_ref()
+                        .and_then(|key| held.get(key))
+                        .filter(|row| self.live(row))
+                        .cloned()
+                        .ok_or_else(|| self.deleted(on))?;
+                    matched[i] = Some(Upserted {
+                        row: self.plan.open(row)?,
+                        status: UpsertStatus::Unchanged,
+                    });
+                }
+            }
+            for (i, upserted) in matched.into_iter().enumerate() {
+                let input = &inputs[batch.inputs[i]];
+                let upserted = upserted.ok_or_else(|| self.deleted(on))?;
+                let mut sealing = Values::new();
+                for column in &plan.sealing {
+                    sealing.insert(
+                        column.name.clone(),
+                        input.get(&column.name).cloned().unwrap_or(Value::Null),
+                    );
+                }
+                results[batch.inputs[i]] =
+                    Some(self.resealed(upserted, &Values::new(), &sealing).await?);
+            }
+        }
+        Ok(results.into_iter().flatten().collect())
     }
 
     pub(crate) async fn delete_one(
