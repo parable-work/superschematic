@@ -15,8 +15,9 @@ import (
 // Each is on a plain table of a DB service, with one key field: a target's
 // delete clears its references through a trigger, and referencedBy and a
 // release read across tables. On SQLite only the TypeScript repositories
-// do so far, so a service that lists sqlite takes no other language's
-// types (D182, refuseSQLiteReaders). The tables a
+// do so far, and the Go ones refuse those calls at run time, so a service
+// that lists sqlite takes no Rust types (D182, refuseSQLiteReaders). The
+// tables a
 // @references lists are plain tables of the database with one key each.
 // The queues each names are @queue classes of the schema that declare no
 // fields, which the expansion fills. And no authored type takes the name

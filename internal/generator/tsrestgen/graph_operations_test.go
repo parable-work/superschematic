@@ -230,7 +230,7 @@ func TestGraphOperationsNeedTheRepositories(t *testing.T) {
 		why  string
 	}{
 		"no TypeScript types": {DepsInfo{Database: graphDB, Dialect: "postgres"}, "enable outputs.types.typescript in fixture-version-graph-db's config"},
-		"sqlite first":        {DepsInfo{Database: graphDB, Dialect: SQLiteDialect, ORM: "FixtureVersionGraphDbOrm", DatabaseTypesPackage: "@schemas/fixture-version-graph-db-types"}, "fixture-version-graph-db lists sqlite first, and the repositories and the graph's facade run on Postgres alone (D138)"},
+		"sqlite first":        {DepsInfo{Database: graphDB, Dialect: SQLiteDialect, ORM: "FixtureVersionGraphDbOrm", DatabaseTypesPackage: "@schemas/fixture-version-graph-db-types"}, "fixture-version-graph-db lists sqlite first, and the graph's facade runs on Postgres alone (D138)"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := generateGraph(t, graphFixture(t)).SetDeps(tc.deps)

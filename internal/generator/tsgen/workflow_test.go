@@ -75,9 +75,17 @@ var workflowCases = []string{
 
 // workflowPostgresCases are the cases workflow.test.ts runs through the
 // generated repository on Postgres alone, by their whole names: the
-// repositories run on Postgres, and the adapter has no upsert of its own.
+// adapter has no upsert of its own, and on SQLite a table that composes
+// behaviors upserts a row at a time (D182).
 var workflowPostgresCases = []string{
 	"an upsert by a unique key inserts a new row with what the core's create gives it, and updates a held row's own fields, its states kept",
+}
+
+// workflowSQLiteCases are the cases workflow.test.ts runs through the
+// generated repository on SQLite alone (D182), by their whole names: an
+// upsert of one row, and the refusal of one of many.
+var workflowSQLiteCases = []string{
+	"an upsert by a unique key inserts a new row with what the core's create gives it, and updates a held row's own fields, its states kept, on SQLite",
 }
 
 // TestWorkflowTablesEndToEnd holds the generator's layout to the HTTP
@@ -90,8 +98,12 @@ var workflowPostgresCases = []string{
 // generator writes sqlite/create.sql), the adapter run on the layout the
 // generated orm.ts embeds; on Postgres, over the generated create.sql in a
 // schema of its own at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL, the
-// generated repository, and its upserts (workflowPostgresCases). Every
-// case must pass on bun:sqlite, and on Postgres when the database is set;
+// generated repository, and its upserts (workflowPostgresCases); and on
+// SQLite, the generated repository over a file of the same DDL
+// (createOrm of ./orm-sqlite, D182), whose commands run through the adapter's SQLite
+// store in the transaction that holds the file, and its upsert of one row
+// (workflowSQLiteCases). Every case must pass on bun:sqlite and on SQLite,
+// and on Postgres when the database is set;
 // it skips without bun unless SUPERSCHEMATIC_REQUIRE_TS_CHECKS says the
 // gate must run.
 func TestWorkflowTablesEndToEnd(t *testing.T) {
@@ -128,6 +140,7 @@ func TestWorkflowTablesEndToEnd(t *testing.T) {
 		schema:   schema,
 		registry: reg,
 		extra:    map[string]string{"workflow.check.ts": workflowCheck},
+		sqlite:   true,
 	}})
 	// Written once the package type-checks: bun runs the test without a
 	// check of its own, and tsc has no bun:test.
@@ -158,7 +171,7 @@ func TestWorkflowTablesEndToEnd(t *testing.T) {
 		// name beside its tests.
 		delete(cases, "(unnamed)")
 	}
-	for _, dialect := range []string{"bun:sqlite", "Postgres"} {
+	for _, dialect := range []string{"bun:sqlite", "SQLite", "Postgres"} {
 		for _, name := range workflowCases {
 			name += ", on " + dialect
 			tc, ok := cases[name]
@@ -183,7 +196,16 @@ func TestWorkflowTablesEndToEnd(t *testing.T) {
 			t.Fatalf("%q was skipped:\n%s", name, junit)
 		}
 	}
-	if want := 2*len(workflowCases) + len(workflowPostgresCases); len(cases) != want {
+	for _, name := range workflowSQLiteCases {
+		tc, ok := cases[name]
+		switch {
+		case !ok:
+			t.Fatalf("bun did not run %q:\n%s", name, junit)
+		case tc.Failure != nil || tc.Skipped != nil:
+			t.Fatalf("%q did not pass:\n%s", name, junit)
+		}
+	}
+	if want := 3*len(workflowCases) + len(workflowPostgresCases) + len(workflowSQLiteCases); len(cases) != want {
 		t.Fatalf("bun ran %d cases of workflow.test.ts, and the test names %d:\n%s", len(cases), want, junit)
 	}
 	if !postgres {

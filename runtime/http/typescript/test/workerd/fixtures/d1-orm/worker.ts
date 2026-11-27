@@ -19,8 +19,12 @@
 //     message, through the note's trigger;
 //   - a file's upload is begun, its bytes put, completed, listed, read,
 //     viewed, processed and detached, which enqueues its release;
-//   - a write of a table that composes behaviors is refused.
+//   - a ticket, whose table composes Comments, is created and renamed
+//     through the behaviors' core, the module @superschematic/rules ships,
+//     whose change sets go as D1's batches.
 import { DurableObject } from 'cloudflare:workers';
+import rulesWasm from './superschematic_rules_wasm.wasm';
+import { initSync } from '../../../../../../rules/typescript/dist/index.js';
 import { NotFoundError, uuidFromDb, uuidToDb, type SqlDatabase, type SqlPreparedStatement, type SqlResult, type SqlValue } from '../../../../dist/d1.js';
 import { openR2Bucket, type R2BucketBinding, type R2ObjectLike, type R2PutValue } from '../../../../dist/r2.js';
 import { createOrm } from './records-orm.ts';
@@ -125,7 +129,9 @@ export default {
   async test(_controller: unknown, env: { DATABASE: DurableObjectNamespace<Database> }) {
     const db = d1Over(env.DATABASE.get(env.DATABASE.idFromName('records')));
     await db.exec(createSQL);
-    const orm = createOrm(db, ALICE);
+    // The behaviors' core, as a Worker's bundle carries it (D103).
+    const rules = initSync(rulesWasm as WebAssembly.Module);
+    const orm = createOrm(db, { user: ALICE, rules });
     const system = orm.asSystem();
     const note = async (title: string, owner: string, audience: string, audienceNamed?: string[]) =>
       (await system.note.createOne({ title, owner, audience, ...(audienceNamed ? { audienceNamed } : {}), createdAt: new Date() } as never)).id as string;
@@ -180,10 +186,13 @@ export default {
     check(released.rows.map(r => r.reason).join() === 'expired,detached', `a detached file's object is released: ${JSON.stringify(released.rows)}`);
     check((await orm.attachments.release({ objectKey: file.objectKey }, { bucket })).deleted, 'the object goes once no file names it');
 
-    // A ticket composes Comments, whose writes run on Postgres alone so far.
+    // A ticket composes Comments, whose writes run through the core.
     const ticket = crypto.randomUUID();
     await orm.exec('INSERT INTO ticket (id, title) VALUES (?1, ?2)', [ticket, 'Read on D1']);
     check((await orm.ticket.getOne(uuidFromDb(ticket) as never)).title === 'Read on D1', "a behaviors' table is read");
-    await refuses(orm.ticket.createOne({ title: 'Not yet' } as never), "a write of a behaviors' table", error => String(error).includes('on Postgres alone so far'));
+    const created = (await orm.ticket.createOne({ title: 'Written on D1' } as never)) as { id: string; title: string };
+    check(created.title === 'Written on D1', "a behaviors' table's row is created through the core");
+    const renamed = (await orm.ticket.updateOne(created.id as never, { title: 'Renamed on D1' } as never)) as { title: string };
+    check(renamed.title === 'Renamed on D1' && (await orm.ticket.getOne(created.id as never)).title === 'Renamed on D1', "a behaviors' table's row is updated through the core");
   },
 };

@@ -19,6 +19,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/queueops"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	"github.com/parable-work/superschematic/internal/stack/local"
 	"github.com/parable-work/superschematic/internal/stackdeploy"
 	ir "github.com/parable-work/superschematic/ir"
@@ -169,9 +170,9 @@ func runQueueWith(t *testing.T, ext *stacktest.Extension, stackDir string, args 
 
 // TestStackQueueRefuses refuses, before it runs anything, a queue named
 // otherwise than <db>.<Queue>, a DB service the stack does not reach and a
-// queue its DB service does not declare, an environment that places the
-// queue's database on SQLite, a run on a cloud target that was never
-// deployed, and a retry or a drop that names no ID and no --all, or both,
+// queue its DB service does not declare, a run on a cloud target that was
+// never deployed, its database on Postgres or SQLite, and a retry or a
+// drop that names no ID and no --all, or both,
 // an ID that is no UUID, a drop of every message without --yes, a limit
 // under one, a timeout of none and a format other than text or json.
 func TestStackQueueRefuses(t *testing.T) {
@@ -188,7 +189,7 @@ func TestStackQueueRefuses(t *testing.T) {
 		"backfill ids":  {[]string{"backfill", "Dev", "qops-db.Reminder", id}, "accepts 2 arg(s), received 3"},
 		"an API":        {[]string{"dead", "Dev", "qops-api.Reminder"}, "stack qops-stack reaches no DB service qops-api"},
 		"environment":   {[]string{"dead", "Prod", "qops-db.Reminder"}, "stack qops-stack has no environment Prod"},
-		"on SQLite":     {[]string{"lite", "dead", "Lite", "qops-db.Reminder"}, "environment Lite places qops-db on database qops-db, a sqlite database; stack queue reads, retries and drops a queue's dead messages on Postgres alone, and on SQLite it is not built (D68)"},
+		"on SQLite":     {[]string{"lite", "dead", "Lite", "qops-db.Reminder"}, "Lite was never deployed, so its database qops-db holds no queue yet; deploy it first"},
 		"not deployed":  {[]string{"retry", "Staging", "qops-db.Reminder", "--all"}, "Staging was never deployed, so its database qops-db holds no queue yet; deploy it first"},
 		"timeout":       {[]string{"dead", "Dev", "qops-db.Reminder", "--timeout", "0s"}, "--timeout 0s: wait for some time"},
 		"no ids":        {[]string{"retry", "Dev", "qops-db.Reminder"}, "name the IDs of the dead messages to retry, as stack queue dead lists them, or pass --all"},
@@ -271,7 +272,7 @@ func TestStackQueueBackfillOnACloudEnvironment(t *testing.T) {
 
 	schema, err := loader.LoadService(filepath.Join(filepath.Dir(stackDir), "qops-db"))
 	require.NoError(t, err)
-	statements, err := queueops.BackfillStatements(schema, sqlgen.Options{SchemaName: "qops-db"}, "Reminder")
+	statements, err := queueops.BackfillStatements(schema, sqlgen.Options{SchemaName: "qops-db"}, "Reminder", queueops.Postgres)
 	require.NoError(t, err)
 	require.Len(t, statements, 1)
 	assert.Contains(t, statements[0], "INSERT INTO reminder_queue (cart)\nSELECT src.code\nFROM cart AS src\nWHERE TRUE")
@@ -280,6 +281,179 @@ func TestStackQueueBackfillOnACloudEnvironment(t *testing.T) {
 	docs := ext.Queues.Documents()
 	require.Len(t, docs, 1)
 	assert.Equal(t, string(want), string(docs[0]))
+}
+
+// TestStackQueueOnASQLiteCloudEnvironment runs the queue commands over a
+// deployed run on the fake target whose database is on its SQLite
+// platform, as a cloudflare database is on D1 (D68): the command hands the
+// runner a document of SQLite's statements, which lists the message by its
+// columns, and a backfill of SQLite's statement.
+func TestStackQueueOnASQLiteCloudEnvironment(t *testing.T) {
+	stackDir := qopsTree(t, 5432, 5433)
+	ext := &stacktest.Extension{State: &stacktest.FakeState{}, Queues: &stacktest.FakeQueues{Results: map[string][]byte{
+		"dead":     []byte(`{"version": 1, "service": "qops-db", "queue": "Reminder", "operation": "dead", "total": 0, "messages": []}`),
+		"backfill": []byte(`{"version": 1, "service": "qops-db", "queue": "Reminder", "operation": "backfill", "total": 1}`),
+	}}}
+	manifest, err := json.Marshal(map[string]any{"version": stackdeploy.ManifestVersion, "stack": "qlite-stack", "run": "Lite"})
+	require.NoError(t, err)
+	lite := registry.Run{Environment: &ir.ResolvedEnvironment{Stack: "qlite-stack", Environment: "Lite"}}
+	require.NoError(t, ext.State.WriteManifest(context.Background(), lite, manifest))
+
+	stdout, stderr, err := runQueueWith(t, ext, stackDir, "lite", "dead", "Lite", "qops-db.Reminder")
+	require.NoError(t, err, stdout+stderr)
+	assert.Equal(t, "Queue qops-db.Reminder of Lite has no dead messages.\n", stdout)
+	stdout, stderr, err = runQueueWith(t, ext, stackDir, "lite", "backfill", "Lite", "qops-db.Reminder")
+	require.NoError(t, err, stdout+stderr)
+	assert.Equal(t, "Backfilled queue qops-db.Reminder of Lite: enqueued 1 message, one for each row that meets its triggers' conditions.\n", stdout)
+
+	schema, err := loader.LoadService(filepath.Join(filepath.Dir(stackDir), "qops-db"))
+	require.NoError(t, err)
+	opts := sqlgen.Options{SchemaName: "qops-db"}
+	message, err := queueops.MessageColumns(schema, opts, "Reminder")
+	require.NoError(t, err)
+	dead, err := queueops.Document(queueops.Request{Service: "qops-db", Queue: "Reminder", Operation: queueops.Dead, Limit: queueops.DefaultLimit, Dialect: queueops.SQLite, Message: message})
+	require.NoError(t, err)
+	statements, err := queueops.BackfillStatements(schema, opts, "Reminder", queueops.SQLite)
+	require.NoError(t, err)
+	backfill, err := queueops.Document(queueops.Request{Service: "qops-db", Queue: "Reminder", Operation: queueops.Backfill, Backfills: statements, Dialect: queueops.SQLite})
+	require.NoError(t, err)
+	docs := ext.Queues.Documents()
+	require.Len(t, docs, 2)
+	assert.Equal(t, string(dead), string(docs[0]))
+	assert.Equal(t, string(backfill), string(docs[1]))
+	assert.Contains(t, string(docs[0]), `json_object('cart', q.\"cart\", 'note', q.\"note\")`)
+}
+
+// qliteLocalTree writes qlite-db, a DB service with qops-db's schema that
+// lists sqlite first, and qlocal-stack, which deploys it alone in Dev on the
+// local target, where it is a SQLite file under the environment's state
+// directory (D64). It returns the stack's directory and the schemas root.
+func qliteLocalTree(t *testing.T) (string, string) {
+	t.Helper()
+	root := filepath.Join(t.TempDir(), "schemas")
+	services := filepath.Join(root, "services")
+	qopsDir := qopsTree(t, 5432, 5433)
+	schema, err := os.ReadFile(filepath.Join(filepath.Dir(qopsDir), "qops-db", "src", "db.schema.yaml"))
+	require.NoError(t, err)
+	writeFiles(t, services, map[string]string{
+		"qlite-db/schema.config.yaml":     "name: qlite-db\nkind: DB\noutputs:\n  types:\n    go: { enabled: true }\n  sql: { dialects: [sqlite, postgres] }\n",
+		"qlite-db/src/db.schema.yaml":     strings.Replace(string(schema), "name: qops-db", "name: qlite-db", 1),
+		"qlocal-stack/schema.config.yaml": "name: qlocal-stack\nkind: Stack\noutputs: {}\n",
+		"qlocal-stack/src/stack.schema.yaml": `kind: Stack
+types:
+  Qlocal:
+    name: Qlocal
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: qlite-db, kind: DB }
+  Dev:
+    name: Dev
+    role: EmbeddedStruct
+    environment:
+      target: local
+`,
+	})
+	return filepath.Join(services, "qlocal-stack"), root
+}
+
+// TestStackQueueOnALocalSQLiteEnvironment runs the queue commands over the
+// local target on a database on SQLite (D68): qlite-db's file under Dev's
+// state directory, as stack dev creates and migrates it, here migrated by
+// the migration runner, built from runtime/migrate/go, from qlite-db's
+// SQLite plan, with two dead reminders, a ready one and a cart whose
+// reminder waits for a backfill. dead lists the two, the oldest death
+// first; retry refuses the ready one with a dead one and changes neither,
+// then makes the dead one ready; drop deletes the other; dead then finds
+// none; and backfill enqueues a reminder for each cart.
+func TestStackQueueOnALocalSQLiteEnvironment(t *testing.T) {
+	if testing.Short() {
+		t.Skip("-short: builds the migration runner and runs it on a SQLite file")
+	}
+	runner := filepath.Join(t.TempDir(), local.MigrateBinary)
+	build := exec.Command("go", "build", "-o", runner, "./cmd/superschematic-migrate")
+	build.Dir = filepath.Join("..", "runtime", "migrate", "go")
+	build.Env = append(os.Environ(), "CGO_ENABLED=0", "GOWORK=off")
+	built, err := build.CombinedOutput()
+	require.NoError(t, err, string(built))
+	t.Setenv(local.MigrateEnv, runner)
+
+	stackDir, schemasRoot := qliteLocalTree(t)
+	schema, err := loader.LoadService(filepath.Join(filepath.Dir(stackDir), "qlite-db"))
+	require.NoError(t, err)
+	model, err := sqlmigrate.BuildModel(schema, sqlgen.Options{SchemaName: "qlite-db"}, sqlmigrate.SQLite)
+	require.NoError(t, err)
+	plan, err := sqlmigrate.Diff(nil, model, sqlmigrate.Options{})
+	require.NoError(t, err)
+	const (
+		first  = "00000000-0000-4000-8000-0000000000a1"
+		second = "00000000-0000-4000-8000-0000000000a2"
+		ready  = "00000000-0000-4000-8000-0000000000a3"
+	)
+	at := func(modifier string) string { return "strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '" + modifier + "')" }
+	// The rows a running environment would hold, in a step of their own
+	// after the plan's, which create.sql's tables then hold. The cart is
+	// written before its reminders are emptied, as a row written before
+	// its trigger was.
+	plan.Steps = append(plan.Steps, &sqlmigrate.Step{
+		Index: len(plan.Steps) + 1, Phase: sqlmigrate.Expand, Op: "seed", Subject: "the test's rows", Transactional: true,
+		Statements: []string{
+			`INSERT INTO cart (code) VALUES ('c-9')`,
+			`DELETE FROM reminder_queue`,
+			`INSERT INTO reminder_queue (id, cart, note, state, attempts, last_error, updated_at) VALUES
+  ('` + first + `', 'c-1', 'first', 'dead', 3, 'the cart is gone', ` + at("-2 hours") + `),
+  ('` + second + `', 'c-2', NULL, 'dead', 1, 'the claim of its last attempt expired before its handler finished', ` + at("-1 hours") + `)`,
+			`INSERT INTO reminder_queue (id, cart, state, due_at) VALUES ('` + ready + `', 'c-3', 'ready', ` + at("+1 hours") + `)`,
+		},
+	})
+	require.NoError(t, plan.Seal())
+	planJSON, err := json.Marshal(plan)
+	require.NoError(t, err)
+	planFile := filepath.Join(t.TempDir(), "plan.json")
+	require.NoError(t, os.WriteFile(planFile, planJSON, 0o644))
+	file := filepath.Join(local.StateDir(schemasRoot, "qlocal-stack", "Dev"), local.SQLiteFile("qlite-db"))
+
+	out, err := runQueue(t, stackDir, "dead", "Dev", "qlite-db.Reminder")
+	require.Error(t, err, out)
+	assert.Contains(t, err.Error(), "local: the SQLite database of qlite-db, "+file+", is not there")
+
+	require.NoError(t, os.MkdirAll(filepath.Dir(file), 0o700))
+	applied, err := exec.Command(runner, "apply", "--plan", planFile, "--database-url", local.SQLiteURL(file)).CombinedOutput()
+	require.NoError(t, err, string(applied))
+
+	out, err = runQueue(t, stackDir, "dead", "Dev", "qlite-db.Reminder")
+	require.NoError(t, err, out)
+	for _, want := range []string{
+		"Queue qlite-db.Reminder of Dev: 2 dead messages, the oldest death first.\n\n" + first + "\n  attempts:   3\n  died at:    ",
+		"  last error: the cart is gone\n  message:    {\"cart\":\"c-1\",\"note\":\"first\"}\n\n" + second + "\n  attempts:   1\n",
+		"  message:    {\"cart\":\"c-2\",\"note\":null}\n",
+	} {
+		assert.Contains(t, out, want)
+	}
+	assert.NotContains(t, out, ready)
+
+	out, err = runQueue(t, stackDir, "retry", "Dev", "qlite-db.Reminder", strings.ToUpper(first), ready)
+	require.Error(t, err, out)
+	assert.Equal(t, "local: queue Reminder of qlite-db: 1 of the 2 message(s) named are not dead, so none was retried: "+ready+" is ready", err.Error())
+	out, err = runQueue(t, stackDir, "dead", "Dev", "qlite-db.Reminder", "--format", "json")
+	require.NoError(t, err, out)
+	var listed queueops.Result
+	require.NoError(t, json.Unmarshal([]byte(out), &listed), out)
+	assert.Equal(t, int64(2), listed.Total, "a refused retry changed a message")
+
+	out, err = runQueue(t, stackDir, "retry", "Dev", "qlite-db.Reminder", first)
+	require.NoError(t, err, out)
+	assert.Equal(t, "Retried 1 dead message of qlite-db.Reminder in Dev: each is ready, due now, with no attempts.\n  "+first+"\n", out)
+	out, err = runQueue(t, stackDir, "drop", "Dev", "qlite-db.Reminder", second)
+	require.NoError(t, err, out)
+	assert.Equal(t, "Dropped 1 dead message of qlite-db.Reminder in Dev.\n  "+second+"\n", out)
+	out, err = runQueue(t, stackDir, "dead", "Dev", "qlite-db.Reminder")
+	require.NoError(t, err, out)
+	assert.Equal(t, "Queue qlite-db.Reminder of Dev has no dead messages.\n", out)
+
+	out, err = runQueue(t, stackDir, "backfill", "Dev", "qlite-db.Reminder")
+	require.NoError(t, err, out)
+	assert.Equal(t, "Backfilled queue qlite-db.Reminder of Dev: enqueued 1 message, one for each row that meets its triggers' conditions.\n", out)
 }
 
 // TestStackQueueOnALocalEnvironment runs the queue commands over the local

@@ -103,6 +103,7 @@ var accessCases = []string{
 	"a row rule follows a path through the table's relations",
 	"a party with a grant reaches only the rows its role's paths allow",
 	"a role whose path is * reaches every row of the table, the grant's target among them",
+	"an agent run's grant is refused as its holder: the agent dispatcher alone resolves a run's token",
 	"an expired or revoked grant is refused on the very next call",
 	"a reveal opens the value for a holder of its permission and writes an access-log row",
 	"the grants and the access log list through the routes the build serves over views of them",

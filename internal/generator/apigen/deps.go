@@ -59,6 +59,12 @@ type DepsInfo struct {
 	// queues' workers (D145).
 	Queues bool
 
+	// SQLite reports whether Database's DB service lists sqlite first: an
+	// entrypoint then opens its SQLite file, and Deps.DB is the ORM's
+	// SQLiteDatabase, a DatabaseInterface as the Postgres Database is
+	// (D116).
+	SQLite bool
+
 	// Calls are the API's calls entries, in order.
 	Calls []DepsCall
 

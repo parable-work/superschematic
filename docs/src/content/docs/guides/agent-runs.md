@@ -125,6 +125,22 @@ The token ends when the run does. A tool runs as this principal, so no
 tool widens the run's scope. Search across tables, through its `search`
 tool, finds only rows within it.
 
+Only the dispatcher resolves a run's token. `grantAuthenticator`, the
+authenticator of an app's parties, answers it 401: as its grant's holder
+the run would hold the role's every permission, narrowed to no one and
+held to no autonomy. An app that serves both parties and runs mounts
+`agents.authenticator(inner)` alone, which resolves a running run's token
+as the run, any other grant's as its holder, an ended run's as a 401, and
+hands every other request to `inner`:
+
+```ts
+buildRouter(implementations, {
+  orm,
+  authenticate: agents.authenticator(authenticate),
+  accessLog: accessLogOf(orm),
+});
+```
+
 ## Autonomy
 
 Each tool call passes the run's policy. The most specific row wins: the

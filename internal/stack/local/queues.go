@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/registry"
@@ -29,17 +30,50 @@ func DatabaseURLOf(env *ir.ResolvedEnvironment, service string) (string, error) 
 	return "", fmt.Errorf("local: environment %s hosts no database of %s", env.Environment, service)
 }
 
+// sqliteFileOf returns the SQLite file a local environment hosts the DB
+// service on, under the environment's state directory dir (D64), and
+// whether it hosts it on one.
+func sqliteFileOf(env *ir.ResolvedEnvironment, service, dir string) (string, bool) {
+	if env.Resources != nil {
+		for _, res := range env.Resources.Resources {
+			if res == nil || res.Type != TypeSQLiteDatabase || res.Properties["service"] != service {
+				continue
+			}
+			if file, ok := res.Properties["file"].(string); ok && file != "" {
+				return filepath.Join(dir, filepath.FromSlash(file)), true
+			}
+		}
+	}
+	return "", false
+}
+
 // Queue runs a queue document (internal/queueops) on the database of the
 // DB service that declares its queue, with the migration runner,
 // `superschematic-migrate queue`, as stack dev's migrations run it: the
 // runner holds the database drivers (D27). It needs only the environment's
-// Postgres container, which stack dev runs, and returns what the runner
-// printed. A runner's refusal comes back as its own line.
+// Postgres container, which stack dev runs, or, for a database on SQLite,
+// its file under the state directory req.Backend names, which stack dev
+// created (D68), and returns what the runner printed. A runner's refusal
+// comes back as its own line.
 func (p *Provisioner) Queue(ctx context.Context, req registry.ProvisionRequest, service string, document []byte) ([]byte, error) {
 	env := req.Environment
 	url, err := DatabaseURLOf(env, service)
 	if err != nil {
-		return nil, err
+		dir, dirErr := stateDirOf(req.Backend)
+		file, onSQLite := "", false
+		if dirErr == nil {
+			file, onSQLite = sqliteFileOf(env, service, dir)
+		}
+		if !onSQLite {
+			return nil, err
+		}
+		// The runner creates a file that is missing, which would be an
+		// empty database with no queue.
+		if _, statErr := os.Stat(file); statErr != nil {
+			return nil, fmt.Errorf("local: the SQLite database of %s, %s, is not there (%w); run the environment with superschematic stack dev --environment %s, which creates and migrates it, then run this again",
+				service, file, statErr, env.Environment)
+		}
+		url = SQLiteURL(file)
 	}
 	runner, err := p.migrateBinary()
 	if err != nil {
