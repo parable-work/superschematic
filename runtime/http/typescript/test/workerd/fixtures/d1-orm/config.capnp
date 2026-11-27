@@ -3,7 +3,8 @@
 # of D1, a Durable Object of the Worker's own on workerd's SQLite storage,
 # in a file of the run's directory. The runtime reads the caller of an
 # operation through node:async_hooks, which the nodejs_als flag gives, as a
-# deploy's Worker has it.
+# deploy's Worker has it. The behaviors' core's wasm32 module, which
+# scripts/workerd-test.mjs copies beside the bundle, runs a ticket's writes.
 using Workerd = import "/workerd/workerd.capnp";
 
 const config :Workerd.Config = (
@@ -19,6 +20,7 @@ const records :Workerd.Worker = (
   modules = [
     (name = "worker.js", esModule = embed "worker.js"),
     (name = "superscalar_wasm_bg.wasm", wasm = embed "superscalar_wasm_bg.wasm"),
+    (name = "superschematic_rules_wasm.wasm", wasm = embed "superschematic_rules_wasm.wasm"),
   ],
   durableObjectNamespaces = [(className = "Database", uniqueKey = "d1-orm-records", enableSql = true)],
   durableObjectStorage = (localDisk = "storage"),

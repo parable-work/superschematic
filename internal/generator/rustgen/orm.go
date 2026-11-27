@@ -179,10 +179,14 @@ type ormDefinition struct {
 	// JSONClauses are the conditions of a Generic.JSON column's filter
 	// where they are not Clauses' (sqlutil.SQLiteJSONClauses); absent on
 	// Postgres, whose JSONB column compares its values itself.
-	JSONClauses      orderedStrings `json:"jsonClauses,omitempty"`
-	DefaultLimit     int            `json:"defaultLimit"`
-	SystemActor      *ormActor      `json:"systemActor,omitempty"`
-	RequireUpdatedBy bool           `json:"requireUpdatedBy,omitempty"`
+	JSONClauses  orderedStrings `json:"jsonClauses,omitempty"`
+	DefaultLimit int            `json:"defaultLimit"`
+	// MaxParameters is the most parameters one statement binds in the
+	// dialect, by which an upsert of many rows batches them (D89):
+	// sqlutil.MaxParameters on Postgres, SQLiteMaxParameters on SQLite.
+	MaxParameters    int       `json:"maxParameters"`
+	SystemActor      *ormActor `json:"systemActor,omitempty"`
+	RequireUpdatedBy bool      `json:"requireUpdatedBy,omitempty"`
 	// HistoryActorCTE and ClearHistoryActor are the statements a versioned
 	// table's hard delete runs around it, on Postgres (D17, D32).
 	HistoryActorCTE   string     `json:"historyActorCTE,omitempty"`
@@ -369,6 +373,7 @@ var ormClauses = []string{
 	"eq", "ne", "gt", "gte", "lt", "lte", "ilike", "in", "noneOf", "isNull", "isNotNull", "search",
 	"exists", "notExists", "set", "setNull", "pageKey", "placeholder", "default", "or", "group",
 	"where", "and", "orderBy", "orderTerm", "limit", "offset", "changed", "never", "null",
+	"setExcluded", "excluded",
 }
 
 // named are the members of all that names lists, in its order.
@@ -441,8 +446,8 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		}
 	}
 	info := &ORMInfo{}
-	postgres := ormDefinition{Dialect: "postgres", Clauses: named(sqlutil.PostgresClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
-	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), JSONClauses: sqlutil.SQLiteJSONClauses().AllJSONClauses(), DefaultLimit: sqlutil.DefaultLimit, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
+	postgres := ormDefinition{Dialect: "postgres", Clauses: named(sqlutil.PostgresClauses().AllClauses(), ormClauses), DefaultLimit: sqlutil.DefaultLimit, MaxParameters: sqlutil.MaxParameters, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
+	sqlite := ormDefinition{Dialect: "sqlite", Clauses: named(sqlutil.SQLiteClauses().AllClauses(), ormClauses), JSONClauses: sqlutil.SQLiteJSONClauses().AllJSONClauses(), DefaultLimit: sqlutil.DefaultLimit, MaxParameters: sqlutil.SQLiteMaxParameters, RequireUpdatedBy: opts.Actor.RequireUpdatedBy}
 	if opts.Actor.SystemSet {
 		actor := &ormActor{ID: opts.Actor.SystemID, Name: opts.Actor.SystemName}
 		postgres.SystemActor, sqlite.SystemActor = actor, actor

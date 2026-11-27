@@ -96,8 +96,9 @@ func TestWorkflowTablesOnPostgres(t *testing.T) {
 // generateBehaviorORMModule writes fixture's Go types module, its ORM
 // module and its Postgres DDL (under the ORM's testdata) into a temporary
 // tree, loaded and generated with the core's registry, and returns the ORM
-// module's directory: fixture-workflow-db's or fixture-timers-db's.
-func generateBehaviorORMModule(t *testing.T, paths naming.LocalPaths, fixture string) string {
+// module's directory: fixture-workflow-db's or fixture-timers-db's. Each of
+// configure sets an option of the ORM's.
+func generateBehaviorORMModule(t *testing.T, paths naming.LocalPaths, fixture string, configure ...func(*Options)) string {
 	t.Helper()
 	reg := registry.New(naming.Default())
 	schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture), loader.WithRegistry(reg))
@@ -121,13 +122,17 @@ func generateBehaviorORMModule(t *testing.T, paths naming.LocalPaths, fixture st
 		t.Fatalf("write types: %v", err)
 	}
 
-	ormOutput, err := Generate(schema, Options{
+	opts := Options{
 		SchemaName:  fixture,
 		ModulePath:  "example.com/schemas/orm/" + fixture,
 		TypesModule: typesModule,
 		Registry:    reg,
 		Clock:       clock,
-	})
+	}
+	for _, set := range configure {
+		set(&opts)
+	}
+	ormOutput, err := Generate(schema, opts)
 	if err != nil {
 		t.Fatalf("generate orm: %v", err)
 	}

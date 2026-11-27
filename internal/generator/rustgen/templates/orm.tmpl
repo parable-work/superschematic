@@ -73,7 +73,7 @@ use {{.HTTPRuntimeIdent}}::orm;
 pub use orm::{
     Caller, Constraint, ConstraintKind, Equals, Error, FieldCell, FieldKeyring, FieldKeys,
     FindOptions, Found, OrderBy, Ordered, PageOptions, ReferencedBy, Refusal, RowPage, Text,
-    UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
+    UpsertManyOptions, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
 };
 
 {{if gt (len .Scalars) 0 -}}

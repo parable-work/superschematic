@@ -25,8 +25,12 @@ const (
 
 // ORMSQLite is what orm-sqlite.ts writes.
 type ORMSQLite struct {
-	// Clauses are sqlutil.SQLiteClauses by name.
-	Clauses []sqlutil.NamedStatement
+	// Clauses are sqlutil.SQLiteClauses by name, and JSONClauses
+	// sqlutil.SQLiteJSONClauses: the conditions of a Generic.JSON column's
+	// filter, which compare the nodes json_tree reads of each value, as
+	// Postgres's JSONB compares its values (D116).
+	Clauses     []sqlutil.NamedStatement
+	JSONClauses []sqlutil.NamedStatement
 	// Tables are the tables on SQLite: each ORMTable with its statements,
 	// unique keys and columns as SQLite holds them.
 	Tables []ORMTable

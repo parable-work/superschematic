@@ -277,6 +277,11 @@ type TypeScriptServer struct {
 	// bundle.ts (D92).
 	Workers bool
 
+	// SQLiteFieldKeys is whether an API's repositories on a sqlite-first
+	// database open Encrypted<T> fields, whose keyring main.ts reads with
+	// parseFieldKeys of the runtime's ./sqlite (D85, D182).
+	SQLiteFieldKeys bool
+
 	// Runner is what an engine's runner's entrypoint runs, nil for every
 	// other (D58).
 	Runner *TypeScriptRunner
@@ -689,8 +694,10 @@ type TypeScriptDatabase struct {
 
 	// ORM is the name the entrypoint imports createOrm of the database's
 	// repositories as (D79), from ORMModule, the ./orm entry of its
-	// TypeScript types package, ORMPackage, when an API on the database
-	// holds them in Deps.orm; empty otherwise.
+	// TypeScript types package, ORMPackage, or for a sqlite-first database
+	// its ./orm/sqlite entry, whose createOrm opens them over the SQLite
+	// file under Bun and the D1 binding on Workers (D182), when an API on
+	// the database holds them in Deps.orm; empty otherwise.
 	ORM        string
 	ORMModule  string
 	ORMPackage string
@@ -917,8 +924,8 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		if w.Behavior != nil {
 			// A behavior worker runs its table's deadlines and changes
 			// through the repositories, on Postgres alone (D103).
-			if !o.DepsORM() {
-				return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, a behavior worker (D103), which runs %s through the repositories %s's TypeScript types export for Postgres, and %s has none", in.Stack, in.Server, w.Name, o.SchemaName, w.Behavior.Runs(), o.Deps.Database, o.SchemaName)
+			if !o.DepsORM() || o.DepsSQLite() {
+				return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, a behavior worker (D103), which runs %s through the repositories %s's TypeScript types export for Postgres, and %s has none: a TypeScript behavior worker claims its queues on Postgres alone, and one on a SQLite file or D1 is not built (D116)", in.Stack, in.Server, w.Name, o.SchemaName, w.Behavior.Runs(), o.Deps.Database, o.SchemaName)
 			}
 			s.Worker.Behavior = w.Behavior
 			s.Worker.QueuesFunc = w.QueuesFunc()
@@ -1102,18 +1109,33 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				}
 				api.IdempotencyStore = fmt.Sprintf("%s(%s, %s.idempotencyTable)", store, d.Var, api.Module)
 			}
-			if o.DepsORM() && !d.SQLite {
+			if o.DepsORM() {
 				api.ORM = true
 				// orm.ts of a database whose fields are behaviors imports
 				// the behaviors' core (D103).
 				s.Rules = s.Rules || o.TableBehaviors
 				if key := o.Deps.ORMFieldKeys; key != "" && api.Config != "" {
 					api.ORMFieldKeys = api.Config + "." + key
+					if d.SQLite {
+						// The repositories on SQLite take a keyring read
+						// already, which parseFieldKeys of the runtime's
+						// ./sqlite reads under Bun; a Worker has no
+						// node:crypto to read one with (D182).
+						if s.Workers {
+							return nil, fmt.Errorf("stack %s: server %s serves %s, whose database %s lists sqlite first and holds Encrypted<T> fields, and an environment places the server on Cloudflare Workers, where the database is a D1 binding: a Worker has no node:crypto to read the field keys with, so the repositories on D1 open no Encrypted<T> field yet (D85, D182)", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
+						}
+						api.ORMFieldKeys = "parseFieldKeys(" + api.ORMFieldKeys + ")"
+						s.SQLiteFieldKeys = true
+					}
 				}
 				if d.ORM == "" {
 					stem := varStem(d.Service)
 					d.ORM = taken.take("create" + strings.ToUpper(stem[:1]) + stem[1:] + "Orm")
 					d.ORMModule = o.Deps.DatabaseTypesPackage + tsgen.ORMEntry
+					if d.SQLite {
+						// The repositories on SQLite and D1 (D182).
+						d.ORMModule = o.Deps.DatabaseTypesPackage + tsgen.ORMSQLiteEntry
+					}
 					d.ORMPackage = o.Deps.DatabaseTypesPackage
 				}
 			}
@@ -1156,7 +1178,7 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			// A deriver of tables pulls and settles through the
 			// repositories, on Postgres alone (D146), as a behavior
 			// worker runs its queues.
-			if !api.ORM {
+			if !api.ORM || api.Database.SQLite {
 				return nil, fmt.Errorf("stack %s: deriver %s runs %s of %s, which fills the Derived fields of %s through the repositories %s's TypeScript types export for Postgres (D146), and %s has none: list postgres first in %s's outputs.sql.dialects and enable its TypeScript types", in.Stack, in.Server, s.Deriver.Name, o.SchemaName, strings.Join(s.Deriver.Schemas, ", "), o.Deps.Database, o.SchemaName, o.Deps.Database)
 			}
 			s.Deriver.Database = api.Database
@@ -1171,8 +1193,12 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			if d == nil || d.Service != o.Identity.AuthDB {
 				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over %s, its authDb, and opens no pool on it to build its identity store over", in.Stack, in.Server, o.SchemaName, o.Identity.AuthDB)
 			}
-			if d.SQLite {
-				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over %s, its authDb, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)", in.Stack, in.Server, o.SchemaName, o.Identity.AuthDB)
+			if d.SQLite && s.Workers {
+				// A Worker reaches a sqlite-first database through a D1
+				// binding, which has no interactive transaction, and an
+				// identity store's operation reads before it writes in
+				// one (D92, D116).
+				return nil, fmt.Errorf("stack %s: server %s serves %s, which authenticates with the identity runtime over %s, its authDb, whose DB service lists sqlite first, and an environment places the server on Cloudflare Workers, where the database is a D1 binding: an identity store runs on a SQLite file or on Postgres, and none over D1 is built (D50, D92)", in.Stack, in.Server, o.SchemaName, o.Identity.AuthDB)
 			}
 			if d.Store == "" {
 				stem := varStem(d.Service)
@@ -1403,6 +1429,31 @@ func (a *TypeScriptAPI) EngineCallers() []string {
 	return out
 }
 
+// IdentityStoreImports are the identity stores main.ts imports from the
+// runtime's ./identity entry: postgresIdentityStore over a pool, and
+// sqlDatabaseIdentityStore over a sqlite-first database's file (D116).
+func (s *TypeScriptServer) IdentityStoreImports() []string {
+	var postgres, sqlite bool
+	for _, d := range s.Databases {
+		if d.Store == "" {
+			continue
+		}
+		if d.SQLite {
+			sqlite = true
+		} else {
+			postgres = true
+		}
+	}
+	var out []string
+	if postgres {
+		out = append(out, "postgresIdentityStore")
+	}
+	if sqlite {
+		out = append(out, "sqlDatabaseIdentityStore")
+	}
+	return out
+}
+
 // Identity reports whether an API of the server authenticates with the
 // identity runtime, so main.ts imports its ./identity entry.
 func (s *TypeScriptServer) Identity() bool {
@@ -1505,7 +1556,9 @@ func (s *TypeScriptServer) BundleEntry() string {
 
 // NodeCompat reports whether the Workers bundle runs with Node's modules:
 // it opens a Postgres database through Hyperdrive with node-postgres, which
-// imports them (D92), so bundle.ts keeps them external.
+// imports them (D92), so bundle.ts keeps them external. The repositories
+// of a D1 database import none but node:async_hooks, which nodejs_als
+// gives (D182).
 func (s *TypeScriptServer) NodeCompat() bool {
 	return s.Workers && len(s.PostgresDatabases()) > 0
 }
@@ -1630,7 +1683,8 @@ func (s *TypeScriptServer) QueueWakeClass() string { return ir.QueueWakeClass }
 
 // ImportsPostgres reports whether main.ts imports the HTTP runtime's
 // ./postgres entry: for its pools, or, for a runner, for the Cloud SQL
-// socket it serves the engine on.
+// socket it serves the engine on. The repositories of a sqlite-first
+// database import no pg (./orm/sqlite, D182).
 func (s *TypeScriptServer) ImportsPostgres() bool {
 	if s.Runner != nil {
 		return len(s.CloudSQL) > 0

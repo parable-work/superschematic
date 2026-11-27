@@ -112,6 +112,11 @@ pub struct Definition {
     pub json_clauses: Option<JsonClauses>,
     /// The rows `find_many` and `find_page` read unless told.
     pub default_limit: u32,
+    /// The most parameters one statement binds in the dialect, by which
+    /// `upsert_many` batches its rows (D89): 65535 on Postgres, 32766 on
+    /// SQLite. Zero in a definition a compiler before it wrote.
+    #[serde(default)]
+    pub max_parameters: usize,
     /// Who a repository opened as the system acts as (D87): the DB
     /// service's `outputs.sql.systemActor`, [`DEFAULT_SYSTEM_ACTOR`] unless
     /// set.
@@ -232,6 +237,14 @@ pub struct Clauses {
     pub changed: String,
     pub never: String,
     pub null: String,
+    /// An upsert of many rows' assignment of the column `%s` from the
+    /// value the row it would have inserted holds in the column `%s`, and
+    /// that value (D89); empty in a definition a compiler before
+    /// `upsert_many` wrote, which refuses it.
+    #[serde(default)]
+    pub set_excluded: String,
+    #[serde(default)]
+    pub excluded: String,
 }
 
 /// The conditions of a JSON column's filter, `sqlutil.JSONClauses`: `eq`
@@ -831,6 +844,18 @@ pub struct UpsertOptions {
     /// Updates the row that holds the key only when a field the update
     /// sets differs from what the row holds (D89).
     pub only_if_changed: bool,
+}
+
+/// The options of `upsert_many` (D89).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UpsertManyOptions {
+    /// Updates a row that holds an input's key only when a field the
+    /// update sets differs from what the row holds.
+    pub only_if_changed: bool,
+    /// The most rows one statement writes; none is as many as the
+    /// dialect binds the parameters of. More rows than a batch take a
+    /// statement each, in the caller's transaction.
+    pub batch: Option<usize>,
 }
 
 /// What an upsert did with a row (D89).

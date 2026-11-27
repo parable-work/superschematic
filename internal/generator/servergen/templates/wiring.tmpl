@@ -7,11 +7,14 @@ exactly as a server does.
 */ -}}
 
 {{- define "imports" }}
-{{- if .Databases }}
+{{- if anyPostgres .Databases }}
 	"github.com/jackc/pgx/v5/pgxpool"
 {{- end }}
-{{- if or (anyIdentity .APIs) (anyIdempotent .APIs) }}
+{{- if anyPostgresHandle .Databases }}
 	"github.com/jackc/pgx/v5/stdlib"
+{{- end }}
+{{- if anySQLite .Databases }}
+	"{{ .Naming.HTTPRuntimeGoModule }}/sqlitefile"
 {{- end }}
 {{- if anyIdempotent .APIs }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/idempotency"
@@ -22,7 +25,7 @@ exactly as a server does.
 {{- if .Clients }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/serviceauth"
 {{- end }}
-{{- if or .Databases .Clients }}
+{{- if or (anyPostgres .Databases) .Clients }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/stackconfig"
 {{- end }}
 	"{{ .Naming.HTTPRuntimeGoModule }}/telemetry"
@@ -89,6 +92,31 @@ exactly as a server does.
 	defer wakes.Wait()
 {{- end }}
 {{- range .Databases }}
+{{- if .SQLite }}
+	// {{ .Service }} lists sqlite first, so it is a SQLite file, which a
+	// migration made (D116): the ORM's repositories{{ if .Identity }}, the identity store{{ end }}{{ if .Idempotency }}, the
+	// idempotency keys{{ end }} and the pings of /readyz run on the one handle.
+	{{ .Var }}SQL, err := sqlitefile.Open({{ .From }})
+	if err != nil {
+		return fmt.Errorf("database {{ .Service }}: %s_URL: %w", {{ quote .Field }}, err)
+	}
+	defer {{ .Var }}SQL.Close()
+	{{ .Var }}, err := {{ .Package }}.OpenSQLite(ctx, {{ .Var }}SQL)
+	if err != nil {
+		return fmt.Errorf("database {{ .Service }}: %w", err)
+	}
+{{- if .Queues }}
+	{{ .Package }}.OnEnqueue(wakes.Enqueued)
+{{- end }}
+{{- if .Identity }}
+	// The identity store of the user model in {{ .Service }} (D50), on the
+	// same file, for every API that authenticates its users against it.
+	{{ .Var }}IdentityStore, err := identity.NewSQLStore({{ .Var }}SQL, identity.SQLite, []byte({{ .Types }}.IdentityDescriptor))
+	if err != nil {
+		return fmt.Errorf("identity store of {{ .Service }}: %w", err)
+	}
+{{- end }}
+{{- else }}
 	{{ .Var }}Pool, err := connect(ctx, {{ quote .Field }}, {{ .From }})
 	if err != nil {
 		return fmt.Errorf("database {{ .Service }}: %w", err)
@@ -131,6 +159,7 @@ exactly as a server does.
 		return fmt.Errorf("engine of {{ .Service }}: %w", err)
 	}
 	defer {{ .Engine.Var }}.Close()
+{{- end }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -222,7 +251,7 @@ exactly as a server does.
 {{- end }}
 
 {{- define "functions" }}
-{{- if .Databases }}
+{{- if anyPostgres .Databases }}
 
 {{ if .CloudSQL -}}
 // connect builds the pool of the database field named field, which the

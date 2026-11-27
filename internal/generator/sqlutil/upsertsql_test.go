@@ -92,6 +92,53 @@ func TestUpsertStatementsOfASync(t *testing.T) {
 	}
 }
 
+// TestSQLiteUpsertOfManyRows holds what a repository on SQLite upserts many
+// rows of a ledger's entries with (D89), part for part with Postgres's:
+// the statement, which takes the rows' tuples, the conflict target and the
+// update as Postgres's does, and returns the row with no UpsertInserted;
+// the update's assignments and comparison from EXCLUDED, which SQLite
+// reads as Postgres does; the read of the rows a batch's keys hold, before
+// the statement and after it, a list of row values as VALUES; and a batch
+// bound by SQLite's parameters, and D1's.
+func TestSQLiteUpsertOfManyRows(t *testing.T) {
+	entry := ledgerTables(t)["Entry"]
+	postgres, sqlite := TableStatementsOf(entry), SQLiteTableStatementsOf(entry)
+	if want := strings.TrimSuffix(postgres.Upsert, ", (xmax = 0) AS "+UpsertInserted); sqlite.Upsert != want || !strings.Contains(sqlite.Upsert, "VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING ") {
+		t.Errorf("Entry's upsert on SQLite = %q, want Postgres's without its last column, %q", sqlite.Upsert, want)
+	}
+	pc, sc := PostgresClauses(), SQLiteClauses()
+	for name, pair := range map[string][2]string{
+		"setExcluded": {pc.SetExcluded, sc.SetExcluded},
+		"excluded":    {pc.Excluded, sc.Excluded},
+		"changed":     {pc.Changed, sc.Changed},
+		"never":       {pc.Never, sc.Never},
+	} {
+		if pair[0] != pair[1] {
+			t.Errorf("the clause %s on SQLite = %q, not Postgres's %q", name, pair[1], pair[0])
+		}
+	}
+	if sc.Default != "" || pc.Default != "DEFAULT" {
+		t.Errorf("a batch's unset cell is %q on SQLite and %q on Postgres", sc.Default, pc.Default)
+	}
+	key := entry.UniqueKeyNamed("account,externalId")
+	if key == nil {
+		t.Fatal("Entry has no key by account and externalId")
+	}
+	if got, want := key.SQLite().Rows, strings.Replace(key.Rows, "IN (%s)", "IN (VALUES %s)", 1); got != want || key.SQLite().Conflict != key.Conflict {
+		t.Errorf("Entry's key on SQLite reads its rows with %q, want %q", got, want)
+	}
+	columns := len(entry.InsertColumns())
+	if got, want := entry.BatchRowsOf(SQLiteMaxParameters), (32766-2)/columns; got != want {
+		t.Errorf("Entry's batch on SQLite = %d rows, want %d", got, want)
+	}
+	if got, want := entry.BatchRowsOf(D1MaxParameters), (100-2)/columns; got != want {
+		t.Errorf("Entry's batch on D1 = %d rows, want %d", got, want)
+	}
+	if entry.BatchRows() != entry.BatchRowsOf(MaxParameters) || entry.BatchRowsOf(3) != 1 {
+		t.Errorf("a batch is at least a row: %d, %d", entry.BatchRows(), entry.BatchRowsOf(3))
+	}
+}
+
 // TestExpressionKeysCannotBeReadBack holds that a unique @index over an
 // expression has no read of its rows (D89): an upsert cannot match a row to
 // its input by the expression's columns. Its keep leaves the held row's

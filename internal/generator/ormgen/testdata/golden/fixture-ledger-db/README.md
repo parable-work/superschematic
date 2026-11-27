@@ -14,6 +14,9 @@ Generated at: 2026-01-02T03:04:05Z
 - `search.go` -- the words of a filter's `SearchText` and their `LIKE` patterns
 - `repository_account.go` -- Account repository
 - `repository_entry.go` -- Entry repository
+- `sqlite.go` -- the repositories on a SQLite file: `OpenSQLite`, `SQLiteDSN`, `SQLiteDatabase` and `SQLiteTx`, a `DatabaseInterface` and a `TxInterface` as the Postgres ones are
+- `sqlite_account.go` -- Account repository on SQLite
+- `sqlite_entry.go` -- Entry repository on SQLite
 
 ## Usage
 

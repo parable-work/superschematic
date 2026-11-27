@@ -3,8 +3,9 @@ import { FieldEncryptionError } from './fieldcrypt-error.js';
 import type { FieldCell, FieldKeyring, FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, decodeValue, encodeParam, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
-import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
+import { execute, postgresRulesStore, prepareCreate, sqliteRulesStore, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './pgtext.js';
+import { formatDuration, parseDuration } from './queue-core.js';
 import { wakeAfterEnqueue } from './queue-wake.js';
 import type { SearchableDefinition } from './search-tables.js';
 import { rowFeatureMembers, type AttachmentsDefinition, type RowFeatureHost, type RowReferencesDefinition } from './rowfeatures.js';
@@ -12,6 +13,7 @@ import { likePattern, searchTerms } from './search.js';
 import { SecretValue, revealed } from './secret.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
 import type { CalendarSourceDefinition } from './calendar.js';
+import type { SqlDatabase } from './d1.js';
 
 /*
 The generated repositories' runtime (D79): a DB service's TypeScript types
@@ -620,6 +622,15 @@ export interface NearestSettingDefinition {
   readonly max?: number;
 }
 
+/** The conditions of a JSON column's filter (sqlutil.JSONClauses): eq, ne, in and noneOf over the column %s and a parameter ?%d or the list %s; value is one parameter %d of in and noneOf. */
+export interface JsonClauses {
+  readonly eq: string;
+  readonly ne: string;
+  readonly in: string;
+  readonly noneOf: string;
+  readonly value: string;
+}
+
 /** What a database's ./orm entry gives ormOf beside its tables. */
 export interface OrmDefinition {
   /**
@@ -629,6 +640,13 @@ export interface OrmDefinition {
    */
   readonly dialect?: 'postgres' | 'sqlite';
   readonly clauses: Clauses;
+  /**
+   * A Generic.JSON column's conditions where the clauses do not compare JSON
+   * values: SQLite's, whose column holds text, compare the nodes json_tree
+   * reads of each value, as Postgres's JSONB compares its values
+   * (sqlutil.SQLiteJSONClauses, D116); absent on Postgres.
+   */
+  readonly jsonClauses?: JsonClauses;
   readonly nearest?: NearestDefinition;
   /** The rows findMany and findPage read unless told. */
   readonly defaultLimit: number;
@@ -696,6 +714,31 @@ export interface OrmPool extends OrmQueryable {
    * takes a connection of its own.
    */
   transaction?<T>(begin: string, fn: (client: OrmQueryable) => Promise<T>): Promise<T>;
+  /** What a pool over SQLite gives the repositories beside its statements (OrmSqlite); absent on a pg Pool. */
+  readonly sqlite?: OrmSqlite;
+}
+
+/** A statement and its values, as a batch runs it. */
+export interface OrmStatement {
+  readonly text: string;
+  readonly values: readonly unknown[];
+}
+
+/**
+ * What sqliteOrmPool gives the repositories beside its statements
+ * (D182): the database, whose statements bind values as the pool's do,
+ * which the behaviors' core runs its commands on (sqliteRulesStore, D103);
+ * the most parameters a statement binds there, which an upsert of many rows
+ * batches by (D89); a batch, which runs statements as one unit in the
+ * pool's turn, all of them or none; and, on D1, why the database runs no
+ * transaction, which a write whose statements must commit together and
+ * cannot go as one batch is refused with.
+ */
+export interface OrmSqlite {
+  readonly db: SqlDatabase;
+  readonly maxParameters: number;
+  readonly noTransactions?: string;
+  batch(statements: readonly OrmStatement[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number }[]>;
 }
 
 /** A query config a transaction's query takes, as pg's does. */
@@ -1325,11 +1368,32 @@ interface Runner {
   readonly types?: unknown;
   /** The pool a write that takes more than one statement opens a transaction on, outside one (D89). */
   readonly pool?: OrmPool;
+  /** What the pool over SQLite gives the repositories (OrmSqlite); absent on Postgres. */
+  readonly sqlite?: OrmSqlite;
 }
+
+/** What a transaction's runner keeps of the runner it began on: the types each statement reads with, and SQLite's pool (OrmSqlite). */
+type RunnerBase = Pick<Runner, 'types' | 'sqlite'>;
 
 async function run(runner: Runner, text: string, values: unknown[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number }> {
   const result = await runner.queryable.query(runner.types === undefined ? { text, values } : { text, values, types: runner.types });
   return { rows: result.rows as Record<string, unknown>[], rowCount: result.rowCount ?? 0 };
+}
+
+/**
+ * Runs statements as one unit (D182): one by one in a transaction of
+ * SQLite's or Postgres's, and outside one, or on D1, whose transaction's
+ * statements each commit as they run, as SQLite's batch, all of them or
+ * none. Every statement is known before the first runs.
+ */
+async function runUnit(runner: Runner, statements: readonly OrmStatement[]): Promise<{ rows: Record<string, unknown>[]; rowCount: number }[]> {
+  const sqlite = runner.sqlite;
+  if (sqlite === undefined || statements.length === 1 || (runner.inTransaction && sqlite.noTransactions === undefined)) {
+    const out: { rows: Record<string, unknown>[]; rowCount: number }[] = [];
+    for (const statement of statements) out.push(await run(runner, statement.text, [...statement.values]));
+    return out;
+  }
+  return sqlite.batch(statements);
 }
 
 type Values = Record<string, unknown>;
@@ -1343,6 +1407,17 @@ function firstValue(row: Record<string, unknown> | undefined): unknown {
   if (row === undefined) return undefined;
   for (const value of Object.values(row)) return value;
   return undefined;
+}
+
+/** A duration, or a list of them, as SQLite holds it: the scalar core's canonical text (D182). */
+function sqliteDuration(value: unknown, codec: TableColumn): unknown {
+  if (value === undefined || value === null) return null;
+  const one = (v: unknown): string => {
+    if (typeof v !== 'string') throw new Error(`${JSON.stringify(v)} is no duration`);
+    return formatDuration(parseDuration(v));
+  };
+  if (codec.list && Array.isArray(value)) return value.map(v => (v === null || v === undefined ? null : one(v)));
+  return one(value);
 }
 
 /** The alias an upsert returns whether it inserted a row as, sqlutil.UpsertInserted (D89). */
@@ -1762,8 +1837,18 @@ class TableRepository {
     const pool = this.runner.pool;
     if (!pool) throw new Error(`orm: ${this.def.name} has no pool to open a transaction on`);
     return inTransaction(pool, 'BEGIN', client =>
-      fn(new TableRepository(this.orm, this.def, { queryable: client, inTransaction: true, types: this.runner.types }, this.acting, this.keys, this.rules, this.behaviorCaller))
+      fn(new TableRepository(this.orm, this.def, { queryable: client, inTransaction: true, types: this.runner.types, sqlite: this.runner.sqlite }, this.acting, this.keys, this.rules, this.behaviorCaller))
     );
+  }
+
+  /**
+   * Throws for a write whose later statement needs an earlier one's answer,
+   * on D1, whose transaction's statements each commit as they run (D182):
+   * what would otherwise commit half.
+   */
+  private refuseOnD1(what: string): void {
+    const why = this.runner.sqlite?.noTransactions;
+    if (why !== undefined) throw new Error(`orm: ${what} of ${this.def.name}, and ${why}`);
   }
 
   /** The cell of column in the row whose key is key, in its wire or database form. */
@@ -1835,6 +1920,10 @@ class TableRepository {
 
   private encode(value: unknown, column: TableColumn, what: string): unknown {
     try {
+      // A duration on SQLite is the scalar core's canonical text, as the Go
+      // and Rust repositories write it there, not Postgres's INTERVAL text
+      // (D182).
+      if (this.orm.dialect === 'sqlite' && column.interval) return sqliteDuration(value, column);
       return encodeParam(value, column);
     } catch (error) {
       throw new Error(`orm: ${this.def.name}.${column.name}: ${what}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
@@ -1874,6 +1963,9 @@ class TableRepository {
       const member = filter[column.name] as Values | null | undefined;
       if (!ops || ops.length === 0 || member === undefined || member === null) continue;
       const q = column.qualified;
+      // A JSON column compares JSON values, by the dialect's own conditions
+      // where its column holds text (D116).
+      const json = column.json || column.jsonText ? this.orm.jsonClauses : undefined;
       for (const op of ops) {
         const value = member[op];
         if (value === undefined || value === null) continue;
@@ -1883,11 +1975,11 @@ class TableRepository {
           case 'gte':
           case 'lt':
           case 'lte':
-            conditions.push(fill(c[op as 'eq' | 'gt' | 'gte' | 'lt' | 'lte'], q, ++n));
+            conditions.push(fill(op === 'eq' && json ? json.eq : c[op as 'eq' | 'gt' | 'gte' | 'lt' | 'lte'], q, ++n));
             args.push(this.encode(value, column, op));
             break;
           case 'ne':
-            conditions.push(fill(negationClause(c, 'ne', this.def.name, column.name), q, ++n));
+            conditions.push(fill(json ? json.ne : negationClause(c, 'ne', this.def.name, column.name), q, ++n));
             args.push(this.encode(value, column, op));
             break;
           case 'ilike':
@@ -1898,10 +1990,10 @@ class TableRepository {
           case 'notIn': {
             const values = value as readonly unknown[];
             if (values.length === 0) break;
-            const clause = op === 'in' ? c.in : negationClause(c, 'noneOf', this.def.name, column.name);
+            const clause = json ? (op === 'in' ? json.in : json.noneOf) : op === 'in' ? c.in : negationClause(c, 'noneOf', this.def.name, column.name);
             const placeholders = values.map(v => {
               args.push(this.encode(v, column, op));
-              return fill(c.placeholder, ++n);
+              return fill(json ? json.value : c.placeholder, ++n);
             });
             conditions.push(fill(clause, q, placeholders.join(', ')));
             break;
@@ -2328,6 +2420,9 @@ class TableRepository {
         return rows;
       });
     }
+    // A VALUES list on SQLite takes no DEFAULT (D182): the rows go a row at
+    // a time, each statement listing the columns its row sets, as one unit.
+    if (this.orm.dialect === 'sqlite') return this.createRows(inputs);
     const order = this.insertOrder();
     const rows = inputs.map(input => {
       const stamped = this.sealed(this.stamped(input), 'create');
@@ -2338,6 +2433,19 @@ class TableRepository {
     const s = this.def.statements;
     const result = await run(this.runner, fill(s.insertMany, columns.join(', '), tuples.join(', '), s.columns), args);
     const created = result.rows.map(row => this.decode(row));
+    for (const row of created) await this.requireCreatedReach(row);
+    return created;
+  }
+
+  /** createMany on SQLite (D182): an insert per row, in order, as one unit, which a batch holds on D1. */
+  private async createRows(inputs: readonly Values[]): Promise<Values[]> {
+    const s = this.def.statements;
+    const statements = inputs.map(input => {
+      const values: unknown[] = [];
+      const { columns, placeholders } = this.insertOne(this.sealed(this.stamped(input), 'create'), values);
+      return { text: fill(s.insert, columns.join(', '), placeholders.join(', '), s.columns), values };
+    });
+    const created = (await runUnit(this.runner, statements)).map(result => this.decode(result.rows[0]!));
     for (const row of created) await this.requireCreatedReach(row);
     return created;
   }
@@ -2469,9 +2577,11 @@ class TableRepository {
    * behaviors' core of count rows (D145), each of which its trigger wrote a
    * change of: updateMany's, deleteMany's and hardDeleteOne's. A write
    * through the core wakes it from the rules adapter. A table no behavior
-   * hears has none.
+   * hears has none, and neither has one on SQLite or D1, where no drain
+   * worker runs and an enqueue wakes none (D182).
    */
   private wakeChanges(count: number): void {
+    if (this.runner.sqlite !== undefined) return;
     const queue = this.behaviors?.changes?.queue;
     if (queue !== undefined && count > 0) wakeAfterEnqueue(queue);
   }
@@ -2506,6 +2616,7 @@ class TableRepository {
     // it holds, and the core's update of a row the key holds after, which
     // seals the field itself (D103), so a refusal of either writes nothing.
     const sealing = this.encrypted.filter(c => change[c.name] !== undefined && change[c.name] !== null);
+    if (sealing.length > 0) this.refuseOnD1('an upsertOne that sets an Encrypted<T> field, which a second statement seals under the key of the row it updates,');
     const write = async (repo: TableRepository): Promise<UpsertResult<Values>> => repo.upsertRow((await repo.upsertInputs([input]))[0]!, name, key, change, sealing, onlyIfChanged);
     // An update that sets no field reads back the row the key holds, which
     // the statement locked, in its transaction.
@@ -2533,10 +2644,19 @@ class TableRepository {
       throw new Error(`orm: upsertMany writes 1 or more ${this.def.name} rows a statement, not ${options.batch}`);
     }
     if (inputs.length === 0) return [];
-    // As many rows as Postgres binds the parameters of, or fewer.
-    const most = Math.max(1, Math.floor((MAX_PARAMETERS - UPSERT_STAMPS) / this.insertOrder().length));
+    // As many rows as the database binds the parameters of, or fewer:
+    // Postgres's, a SQLite file's or D1's (D89).
+    const most = Math.max(1, Math.floor(((this.runner.sqlite?.maxParameters ?? MAX_PARAMETERS) - UPSERT_STAMPS) / this.insertOrder().length));
     const batch = Math.min(options.batch ?? most, most);
     const onlyIfChanged = options.onlyIfChanged === true;
+    if (this.orm.dialect === 'sqlite') {
+      if (this.behaviors) {
+        throw new Error(`orm: upsertMany of ${this.def.name}: a table that composes behaviors upserts through the core (D103), a row at a time on SQLite and D1, as the Go and Rust repositories do: upsert each with upsertOne`);
+      }
+      if (fields.some(c => c.encrypted)) this.refuseOnD1('an upsertMany that sets an Encrypted<T> field, which a second statement seals under the key of each row it updates,');
+      const onSQLite = async (repo: TableRepository): Promise<UpsertResult<Values>[]> => repo.upsertBatchesOnSQLite(inputs, name, key, fields, batch, onlyIfChanged);
+      return fields.some(c => c.encrypted) ? this.atomically(onSQLite) : onSQLite(this);
+    }
     const write = async (repo: TableRepository): Promise<UpsertResult<Values>[]> => repo.upsertBatches(await repo.upsertInputs(inputs), name, key, fields, batch, onlyIfChanged);
     return this.behaviors || inputs.length > batch || onlyIfChanged || fields.length === 0 || fields.some(c => c.encrypted) ? this.atomically(write) : write(this);
   }
@@ -2548,9 +2668,6 @@ class TableRepository {
    * writes its sub-table rows and arms its deadlines.
    */
   private refuseUpsert(method: string): void {
-    if (this.orm.dialect === 'sqlite') {
-      throw new Error(`orm: ${method} of ${this.def.name}: the TypeScript repositories upsert on Postgres alone so far (D182); create the row with createOne, or update it by its key`);
-    }
     const behaviors = this.behaviors;
     if (!behaviors) return;
     const keeping = behaviors.uses.filter(use => (use.tables ?? []).length > 0).map(use => use.behavior);
@@ -2679,10 +2796,30 @@ class TableRepository {
       assignments.push(...fenceBumps(this.def.fences, assignments));
     }
     const where = this.upsertWhere(compared.current, compared.next, onlyIfChanged || sets.length === 0);
-    const { rows } = await run(this.runner, fill(s.upsert, columns.join(', '), `(${placeholders.join(', ')})`, key.conflict, assignments.join(', '), where), args);
+    const upsert: OrmStatement = { text: fill(s.upsert, columns.join(', '), `(${placeholders.join(', ')})`, key.conflict, assignments.join(', '), where), values: args };
+    // SQLite's upsert does not say whether it inserted (D182, as the Rust
+    // repositories read it): whether a row held the key before it, read in
+    // its unit, does. An input that leaves a column of the key unset holds
+    // no row's.
+    let existed: boolean | undefined;
+    let rows: Record<string, unknown>[];
+    if (this.orm.dialect === 'sqlite') {
+      const before = this.keyRead(name, key, sealed);
+      if (before) {
+        const [read, wrote] = await runUnit(this.runner, [before, upsert]);
+        existed = read!.rows.length > 0;
+        rows = wrote!.rows;
+      } else {
+        existed = false;
+        ({ rows } = await run(this.runner, upsert.text, [...upsert.values]));
+      }
+    } else {
+      ({ rows } = await run(this.runner, upsert.text, [...upsert.values]));
+    }
     let result: UpsertResult<Values>;
     if (rows.length > 0) {
-      result = { row: this.decode(rows[0]!), status: rows[0]![UPSERT_INSERTED] === true ? 'inserted' : 'updated' };
+      const inserted = existed === undefined ? rows[0]![UPSERT_INSERTED] === true : !existed;
+      result = { row: this.decode(rows[0]!), status: inserted ? 'inserted' : 'updated' };
     } else if (!onlyIfChanged && sets.length > 0) {
       throw new NotFoundError(`the ${this.def.name} row that holds the key ${name} is deleted`);
     } else {
@@ -2790,6 +2927,177 @@ class TableRepository {
   }
 
   /**
+   * upsertMany on SQLite and D1 (D89, D182), as the Rust repositories run
+   * it over sqlutil's SQLite statements: each batch, the most rows a
+   * statement binds the parameters of there, reads the rows that hold its
+   * keys, upserts its rows, a statement per set of columns its inputs set,
+   * since a VALUES list on SQLite takes no DEFAULT, and reads the rows of
+   * its keys again. Every statement is known before the first runs, so the
+   * call runs as one unit (runUnit), one batch on D1. A returned row whose
+   * key no row held before its batch was inserted; a row the statements did
+   * not return is one they left as it was, when the update sets no field or
+   * only if changed, or a deleted one. Two inputs of one batch that hold
+   * one key are refused before anything runs, as Postgres refuses to change
+   * a row twice in one statement. An encrypted field is resealed after, by
+   * a second statement per row, in the transaction upsertMany opens.
+   */
+  private async upsertBatchesOnSQLite(
+    inputs: readonly Values[],
+    name: string,
+    key: UniqueKeyDefinition,
+    fields: readonly TableColumn[],
+    batch: number,
+    onlyIfChanged: boolean
+  ): Promise<UpsertResult<Values>[]> {
+    const order = this.insertOrder();
+    const keyColumns = this.keyColumns(name);
+    const at = keyColumns.map(c => order.indexOf(c));
+    const plain = fields.filter(c => !c.encrypted);
+    const sealing = fields.filter(c => c.encrypted);
+    const c = this.clauses;
+    const s = this.def.statements;
+    const statements: OrmStatement[] = [];
+    const planned: { start: number; texts: (string | undefined)[]; cells: { set: boolean; value?: unknown }[][]; before?: number; groups: { members: number[]; statement: number }[]; after?: number }[] = [];
+    for (let start = 0; start < inputs.length; start += batch) {
+      const chunk = inputs.slice(start, start + batch);
+      const cells = chunk.map(input => {
+        const sealed = this.sealed(this.stamped(input), 'upsert');
+        return order.map(column => this.insertValue(sealed, column));
+      });
+      const texts = cells.map(row => keyText(keyColumns, at.map(j => (row[j]!.set ? row[j]!.value : undefined))));
+      const seen = new Map<string, number>();
+      texts.forEach((text, i) => {
+        if (text === undefined) return;
+        const first = seen.get(text);
+        if (first !== undefined) {
+          throw new Error(`orm: upsertMany of ${this.def.name}: inputs ${start + first} and ${start + i} of one statement hold one ${name}, and an upsert changes a row once`);
+        }
+        seen.set(text, i);
+      });
+      const keyed = cells.flatMap((row, i) => (texts[i] === undefined ? [] : [at.map(j => row[j]!)]));
+      const plan: (typeof planned)[number] = { start, texts, cells, groups: [] };
+      if (keyed.length > 0) plan.before = statements.push(this.keysStatement(name, key, keyed)) - 1;
+      // A statement per set of columns the inputs set, in the order the
+      // sets first appear.
+      const groups = new Map<string, number[]>();
+      cells.forEach((row, i) => {
+        const set = row.map(cell => (cell.set ? '1' : '0')).join('');
+        const members = groups.get(set);
+        if (members) members.push(i);
+        else groups.set(set, [i]);
+      });
+      for (const members of groups.values()) {
+        const args: unknown[] = [];
+        const { columns, tuples } = this.insertTuples(
+          order,
+          members.map(i => cells[i]!),
+          args
+        );
+        const sets = plain.map(column => fill(c.setExcluded, column.column, column.column));
+        const current = plain.map(column => this.compareAs(column, column.qualified));
+        const next = plain.map(column => this.compareAs(column, fill(c.excluded, column.column)));
+        const assignments = sets.length === 0 ? [key.keep] : [...sets];
+        if (sets.length > 0) {
+          this.stamp(assignments, {}, args);
+          assignments.push(...fenceBumps(this.def.fences, assignments));
+        }
+        const where = sets.length === 0 ? this.upsertWhere([], [], true) : this.upsertWhere(current, next, onlyIfChanged);
+        plan.groups.push({ members, statement: statements.push({ text: fill(s.upsert, columns.join(', '), tuples.join(', '), key.conflict, assignments.join(', '), where), values: args }) - 1 });
+      }
+      if (keyed.length > 0) plan.after = statements.push(this.keysStatement(name, key, keyed)) - 1;
+      planned.push(plan);
+    }
+    const ran = await runUnit(this.runner, statements);
+    const textOf = (raw: Record<string, unknown>): string | undefined => keyText(keyColumns, keyColumns.map(column => raw[columnKey(column.column)] ?? null));
+    const deletedAt = this.audit('deletedAt');
+    const results: UpsertResult<Values>[] = [];
+    for (const plan of planned) {
+      const existed = new Set<string>();
+      if (plan.before !== undefined) {
+        for (const raw of ran[plan.before]!.rows) {
+          const text = textOf(raw);
+          if (text !== undefined) existed.add(text);
+        }
+      }
+      const matched: (UpsertResult<Values> | undefined)[] = plan.cells.map(() => undefined);
+      for (const group of plan.groups) {
+        const waiting = new Map<string, number>();
+        const unkeyed: number[] = [];
+        for (const i of group.members) {
+          const text = plan.texts[i];
+          if (text === undefined) unkeyed.push(i);
+          else waiting.set(text, i);
+        }
+        for (const raw of ran[group.statement]!.rows) {
+          const text = textOf(raw);
+          const held = text === undefined ? undefined : waiting.get(text);
+          const i = held ?? unkeyed.shift();
+          if (i === undefined) throw new Error(`orm: upsertMany of ${this.def.name} wrote a row whose ${name} no input holds`);
+          if (held !== undefined) waiting.delete(text!);
+          const inserted = plan.texts[i] === undefined || !existed.has(plan.texts[i]!);
+          matched[i] = { row: this.decode(raw), status: inserted ? 'inserted' : plain.length > 0 ? 'updated' : 'unchanged' };
+        }
+      }
+      // A row no statement returned is one it left as it was, when the
+      // update sets no field or only if changed, or a deleted one.
+      const left = matched.flatMap((result, i) => (result === undefined ? [i] : []));
+      if (left.length > 0) {
+        if (!onlyIfChanged && plain.length > 0) throw new NotFoundError(`the ${this.def.name} row that holds the ${name} of input ${plan.start + left[0]!} is deleted`);
+        const after = new Map<string, Record<string, unknown>>();
+        for (const raw of plan.after === undefined ? [] : ran[plan.after]!.rows) {
+          const text = textOf(raw);
+          if (text !== undefined) after.set(text, raw);
+        }
+        for (const i of left) {
+          const text = plan.texts[i];
+          const raw = text === undefined ? undefined : after.get(text);
+          if (!raw || (deletedAt && raw[columnKey(deletedAt.column)] !== null && raw[columnKey(deletedAt.column)] !== undefined)) {
+            throw new NotFoundError(`the ${this.def.name} row that holds the ${name} of input ${plan.start + i} is deleted`);
+          }
+          matched[i] = { row: this.decode(raw), status: 'unchanged' };
+        }
+      }
+      for (const [i, result] of matched.entries()) {
+        const input = inputs[plan.start + i]!;
+        const update: Values = {};
+        for (const column of sealing) update[column.name] = input[column.name] ?? null;
+        results.push(await this.resealed(result!, update, sealing));
+      }
+    }
+    return results;
+  }
+
+  /**
+   * The read of the rows that hold the unique key name's value of sealed,
+   * an input as its insert binds it, by the key's rows over its columns, or
+   * for a key over an expression by its held: what an upsert on SQLite reads
+   * before it, in its unit, to say whether it inserted (D182); undefined
+   * when the input leaves a column of the key unset, which no row then
+   * holds.
+   */
+  private keyRead(name: string, key: UniqueKeyDefinition, sealed: Values): OrmStatement | undefined {
+    const cells = this.keyColumns(name).map(c => this.insertValue(sealed, c));
+    if (cells.some(cell => !cell.set)) return undefined;
+    if (key.rows) return this.keysStatement(name, key, [cells]);
+    if (key.held) return { text: key.held, values: cells.map(cell => cell.value) };
+    return undefined;
+  }
+
+  /** The read of the rows that hold the keys of the cells, each a key column's insert cell (UniqueKeyDefinition.rows). */
+  private keysStatement(name: string, key: UniqueKeyDefinition, keys: readonly { set: boolean; value?: unknown }[][]): OrmStatement {
+    const values: unknown[] = [];
+    const tuples = keys.map(cells => {
+      const placeholders = cells.map(cell => {
+        if (!cell.set) throw new NotFoundError(`no ${this.def.name} row holds an unset ${name}`);
+        values.push(cell.value);
+        return fill(this.clauses.placeholder, values.length);
+      });
+      return `(${placeholders.join(', ')})`;
+    });
+    return { text: fill(key.rows!, tuples.join(', ')), values };
+  }
+
+  /**
    * The row that holds the unique key name's value of sealed, an input as
    * its insert binds it, which an upsert left as it was: by rowsOfKeys, or,
    * for a key over an expression, whose columns read no row, by the
@@ -2817,16 +3125,8 @@ class TableRepository {
    * for a key no live row holds (D89).
    */
   private async rowsOfKeys(name: string, key: UniqueKeyDefinition, keyColumns: readonly TableColumn[], keys: readonly { set: boolean; value?: unknown }[][]): Promise<Values[]> {
-    const args: unknown[] = [];
-    const tuples = keys.map(cells => {
-      const placeholders = cells.map(cell => {
-        if (!cell.set) throw new NotFoundError(`no ${this.def.name} row holds an unset ${name}`);
-        args.push(cell.value);
-        return fill(this.clauses.placeholder, args.length);
-      });
-      return `(${placeholders.join(', ')})`;
-    });
-    const { rows } = await run(this.runner, fill(key.rows!, tuples.join(', ')), args);
+    const read = this.keysStatement(name, key, keys);
+    const { rows } = await run(this.runner, read.text, [...read.values]);
     const byKey = new Map<string, Record<string, unknown>>();
     for (const raw of rows) {
       const text = keyText(keyColumns, keyColumns.map(column => raw[columnKey(column.column)] ?? null));
@@ -2971,13 +3271,21 @@ class TableRepository {
 
   // ---- Behaviors (D103) ----
 
-  /** The host the behaviors' core runs on: this repository's transaction, with the ORM's types. */
+  /**
+   * The host the behaviors' core runs on: this repository's transaction,
+   * with the ORM's types; on SQLite and D1 the rules module's SQLite store
+   * over the pool's database (D103, D182), whose batch is a savepoint of a
+   * transaction open on a file and D1's one atomic unit.
+   */
   private rulesHost(): RulesHost {
-    if (this.orm.dialect === 'sqlite') {
-      throw new Error(`orm: ${this.def.name} composes behaviors (D103), which the TypeScript repositories run on Postgres alone so far: on SQLite and D1 its reads are served, and a write or an operation of it is not (D182)`);
-    }
     if (!this.rules || !this.orm.rules) {
       throw new Error(`orm: ${this.def.name} composes behaviors (D103), and the ORM was opened with no core for them; createOrm passes @superschematic/rules's (withRulesCore)`);
+    }
+    if (this.orm.dialect === 'sqlite') {
+      const sqlite = this.runner.sqlite;
+      if (sqlite === undefined) throw new Error(`orm: ${this.def.name} composes behaviors (D103), and the repositories on SQLite run over no SqlDatabase; open them with sqliteOrm`);
+      // No wake on SQLite or D1, where no drain worker runs (D145's left).
+      return { core: this.rules, layout: this.orm.rules, store: sqliteRulesStore(sqlite.db), wakes: false };
     }
     const queryable = this.runner.queryable;
     return {
@@ -3225,6 +3533,7 @@ class TableRepository {
     options: RunEventOptions,
     handle: () => Promise<void>
   ): Promise<EventRun> {
+    this.refuseOnD1("runEvent, which spends the event's claim in the transaction of its handler's writes,");
     return this.atomically(async repo => {
       const spent = await spendEvent(repo.rulesHost(), repo.def.name, options.claim);
       if (!spent.ran) return spent;
@@ -3407,8 +3716,8 @@ function queryOf(orm: OrmDefinition, runner: Runner, acting: Acting, keys: Field
  * acts as the transaction it is nested in, the caller (D87) and the
  * behavior caller among them.
  */
-function txOf<R>(orm: OrmDefinition, types: unknown, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, depth = 0, viewer: Viewer = CALLER): OrmTx<R> {
-  const runner: Runner = { queryable: client, inTransaction: true, types };
+function txOf<R>(orm: OrmDefinition, base: RunnerBase, client: OrmQueryable, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, depth = 0, viewer: Viewer = CALLER): OrmTx<R> {
+  const runner: Runner = { queryable: client, inTransaction: true, ...base };
   const query = queryOf(orm, runner, acting, keys);
   return withRowFeatures(orm, viewer, {
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
@@ -3416,10 +3725,10 @@ function txOf<R>(orm: OrmDefinition, types: unknown, client: OrmQueryable, actin
     get actingUser() {
       return actingUser(acting);
     },
-    withUser: (id: string | null | undefined) => txOf<R>(orm, types, client, userOf(id), keys, rules, behaviorCaller, depth, viewerOf(id)),
-    as: (principal: Actor | null | undefined) => txOf<R>(orm, types, client, userOf(principal?.subject), keys, rules, behaviorCaller, depth, accessCallerOf(principal)),
-    asSystem: () => txOf<R>(orm, types, client, systemActorOf(orm).id, keys, rules, behaviorCaller, depth, ALL),
-    withBehaviorCaller: (caller: CoreCaller | null) => txOf<R>(orm, types, client, acting, keys, rules, caller ?? undefined, depth, viewer),
+    withUser: (id: string | null | undefined) => txOf<R>(orm, base, client, userOf(id), keys, rules, behaviorCaller, depth, viewerOf(id)),
+    as: (principal: Actor | null | undefined) => txOf<R>(orm, base, client, userOf(principal?.subject), keys, rules, behaviorCaller, depth, accessCallerOf(principal)),
+    asSystem: () => txOf<R>(orm, base, client, systemActorOf(orm).id, keys, rules, behaviorCaller, depth, ALL),
+    withBehaviorCaller: (caller: CoreCaller | null) => txOf<R>(orm, base, client, acting, keys, rules, caller ?? undefined, depth, viewer),
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,
     // A nested transaction is a savepoint, named for its depth, as
@@ -3430,7 +3739,7 @@ function txOf<R>(orm: OrmDefinition, types: unknown, client: OrmQueryable, actin
       await client.query({ text: `SAVEPOINT ${savepoint}`, values: [] });
       let out: T;
       try {
-        out = await fn(txOf<R>(orm, types, client, acting, keys, rules, behaviorCaller, depth + 1, viewer));
+        out = await fn(txOf<R>(orm, base, client, acting, keys, rules, behaviorCaller, depth + 1, viewer));
       } catch (error) {
         await client.query({ text: `ROLLBACK TO SAVEPOINT ${savepoint}`, values: [] });
         await client.query({ text: `RELEASE SAVEPOINT ${savepoint}`, values: [] });
@@ -3500,7 +3809,7 @@ function keyringOf(keys: FieldKeys, runtime: OrmRuntime): FieldKeyring {
 }
 
 function ormWith<R>(pool: OrmPool, orm: OrmDefinition, runtime: OrmRuntime, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Orm<R> {
-  const runner: Runner = { queryable: pool, inTransaction: false, pool, types: runtime.types };
+  const runner: Runner = { queryable: pool, inTransaction: false, pool, types: runtime.types, sqlite: pool.sqlite };
   const query = queryOf(orm, runner, acting, keys);
   return withRowFeatures(orm, viewer, {
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
@@ -3513,7 +3822,7 @@ function ormWith<R>(pool: OrmPool, orm: OrmDefinition, runtime: OrmRuntime, acti
     asSystem: () => ormWith<R>(pool, orm, runtime, systemActorOf(orm).id, keys, rules, behaviorCaller, ALL),
     withBehaviorCaller: (caller: CoreCaller | null) => ormWith<R>(pool, orm, runtime, acting, keys, rules, caller ?? undefined, viewer),
     async transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>, options?: TransactionOptions): Promise<T> {
-      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, runtime.types, client, acting, keys, rules, behaviorCaller, 0, viewer)));
+      return inTransaction(pool, beginStatement(options), client => fn(txOf<R>(orm, { types: runtime.types, sqlite: pool.sqlite }, client, acting, keys, rules, behaviorCaller, 0, viewer)));
     },
     query,
     exec: async (text: string, values?: readonly unknown[]) => (await query(text, values)).rowCount ?? 0,

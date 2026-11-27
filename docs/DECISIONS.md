@@ -134,9 +134,6 @@ a secret, on gcp and on Workers, and a collector the target runs.
 - A message's span continues the trace that enqueued it, which needs a
   trace-context column in the queue tables.
 
-**D68** (L 8361, 9476; D96, L 12990; D80, L 11361). `stack queue`
-(`dead`, `retry`, `drop`) on SQLite and on D1. `queueops` is Postgres only.
-
 **D69** (L 8468). A planner per pull request. `planner` admits every pull
 request in every project with a plan job.
 
@@ -180,7 +177,12 @@ readiness check deeper than a TCP connection.
 - The `@versioned` history readers in TypeScript (`orm.ts`; also D90,
   L 12025).
 - `IfVersion` fences in TypeScript (D106, L 17540).
-- TypeScript and Go repositories on SQLite and D1 (D116 built Rust's).
+- Of the repositories on SQLite and D1, which D116 built in Rust and Go
+  and D182 in TypeScript: in Go, `Encrypted<T>`, `MergeInto`, a `BYTEA`
+  column and the hydration of a `@hasMany` field, a duration's `gt` and
+  `lt`, which compare its text, a decimal's trailing zeros, which SQLite's
+  `NUMERIC` drops, and a `LIKE` that folds only ASCII; in TypeScript,
+  `mergeInto` and a table deriver.
 - The Go ORM writes the zero value for an unset required field with
   `Default<T, V>` (`Product.inStock` false, not true). D88 fixed `"now"`
   alone (L 11059, 11114).
@@ -243,7 +245,9 @@ for `NUMERIC` and vectors; Topcoat's currency for `Finance.SignedMoney`.
   expression (D105 restates it, L 17452).
 - An encrypted field's second statement once per batch, not an `UpdateOne`
   per row.
-- Upserts of many rows on SQLite and D1.
+- An upsert of many rows of a table that composes behaviors on SQLite and
+  D1, which upserts a row at a time there in TypeScript and Rust; the Go
+  repositories on SQLite refuse its upserts, one row's among them.
 
 **D90** (L 11926). A `materialized: true` projection and its refresh; Go
 includes of references no `@hasMany` field holds; `includeDeleted` per
@@ -267,8 +271,8 @@ hand-written Rust operation that acts as its caller without an explicit
 `withCaller` itself).
 
 **D88** (L 12264). `Default<T, "now">` on a queue's message; seeds of rows
-other than roles; `stack queue backfill` on SQLite; a backfill when a plan
-changes an existing trigger's `when`.
+other than roles; a backfill when a plan changes an existing trigger's
+`when`.
 
 **D93** (L 12372).
 - Confirmation on the engine's MCP endpoint, which publishes
@@ -282,8 +286,10 @@ changes an existing trigger's `when`.
 a gcp site; the redirect prefix on gcp, whose load balancer rewrites no
 answer header; `origins` in acme-shop's stacks.
 
-**D92** (L 12596). An identity store over D1, and a TypeScript server over
-a sqlite-first `authDb`; Hyperdrive in a parameterized environment; a
+**D92** (L 12596). An identity store over D1, so a TypeScript server on
+Workers over a sqlite-first `authDb` (one over the SQLite file, under
+`stack dev`, keeps its users in the file, D182); Hyperdrive in a
+parameterized environment; a
 least-privilege config per API; a separate migrator user on the origin;
 more than one drainer of a worker; the stack
 managing the Hyperdrive config and its caching.
@@ -297,7 +303,12 @@ a map walk; an audit of walks that append in map order unsorted.
 only a string, as an interpolated constant (a `LIMIT`); a projection's
 computed column judged non-null.
 
-**D96** (L 12989). A generated CI job that runs `stack queue`.
+**D96** (L 12989). A generated CI job that runs `stack queue`, which now
+runs on every platform (D68). Its design is open on four points: what its
+log may show, since `dead` prints message payloads; whether it runs only a
+`--prepared` operation, one a reviewer approved; which inputs a dispatch
+takes (environment, queue, operation, message ids); and which credentials
+it reads on each platform.
 
 **D97** (L 13084). `smoke.sh Dev` in CI's full tier; a domain on the
 smoke's gcp environment, which a `Secure` cookie needs; Cloudflare names
@@ -1160,8 +1171,21 @@ its MCP endpoint. Since then: a behavior table's `upsert_one`,
 `update_many` and `hard_delete_one` through the core, typed methods per
 behavior operation, `reencrypt`, a JSON column's comparisons on SQLite,
 and workers on SQLite that claim by the time a drain is given and extend
-a long handler's claim. What is left follows, and the design of the one
-step not built, the `server` feature.
+a long handler's claim. Since then too: `upsert_many` on SQLite (D89),
+refused, as `upsert_one` is, for repositories that keep to a caller
+(D156); and the Go ORM's repositories on SQLite (`sqlite.go`,
+`sqlite_<table>.go`, from sqlutil's SQLite statements), opened by
+`OpenSQLite` over a `*sql.DB` as a second `DatabaseInterface`, with
+`UpsertMany` and commit hooks (D166) as on Postgres, a table that composes
+behaviors written through the rules module's SQLite store, and a Go
+server or job in a stack on its database's first dialect, its file opened
+with the HTTP runtime's `sqlitefile`. Of the Go ORM on SQLite: pgx's
+`Query`, `QueryRow` and `Exec` and the declared queries answer
+`ErrPostgresOnly`; a file has no read replica; a constraint refuses a
+write as Postgres's `*pgconn.PgError` does, by SQLSTATE; a Go API whose
+sqlite-first database an environment places on Postgres is refused; and
+a Go worker claims on Postgres alone. What is left follows, and the
+design of the one step not built, the `server` feature.
 
 ### A request in, a response out
 
@@ -1204,10 +1228,11 @@ behaviors on the core, which reads no clock; an operation's idempotency
 key and a record moved between two databases, which D104 lists as the
 app's; a bucket on a local directory, without which the target refuses
 every bucket; jobs in the process; installing the binary as a service,
-signing it and updating it; TypeScript's repositories and behavior
-workers on SQLite and D1, which step 1's statements serve; Go on SQLite;
-and, on SQLite, a declared query, a `@versioned` table's history and
-full-text search (D62).
+signing it and updating it; TypeScript's behavior workers on SQLite and
+D1; Go's workers on SQLite, and the Go repositories' `Encrypted<T>`,
+`MergeInto`, `BYTEA` and `@hasMany` hydration there (D79); and, on
+SQLite, a declared query, a `@versioned` table's history and full-text
+search (D62).
 
 ## D117. A project's schemas run in one of three modes, development, runtime and compiled: development keeps rows as JSON, a runtime type is a table whose DDL a publish plans and applies, and compiled is the build (D16, D27, D46, D103 amended)
 
@@ -1600,7 +1625,12 @@ Left:
 
 - A wake from an enqueue on SQLite (`Enqueue<Queue>SQLite`,
   `enqueueStatement`), and a slot there, which has no advisory lock: no
-  target runs a drain worker over a SQLite file.
+  target runs a drain worker over a SQLite file. The generated
+  repositories on SQLite and D1 wake nothing either, after a write past
+  the core or a command of it: TypeScript's (`wakeChanges`, and a rules
+  host whose `wakes` is false), Go's (the SQLite rules host gives no
+  `Wake`) and Rust's (which wakes from its Postgres enqueue alone). A
+  hand-written host's command over D1 wakes as on Postgres (D151).
 - A bound on a task's life shorter than a day, and a setting for it.
 - Holding wakes back while the workers hold every slot. A process sends a
   queue's wake whenever five seconds have passed since its last, so on a
@@ -2557,7 +2587,7 @@ left Go's. This entry ports it, and settles what Go's shape asked for.
 | The Go server records each call in the access log itself, in a route of an API whose database has an `@accessLog` table, before the permission check, through `session.AccessLogged`; a log that fails answers 500. | An option the app passes, as the TypeScript router takes (D156's left for TypeScript). |
 | A view's field under `@decrypted({ permission })` is masked, `[secret]`, for a caller without it, and each value opened for one with it is recorded in the operation's transaction. A revealed field holds text, and a database without an `@accessLog` table refuses the build, where TypeScript refuses the reveal when it happens. | A mask of another type's zero, which a reader cannot tell from a value. |
 | A path of `*` lets a grant read every row of the table, and the values the branches before it bound go with them. | Leaving them bound: TypeScript's `accessConditions` does, and a statement then binds more values than it names (left below). |
-| The loader refuses, in a Go server, each feature of D152 to D159 that Go does not serve yet, on the tables of the API's database and on the API's own provider slots and operations (`verify/go_features.go`); a Go server is an API whose server is Go and whose Go types are on. The loader checks the database when it reads it for a set or an operation, and the Go server's generation, which reads it always, checks it too (`verify.GoServerDatabaseErr`). Before it, a Go server left out the calendar and Recurrence's operations, `@event`, `@notifier`, `@channelIdentities`, `@references`, `@attachments`, `@searchable`, `@party`, `@conversations`, `@runRequests`, `@agents`, provider slots and `@autonomy`, and, for D156, read an `@audience` table whole and opened a revealed field for every caller. `fixture-recurrence-api` was such a server, and is served in TypeScript now. | Refusing a DB service's Go types, as D181 refuses Rust's: the DB kind generates the Go ORM always and the build needs the Go types for it (`refuseORMWithoutGoTypes`), so every database with one of these tables would fail `build-all`, whatever language its API is served in. The Go ORM of these tables is their plain repositories, and the triggers and the core keep what each feature writes, whichever ORM writes the row; what would serve a feature wrongly is the Go server. Relaxing the build's requirement of Go types, which would leave a Go worker or job of the database with no ORM. This holds on Postgres, where the Go ORM keeps an audience (above) and triggers keep references and attachments; on SQLite, where neither holds for Go, D182 refuses a database's Go types for `@audience`, `@references` and `@attachments` (`sqlite_features.go`), and the two checks agree. |
+| The loader refuses, in a Go server, each feature of D152 to D159 that Go does not serve yet, on the tables of the API's database and on the API's own provider slots and operations (`verify/go_features.go`); a Go server is an API whose server is Go and whose Go types are on. The loader checks the database when it reads it for a set or an operation, and the Go server's generation, which reads it always, checks it too (`verify.GoServerDatabaseErr`). Before it, a Go server left out the calendar and Recurrence's operations, `@event`, `@notifier`, `@channelIdentities`, `@references`, `@attachments`, `@searchable`, `@party`, `@conversations`, `@runRequests`, `@agents`, provider slots and `@autonomy`, and, for D156, read an `@audience` table whole and opened a revealed field for every caller. `fixture-recurrence-api` was such a server, and is served in TypeScript now. | Refusing a DB service's Go types, as D181 refuses Rust's: the DB kind generates the Go ORM always and the build needs the Go types for it (`refuseORMWithoutGoTypes`), so every database with one of these tables would fail `build-all`, whatever language its API is served in. The Go ORM of these tables is their plain repositories, and the triggers and the core keep what each feature writes, whichever ORM writes the row; what would serve a feature wrongly is the Go server. Relaxing the build's requirement of Go types, which would leave a Go worker or job of the database with no ORM. This holds on Postgres, where the Go ORM keeps an audience (above) and triggers keep references and attachments; on SQLite, where neither holds for Go, D182 refuses a database's Go types for `@audience`, `@references` and `@attachments` (`sqlite_features.go`), and the two checks agree. The Go repositories on SQLite (batch 8, D116) keep to no grants and record no access log either, so the same check refuses a sqlite database's Go types for `@accessGrants` and `@accessLog`, as it refuses Rust's (D181 leaves Rust's grant reach on SQLite): TypeScript's repositories alone serve both there (D182). For a generation that did not read the service's config, whose Go ORM the DB kind writes always, each repository on SQLite of a database whose reads keep to a caller, and the access log's, refuses every call, naming why, as a table SQLite does not hold does (`sqliteAccessRefusal`). A filter through a one-to-many relation reaches on SQLite as on Postgres, so a row rule's path holds in both. |
 
 Built: `runtime/schema/go/access` and `session`'s `Caller`,
 `GrantAuthenticator`, `AccessLogged` and `RevealEntry`; `access_parity.json`,
@@ -2590,6 +2620,9 @@ Left:
   rows decode `effectiveAudience`, a list, as one UUID, which fails
   Derived's `StaleDerivations`. No test runs one:
   `TestHeldRepositoriesCompile` builds the behavior fixtures alone.
+- Per-record access in the Go repositories on SQLite: an audience, grants
+  and the access log, which lifts `sqlite_features.go`'s refusal of a
+  sqlite database's Go types for them.
 
 ## D181. The Rust runtime and server serve D156's per-record access on Postgres, and the Rust outputs refuse the platform features they do not serve yet (D156 amended)
 
@@ -2656,8 +2689,8 @@ SQLite.
 | SQLite has no trigger functions, cannot set `NEW`, and does not fire a trigger already running (`recursive_triggers` is off unless a connection turns it on, which a migration on D1 cannot), so no trigger counts on another to finish its work. Each `@audience` table has `trg_<table>_audience_insert` and `_update`, after the write, which refuse an unknown audience or agent access (`RAISE(ABORT)`) and set the resolved columns from the row as the table holds it; the update's fires only when they are not what the audience resolves to, which stops it whether or not recursion is on. A parent table's `trg_<table>_audience_cascade` sets each inheriting child's directly; a table that inherits from itself sets every inheriting row below the parent through a recursive CTE, each the parent's audience and the least open agent access on its way down, then the other child tables' rows below any of them. | A cascade that updates the children's `audience` to itself, as Postgres's does, which on SQLite would not fire the child's trigger again when the child is of the same table or its trigger is running. `PRAGMA recursive_triggers`, which a D1 migration cannot set. |
 | References and files are row triggers of the Postgres triggers' names: a target's delete enqueues a cleared message per reference to the row and deletes them; a file's delete enqueues its object's release unless another file of the sub-table still names it, so a statement that deletes the files of one object releases it once. Of a statement that deletes a holder and a row it points at, a cleared message may name a holder the same statement deleted. | A statement trigger, which SQLite has none of. |
 | The members of `orm.references` and `orm.attachments` run in the host's dialect (`rowfeatures.ts`, `sqlOf`): a parameter `?n`, `CAST(... AS TEXT)`, the database's clock, a ref block found through `json_each`, a time read back from its text, and no advisory lock, since a transaction on SQLite holds its one write lock and D1 runs each statement alone. | |
-| On SQLite the repositories read a table that composes behaviors and refuse its writes, and refuse upserts and `mergeInto`, each naming why. | Serving the behaviors' core in the ORM's transaction over `sqliteRulesStore`, whose batch cannot nest in one (left). |
-| The loader serves the three on sqlite, and refuses a service that lists sqlite and enables Go's or Rust's types, naming the language, since their repositories on SQLite would read the rows without them (`verify/sqlite_features.go`, `Input.TypesLanguages`). | Refusing sqlite until every language serves them. |
+| On SQLite the repositories refuse `mergeInto`, naming why. A table that composes behaviors writes through the core over `sqliteRulesStore`, whose batch is a savepoint of a transaction open on a file, and upserts a row at a time. | A merge's plan in SQLite's words, which a later change writes (left). |
+| The loader serves the three on sqlite, and refuses a service that lists sqlite and enables Go's or Rust's types, naming the language, since their repositories on SQLite would read the rows without them (`verify/sqlite_features.go`, `Input.TypesLanguages`). It refuses Go's and Rust's types for `@accessGrants` and `@accessLog` on sqlite too: TypeScript's repositories alone keep a caller's reads to its grants there (D180, D181's left), so the three languages serve one set of these features on SQLite, TypeScript's. | Refusing sqlite until every language serves them. |
 | D1 is proved under the pinned workerd by the fixture `d1-orm`, which runs a database's generated `orm-sqlite.ts` and `sqlite/create.sql` (kept current by `TestTheWorkerdD1FixtureIsCurrent`) over a stand-in of D1 on a Durable Object's SQLite storage, workerd's own SQLite, which runs no BEGIN, as D1 runs none. | Miniflare, which the repository does not pin. A stand-in that answers fixed statements, which proves no trigger. |
 
 ### The SQLite shapes later workstreams take
@@ -2704,17 +2737,59 @@ round trip and convergence of both fixtures (sqlmigrate);
 among them; `TestReferencesTablesEndToEndOnSQLite`, D154's on bun:sqlite,
 the thread's message written by hand; and the workerd fixture `d1-orm`.
 
+Since then, of the left list below:
+- The behaviors' core on SQLite and D1: a table that composes behaviors
+  writes through the rules module's SQLite store over the pool's database
+  (`OrmSqlite.db`), whose batch is a savepoint of a transaction open on a
+  file (`sqlite-database.ts`) and D1's one atomic unit, so a command
+  commits whole on either.
+- Upserts: `upsertOne` reads whether a row holds its key in the unit of
+  the upsert; `upsertMany` runs sqlutil's SQLite upsert as the Rust and Go
+  repositories do, batches of the rows that bind 32766 parameters on a file
+  and 100 on D1, a statement per set of columns, the rows of each batch's
+  keys read before and after it, and two inputs of one batch with one key
+  refused (D89). A table that composes behaviors upserts a row at a time.
+- A write of several statements all known before the first runs as one
+  unit (`runUnit`): one batch outside a transaction and on D1, so
+  `createMany`, an upsert and an upsert of many rows commit whole there.
+  On D1 a write whose later statement needs an earlier one's answer is
+  refused by name: an upsert that seals an `Encrypted<T>` field, and
+  `runEvent`.
+- A `Generic.JSON` column's filter compares JSON values on SQLite
+  (`sqlutil.SQLiteJSONClauses`, the definition's `jsonClauses`).
+- The generated TypeScript server over a sqlite-first database:
+  `Deps.orm` is `createOrm(db)` of `./orm/sqlite`, over the file in
+  `main.ts` and over the binding in `fetch.ts` and `scheduled.ts`; the
+  D1 bundle needs no `nodejs_compat` for it, and a behavior operation and
+  a `@tableOperation` run through them, where tsrestgen refused them
+  (D106). An API over the user model
+  keeps its users in the file (`sqlDatabaseIdentityStore`, whose
+  operations take the pool's turns through `inSqliteTurn`), and is refused
+  on Workers. `openNodeSqlite` (`./node-sqlite`) opens a file through
+  `node:sqlite`.
+- The tests: `TestTypeScriptRepositoryResultsOnSQLiteAndPostgres`, one
+  script of 70 calls through bun:sqlite, node:sqlite, a D1 stand-in and
+  Postgres, held to Postgres's answers, its upserts of many rows among
+  them; `TestWorkflowTablesEndToEnd` through the repository on SQLite;
+  the ticket's writes through the core in
+  `TestReferencesTablesEndToEndOnSQLite` and the `d1-orm` fixture, which
+  loads the core's wasm module under workerd;
+  `TestTypeScriptSQLiteEntrypointCompilesAndServes`.
+
 Left:
 
-- Go and Rust on SQLite: their repositories' audience, grants, references
-  and attachments over these shapes, which lifts the loader's refusal.
-- The generated TypeScript server over a database that lists sqlite first:
-  `Deps.orm` built from `createOrm(db)` of `./orm/sqlite`, which lifts
-  tsrestgen's refusal of a table operation there (D106); an app passes
-  `orm` in the router's options now.
-- The behaviors' core, upserts and merges in the SQLite repositories.
-- `Encrypted<T>` fields on D1, which need a cipher a Worker has.
-- An atomic write of several statements on D1, through its batch.
+- Go and Rust on SQLite: their repositories' audience, grants, access
+  log, references and attachments over these shapes, which lifts the
+  loader's refusal.
+- Merges in the SQLite repositories, and an upsert of many rows of a table
+  that composes behaviors there.
+- `Encrypted<T>` fields on D1, which need a cipher a Worker has; the
+  generated Workers entrypoint refuses an API whose database holds them.
+- An atomic write on D1 of statements a later one of which needs an
+  earlier one's answer: a transaction's, `references.add` and
+  `attachments.begin` among them.
+- An identity store over D1 (D92), and a TypeScript behavior worker and
+  table deriver on SQLite and D1.
 - A cleared message that names a holder the same delete statement
   deleted, which a row trigger cannot tell.
 - The calendar, search, the notifier's queues, parties and agents on
@@ -2913,7 +2988,11 @@ Left:
 - Generated routes, MCP tools and SDK methods for references and
   attachments, as in TypeScript (D154's left).
 - Go on SQLite and D1: the loader refuses a database's Go types of
-  either declaration there (D182), which TypeScript alone serves.
+  either declaration there (D182), which TypeScript alone serves. The
+  SQLite database and its transactions (batch 8, D116) carry
+  `References()` and `Attachments()`, which a table's `Comments` gives a
+  database the loader does not refuse, over a host that answers
+  `ErrSQLiteUnsupported` for every statement (`sqliteRowFeaturesHost`).
 - A provider package named by its Go module path alone, resolved from
   the module cache rather than a directory.
 
