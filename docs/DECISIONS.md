@@ -1224,7 +1224,9 @@ context is written out.
 - Pool: `match` and `prefer` over a Workflow state or an owned field, a
   pick of members with no value, more than 2,000 members
   (`pool_too_large`), and the extra rounds of a pick across pages
-  (L 17382).
+  (L 17382). A pick on a table whose rows keep to a caller (D156) answers
+  no member when the one it picks is a row the caller does not see, in
+  every language; choosing among the members the caller sees is left.
 - An operation's idempotency key, left for an entry of its own (L 15063;
   D116 left it too).
 - Event order on SQLite: one command's events share a millisecond's
@@ -1745,15 +1747,22 @@ API's derivers all fill one kind, tables or engine types, and a Go
 API's deriver of engine types is still refused, since that loop is the
 engine's. The commits that built it name D146.
 
+A Go or a Rust deriver of an `@audience` table fills its rows, which keep
+to their audience for every other caller: both rules adapters read the
+table's audience ids as a list (D180, D181), and the build no longer
+refuses a Go one. `TestAGoDeriverOfAHeldTableBuilds` builds one,
+ormgen's `TestHeldBehaviorTablesOnPostgres` runs the Go loop over a
+private row, and rustgen's `TestRepositoriesKeepBehaviorOperationsToTheCaller`
+pulls and settles one through the Rust repositories as a deriver's
+`main.rs` opens them.
+
 Left: a wake on a write, where the loop pulls again every five seconds,
 and each pull is a scan of the table's rows with their derivations
 sub-table, since the core keeps no index of stale fields; an item the
 core skips without counting an attempt, which is answered again at every
 pull while its guard holds it; D74's model label and cost cap, which stay
-D74's; a Go or a Rust deriver over a database whose DB service lists
-sqlite first; and a Go deriver of a table with `@audience`, which the
-build refuses, since the Go behaviors' core decodes the table's
-`effectiveAudience` as one UUID and fails every pull (D180).
+D74's; and a Go or a Rust deriver over a database whose DB service lists
+sqlite first.
 
 ## D147. `Aliased<T>` keeps a row's former names, and `Mergeable` folds one row into another (D103 amended)
 
@@ -1787,7 +1796,9 @@ its normalized form (`lower`, the default, or `slug`) across the table's
 names and aliases together, through a shared table whose `holder` is
 typed by the table's key. Its operations are `rename`, `addAlias`,
 `removeAlias` and `resolve`, and a name another row holds is refused with
-`name_taken`, which names the holder. A merge moves `from`'s aliases to
+`name_taken`, whose details are the name and its normalized form: the
+name is unique across the table, so that it is taken shows, and which row
+holds it does not (D156). A merge moves `from`'s aliases to
 `into` and adds its name as one, through `MergeStep.Before`. The Rust
 repositories gain `merge_into` on Postgres and on SQLite
 (`sqlutil.SQLiteMergePlanOf`), where a merge that deletes `@versioned`
@@ -1804,9 +1815,31 @@ text left open: `resolve` answers `{ row: null }` for a name no row
 holds; `T` is `string`; a name is at most 256 characters; and a name
 whose holder is no live row is taken over.
 
-Left: Go and Rust handlers of the merge route; the rows of the tables
-that reference the two, which a merge repoints and deletes whether or not
-its caller may see them, in Go, TypeScript and Rust; a create on
+Under per-record access (D156) a merge, and `resolve`, keep to the
+caller in Go, TypeScript and Rust on Postgres. A merge refuses a row of
+another table it would repoint or delete that its caller may not write,
+naming the table and nothing of the row, before a statement writes:
+`sqlutil.MergeStep.Reach` reads each step's rows against the caller's
+write conditions with both rows locked. Go answers `ErrMergeOutOfReach`,
+and TypeScript and Rust a merge error `out_of_reach`, which their routes
+answer 403. A merge outside any operation, `AsSystem`'s and repositories
+opened for no caller repoint every row as before. TypeScript's
+`mergeInto` now finds `into` only when its caller may write it, as Go's
+and Rust's did: it checked `from` alone, in its last step. The core reads
+every row, so `resolve` answers `{ row: null }` for a row its caller does
+not see: `registry.TableOperationRow` names the member of a table
+operation's answer that names a row, the layout carries it
+(`answersRow`), and each language's repositories, and a Rust server's
+behavior routes, answer it null. `TestMergeIntoKeepsToTheCallerOnPostgres`,
+`TestMergeAccessEndToEnd` and `TestRepositoriesMergeKeepToTheirCaller`
+hold each language to a party's grants and to private rows.
+
+Left: Go and Rust handlers of the merge route; TypeScript's
+`atomically()`, which opens its transaction's repository without the
+ORM's own viewer (`createOrm` with a user, `orm.as`), so a check made
+through that repository keeps to an operation's caller alone, and
+`mergeInto` and `operateTable` check their caller's reach through the
+repository that holds the viewer instead; a create on
 development mode, whose handler refuses the name a create gives as
 Aliased's owned field, though its stores replay `core-aliased`; a merge
 that repoints a version graph's table, which needs the merge as a commit;
@@ -2065,6 +2098,15 @@ Left:
   identity (section 7), and the agent run's narrowed token (section 8).
 - A path to a list field of ids in a row rule, and a team as a principal
   in an audience.
+- The behaviors' core reads every row of a table. A behavior's operation
+  on a row keeps to its caller in every language, and so does the one row
+  Aliased's `resolve` and Pool's `pick` answer (D147, D104). The
+  operations of a table as a whole whose answer lists rows do not:
+  Calendar's `findAvailability` (its slots' rows), Derived's
+  `staleDerivations` and `failedDerivations` (each item's row, the
+  stale ones with their inputs), Payments' `listPaymentActions` and
+  Lease's `expireHolder` (the rows it expired). Derived's and Lease's
+  need a permission their config names.
 - Live deploys: `smoke.sh Cloudflare` and `Gcp` are the maintainer's.
 
 ## D159. Five runtime interfaces a running app calls, each provider a package that declares its interface in its package.json, slots in an API's config that each environment binds, a build that refuses a feature with no provider, and providers that act as their own principals (D156 amended)
@@ -2720,6 +2762,25 @@ call log; the loader's refusal of a Go server. `TestGoAccessEndToEnd` serves
 `TestHeldRepositoriesCompile` builds the held repositories of the history,
 vector, merge, projection and behavior fixtures.
 
+Also built: a held table that composes behaviors, through the Go
+behaviors' core. A create that leaves `Audience`, `AgentAccess` or
+`EffectiveAgents` at `""` hands the core the table's default, as a plain
+create binds it (`coreOwn`, `createColumns`), and `runtime/rules/go`
+reads and writes the layout's list columns as lists (`rules.Column.List`),
+so the core reads `audienceNamed` and `effectiveAudience` as lists of ids.
+Every behavior operation on a row of a held table checks the caller's
+reach before the core runs, as `UpdateOne` does: write reach for an
+operation the core's declaration says writes, read reach for one that
+writes nothing (`RepositoryOperation.Writes`). A row out of reach is
+`ErrNotFound` over the core's `not_found` of a row no live row holds, so
+its route answers 404 in the core's words, as TypeScript's does (D201).
+`MergeInto` refuses a referencing row its caller may not write
+(`ErrMergeOutOfReach`), and a table operation's answered row is null for
+a caller who does not see it (`keepAnsweredRow`; D147).
+`TestHeldBehaviorTablesOnPostgres`,
+`TestBehaviorOperationsKeepToTheCallerOnPostgres` and
+`TestMergeIntoKeepsToTheCallerOnPostgres` run them on Postgres.
+
 Left:
 
 - A Go table operation that writes a list, `audienceNamed` among them
@@ -2733,12 +2794,6 @@ Left:
 - The Go server's parties and agents, which later Go workstreams port.
   References, attachments and provider slots are D184's, Recurrence, the
   calendar and search D187's, and the notifier D190's.
-- A held table that composes behaviors, through the Go behaviors' core:
-  its create fills neither default of `audience` and `agentAccess`, so a
-  create that names neither fails their checks, and its reads of the
-  rows decode `effectiveAudience`, a list, as one UUID, which fails
-  Derived's `StaleDerivations`. No test runs one:
-  `TestHeldRepositoriesCompile` builds the behavior fixtures alone.
 - Per-record access in the Go repositories on SQLite: an audience, grants
   and the access log, whose calls they refuse there with
   `ErrSQLiteUnsupported` until then.
@@ -2775,6 +2830,28 @@ Rust router on Postgres: audience reads, writes, searches and counts, a
 named and an inherited audience and the cascade, an agent run, a row
 rule through three relations, a grant that reaches only its paths and
 ends by revocation, date and state, a reveal, and the access log.
+
+Also built: behaviors on a held table. The rules adapter reads a row's
+list columns, a `UUID[]` among them, as lists (`Column.list`), so the core
+reads a private or a named row and a deriver fills one (D146). The
+repositories' behavior operations (`operation`, and each use's typed
+methods) check the caller's reach before the core runs, as `update_one`
+does, write reach for an operation that writes and read reach for one the
+definition names a read (`Behaviors.reads`), and answer a row out of
+reach `Error::NotFound`; `Repository::reach(key, write)` is the same
+check for code that runs the core itself. A Rust server's behavior routes
+over a database whose rows keep to a caller open the database's Rust
+repositories for the request's caller and check the row before the core
+runs, a row out of reach answering the core's 404 of a row that is not
+there, and hold a table operation's answer with
+`Repository::keep_answer`. Such a crate depends on the database's Rust
+types and their Postgres repositories (`BehaviorsHeld`), and the build
+refuses one whose `Deps` names none, and one on SQLite. `merge_into`
+refuses a referencing row its caller may not write (`out_of_reach`, 403
+at a route), and `resolve` and `pick` answer null for a row the caller
+does not see (D147, D104). `TestRepositoriesKeepBehaviorOperationsToTheCaller`,
+`TestRustBehaviorOperationsKeepToTheCallerOnPostgres` and
+`TestRepositoriesMergeKeepToTheirCaller` run them on Postgres.
 
 Left:
 
@@ -3421,17 +3498,6 @@ Postgres; `TestTwoOperationsOnOneRouteAreRefused`; and
 
 Left:
 
-- Go and Rust on a behavior's operation of a kept row. Read in the
-  source, not run: neither repository checks the caller's reach before a
-  behavior's row operation (`RunOperation` in ormgen's `repository.tmpl`,
-  `Runner::operation` in `runtime/http/rust/src/orm/run.rs`), where both
-  check it before `updateOne` and `deleteOne`; and neither rules adapter
-  reads a list of UUIDs (`runtime/rules/go/convert.go`,
-  `rules-adapter/src/convert.rs`), so a behavior's call on a private or
-  named row fails for every caller, the bug #554 fixed in TypeScript.
-  D180 lists the Go half. A caller with grants on a table without an
-  audience meets no list, so its behavior operations there are not held
-  to its grants.
 - A relative recurrence hearing its target's write (D152's left item):
   the target table may compose no behaviors and so have no change queue,
   and the core's listening runs from a changed row to the rows its own
