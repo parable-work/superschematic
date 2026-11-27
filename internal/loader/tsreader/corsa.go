@@ -113,6 +113,7 @@ var (
 	kindIndexSignature   = kindNamed("KindIndexSignature")
 	kindNamedTupleMember = kindNamed("KindNamedTupleMember")
 	kindStaticKeyword    = kindNamed("KindStaticKeyword")
+	kindTypeQuery        = kindNamed("KindTypeQuery")
 )
 
 // isStatic reports whether node, a class member, is static.

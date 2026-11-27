@@ -27,5 +27,12 @@ serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve
 superschematic-rules = { path = "../rules" }
 superschematic-rules-behaviors = { path = "../rules-behaviors" }
 
+# abi, on by default, exports the stock core's ABI ([`export_rules_abi`] over
+# superschematic_rules_behaviors::core). A project's rules crate (D103's step 5)
+# depends on this crate without it and exports its own core's.
+[features]
+default = ["abi"]
+abi = []
+
 [lints]
 workspace = true

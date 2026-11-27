@@ -1084,6 +1084,184 @@ where an engine on it publishes `shop-ratings`' `Product`, creates one
 and rates it. The [engine guide](/superschematic/guides/engine/) serves
 three of the core's behaviors in `examples/engine-notes`.
 
+## A behavior declared by a class
+
+A behavior can also be declared by an abstract class in the schema
+language (D103). The build derives from the class the declaration the
+behaviors' core reads, the same JSON document as above. The class
+declares and never implements: a method body would run in one language.
+The core's own behaviors are classes of this form, in
+`internal/registry/behaviors/<name>.behavior.ts`, and `make behaviors`
+writes each one's `<name>.behavior.json` from it.
+
+### The class
+
+```ts
+import { declaresBehavior, subTable, type Integer, type JsonSchema, type Names } from "@superschematic/db";
+
+interface RatingConfig {
+  /** The most stars a rating gives. */
+  maxStars: JsonSchema<Integer, { minimum: 1; maximum: 10 }>;
+  /** The permission a caller needs to clear the ratings. */
+  clearPermission?: JsonSchema<string, { minLength: 1 }>;
+  /** The field whose Workflow a rating needs to be open. */
+  status?: Names<string, "workflow">;
+}
+
+/** The codes Rating's refusals carry. */
+enum RatingVeto {
+  /** More stars than the config's maxStars. */
+  too_many_stars,
+}
+
+/** Shoppers rate a row from one star to the most the config gives. */
+@declaresBehavior({
+  name: "notes.Rating",
+  vetoes: RatingVeto,
+  crate: { crate: "notes-rules", path: "crates/rules", register: "notes_rules::Rating" },
+})
+export abstract class Rating<T, C extends RatingConfig> {
+  /** How many ratings the row has. */
+  ratingCount: number;
+
+  /**
+   * Rates the row as the caller: a second rating replaces the first.
+   * @writes
+   */
+  abstract rate(params: { stars: Integer }): { count: Integer };
+
+  /**
+   * Clears the row's ratings.
+   * @writes
+   * @checks clearPermission
+   */
+  abstract clear(): { count: Integer };
+
+  /** One row per rater. */
+  @subTable({ key: "rater" })
+  static ratings = class {
+    /** Who rated. */
+    rater: string;
+    /** How many stars. */
+    stars: number;
+  };
+}
+```
+
+Each part of the class is one member of the declaration:
+
+- The class's JSDoc is its `description`. The options of
+  `@declaresBehavior` give its `name` (the class's own when absent),
+  `requires`, `conflicts`, `armsDeadlines`, `hearsChanges`, the contracts
+  it `asks`, its `vetoes` (an enum: each member is a code, and its JSDoc
+  is the code's description) and its `crate`.
+- The last type parameter's constraint is the config. A first one, when
+  there are two, is the table the behavior sits on.
+- A property is a field, its type the column's: `string`, `number`,
+  `boolean`, or a superscalar scalar such as `Temporal.DateTime`.
+  `@valueField` marks the field a field anchor's value is, and `?` on it
+  makes it optional. `@fromCreate`, `@computed`, `@volatile` and
+  `@perReader` mark the rest.
+- A static property whose value is a class expression, marked
+  `@subTable({ key, shared? })`, is a sub-table. It is static so that a
+  sub-table may share its name with a field, as Timers' `deadlines` do.
+  `RowKey` types a field that holds the key of a row of the table.
+- An abstract method is an operation. Its parameter's type is its
+  `paramsSchema`, its return type its `resultSchema`, and its JSDoc's
+  tags say the rest: `@writes`, `@scope schema`, `@beside`, `@log false`,
+  `@asks read`, `@invocation <value>`, `@checks <paths>` and
+  `@returns <description>`. A method tagged `@event` is an event, one
+  tagged `@signal <access>` a signal. The methods `create` and
+  `precondition` are the create's parameters and a caller's precondition.
+- `implements Capacity` or `implements Supply` names a contract the
+  behavior implements. A JSDoc comment before the name is its
+  description.
+
+The reader writes each JSON Schema from the types as written. An
+interface or a type literal is an object with `additionalProperties`
+false, whose members marked `?` are left out of `required`. `X[]` is an
+array, a tuple an array of exactly its elements, `Record<K, V>` an object
+of `V`, a union of literals an `enum`, `T | null` the type of `T` with
+`"null"` beside it, and another union a `oneOf`. `Integer`, `Const<V>`,
+`OneOf<U>` and `Open<T>` say what TypeScript's types do not, and
+`JsonSchema<T, K>` adds the keywords the literal type `K` holds.
+
+### What the declaration states
+
+Two members of a declaration say what the build used to read from code
+it held for each behavior:
+
+- An operation's `permissions`, written with `@checks`, are the config
+  paths whose permissions it checks: `transitions[].permission` is each
+  transition's, `gates.*.permission` each gate's. The permission catalog
+  lists under an operation only the permissions a table's config holds at
+  those paths. A declaration that states none for any operation lists
+  every permission its config names under each of its operations.
+- `references` are the config's members that name a part of the table,
+  each with its path and its kind. A class marks them in its config's
+  types. `Names<T, "field">` names an own field, and
+  `Names<T, { field: "Temporal.DateTime"; reason }>` one that holds that
+  scalar. `Names<T, "workflow">` names a Workflow use, and
+  `Names<T, "state">` a state of the Workflow it reads. `Hears<T>` is an
+  object whose `schema` and `link` name a table and its relation to this
+  one, whose writes the behavior hears. The build holds a table's config to
+  them before a behavior's own checks run, and finds from them the tables
+  whose writes a table hears.
+
+### A project's own behaviors
+
+A project names the directory of its behaviors in its `superschematic.toml`
+([`behaviors`](/superschematic/reference/naming/#behaviors)). The
+directory holds the classes of its `*.behavior.ts` files, beside a
+`tsconfig.json` that resolves `@superschematic/db`. It may also hold a
+behavior's declaration as data, a `*.behavior.json` or `*.behavior.yaml`
+file, with a `crate` member beside the declaration's. Every command
+registers them before it reads a schema. A project's behavior is named
+`<prefix>.<Name>`, as an extension's is.
+
+A table implements a class's behavior through the class:
+
+```ts
+import { Identity } from "superscalar";
+import { key, type Behavior } from "@superschematic/db";
+import { Rating } from "../../../behaviors/rating.behavior";
+
+export abstract class Movie implements Behavior<typeof Rating, Movie, { maxStars: 5 }> {
+  @key id: Identity.UUID;
+  title: string;
+}
+```
+
+`Behavior<typeof B, T, C>` resolves to the empty object type, so
+TypeScript imposes none of the class's members on the table.
+`BehaviorField<typeof B, C>` carries one on a field. A JSON or YAML
+schema names a project's behavior as it names one of the core's:
+`{ "name": "notes.Flag", "implements": true }`.
+
+### The project's rules core
+
+A behavior whose rules need code names the Rust crate that implements its
+hooks over the core's API (`crate`, `registry.BehaviorSpec.Rules` in Go):
+a value that implements `superschematic_rules::Behavior`. A table may then
+implement the behavior, and the build of its DB schema writes the
+project's rules crate into `rules/rust/<schema>`. The crate is the core's
+behaviors with each composed behavior's crate added, and it exports the
+core's ABI over them (`superschematic_rules_wasm::export_rules_abi`). Its
+tests find every composed behavior registered and declared.
+
+The crate's archive and module stand in the stock ones' place:
+
+- A Go server links the crate's static archive. Stage it with
+  `scripts/rules-archive.sh --crate <crate> --out <dir>` and put `-L<dir>`
+  first in `CGO_LDFLAGS`, before the binding's own directory.
+- A TypeScript host loads the crate's `wasm32-unknown-unknown` build:
+  pass it to `@superschematic/rules`' `init(source)`.
+
+A schema whose tables compose the core's behaviors alone gets no rules
+crate: the stock core runs them. A composed behavior whose crate is not
+in the project leaves no core that can run the schema, and the build's log
+says why.
+
 ## A deploy target
 
 A stack deploys a schema tree through a target, and the target's resources

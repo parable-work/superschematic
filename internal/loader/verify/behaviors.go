@@ -214,10 +214,12 @@ func configNames(config json.RawMessage, key string) bool {
 }
 
 // implementable reports whether a table may implement behavior (D103): one
-// the behaviors' core runs (registry.RulesBehaviors), naming no value
-// field, which a field anchors instead. It reports why not on td.
+// a core runs (registry.Behavior.RunsOnTheCore: the stock core's, or one a
+// class or an extension declares with the Rust crate that runs it on a
+// project's core, D103's step 5), naming no value field, which a field
+// anchors instead. It reports why not on td.
 func implementable(behavior registry.Behavior, reg *registry.Registry, td *ir.TypeDef, r *Result) bool {
-	if !registry.RunsOnTheCore(behavior.Name) {
+	if !behavior.RunsOnTheCore() {
 		var names []string
 		for _, name := range registry.RulesBehaviors {
 			if b, ok := reg.Behavior(name); ok && b.Value == "" {

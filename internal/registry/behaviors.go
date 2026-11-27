@@ -41,6 +41,14 @@ type BehaviorSpec struct {
 	// behavior, depends on and registers. Optional; the core's behaviors
 	// are the engine's own crates and name none.
 	Rust BehaviorRust
+	// Rules is the Rust crate whose implementation of the core's hooks runs
+	// the behavior on the behaviors' core (D103's step 5): a crate whose
+	// Register value implements superschematic_rules::Behavior, which a
+	// project's rules crate (the rulescore generator's) depends on and adds
+	// to the core's behaviors (Core::with), so a table may implement or
+	// carry the behavior as it does the core's. Optional; the core's own
+	// behaviors are the core's crate and name none.
+	Rules BehaviorRust
 	// Declaration is the behavior's JSON declaration.
 	Declaration json.RawMessage
 }
@@ -434,6 +442,9 @@ type Behavior struct {
 	// Rust is the Rust crate that implements it; the zero value when its
 	// spec names none.
 	Rust BehaviorRust
+	// Rules is the Rust crate that implements it on the behaviors' core
+	// (D103's step 5); the zero value when its spec names none.
+	Rules BehaviorRust
 
 	config         *validator.Schema
 	configRequired bool
@@ -541,10 +552,13 @@ func (r *Registry) RegisterBehavior(spec BehaviorSpec) error {
 	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rust); err != nil {
 		return err
 	}
+	if err := checkBehaviorRust(decl.Name, spec.Extension, spec.Rules); err != nil {
+		return err
+	}
 	if _, dup := r.behaviors[decl.Name]; dup {
 		return fmt.Errorf("registry: behavior %q is already registered", decl.Name)
 	}
-	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package, Rust: spec.Rust}
+	b := Behavior{BehaviorDeclaration: decl, Extension: spec.Extension, Package: spec.Package, Rust: spec.Rust, Rules: spec.Rules}
 	if len(decl.ConfigSchema) > 0 {
 		compiled, err := compileSchema(decl.ConfigSchema, "superschematic://behaviors/"+decl.Name+"/config.json")
 		if err != nil {

@@ -59,7 +59,7 @@ type BehaviorClass struct {
 	Class string
 	// Declaration is the declaration derived from the class.
 	Declaration registry.BehaviorDeclaration
-	// Rules is the crate the class's rules option names; the zero value
+	// Rules is the crate the class's crate option names; the zero value
 	// when it names none.
 	Rules registry.BehaviorRust
 }
@@ -304,7 +304,7 @@ func (r *behaviorClassReader) readOptions(class string, marker decoratorRef, out
 				text, _ := asks[contract].(string)
 				decl.Contracts = append(decl.Contracts, registry.BehaviorContract{Name: contract, Role: registry.ContractRoleAsks, Description: text})
 			}
-		case "rules":
+		case "crate":
 			crate, ok := value.(map[string]any)
 			if !ok {
 				bad("{ crate, path, register }")
@@ -314,7 +314,7 @@ func (r *behaviorClassReader) readOptions(class string, marker decoratorRef, out
 			out.Rules.Path, _ = crate["path"].(string)
 			out.Rules.Register, _ = crate["register"].(string)
 		default:
-			r.fail(p, "behavior class %s: @declaresBehavior has no option %s (name, requires, conflicts, armsDeadlines, hearsChanges, vetoes, asks, rules)", class, key)
+			r.fail(p, "behavior class %s: @declaresBehavior has no option %s (name, requires, conflicts, armsDeadlines, hearsChanges, vetoes, asks, crate)", class, key)
 		}
 	}
 }

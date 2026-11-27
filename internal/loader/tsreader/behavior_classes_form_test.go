@@ -73,7 +73,7 @@ enum RatingVeto {
   hearsChanges: true,
   vetoes: RatingVeto,
   asks: { Supply: "Asks nothing really." },
-  rules: { crate: "acme-rules", path: "crates/rules", register: "acme_rules::Rating" },
+  crate: { crate: "acme-rules", path: "crates/rules", register: "acme_rules::Rating" },
 })
 export abstract class Rating<T, C extends RatingConfig> implements /** Room for more ratings. */ Capacity {
   /** The item's label, which a create gives. */

@@ -28,7 +28,7 @@
 //     @declaresBehavior its name, requires, conflicts, armsDeadlines,
 //     hearsChanges, vetoes (an enum, each member a code and its JSDoc its
 //     description), the contracts it asks, and the Rust crate whose hooks
-//     run it on the core (rules);
+//     run it on the core (crate);
 //   - the last type parameter's constraint is the config, whose JSON Schema
 //     the reader writes from the type: an interface or a type literal is an
 //     object that sets additionalProperties false, its optional members
@@ -82,7 +82,7 @@ export interface DeclaresBehaviorOptions {
   /** The contracts it asks of the other uses of its type, by name, each with what it means here. */
   readonly asks?: Readonly<Record<string, string>>;
   /** The Rust crate whose hooks run the behavior on the core: a project's or an extension's behavior names one. */
-  readonly rules?: BehaviorCrate;
+  readonly crate?: BehaviorCrate;
 }
 
 /** Declares a behavior by its class (D103); the class declares and never implements. */

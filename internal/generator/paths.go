@@ -35,6 +35,13 @@ func EngineDir(root, lang, schemaName string) string {
 	return filepath.Join(root, "engine", lang, schemaName)
 }
 
+// RulesDir returns the directory of a DB schema's rules crate (D103's step
+// 5): the behaviors' core with the behaviors its tables compose that the
+// core's crate does not ship.
+func RulesDir(root, lang, schemaName string) string {
+	return filepath.Join(root, "rules", lang, schemaName)
+}
+
 // SDKDir returns the client SDK output directory for a language.
 func SDKDir(root, lang, schemaName string) string {
 	return filepath.Join(root, "sdk", lang, schemaName)

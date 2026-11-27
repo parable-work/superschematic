@@ -256,6 +256,15 @@ func RunsOnTheCore(name string) bool {
 	return slices.Contains(RulesBehaviors, name)
 }
 
+// RunsOnTheCore reports whether a core runs the behavior: the stock core,
+// one of RulesBehaviors, or a project's, the core's behaviors and the
+// crates of the behaviors a class or an extension declares with a Rust
+// crate that implements the core's hooks (D103's step 5), which the
+// project's rules crate assembles.
+func (b Behavior) RunsOnTheCore() bool {
+	return RunsOnTheCore(b.Name) || b.Rules.Declared()
+}
+
 // BehaviorReads are the tables a use of the behavior name with config
 // reads beside its own row's, which a table that composes no behavior may
 // be (D152): Recurrence's holiday table (holidays.table) and its relative
