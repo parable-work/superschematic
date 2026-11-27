@@ -25,6 +25,9 @@ var mergeAccessORMCases = []string{
 	"resolve answers a party nothing of a brand its grants do not reach",
 	"a name another brand holds is refused naming nothing of that brand",
 	"a party whose grants reach both brands merges one into the other",
+	"resolve answers a user nothing of a private brand it may not read",
+	"a name a private brand holds is refused naming nothing of that brand",
+	"a user who may write both private brands merges one into the other",
 }
 
 // TestMergeIntoKeepsToTheCallerOnPostgres holds the generated Go ORM's
@@ -39,10 +42,10 @@ var mergeAccessORMCases = []string{
 // answers no row for a brand the caller does not see, and a name another
 // brand holds is refused with neither that brand's key nor its fields. A
 // user is held to the rows' audiences, and a party to the rows its grants
-// reach; the brands' audience is everyone and their callers parties, since
-// the Go behaviors' core reads no private row yet (D180's left). It loads
-// fixture-merge-access-db, generates its Go types, ORM and DDL into a
-// temporary tree, and runs mergeAccessORMTest on the Postgres at
+// reach: a brand everyone sees to a party's grants, and a private brand,
+// whose audience ids the Go behaviors' core reads as a list, to its owner.
+// It loads fixture-merge-access-db, generates its Go types, ORM and DDL
+// into a temporary tree, and runs mergeAccessORMTest on the Postgres at
 // SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL; every case must pass. The module
 // links the core's static archive, which scripts/rules-archive.sh stages.
 // It skips without the database or the archive, and in -short mode.
@@ -383,6 +386,75 @@ func TestMergeIntoKeepsToTheCaller(t *testing.T) {
 		}
 		if found := resolve(t, ctx, "piper net"); found == nil || found.Key != stays.String() || !found.Alias {
 			t.Fatalf("resolve piper net after the merge = %+v, want the brand that stays, by an alias", found)
+		}
+	})
+
+	// privateBrand is a brand its owner alone sees, created naming no agent
+	// access, which takes the table's default.
+	privateBrand := func(t *testing.T, name string, owner uuid.UUID) types.IdentityUUID {
+		t.Helper()
+		row, err := db.Brand.CreateOne(ctx, &BrandCreate{Name: name, Owner: id(t, owner), Audience: "private"})
+		if err != nil {
+			t.Fatalf("create the private brand %s: %v", name, err)
+		}
+		return *row.Id
+	}
+	// nameTaken holds err to the veto name_taken, naming nothing of holder.
+	nameTaken := func(t *testing.T, err error, holder types.IdentityUUID) {
+		t.Helper()
+		refusal, ok := rules.AsRefusal(err)
+		if !ok {
+			t.Fatalf("%v, want the veto name_taken", err)
+		}
+		var details struct {
+			VetoCode    string                     ` + "`" + `json:"vetoCode"` + "`" + `
+			VetoDetails map[string]json.RawMessage ` + "`" + `json:"vetoDetails"` + "`" + `
+		}
+		if err := json.Unmarshal(refusal.Details, &details); err != nil || details.VetoCode != "name_taken" {
+			t.Fatalf("%v (%s), want the veto name_taken", err, refusal.Details)
+		}
+		if _, ok := details.VetoDetails["holder"]; ok || len(details.VetoDetails) != 2 {
+			t.Fatalf("the refusal's details %s name more than the name", refusal.Details)
+		}
+		if text := err.Error() + string(refusal.Details); strings.Contains(text, holder.String()) || strings.Contains(text, holder.ToUUID().String()) {
+			t.Fatalf("the refusal names the brand that holds the name: %s", text)
+		}
+	}
+
+	t.Run("resolve answers a user nothing of a private brand it may not read", func(t *testing.T) {
+		umbrella := privateBrand(t, "Umbrella", ada)
+		if found := resolve(t, asUser(bob), "umbrella"); found != nil {
+			t.Fatalf("resolve umbrella = %+v for a user outside its audience, want no row", found)
+		}
+		if found := resolve(t, asUser(ada), "UMBRELLA"); found == nil || found.Key != umbrella.String() {
+			t.Fatalf("resolve UMBRELLA for its owner = %+v, want %s", found, umbrella)
+		}
+		if found := resolve(t, ctx, "umbrella"); found == nil || found.Key != umbrella.String() {
+			t.Fatalf("resolve umbrella outside any operation = %+v, want %s", found, umbrella)
+		}
+	})
+
+	t.Run("a name a private brand holds is refused naming nothing of that brand", func(t *testing.T) {
+		tyrell, wayne := privateBrand(t, "Tyrell", ada), privateBrand(t, "Wayne", bob)
+		_, err := db.Brand.CreateOne(asUser(bob), &BrandCreate{Name: "TYRELL", Owner: id(t, bob), Audience: "private"})
+		nameTaken(t, err, tyrell)
+		_, err = db.Brand.Name().Rename(asUser(bob), wayne, BrandNameRenameParams{Name: "tyrell"})
+		nameTaken(t, err, tyrell)
+	})
+
+	t.Run("a user who may write both private brands merges one into the other", func(t *testing.T) {
+		stays, goes := privateBrand(t, "Cyberdyne", ada), privateBrand(t, "Cyberdyne Systems", ada)
+		if _, err := db.Brand.MergeInto(asUser(bob), goes, stays); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("a merge by a user outside both brands' audience: %v, want ErrNotFound", err)
+		}
+		if _, err := db.Brand.MergeInto(asUser(ada), goes, stays); err != nil {
+			t.Fatalf("merge: %v", err)
+		}
+		if found := resolve(t, asUser(ada), "cyberdyne systems"); found == nil || found.Key != stays.String() || !found.Alias {
+			t.Fatalf("resolve cyberdyne systems after the merge = %+v, want the brand that stays, by an alias", found)
+		}
+		if found := resolve(t, asUser(bob), "cyberdyne systems"); found != nil {
+			t.Fatalf("resolve cyberdyne systems for a user outside its audience = %+v, want no row", found)
 		}
 	})
 }

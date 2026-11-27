@@ -8,9 +8,9 @@
 //! notes on the one merged away; and Aliased's resolve answers a party no
 //! row for a brand its grants do not reach, a name another brand holds is
 //! refused naming nothing of that brand, and a party whose grants reach two
-//! brands merges one into the other. The brands' audience is everyone and
-//! their callers parties, since the Rust behaviors' core reads no private
-//! row yet.
+//! brands merges one into the other. The same holds of a private brand,
+//! whose audience ids the core reads as a list, for a user outside its
+//! audience and for its owner.
 
 use db::orm::postgres::{deadpool_postgres, tokio_postgres};
 use db::orm::*;
@@ -219,6 +219,55 @@ async fn on_postgres(pool: &deadpool_postgres::Pool) -> Result<(), Box<dyn std::
         .await?;
     let found = brands.untyped().table_operation("name", "resolve", &resolve("piper net")).await?;
     assert_eq!((&found["row"]["key"], &found["row"]["alias"]), (&stays["id"], &json!(true)), "{found}");
+
+    // A private brand, its owner's alone, created naming no agent access,
+    // which takes the table's default: the core reads its audience ids, a
+    // UUID[], as a list.
+    let private = |name: &str, owner: &str| values(json!({"name": name, "owner": owner, "audience": "private"}));
+    // name_taken naming nothing of the brand that holds the name.
+    let name_taken = |refused: &Result<Values, Error>, holder: &Value| match refused {
+        Err(Error::Refused(refusal)) => {
+            assert_eq!(refusal.details["vetoCode"], "name_taken", "{refusal:?}");
+            let members: Vec<_> = refusal.details["vetoDetails"].as_object().map(|details| details.keys().cloned().collect()).unwrap_or_default();
+            assert_eq!(members, ["name", "normalized"], "{refusal:?}");
+            let text = format!("{} {}", refusal.message, refusal.details);
+            assert!(!text.contains(holder["id"].as_str().unwrap()), "the refusal names the brand: {text}");
+        }
+        other => panic!("a name a private brand holds answered {other:?}"),
+    };
+
+    // Aliased's resolve answers a user no row for a private brand it may
+    // not read, and its owner the brand.
+    let umbrella = Value::Object(brands.untyped().create_one(&private("Umbrella", ALICE)).await?);
+    let found = as_caller(user(BOB)).brand()?.untyped().table_operation("name", "resolve", &resolve("umbrella")).await?;
+    assert_eq!(found, json!({"row": null}), "resolve umbrella for a user outside its audience");
+    let found = as_caller(user(ALICE)).brand()?.untyped().table_operation("name", "resolve", &resolve("UMBRELLA")).await?;
+    assert_eq!(found["row"]["key"], umbrella["id"], "{found}");
+
+    // A name a private brand holds is refused to a create and a rename
+    // naming nothing of that brand.
+    let tyrell = Value::Object(brands.untyped().create_one(&private("Tyrell", ALICE)).await?);
+    let wayne = Value::Object(brands.untyped().create_one(&private("Wayne", BOB)).await?);
+    name_taken(&as_caller(user(BOB)).brand()?.untyped().create_one(&private("TYRELL", BOB)).await, &tyrell);
+    let renamed = as_caller(user(BOB))
+        .brand()?
+        .untyped()
+        .operation("name", "rename", &wayne["id"], &json!({"name": "tyrell"}), &WriteOptions::default())
+        .await
+        .map(|answer| values(json!({"answer": answer})));
+    name_taken(&renamed, &tyrell);
+
+    // A user who may write both private brands merges one into the other,
+    // and a user outside their audience finds neither.
+    let stays = Value::Object(brands.untyped().create_one(&private("Cyberdyne", ALICE)).await?);
+    let goes = Value::Object(brands.untyped().create_one(&private("Cyberdyne Systems", ALICE)).await?);
+    let refused = as_caller(user(BOB)).brand()?.untyped().merge_into(&goes["id"], &stays["id"]).await;
+    assert!(matches!(refused, Err(Error::NotFound(_))), "{refused:?}");
+    as_caller(user(ALICE)).brand()?.untyped().merge_into(&goes["id"], &stays["id"]).await?;
+    let found = as_caller(user(ALICE)).brand()?.untyped().table_operation("name", "resolve", &resolve("cyberdyne systems")).await?;
+    assert_eq!((&found["row"]["key"], &found["row"]["alias"]), (&stays["id"], &json!(true)), "{found}");
+    let found = as_caller(user(BOB)).brand()?.untyped().table_operation("name", "resolve", &resolve("cyberdyne systems")).await?;
+    assert_eq!(found, json!({"row": null}), "resolve cyberdyne systems for a user outside its audience");
 
     transaction.commit().await?;
     Ok(())
