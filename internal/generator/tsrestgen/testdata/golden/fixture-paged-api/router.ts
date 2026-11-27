@@ -137,6 +137,13 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
 /** Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application. */
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-paged-api', options);
@@ -152,9 +159,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.placeBasket,
-      rateLimitPerMinute: options.rateLimits?.placeBasket,
-      timeoutSeconds: options.timeouts?.placeBasket,
+      bodyLimitBytes: bodyLimits.placeBasket,
+      rateLimitPerMinute: rateLimits.placeBasket,
+      timeoutSeconds: timeouts.placeBasket,
     }
   );
   mountOperation(
@@ -177,9 +184,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     },
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listItems,
-      rateLimitPerMinute: options.rateLimits?.listItems,
-      timeoutSeconds: options.timeouts?.listItems,
+      bodyLimitBytes: bodyLimits.listItems,
+      rateLimitPerMinute: rateLimits.listItems,
+      timeoutSeconds: timeouts.listItems,
     }
   );
   mountOperation(
@@ -194,9 +201,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getItem,
-      rateLimitPerMinute: options.rateLimits?.getItem,
-      timeoutSeconds: options.timeouts?.getItem,
+      bodyLimitBytes: bodyLimits.getItem,
+      rateLimitPerMinute: rateLimits.getItem,
+      timeoutSeconds: timeouts.getItem,
     }
   );
   mountOperation(
@@ -220,9 +227,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     },
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listParts,
-      rateLimitPerMinute: options.rateLimits?.listParts,
-      timeoutSeconds: options.timeouts?.listParts,
+      bodyLimitBytes: bodyLimits.listParts,
+      rateLimitPerMinute: rateLimits.listParts,
+      timeoutSeconds: timeouts.listParts,
     }
   );
   mountOperation(
@@ -237,9 +244,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listTags,
-      rateLimitPerMinute: options.rateLimits?.listTags,
-      timeoutSeconds: options.timeouts?.listTags,
+      bodyLimitBytes: bodyLimits.listTags,
+      rateLimitPerMinute: rateLimits.listTags,
+      timeoutSeconds: timeouts.listTags,
     }
   );
   return router;

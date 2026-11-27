@@ -169,6 +169,14 @@ describe('behaviorOperation', () => {
     expect(await thrown(error)).toMatchObject({ status: 404, code: 'not_found', message: 'Order 7 does not exist' });
   });
 
+  test("the repository's NotFoundError over no refusal is rethrown as it is, for the caller to answer", async () => {
+    // A table operation's route answers it in its own words (D106). A
+    // behavior's operation never throws one: a row its caller is kept
+    // from is a NotFoundError over the core's not_found (D156, D201).
+    const error = new NotFoundError('Order 7 not found');
+    expect(await thrown(error)).toBe(error);
+  });
+
   test("a refusal is recognized by its shape, whichever copy of the runtime threw it", async () => {
     const foreign = Object.assign(new Error('refused'), { refusal: { ...forbidden } });
     expect(await thrown(foreign)).toMatchObject({ status: 403, code: 'forbidden', message: forbidden.message });

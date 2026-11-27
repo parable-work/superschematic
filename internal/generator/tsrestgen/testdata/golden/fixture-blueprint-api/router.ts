@@ -151,6 +151,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-blueprint-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-blueprint-api', options);
@@ -173,9 +180,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<BatchStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.batchStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.batchStatusTransition,
-      timeoutSeconds: options.timeouts?.batchStatusTransition,
+      bodyLimitBytes: bodyLimits.batchStatusTransition,
+      rateLimitPerMinute: rateLimits.batchStatusTransition,
+      timeoutSeconds: timeouts.batchStatusTransition,
     }
   );
   // Job's Dependencies addBlocker, a Dependencies (D103): the
@@ -197,9 +204,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobDependenciesAddBlockerResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.dependenciesAddBlocker,
-      rateLimitPerMinute: options.rateLimits?.dependenciesAddBlocker,
-      timeoutSeconds: options.timeouts?.dependenciesAddBlocker,
+      bodyLimitBytes: bodyLimits.dependenciesAddBlocker,
+      rateLimitPerMinute: rateLimits.dependenciesAddBlocker,
+      timeoutSeconds: timeouts.dependenciesAddBlocker,
     }
   );
   // Job's Dependencies listBlockers, a Dependencies (D103): the
@@ -221,9 +228,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobDependenciesListBlockersResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.dependenciesListBlockers,
-      rateLimitPerMinute: options.rateLimits?.dependenciesListBlockers,
-      timeoutSeconds: options.timeouts?.dependenciesListBlockers,
+      bodyLimitBytes: bodyLimits.dependenciesListBlockers,
+      rateLimitPerMinute: rateLimits.dependenciesListBlockers,
+      timeoutSeconds: timeouts.dependenciesListBlockers,
     }
   );
   // Job's Dependencies removeBlocker, a Dependencies (D103): the
@@ -245,9 +252,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobDependenciesRemoveBlockerResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.dependenciesRemoveBlocker,
-      rateLimitPerMinute: options.rateLimits?.dependenciesRemoveBlocker,
-      timeoutSeconds: options.timeouts?.dependenciesRemoveBlocker,
+      bodyLimitBytes: bodyLimits.dependenciesRemoveBlocker,
+      rateLimitPerMinute: rateLimits.dependenciesRemoveBlocker,
+      timeoutSeconds: timeouts.dependenciesRemoveBlocker,
     }
   );
   // Job's status transition, a Workflow (D103): the
@@ -269,9 +276,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.jobStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.jobStatusTransition,
-      timeoutSeconds: options.timeouts?.jobStatusTransition,
+      bodyLimitBytes: bodyLimits.jobStatusTransition,
+      rateLimitPerMinute: rateLimits.jobStatusTransition,
+      timeoutSeconds: timeouts.jobStatusTransition,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at
