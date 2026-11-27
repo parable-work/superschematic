@@ -74,6 +74,21 @@ pub struct RouteTool {
     /// the route as its `Idempotency-Key`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub idempotent: Option<ToolIdempotency>,
+    /// The operation's `@autonomy` (D158, D183): what it is to an agent run
+    /// that calls it, which an endpoint's call gate holds the call to
+    /// ([`super::CallGate`]); absent for an operation that declares none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub autonomy: Option<ToolAutonomy>,
+}
+
+/// An operation's `@autonomy` as its tool's record carries it (D183): its
+/// class (`read`, `internalWrite`, `messageParty` or `moneyMovement`) and
+/// the mode a policy row may override.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolAutonomy {
+    pub class: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
 }
 
 /// The argument the tool of an `@idempotent` operation takes the call's key

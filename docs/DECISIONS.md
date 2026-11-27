@@ -2581,8 +2581,8 @@ approval policy and STOP.
 
 Left:
 
-- Rust: the inbound path, party principals and sends; SQLite and D1. Go
-  serves them on Postgres (D192).
+- SQLite and D1, in every language. Go and Rust serve the inbound path,
+  party principals and sends on Postgres (D192, D193).
 - Comments' `via` on a table: the rules core's caller carries no channel,
   so a message posted into a row's Comments for a text's sender records
   its `for` and not its channel. The core's `Caller` gains a channel, the
@@ -2682,8 +2682,8 @@ its Lease; and administration is permissions.
 
 Left:
 
-- Rust: the dispatcher, the run's authenticator, autonomy and the runner;
-  SQLite and D1. Go serves them on Postgres (D192).
+- SQLite and D1, in every language. Go and Rust serve the dispatcher, the
+  run's authenticator, autonomy and the runner on Postgres (D192, D193).
 - A real container platform's sandbox provider and one model API's
   provider (D159's left), and the live Workers run (`smoke.sh
   Cloudflare`), which is the maintainer's. The dispatcher's module reaches
@@ -2781,9 +2781,10 @@ Left:
   itself; an app wraps the authenticator its `Handlers` take.
 - The typed filters' one-to-many members; a path filter is the
   untyped repositories' and the table operations' so far.
-- The D152 to D159 features the refusals name, which the later Rust
-  entries port: D185 ports D154 and D159, D188 D152 and D155, and D191
-  D153.
+- The D152 to D159 features the refusals named, which the later Rust
+  entries port: D185 ports D154 and D159, D188 D152 and D155, D191 D153,
+  and D193 D157 and D158. The refusals left are Rust on SQLite's and a
+  provider of no crate.
 
 ## D182. The TypeScript repositories run on SQLite and D1, an audience there is a JSON array of ids a trigger keeps and a read reaches through json_each, references and files are row triggers, and no trigger counts on another firing (D79, D116, D154, D156 amended)
 
@@ -2983,11 +2984,11 @@ implementation.
 
 Left:
 
-- Rust and SQLite: the trust, the narrowed paths, the tool records'
-  `@autonomy` read by their gates, and the generated wiring (D158's left).
-  Go serves the trust and the narrowed paths (D192); it serves no MCP
-  endpoint, so a Go server stays refused `@autonomy`, and its generated
-  wiring is left.
+- SQLite: the trust, the narrowed paths, the tool records' `@autonomy` read
+  by their gates, and the generated wiring (D158's left). Go serves the
+  trust and the narrowed paths (D192); it serves no MCP endpoint, so a Go
+  server stays refused `@autonomy`. Rust serves all but the generated
+  wiring (D193's left). The generated wiring is left in Go and Rust.
 - A run's token on the API's own routes: the generated server accepts it
   only where the implementation's authenticator does
   (`deps.agents.authenticator(inner)`; `grantAuthenticator`, an app's
@@ -3319,12 +3320,6 @@ once. The guide's Rust section.
 Left:
 
 - Rust on SQLite, as in every language (D153's).
-- A route to an agent in Rust, which is logged and reaches no one until
-  the Rust runtime serves D158's agent runs; the approvals table itself
-  is D158's.
-- A party's channel identity that lapsed with its grants (D157's
-  `identityLapsed`), which the Rust notifier does not ask until it serves
-  parties.
 - A generated Rust server that builds the notifier into its `Deps`,
   mounts the inbox and the relay routes, and fills a `@worker` of the
   dispatch queue with `handle`; an app wires them, as in TypeScript
@@ -3434,6 +3429,90 @@ Left:
   relations name, the other way.
 - An overlap among an API's own routes, which stays each router's
   precedence.
+
+## D193. The Rust runtime serves D157's parties and inbound path and D158's agent dispatcher on Postgres, with D183's trust, narrowed paths and @autonomy; the agent routes finish their work when an instance's connection closes (D157, D158, D181, D183, D191 amended)
+
+D157 and D158 built parties, the inbound path, conversations and the agent
+dispatcher in the TypeScript runtime, D183 their follow-ups, and D181
+refused `@party`, `@conversations`, `@runRequests`, `@agents` and
+`@autonomy` in the Rust outputs. This entry ports them to Rust, on
+Postgres, with the TypeScript tables, statements, states and refusals. It
+is the fifth of the Rust parity entries.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Postgres definition of a Rust types crate carries each table's `@party` and its title (`Table.party`), its conversations part (`Table.conversations`) and its orchestration part (`Table.agents`), member for member what tsgen writes into orm.ts (`rustgen/notifications.go`). The crate re-exports `orm::parties`, `orm::inbound` and `orm::agents`. | A definition of the parts the app passes, which the loader already settled. |
+| `orm::parties` is `parties.ts` (`party_principal`, `identity_lapsed`, `party_tables_of`, `same_uuid`) and `orm::inbound` is `createInbound` (`Inbound`: `receive`, `inbound`, `send`, `release`, `reject`, `principal_of`, `file`, `triage`, `settle`, `timeline`, `message`, `run_queue`), over the untyped repositories, as the notifier is (D191). A read as the sender or the party opens the repositories for it (`with_access`), since Rust has no ambient caller (D181). | A party module of the access module, which knows no channel identity. |
+| A send's approval policy is a trait (`SendApproval`) the path holds once (`with_approval`, or `set_approval` on a path already shared): the app's, or the dispatcher's `send_approval`. | A closure, which would not name what it decides. |
+| `orm::agents::Agents` is `createAgents`: `request`, `handle` (start, watch, follow-up), `worker_queue`, `principal_of`, `authenticator`, `gate`, `approve`, `deny`, `reply_actions`, `send_policy`, `send_approval`, `mcp_gate`, `routes`, `pause`, `resume`, `set_policy`, `set_budget`, `define`, `cancel`, `transcript` and `prune`. Its Lease, Retries, Workflow and Budget calls are the behaviors' operations through the core (`Repository::operation`), each write of a table that composes behaviors in a transaction of its own. `move_run` writes the outcome, cost and transcript before the status moves. | Generated agents per database, typed by its tables: the parts' fields are the loader's, the same in every database. |
+| The notifier takes the dispatcher's reply actions and its requests queue (`with_agents`), and the inbound path the dispatcher's send approval, so the dispatcher is built first and given the notifier and the inbound path once they are (`set_notifier`, `set_inbound`). The reply actions and the send approval hold the dispatcher weakly, so the three make no cycle. A route's `{ agent }` recipient is a request on that queue in the routing transaction, which closes D191's left; the notifier now also skips a party's address whose identity lapsed (`identity_lapsed`), D191's other left. | A notifier that holds the dispatcher, which holds the notifier. `approval_replies` for the orchestration's approvals, which knows no held message and no run past the budget. |
+| The agent routes are an axum router under the endpoint's path (`routes`), and each call's work runs in a task of its own. A run cancelled while its turn runs (a pause, a budget's cap) has its instance stopped, which closes the instance's connection, and hyper drops a handler whose client left: the work that cancelled the run would stop half done. | Work inline in the handler, which the end-to-end test's budget case found leaving the run running and its agent paused. |
+| The plain grant authenticator (`access::GrantAuthenticator`) refuses an agent run's token with 401, as D192 settled for Go: as its grant's bare holder a run would act with its role's permissions, neither narrowed to whom it acts for nor gated by its autonomy. The dispatcher's `principal_of` and `authenticator(inner)` alone resolve one, through a grant authenticator that admits runs, which the crate keeps to itself. | Accepting it as the holder, which `TestRustSearchEndToEnd` relied on and now builds the run's principal itself. |
+| The MCP tool record carries its operation's `@autonomy` (`RouteTool.autonomy`), and an endpoint's options take a `CallGate` (`EndpointOptions.call_gate`), which the router asks before a call's route runs; `mcp_gate` is the dispatcher's. A Rust server is no longer refused `@autonomy`. | The class in the tool's `_meta`, which D183 turned down. |
+| The sandbox's side is `providers::run_agent_instance` under the `http-client` feature, over reqwest: turns, MCP calls retried while an approval holds them, the sandbox's own tools, credentials resolved in the instance and reported by reference. | A runner binary of the runtime's, which a sandbox provider names as its program. |
+| A key read from a queue's `UUID` column is hyphenated there, and a run request's `message` and `grant` and a dispatcher request's `run` read in base62, as the repositories write a key, so a request names its rows as the outcome that made it does and a transcript's object is `agent-runs/<base62>.json`. | Comparing either form everywhere a key is read. |
+| Redaction is hand-written (`redact_text`): the runtime has no regular expressions, and the two patterns are a grant's token and a bearer credential. The app's own redactions are texts (`with_redacted`). | A regex dependency for two patterns. |
+| The pure parts are shared through `runtime/http/testdata/agents_parity.json`, which TypeScript's `agents-parity.test.ts` writes and checks and Rust reads: `defaultAutonomy`, `trustOf`, `effectiveAutonomy`, `narrowReaches`, `narrowPermissions`, `paramsHash`, `bestPolicy`, `budgetCrossing`, `redactTokens` and `emailAuthenticated`. agents.ts exports the four it held inline, and calls them. | Vectors written by Go, which has no dispatcher. |
+| D157's and D158's tables stay refused for a Rust service that lists sqlite, by the loader (`verify/rust_features.go`, which reads the DB service's dialects), rustgen, and rustrestgen's `checkSQLiteDeps` for a Rust server whose database lists sqlite first. | Lifting the Rust refusal on SQLite with TypeScript's, which D189 carries. |
+
+Settled. The Rust dispatcher's order of writes, states and refusals are
+the TypeScript one's; the cases of `TestAgentRunsEndToEnd` hold the Rust
+runtime to them. The sandbox stand-in of the Rust test runs each instance
+as a task of the test's process, over the agent routes on a local port,
+where the TypeScript test runs a process under Bun; the routes, the token,
+the MCP endpoint and the runner are the same. The Rust types crate fires
+no deadline itself (the Rust server's behavior worker does, D188), so the
+scheduled case hands the notifier the event a schedule's deadline raises.
+
+Built: the definition's `party`, `conversations` and `agents`
+(`internal/generator/rustgen/notifications.go`, goldens
+`fixture-parties-db` and `fixture-agent-runs-db`) and the crate's
+re-exports; `orm::parties`, `orm::inbound` and `orm::agents`
+(`runtime/http/rust/src/orm/`); the notifier's `with_agents` and its check
+of a lapsed identity; the model types' tool calls and provider state
+(`providers/model.rs`); `providers::run_agent_instance`; `RouteTool.autonomy`
+and `CallGate` (`mcp/`); the parity file, TypeScript's exports and test;
+the refusals of D181 lose `@party`, `@conversations`, `@runRequests`,
+`@agents` and `@autonomy` but on SQLite (`verify/rust_features.go`,
+`rustgen`, `rustrestgen/tables.go`). `TestRustPartiesEndToEnd` runs D157's
+seven cases through the Rust inbound path on Postgres over a stand-in SMS
+relay and mail relay and a bucket in memory: a text with a photo from a
+party with a grant becomes a report on the granted job with the photo
+attached, on the job's, the report's and the party's backlinks; a text from
+an unknown number lands in triage; the same text from a party whose grant
+ended reaches nothing until its number is verified again; email failing
+DMARC is unknown and an authenticated reply threads to its party; a party
+with no grant is on its timeline and a user's text is the notifier's
+reply; two parties on one address are told apart by the thread; and
+sending is held to the permission, the rate limit, the approval policy
+and STOP. `TestRustAgentRunsEndToEnd` runs D158's and D183's thirteen
+cases through the Rust dispatcher on Postgres: a route's run reads only
+its target and the rows its role reaches; its MCP search keeps to its
+scope; each turn replays the earlier completions with their tool calls and
+provider state, which a reader gets redacted; an ask waits for an approval
+given by SMS, then runs once; a changed amount asks again and money never
+runs on its own; a budget cap pauses the agent, and every agent's cap
+refuses a scheduled run and asks before a principal's; pausing every agent
+cancels a run in flight and returns its assigned row; the transcript holds
+no credential value; a party's text starts a run that acts for it, narrowed
+to its grant's role, obeys nothing the text says, and its message back
+waits on its approval, given by text; a party's run reaches only its
+grant's paths, and an entered sender's run reads and asks before every
+write; an unanswered question makes a follow-up row; Retries starts a
+failed instance again while the run holds its Lease; and administration is
+permissions. The guides' Rust sections.
+
+Left:
+
+- A generated Rust server that builds the dispatcher into its `Deps`,
+  mounts its routes, passes `mcp_gate` as its MCP endpoint's call gate and
+  hands a `@worker` of the requests queue or the `@runRequests` queue to
+  `handle`, as D183 built for TypeScript; an app wires them now, with
+  `EndpointOptions::with_call_gate` for the gate.
+- Rust on SQLite: parties, the inbound path and the dispatcher (D157's and
+  D158's, with TypeScript's, which D189 carries).
+- A Rust types crate's own deadline worker: a schedule's deadline that
+  starts a run fires in the Rust server's behavior worker alone (D188).
 
 ## D192. The Go runtime serves D157's parties and inbound path and D158's agent dispatcher on Postgres, with D183's trust and narrowed paths: the generated ORM hosts both through the notifier's host, a table with behaviors is written through its repository, and the agent routes finish their work when an instance's connection closes (D157, D158, D180, D183, D190 amended)
 

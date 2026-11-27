@@ -82,8 +82,8 @@ pub use json::canonical_json;
 pub use mount::{reached, ConfirmationKey, EndpointOptions, Mount};
 pub use route::{
     caller_of, check_route_tools, outcome_of, problem_of, tool_request, with_confirmation_argument,
-    with_idempotency_argument, ArgumentLocation, RouteTool, ToolArgument, ToolIdempotency,
-    IDEMPOTENCY_ARGUMENT,
+    with_idempotency_argument, ArgumentLocation, RouteTool, ToolArgument, ToolAutonomy,
+    ToolIdempotency, IDEMPOTENCY_ARGUMENT,
 };
 pub use transport::serve;
 
@@ -353,4 +353,20 @@ pub trait ToolSet: Send + Sync {
     ) -> Result<Option<Problem>, ToolError> {
         Ok(None)
     }
+}
+
+/// What holds a call of a generated router's tool before its route runs
+/// (D158, D183): the agent dispatcher's, which holds an agent run's call to
+/// the run's autonomy by the tool's `@autonomy` ([`RouteTool::autonomy`]).
+/// A problem refuses the call with it; `None` lets it run.
+#[async_trait]
+pub trait CallGate: Send + Sync {
+    /// The refusal of a call of `tool` with `arguments` by `principal`, the
+    /// endpoint's caller, or `None` to run it.
+    async fn check(
+        &self,
+        principal: Option<&crate::auth::Principal>,
+        tool: &RouteTool,
+        arguments: &Map<String, Value>,
+    ) -> Result<Option<Problem>, BoxError>;
 }
