@@ -354,7 +354,7 @@ type Options struct {
 func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	// A table feature of D152 to D159 the Rust types do not carry yet is
 	// refused, not dropped (D181).
-	if err := verify.RefuseRustTypes(schema); err != nil {
+	if err := verify.RefuseRustTypes(schema, opts.SQLite); err != nil {
 		return nil, fmt.Errorf("rustgen: %w", err)
 	}
 	if err := refuseNotifierOnSQLite(schema, opts.SQLite); err != nil {

@@ -480,9 +480,11 @@ type APIOutput struct {
 	// its EnvConfig (D57); lib.rs then declares it.
 	HasEnvConfig bool
 	// PostgresFeatures are the features of the databases the API reads
-	// that a Rust server serves on Postgres alone (D188): a table that
-	// composes Recurrence and a calendar source (D152), each "Type:
-	// feature". A Deps whose database lists sqlite first is refused them.
+	// that a Rust server serves on Postgres alone (D188, D193): a table
+	// that composes Recurrence and a calendar source (D152), a @party
+	// table, the conversations and the run requests (D157), and the agent
+	// orchestration's tables (D158), each "Type: feature". A Deps whose
+	// database lists sqlite first is refused them.
 	PostgresFeatures []string
 	// ReadsAcrossTables is whether a database the API reads has a calendar
 	// source (D152) or a @searchable table (D155): the crate's dependency

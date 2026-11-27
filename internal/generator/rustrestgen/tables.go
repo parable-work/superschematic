@@ -371,7 +371,7 @@ func (o *APIOutput) checkSQLiteDeps(deps *DepsInfo) error {
 		return refuse("the Rust server opens an engine")
 	}
 	if len(o.PostgresFeatures) > 0 {
-		return refuse("the Rust server serves " + strings.Join(o.PostgresFeatures, ", ") + " (D152, D188)")
+		return refuse("the Rust server serves " + strings.Join(o.PostgresFeatures, ", ") + " (D152, D157, D158, D188, D193)")
 	}
 	return nil
 }
@@ -398,6 +398,19 @@ func postgresFeaturesOf(databases []*ir.Schema) []string {
 			}
 			if len(td.CalendarSources) > 0 {
 				out = append(out, name+": @calendarSource")
+			}
+			// Parties and the inbound path (D157) and the agent
+			// orchestration (D158) claim their queues through the Postgres
+			// queue client alone (D193).
+			switch {
+			case td.Party != nil:
+				out = append(out, name+": @party")
+			case td.Conversations != nil:
+				out = append(out, name+": @conversations")
+			case td.RunRequests != nil:
+				out = append(out, name+": @runRequests")
+			case td.Agents != nil:
+				out = append(out, name+": @agents")
 			}
 		}
 	}
