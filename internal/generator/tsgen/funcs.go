@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -23,6 +24,7 @@ func customTemplateFuncs() template.FuncMap {
 		"tsUnion":                  tsUnion,
 		"ormPGPeerRange":           func() string { return ORMPGPeerRange },
 		"ormPGTypesVersion":        func() string { return ORMPGTypesVersion },
+		"typescriptVersion":        func() string { return tsutil.TypeScriptVersion },
 		"tsDoc":                    tsDoc,
 		"secretMaskValue":          secretMaskValue,
 		"hasStringValidator": func(s ScalarInfo) bool {

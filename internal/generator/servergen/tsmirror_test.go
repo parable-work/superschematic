@@ -40,7 +40,7 @@ const tsMirrorManifest = `{
   },
   "devDependencies": {
     "@schemas/svc-sdk": "workspace:*",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }
 `
@@ -202,7 +202,7 @@ func TestATypeScriptMirrorHoldsThePackage(t *testing.T) {
   },
   "devDependencies": {
     "@schemas/svc-sdk": "workspace:*",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }
 `
