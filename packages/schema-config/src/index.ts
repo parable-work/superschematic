@@ -196,107 +196,6 @@ export type SqlEncryptionConfig = {
 };
 
 /**
- * A DB service's engine document (D58), which the build writes when a type of the schema composes a behavior: an engine type, whose instances the engine keeps, which sql and orm leave out.
- */
-export type EngineOutputConfig = {
-  /**
-   * The engine namespace the schema's engine types are defined, published and instantiated in: lowercase letters, digits and hyphens, starting with a letter, at most 63 characters. Unset is the service's name.
-   */
-  readonly namespace?: string;
-  /**
-   * The path a server of an API on this database mounts the engine's routes at, its event stream and its MCP endpoint under it: one or more segments, each of letters, digits and . _ ~ -. Unset is /engine/<service>.
-   */
-  readonly mount?: string;
-  /**
-   * The access policy the servers open the engine with: "permission", which allows an action on a type to a caller holding <Type>.<action> (Ticket.read, Ticket.write, Ticket.define, Ticket.publish); "allowAll", for tests and local use; or ordered rules, the first that matches a question deciding it. Unset is "permission".
-   */
-  readonly policy?: EnginePolicy;
-  /**
-   * How long the engine's event log keeps events: an age, a count or both, as the engine reads them. Every server, job, worker and runner on this database opens the engine with it, and the database's runner prunes the log, never past an event a reaction has yet to handle. Unset keeps every event.
-   */
-  readonly retention?: EngineRetention;
-  /**
-   * The engine's tool options the deployment sets beside the binary's invocation policy and vendor keys (D70).
-   */
-  readonly tools?: EngineToolsConfig;
-};
-
-/**
- * What a deployment sets of the engine's tool options (D11, D70).
- */
-export type EngineToolsConfig = {
-  /**
-   * The MCP invocation policy of an engine tool or operation, by the name the engine's tools.invocation takes: a built-in tool's (create, delete, defineSchema), or a behavior operation's, <Behavior>.<operation> (Payments.capturePayment), in place of its declaration's. Each value is one of the binary's invocation policy's values (auto or ask in the core). The build refuses a name no engine type's behavior declares, and where the engine types compose Payments or Stock it refuses a map that does not name each of their operations that move money or stock (Payments' openPayment, capturePayment, voidPayment, refundPayment and refundFor; Stock's receiveStock, adjustStock and countStock). Every server, job, worker and runner on this database opens the engine with it, so an agent's MCP client asks before it runs an operation marked ask.
-   */
-  readonly invocation?: { readonly [name: string]: string };
-  /**
-   * Behavior operations, by <Behavior>.<operation>, that the engine's MCP tools leave out: a service calls them through the API or in-process, and no agent is offered them. The build refuses a name no engine type's behavior declares, and the engine document adds the service operations of the core's commerce behaviors (Payments' listPaymentActions, recordPaymentEvent and settleRefundFor) wherever they are composed.
-   */
-  readonly hidden?: readonly string[];
-};
-
-/**
- * The event log's retention (D58): maxAgeMs, maxEvents or both; an event goes when either lets it go. A stream or read that resumes from a cursor retention has pruned past is 410 cursor_expired.
- */
-export type EngineRetention = (EngineRetentionOptions & { readonly maxAgeMs: number }) | (EngineRetentionOptions & { readonly maxEvents: number });
-
-/**
- * The members of an engine's retention, each an integer in the engine's range.
- */
-export type EngineRetentionOptions = {
-  /**
-   * Events older than this many milliseconds, by when they were written, are pruned.
-   *
-   * @asType integer
-   * @minimum 1
-   * @maximum 9007199254740991
-   */
-  readonly maxAgeMs?: number;
-  /**
-   * A namespace's events past its newest this many are pruned.
-   *
-   * @asType integer
-   * @minimum 1
-   * @maximum 9007199254740991
-   */
-  readonly maxEvents?: number;
-  /**
-   * The longest a reaction that does not advance (halted, in an archived namespace, or whose behavior the engine does not run) holds events retention lets go, in milliseconds. Unset, one that has run holds them until it advances, and one that has not holds none.
-   *
-   * @asType integer
-   * @minimum 1
-   * @maximum 9007199254740991
-   */
-  readonly maxHoldMs?: number;
-  /**
-   * How often the runner prunes, in milliseconds. Unset is 60000.
-   *
-   * @asType integer
-   * @minimum 1000
-   * @maximum 9007199254740991
-   */
-  readonly everyMs?: number;
-  /**
-   * Events pruned in one transaction. Unset is 1000.
-   *
-   * @asType integer
-   * @minimum 1
-   * @maximum 10000
-   */
-  readonly batchSize?: number;
-};
-
-/**
- * An engine's access policy (D58): a shorthand, or ordered rules, each matching on the question's action, operation, schema and namespace and the caller's subject and service, and either naming a permission the principal must hold or allowing or refusing outright. The engine checks the rules when a server opens it.
- */
-export type EnginePolicy = "permission" | "allowAll" | { readonly rules: readonly EngineAccessRule[] };
-
-/**
- * One rule of an engine's access policy, as the engine reads it.
- */
-export type EngineAccessRule = { readonly [member: string]: unknown };
-
-/**
  * One CI renderer's options for a Stack service's generated workflow.
  */
 export type CiRendererConfig = {
@@ -324,7 +223,6 @@ export type SchemaOutputs = {
   readonly sdk?: SdkOutputConfig;
   readonly sql?: SqlOutputConfig;
   readonly ci?: CiOutputConfig;
-  readonly engine?: EngineOutputConfig;
 };
 
 /**

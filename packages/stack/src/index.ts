@@ -32,8 +32,8 @@ export interface Targets {
  * (D54), with the request headers its CORS answers allow beside its own
  * (D148), and of its memory stores' Valkey container (D75), a server's, an
  * app's (D78) and a site's settings its port, and a database, a job, a
- * worker, a bucket, an engine's runner (D58), a deriver (D74) and a memory
- * store (D75) take no settings. A port left out is derived from the
+ * worker, a bucket, a deriver (D74) and a memory store (D75) take no
+ * settings. A port left out is derived from the
  * stack, the environment and the deployable.
  */
 export interface LocalTarget {
@@ -57,8 +57,6 @@ export interface LocalTarget {
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   worker: {};
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type
-  runner: {};
-  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
   deriver: {};
   memoryStore: {};
   app: { port?: number };
@@ -68,7 +66,7 @@ export interface LocalTarget {
 export type TargetName = Extract<keyof Targets, string>;
 
 /** A deployable kind: what a target gives a settings type for. */
-export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "runner" | "deriver" | "memoryStore" | "app";
+export type DeployableKind = "server" | "database" | "job" | "site" | "bucket" | "worker" | "deriver" | "memoryStore" | "app";
 
 /**
  * A declared deployable, an `@server` or `@database` class, named as a value
@@ -233,29 +231,6 @@ type WorkerElementOf<T, Of> =
     : never;
 
 /**
- * Whether an engine's runner runs in an environment (D58). A runner that is
- * off runs no instance: no reaction, schedule, Timers deadline or event-log
- * retention runs until it is on again, when each reaction reads on from its
- * cursor, a schedule that came due runs once and every overdue deadline
- * fires.
- */
-export type RunnerRun = {
-  /** Turns the runner on or off. */
-  readonly enabled?: boolean;
-};
-
-/**
- * What an engine's runner's settings element is: its database's handle in
- * `of` and `runner: true`, whether it runs, and the target's runner
- * settings. A runner reads no config but its database's connection, so it
- * takes no env.
- */
-type RunnerElementOf<T, Of> =
-  Of extends ServiceHandle<"DB">
-    ? { readonly of: Of; readonly runner: true; readonly platform?: string } & RunnerRun & SettingsOf<T, "runner">
-    : never;
-
-/**
  * How a deriver runs in an environment (D74): whether its one instance
  * runs, and how many answers it runs at a time. A deriver that is off runs
  * no instance, and its fields stay stale until it is on again.
@@ -322,10 +297,8 @@ type EnvFor<Of> = Of extends ServiceHandle<"API", infer C> ? EnvOf<C> : EnvOf<un
 /**
  * One settings element checked: its `of` picks the settings type, a `job`,
  * a `worker`, a `deriver` or an `app` beside an API's handle makes it the
- * element of that job, worker, deriver or app, and `runner: true` beside a
- * DB's handle that of the engine's
- * runner of the database; its env is the config's fields, and a key none
- * takes is refused. An element that names a platform, which may be another
+ * element of that job, worker, deriver or app; its env is the config's
+ * fields, and a key none takes is refused. An element that names a platform, which may be another
  * target's, takes any settings key; the loader checks it against that
  * platform.
  */
@@ -339,9 +312,7 @@ export type SettingsElement<T, E> = E extends { readonly of: infer Of }
             ? DeriverElementOf<E extends { readonly platform: string } ? undefined : T, Of>
             : E extends { readonly app: unknown }
               ? AppElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-              : E extends { readonly runner: unknown }
-                ? RunnerElementOf<E extends { readonly platform: string } ? undefined : T, Of>
-                : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
+              : ElementOf<E extends { readonly platform: string } ? undefined : T, Of>,
       E
     > &
       (E extends { readonly env: infer V } ? { readonly env: Exact<EnvFor<Of>, V> } : {})
@@ -355,7 +326,7 @@ export type EnvironmentOptions<T extends TargetName | undefined, S extends reado
   readonly domain?: string;
   /** The DNS platform that holds the domain's records, with its values: `{ cloudflare: { zone, zoneId } }`. */
   readonly dns?: { readonly [platform: string]: { readonly [value: string]: unknown } };
-  /** Settings per deployable; `of` is a service handle, a Bucket's (D54) and a MemoryStore's (D75) among them, or a declared deployable's class, with `job`, `worker`, `deriver`, `app` or `runner: true` beside a handle for a job, a worker, a deriver, an app or an engine's runner. */
+  /** Settings per deployable; `of` is a service handle, a Bucket's (D54) and a MemoryStore's (D75) among them, or a declared deployable's class, with `job`, `worker`, `deriver` or `app` beside a handle for a job, a worker, a deriver or an app. */
   readonly settings?: S & { readonly [I in keyof S]: SettingsElement<T, S[I]> };
   /** Makes the environment a family, one member per value. */
   readonly parameters?: readonly string[];
@@ -405,8 +376,7 @@ export type ImageAdditions = {
  * One element of `@stack`'s `images` (D144): the deployable in `of`, an
  * API's handle for its server or a declared server's class, with `job`,
  * `worker`, `deriver` or `app` beside an API's handle for that job,
- * worker, deriver or app, or `runner: true` beside a DB's for the engine's
- * runner of the database, as a settings element names one, and what the
+ * worker, deriver or app, as a settings element names one, and what the
  * stack adds to its image.
  */
 export type ImageElement<E> = E extends { readonly of: infer H }
@@ -427,11 +397,7 @@ export type ImageElement<E> = E extends { readonly of: infer H }
               ? H extends ServiceHandle<"API", unknown, string, string, string, infer A>
                 ? { readonly of: H; readonly app: A }
                 : never
-              : E extends { readonly runner: unknown }
-                ? H extends ServiceHandle<"DB">
-                  ? { readonly of: H; readonly runner: true }
-                  : never
-                : { readonly of: ServiceHandle<"API"> | DeployableClass })
+              : { readonly of: ServiceHandle<"API"> | DeployableClass })
   : ImageAdditions & { readonly of: ServiceHandle<"API" | "DB"> | DeployableClass };
 
 /**
