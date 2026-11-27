@@ -14,7 +14,7 @@ stop switch ends every run in flight.
 
 | Built | Not built yet |
 | --- | --- |
-| `@agents("<part>")` on the orchestration's tables, which the build fills | Go and Rust runtimes; SQLite and D1 |
+| `@agents("<part>")` on the orchestration's tables, which the build fills, on Postgres, SQLite and D1 | Go and Rust runtimes |
 | run requests on a queue from routes, assignments, schedules, principals and inbound messages | a real container platform's sandbox provider and a model API's provider |
 | the run's token as a grant per target row, acting for its principal, its paths narrowed to a party's grant | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
 | autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | |
@@ -22,7 +22,7 @@ stop switch ends every run in flight.
 | budgets per agent and in total, warnings, pauses; stop switches | |
 | asking in a row's thread, with a follow-up row at the deadline | |
 | redacted transcripts in a bucket; credentials that stay in the sandbox | |
-| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | |
+| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | the same over a database that lists `sqlite` first, whose `Deps.orm` is built over a pg pool alone |
 
 D158 and D183 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
 record the design and what is left. `examples/agent-orchestration` is
@@ -242,3 +242,19 @@ inbound message reach the model marked untrusted, and the run counts them.
 
 A transcript is kept 30 days after its run ends (`transcriptRetentionDays`);
 `prune` deletes it from the bucket. The run row stays.
+
+## On SQLite and D1
+
+A database that lists `sqlite` keeps the orchestration's tables as
+Postgres does (D189). The definitions are `@versioned`, and SQLite keeps
+their history by row triggers, so a run's `definitionVersion` names a
+version the history holds. The runs' Lease and Retries and the controls'
+Budget run through the behaviors' core in the repository's transaction,
+as on SQLite every behavior does (D186). `createAgents` comes from the
+runtime's `./d1` entry too, over the `./orm/sqlite` entry's repositories,
+and `agents.workerQueue(db)` claims its requests over a `SqlDatabase`.
+
+A generated server builds `Deps.orm` over a pg pool alone, so an API
+whose database lists `sqlite` first and declares the orchestration is
+refused its generated dispatcher: the app builds `createAgents` over
+`createOrm(db)` of the `./orm/sqlite` entry itself.
