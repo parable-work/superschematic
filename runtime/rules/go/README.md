@@ -266,6 +266,7 @@ the API's Workers method of its use and kind.
 | lock | `pg_advisory_xact_lock(hashtextextended(key, 0))`, held until the transaction ends (`LocksHeld`) | none: the unit begins with a check of each read made under a lock, a row still at its version or still absent, a table that still has rows or none (`LocksFenced`) |
 | date-time | `TIMESTAMPTZ`, a `time.Time` | text, as `Date.prototype.toISOString` writes it |
 | UUID | hyphenated text | hyphenated text |
+| list (the layout's `list`, an `@audience` table's ids, D156) | an array, `uuid[]` or `text[]`, which pgx reads as a `[]any` and is bound as a `[]*string` of each element's text, a UUID hyphenated; a `jsonb` list, its JSON | the JSON text of the list, a UUID hyphenated |
 
 A store wraps one transaction and is not shared across goroutines.
 Postgres's version column moves in `@optimistic`'s `BEFORE UPDATE` trigger,
@@ -353,7 +354,12 @@ base62, a NULL absent, the core's row and linked reads holding `createdBy`,
 and a write that names it refused) and an operation the core answers with
 no write writing nothing (`TestAnOperationTheCoreAnswersWithNoWriteWritesNothing`:
 no statement, no stamp, `_version` and `enteredAt` unmoved), on SQLite and
-on Postgres; `sign_offs_test.go` holds a table whose only sub-table keeps
+on Postgres; `lists_test.go` holds a table's list columns
+(`TestAListColumnReadsAndWritesAsAList`: a list of UUIDs and one of
+strings read as JSON lists, a UUID in base62, an empty list and a NULL
+one, the core's write of each bound as the column holds it, a list of
+UUIDs that holds none refused, and an operation of the core over the
+row), on SQLite and on Postgres; `sign_offs_test.go` holds a table whose only sub-table keeps
 no deadline or change queue, Approvals' beside Constants and StateRules
 (`TestASubTableWithNoQueueIsWrittenAndReadAsTheCoreSays`: its rows
 inserted, read, updated and deleted, a hard delete removing them, a
