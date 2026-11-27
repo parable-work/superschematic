@@ -18,7 +18,8 @@ import (
 // compose behaviors (D156, D103): a Task its owner keeps private or shows
 // to the principals it names, whose status is a Workflow and which holds a
 // conversation, and a Note its author keeps private unless it says
-// otherwise, whose summary a deriver writes (D146).
+// otherwise, whose summary a deriver writes (D146), and a Runner its owner
+// keeps private, which Pool's pick chooses among (D104).
 const audienceBehaviorsFixture = "fixture-audience-behaviors-db"
 
 // audienceBehaviorsCheck is the file tsc checks the fixture's package
@@ -40,9 +41,11 @@ var audienceBehaviorsCases = []string{
 	"a private row's behaviors answer its owner, and are not found for anyone else, on bun:sqlite",
 	"a named row's behaviors answer the principals it names, and are not found for anyone else, on bun:sqlite",
 	"a create that names no audience takes the table's defaults, on bun:sqlite",
+	"pick answers no runner its caller does not see, on bun:sqlite",
 	"a private row's behaviors answer its owner, and are not found for anyone else, on Postgres",
 	"a named row's behaviors answer the principals it names, and are not found for anyone else, on Postgres",
 	"a create that names no audience takes the table's defaults, on Postgres",
+	"pick answers no runner its caller does not see, on Postgres",
 }
 
 // TestAudienceBehaviorsEndToEnd holds behaviors on an @audience table to
@@ -61,7 +64,8 @@ var audienceBehaviorsCases = []string{
 // found for anyone else: the row's audience ids, a uuid[], are no longer
 // refused as no UUID. On each, a create through the core that names
 // neither audience nor agentAccess takes the table's defaults, as Go's
-// repositories do (ormgen's TestHeldBehaviorTablesOnPostgres). The
+// repositories do (ormgen's TestHeldBehaviorTablesOnPostgres), and Pool's
+// pick answers no member for a runner the caller does not see. The
 // Postgres cases skip without the database.
 func TestAudienceBehaviorsEndToEnd(t *testing.T) {
 	if testing.Short() {

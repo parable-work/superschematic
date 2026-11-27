@@ -1963,18 +1963,21 @@ the row, and nothing is written. The TypeScript, Go and Rust repositories
 hold every operation on a row to this, and so do the Go and Rust servers'
 behavior routes.
 
-Two writes reach rows past the one they name, and keep to the caller
-too. A merge repoints and deletes the rows of every table that references
-the row merged away, and refuses (`out_of_reach`, which a route answers
-403) when one of them is a row its caller may not write
+A merge reaches rows past the two it names, and keeps to the caller too.
+It repoints and deletes the rows of every table that references the row
+merged away, and refuses (`out_of_reach`, which a route answers 403) when
+one of them is a row its caller may not write
 ([A merge and who may write the rows](/superschematic/guides/database-tables/#a-merge-and-who-may-write-the-rows)).
 And the behaviors' core reads every row, so a behavior's answer that names
-a row is held to the caller where the repositories hand it back:
-Aliased's `resolve` answers `{ row: null }` for a name a row the caller
-does not see holds, and the `name_taken` that refuses a name another row
-holds names nothing of that row
+a row is held to the caller where the repositories, and a Rust server's
+behavior routes, hand it back. Aliased's `resolve` answers `{ row: null }`
+for a name a row the caller does not see holds, and the `name_taken` that
+refuses a name another row holds names nothing of that row
 ([A row's names](/superschematic/guides/database-tables/#a-rows-names)).
-Both hold in TypeScript, Go and Rust.
+Pool's `pick` answers `{ member: null }` when the member it picks is one
+the caller does not see
+([A pool of members](/superschematic/guides/database-tables/#a-pool-of-members)).
+Each holds in TypeScript, Go and Rust.
 
 Outside an operation, a job, a worker and `orm.asSystem()` read every row,
 and so does the database's own role. `orm.as(principal)` and
@@ -2247,14 +2250,18 @@ args, write)` in `orm` is the predicate a read across tables applies.
 A behavior's operation through the repositories (`operation`, and each
 use's typed methods) checks the row as `update_one` does, and answers a
 row out of reach with `Error::NotFound`. `Repository::reach(key, write)`
-is the same check, for code that runs the core itself. The server's
-behavior routes run the core through the rules adapter. Over a database
-whose rows keep to a caller (an `@audience` table or grants), each route
-opens the database's Rust repositories for the request's caller and checks
-the row before the core runs. A row out of reach gets the core's 404 for
-a row that is not there. So the crate depends on the database's Rust
-types and their Postgres repositories, and the build refuses one whose
-`Deps` names none.
+is the same check, for code that runs the core itself, and
+`Repository::keep_answer(member, operation, answer)` holds an operation
+of the table as a whole's answer to the caller as `table_operation` does.
+The server's behavior routes run the core through the rules adapter. Over
+a database whose rows keep to a caller (an `@audience` table or grants),
+each route opens the database's Rust repositories for the request's
+caller and checks the row before the core runs. A row out of reach gets
+the core's 404 for a row that is not there. A route of an operation of
+the table as a whole, such as `resolve` or `pick`, answers null for the
+row its answer names when the caller does not see it. So the crate
+depends on the database's Rust types and their Postgres repositories, and
+the build refuses one whose `Deps` names none.
 
 The grants and the access log are in the runtime's `access` module:
 

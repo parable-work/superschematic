@@ -457,7 +457,8 @@ export const fixturePoolDbRules: RulesLayout = {
             {
               "name": "pick",
               "writes": false,
-              "table": true
+              "table": true,
+              "answersRow": "member"
             }
           ]
         },

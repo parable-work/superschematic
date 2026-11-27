@@ -11,7 +11,8 @@
 //! before the core runs, and nothing is written. The core reads the row's
 //! audience ids, a `UUID[]`, as a list, so a deriver fills a private
 //! Note's summary through the repositories its main.rs opens, and the note
-//! stays its author's alone (D146). tsgen's audience_behaviors.test.ts
+//! stays its author's alone (D146); and Pool's pick answers no member for a
+//! runner the caller does not see (D104). tsgen's audience_behaviors.test.ts
 //! and ormgen's TestBehaviorOperationsKeepToTheCallerOnPostgres run the
 //! same cases.
 
@@ -306,6 +307,18 @@ async fn on_postgres(pool: &deadpool_postgres::Pool) -> Result<(), Box<dyn std::
     assert_eq!((&read["summary"], &read["effectiveAudience"]), (&json!("A leak to fix."), &json!([note["author"]])), "{read:?}");
     let hidden = user(BOB).note()?.untyped().get_one(&note["id"]).await;
     assert!(matches!(hidden, Err(Error::NotFound(_))), "another user's read of the filled note: {hidden:?}");
+
+    case("pick answers a user no runner it does not see");
+    // A runner names no audience, so it is its owner's alone. Pool's pick, a
+    // read of the table as a whole the core runs over every row, answers
+    // no member for a caller who does not see the one it picks.
+    let runner = setup.runner()?.untyped().create_one(&values(json!({"owner": ALICE, "rank": 1}))).await?;
+    let picked = user(BOB).runner()?.untyped().table_operation("pool", "pick", &json!({})).await?;
+    assert_eq!(picked, json!({"member": null}), "pick for a user outside the runner's audience");
+    for (who, by) in [("its owner", user(ALICE)), ("no caller", postgres::Repositories::new(&transaction)?)] {
+        let picked = by.runner()?.untyped().table_operation("pool", "pick", &json!({})).await?;
+        assert_eq!(picked["member"]["key"], runner["id"], "pick for {who}: {picked}");
+    }
 
     transaction.commit().await?;
     Ok(())

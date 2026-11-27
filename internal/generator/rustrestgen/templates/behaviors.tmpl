@@ -22,6 +22,9 @@
 //! that writes nothing a caller who sees it, as its repositories hold an
 //! update and a read, and any other row is the core's not_found of a row no
 //! live row holds (`reach`).
+{{- if .HasTableBehaviorOperations }} The row an operation of the table as a
+//! whole answers is null for a caller who does not see it (`keep_answer`).
+{{- end }}
 {{- end }}
 {{- end }}
 {{- range $i, $w := .BehaviorWorkers }}
@@ -186,7 +189,8 @@ where
 /// the pool, as the request's caller, and returns its result once the
 /// transaction commits: the core writes each row it reaches through a call
 /// on that row, each held to its version, and a read-only one writes
-/// nothing. Its refusals and failures are answered as `run_operation`'s.
+/// nothing.{{ if .BehaviorsHeld }} The row an answer names (Aliased's resolve, Pool's pick) is null
+/// for a caller who does not see it (`keep_answer`).{{ end }} Its refusals and failures are answered as `run_operation`'s.
 pub(crate) async fn run_table_operation<P, R>(
     behaviors: &Behaviors,
     ctx: &RequestContext,
@@ -215,7 +219,12 @@ where
     )
     .await;
     match ran {
+        {{- if .BehaviorsHeld }}
+        Ok(mut result) => {
+            keep_answer(&tx, ctx, type_name, use_id, operation, &mut result).await?;
+        {{- else }}
         Ok(result) => {
+        {{- end }}
             tx.commit().await.map_err(internal)?;
             serde_json::from_value(result).map_err(internal)
         }
@@ -224,6 +233,43 @@ where
         Err(err) => Err(internal(err)),
     }
 }
+{{- if .BehaviorsHeld }}
+
+/// Holds the answer of `operation` of the use `use_id` on the table of
+/// `type_name` as a whole to the request's caller (D156, D181): the core
+/// reads every row, so the repositories of {{ .BehaviorDatabase }}'s Rust types, opened
+/// on `tx` for the caller, the anonymous one for a request with none, answer
+/// null for the row it names (Aliased's resolve, Pool's pick) when the
+/// caller does not see it, as their own table operation does. Any other
+/// answer is left as it is; a failure of the check is the server's internal
+/// error.
+async fn keep_answer(
+    tx: &deadpool_postgres::Transaction<'_>,
+    ctx: &RequestContext,
+    type_name: &str,
+    use_id: &str,
+    operation: &str,
+    answer: &mut Value,
+) -> Result<(), ApiError> {
+    let Some(member) = layout()
+        .table(type_name)
+        .and_then(|table| table.uses.iter().find(|used| used.id == use_id))
+        .map(|used| used.member().to_owned())
+    else {
+        return Ok(());
+    };
+    let definition = crate::database_types::orm::postgres_definition().map_err(internal)?;
+    let repositories = orm::postgres::Repositories::new(tx, definition)
+        .map_err(internal)?
+        .with_access(orm::AccessCaller::of(ctx.principal.as_ref()));
+    repositories
+        .table(type_name)
+        .map_err(internal)?
+        .keep_answer(&member, operation, answer)
+        .await
+        .map_err(internal)
+}
+{{- end }}
 {{- end }}
 {{- if .HasBehaviorPreconditions }}
 

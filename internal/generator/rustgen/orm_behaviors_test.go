@@ -140,6 +140,7 @@ var audienceRulesCases = []string{
 	"a party whose grant reaches the row runs its behaviors, and one whose grant reaches another row finds it not there",
 	"an agent run reads a read-only row's conversation, and its moves and posts are not found",
 	"a deriver fills a private note's summary, and another user still cannot read it",
+	"pick answers a user no runner it does not see",
 }
 
 // TestRepositoriesKeepBehaviorOperationsToTheCaller runs
@@ -154,7 +155,8 @@ var audienceRulesCases = []string{
 // with read-only access its conversation's reads; the core reads the
 // row's audience ids, a UUID[], as a list. A deriver, through repositories
 // opened as its generated main.rs opens them, fills a private Note's
-// Derived summary, which another user still cannot read (D146). Every case
+// Derived summary, which another user still cannot read (D146); and Pool's
+// pick answers no member for a runner the caller does not see. Every case
 // of audienceRulesCases must run.
 //
 // It needs cargo, which it skips without, the database, and runs outside

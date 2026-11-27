@@ -903,7 +903,9 @@ Most are load errors; knowing them saves a build round-trip:
   `account_pool_pick`); it answers `{ member: { key, availability, order,
   preferred } }`, the open members `prefer` keeps first, then its near
   ones, then the rest, or `{ member: null, until }`: wait until `until` on
-  a deadline of your own, never in a loop that picks again. When the
+  a deadline of your own, never in a loop that picks again. On an
+  `@audience` table a member the caller does not see is answered as
+  `{ member: null }`, so `match` the caller's own (`{ owner }`). When the
   provider refuses, call `pool.markOut(key, { until?, reason })` with the
   time it names (thirty minutes when it names none); an out member keeps
   the later time. An out member comes back only through

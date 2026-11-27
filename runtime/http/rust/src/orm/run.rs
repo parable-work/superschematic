@@ -606,16 +606,31 @@ impl<C: Client> Runner<'_, C> {
     ) -> Result<Value, Error> {
         let command = self.plan.core_table_operation(member, operation, params)?;
         let mut answer = self.client.core_table_operation(command).await?;
+        self.keep_answer(member, operation, &mut answer).await?;
+        Ok(answer)
+    }
+
+    /// Holds `answer`, the core's answer of `operation` of the behavior
+    /// under `member` on the table as a whole, to the caller (D156): the row
+    /// it names, when the definition says its answer names one (Aliased's
+    /// `resolve`, Pool's `pick`), is null for a caller who does not see it.
+    /// Any other answer is left as it is.
+    pub(crate) async fn keep_answer(
+        &self,
+        member: &str,
+        operation: &str,
+        answer: &mut Value,
+    ) -> Result<(), Error> {
         let answered = self.table.behaviors.as_ref().and_then(|behaviors| {
             behaviors
                 .answers
                 .iter()
                 .find(|answers| answers.member == member && answers.operation == operation)
         });
-        if let Some(answered) = answered {
-            self.keep_answered_row(&mut answer, &answered.row).await?;
+        match answered {
+            Some(answered) => self.keep_answered_row(answer, &answered.row).await,
+            None => Ok(()),
         }
-        Ok(answer)
     }
 
     // keep_answered_row sets the row an answer names under `row` null when

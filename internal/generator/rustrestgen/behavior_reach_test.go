@@ -11,9 +11,11 @@ import (
 )
 
 // audienceBehaviorsFixture is fixture-audience-behaviors-api, whose
-// TaskActions are @behaviorOperations(Task) for any signed-in caller, over
-// fixture-audience-behaviors-db, whose Task is @audience({ owner }), its
-// status a Workflow, and implements Comments (D156, D103).
+// TaskActions and RunnerActions are @behaviorOperations(Task) and
+// (Runner) for any signed-in caller, over fixture-audience-behaviors-db,
+// whose Task is @audience({ owner }), its status a Workflow, and
+// implements Comments, and whose Runner, private by default, is a Pool
+// (D156, D103, D104).
 var audienceBehaviorsFixture = behaviorFixture{api: "fixture-audience-behaviors-api", db: "fixture-audience-behaviors-db"}
 
 // behaviorReachCases are the cases the Rust server's test of the fixture
@@ -27,6 +29,7 @@ var behaviorReachCases = []string{
 	"a named row's behaviors answer the principals it names",
 	"a party whose grant reaches the row runs its behaviors, and one whose grant reaches another row finds it not there",
 	"an agent run reads a read-only row's conversation, and its moves and posts are not found",
+	"pick answers a user no runner it does not see",
 }
 
 // TestTheBehaviorOperationsOfAHeldDatabaseCheckTheCallersReach: the crate
@@ -67,7 +70,9 @@ func TestTheBehaviorOperationsOfAHeldDatabaseCheckTheCallersReach(t *testing.T) 
 // named row the principals it names; a party is answered on the row its
 // grant names, and an agent run with read-only access on its
 // conversation's reads; anyone else's call is the core's 404 of a row no
-// live row holds, with nothing written. Its authenticator reads Bearer
+// live row holds, with nothing written. The route of Pool's pick, a read of
+// a Runner table as a whole, answers no member for a runner the caller
+// does not see, the core having read every row. Its authenticator reads Bearer
 // <kind>:<subject>[:<target or acting for>]. Every case of
 // behaviorReachCases must run. It skips without the database, without
 // cargo, and in -short mode.
@@ -341,5 +346,19 @@ async fn cases(db: Arc<Database>) {
     let err = agent.task.comments.post(watered, input(json!({"body": "On it."})), None).await.unwrap_err();
     assert_eq!(refusal(err), gone, "post");
     assert_eq!(db.state(&watered_text).await, ("open".to_owned(), 1), "a refused call wrote");
+
+    println!("case: pick answers a user no runner it does not see");
+    let row = db
+        .client
+        .query_one("INSERT INTO runner (owner, rank, audience) VALUES ($1::text::uuid, 1, 'private') RETURNING id::text", &[&ALICE])
+        .await
+        .unwrap();
+    let runner: types::IdentityUUID = row.get::<_, String>(0).parse().unwrap();
+    let pick = |token: String| {
+        let base_url = base_url.clone();
+        async move { serde_json::to_value(sdk(&base_url, &token).runner.pool.pick(input(json!({})), None).await.unwrap()).unwrap() }
+    };
+    assert_eq!(pick(format!("user:{CAROL}")).await["member"], Value::Null, "pick for a user outside the runner's audience");
+    assert_eq!(pick(format!("user:{ALICE}")).await["member"]["key"], json!(wire(&runner)), "pick for the runner's owner");
 }
 `

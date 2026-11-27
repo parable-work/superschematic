@@ -4119,7 +4119,11 @@ change queue. A new member is open.
   (`/match/owner: Account has no own field owner (its own fields: name,
   vendor, kind, rank)`). A pick reads at most 2,000 members `match` keeps
   and refuses more (409 `vetoed`, `pool_too_large`, `{ max: 2000 }`):
-  narrow `match`, or pick with code of your own.
+  narrow `match`, or pick with code of your own. On an `@audience` table,
+  or for a caller held to grants, the core still picks among every
+  member, and a member the caller does not see is answered as no member,
+  `{ member: null }`, so its key is never shown: narrow `match` to the
+  members the caller sees, such as `{ owner }`.
 - **The recheck.** An out member's recheck falls due at its `outUntil` on
   the API's [behavior worker](/superschematic/guides/api-routes/#the-worker),
   and then every `recheckAfterMs` while it stays out. Each one writes the

@@ -166,10 +166,15 @@ func TableCreatesRows(name string) bool {
 // is each ORM that keeps such an answer to its caller under per-record
 // access (D156): it answers null there to a caller who may not read the
 // row, as for one no row answers. Aliased's resolve answers the row a name
-// names (D147). Per-behavior code, as tableCreatesRows is, until step 5
-// derives it from the behavior's class (D103).
+// names (D147), and Pool's pick the member it picks (D104), which is then
+// no member: pick does not choose again among the members the caller
+// sees. An answer that lists rows (Calendar's findAvailability, Derived's
+// pulls, Payments' listPaymentActions, Lease's expireHolder) is none of
+// these. Per-behavior code, as tableCreatesRows is, until step 5 derives
+// it from the behavior's class (D103).
 var tableOperationRows = map[string]map[string]string{
 	"Aliased": {"resolve": "row"},
+	"Pool":    {"pick": "member"},
 }
 
 // TableOperationRow is the member of the answer of the behavior name's

@@ -660,6 +660,22 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
             .await
     }
 
+    /// Holds `answer`, what the behaviors' core answered `operation` of the
+    /// behavior under `member` on the table as a whole, to the caller the
+    /// repositories keep to (D156), as [`Repository::table_operation`]
+    /// holds its own: the row an answer names (Aliased's `resolve`, Pool's
+    /// `pick`) is null for a caller who does not see it. The check of a
+    /// caller that runs the core itself, a Rust server's behavior route
+    /// (D181). Opened for no caller, and as the system, every row is seen.
+    pub async fn keep_answer(
+        &self,
+        member: &str,
+        operation: &str,
+        answer: &mut Value,
+    ) -> Result<(), Error> {
+        self.runner().keep_answer(member, operation, answer).await
+    }
+
     /// Reseals under the current field key every envelope of the table's
     /// `Encrypted<T>` columns another key of the keyring sealed, `batch`
     /// rows at a time (the definition's default limit unless set), deleted

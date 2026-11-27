@@ -18,14 +18,15 @@ const behaviorReachFixture = "fixture-audience-behaviors-db"
 
 // behaviorReachORMCases are the cases behaviorReachORMTest runs over
 // fixture-audience-behaviors-db, by name: tsgen's audience_behaviors.test.ts
-// holds the TypeScript repositories to the first three, and the Rust
-// repositories' audience_rules.rs runs all five.
+// holds the TypeScript repositories to the first three and the last, and
+// the Rust repositories' audience_rules.rs runs all six.
 var behaviorReachORMCases = []string{
 	"a private row's and a named row's behaviors are not found for a user outside their audience, and write nothing",
 	"a private row's behaviors answer its owner",
 	"a named row's behaviors answer the principals it names",
 	"a party whose grant reaches the row runs its behaviors, and one whose grant reaches another row finds it not there",
 	"an agent run reads a read-only row's conversation, and its moves and posts are not found",
+	"pick answers a user no runner it does not see",
 }
 
 // TestBehaviorOperationsKeepToTheCallerOnPostgres holds the generated Go
@@ -37,7 +38,9 @@ var behaviorReachORMCases = []string{
 // no live row holds, which a route answers 404, and writes nothing, as
 // UpdateOne and DeleteOne are. A private row answers its owner, a named
 // row the principals it names, a party the row its grant names, and an
-// agent run with read-only access its conversation's reads alone. It loads
+// agent run with read-only access its conversation's reads alone. Pool's
+// pick, a read of the table as a whole that the core runs over every row,
+// answers no member for a runner the caller does not see. It loads
 // fixture-audience-behaviors-db with the core's registry, generates its Go
 // types, ORM and DDL into a temporary tree, and runs behaviorReachORMTest
 // on the Postgres at SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL; every case
@@ -337,6 +340,29 @@ func TestBehaviorOperationsKeepToTheCaller(t *testing.T) {
 		notFound(t, "post", err)
 		if status(t, key) != "open" || len(bodies(t, key)) != 1 {
 			t.Fatal("a write the agent run may not make wrote")
+		}
+	})
+
+	t.Run("pick answers a user no runner it does not see", func(t *testing.T) {
+		runner, err := db.Runner.CreateOne(setup, &RunnerCreate{Owner: id(t, alice), Rank: 1})
+		if err != nil {
+			t.Fatalf("create a private runner: %v", err)
+		}
+		pick := func(t *testing.T, ctx context.Context) *RunnerPoolPickMember {
+			t.Helper()
+			picked, err := db.Runner.Pool().Pick(ctx, RunnerPoolPickParams{})
+			if err != nil {
+				t.Fatalf("pick: %v", err)
+			}
+			return picked.Member
+		}
+		if member := pick(t, asUser(bob)); member != nil {
+			t.Fatalf("pick for a user outside the runner's audience = %+v, want no member", member)
+		}
+		for _, ctx := range []context.Context{asUser(alice), setup} {
+			if member := pick(t, ctx); member == nil || member.Key != runner.Id.String() {
+				t.Fatalf("pick = %+v, want the runner %s", member, runner.Id)
+			}
 		}
 	})
 }

@@ -16,6 +16,7 @@
 // word as it answers a key no row holds, so the answer never says which.
 // On each, a create that names neither audience nor agentAccess takes its
 // table's defaults: a task is everyone's, and a note its author's alone.
+// And Pool's pick answers no member for a runner its caller does not see.
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -125,6 +126,17 @@ async function defaultAudience(orm: FixtureAudienceBehaviorsDbOrm, as: (user: st
   await expect(as(carol).note.getOne(note.id as never)).rejects.toBeInstanceOf(NotFoundError);
 }
 
+/**
+ * Pool's pick, a read of the table as a whole that the core runs over
+ * every row, answers no member for a runner the caller does not see.
+ */
+async function pickedRunner(orm: FixtureAudienceBehaviorsDbOrm, as: (user: string) => FixtureAudienceBehaviorsDbOrm): Promise<void> {
+  const runner = (await orm.runner.createOne({ owner: alice, rank: 1 } as never)) as any;
+  const pick = async (by: FixtureAudienceBehaviorsDbOrm) => ((await by.runner.pool.pick({} as never)) as { member: { key: string } | null }).member;
+  expect(await pick(as(carol))).toBeNull();
+  expect((await pick(orm))?.key).toBe(runner.id);
+}
+
 describe('bun:sqlite', () => {
   let dir: string;
   let db: SqliteDatabase;
@@ -171,6 +183,10 @@ describe('bun:sqlite', () => {
   test("a create that names no audience takes the table's defaults, on bun:sqlite", async () => {
     await defaultAudience(createSqliteOrm(db, alice), user => createSqliteOrm(db, user));
   });
+
+  test("pick answers no runner its caller does not see, on bun:sqlite", async () => {
+    await pickedRunner(createSqliteOrm(db, alice), user => createSqliteOrm(db, user));
+  });
 });
 
 describe.skipIf(dsn === '')('Postgres', () => {
@@ -196,5 +212,9 @@ describe.skipIf(dsn === '')('Postgres', () => {
 
   test("a create that names no audience takes the table's defaults, on Postgres", async () => {
     await defaultAudience(orm, user => createOrm(db.pool, user));
+  });
+
+  test("pick answers no runner its caller does not see, on Postgres", async () => {
+    await pickedRunner(orm, user => createOrm(db.pool, user));
   });
 });
