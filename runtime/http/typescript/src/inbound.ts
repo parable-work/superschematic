@@ -7,10 +7,11 @@ import { normaliseAddress, sameId, type ChannelIdentityRow, type Notifier, type 
 import { identityLapsed, partyPrincipal, partyTablesOf, sameUUID, type PartyRef } from './parties.js';
 import type { ChannelAdapter, InboundAttachment, InboundAuthentication, InboundMessage, WebhookRequest } from './providers/channel.js';
 import type { Providers } from './providers/registry.js';
-import { enqueue, postgresQueue, type QueueDefinition, type QueuePool } from './queue.js';
+import type { QueueDefinition } from './queue-core.js';
+import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-orm.js';
 import { RowFeatureError, type RowRef } from './rowfeatures.js';
 import { sha256 } from './sha256.js';
-import type { WorkerMessage, WorkerQueue } from './worker.js';
+import type { WorkerQueue } from './worker.js';
 
 /*
 Outside parties and inbound messages (D157): one path every inbound message
@@ -189,8 +190,11 @@ export interface Inbound {
   timeline(as: Principal, party: PartyRef, options?: { readonly limit?: number }): Promise<MessageRow[]>;
   /** A message's row, or null. */
   message(id: string): Promise<MessageRow | null>;
-  /** The @runRequests queue over pool as a worker claims it, each message handed to handle: the agent dispatcher's (D158), or an app's own. */
-  runWorker(pool: QueuePool, handle: (request: RunRequest) => Promise<void>): WorkerQueue;
+  /**
+   * The @runRequests queue as a worker claims it, over a pg pool, a SqlDatabase (D189) or the queue's claims, each
+   * message handed to handle: the agent dispatcher's (D158), or an app's own.
+   */
+  runWorker(source: QueueSource, handle: (request: RunRequest) => Promise<void>): WorkerQueue;
 }
 
 /** A refusal of an inbound call: no permission, no such party, no conversations tables. */
@@ -635,22 +639,7 @@ export function createInbound(options: InboundOptions): Inbound {
     }
   };
 
-  const workerOf = (pool: QueuePool, handle: (request: RunRequest) => Promise<void>): WorkerQueue => {
-    const queue = postgresQueue(pool, options.runs);
-    return {
-      name: queue.name,
-      leaseSeconds: queue.leaseSeconds,
-      claim: async (n, leaseSeconds) =>
-        (await queue.claim(n, leaseSeconds)).map((claim): WorkerMessage => ({ id: claim.id, token: claim.token, attempt: claim.attempt, handle: () => handle(claim.message as RunRequest) })),
-      extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
-      complete: (id, token) => queue.complete(id, token),
-      fail: (id, token, cause) => queue.fail(id, token, cause),
-      release: (id, token) => queue.release(id, token),
-      prune: limit => queue.prune(limit),
-      slot: slots => queue.slot(slots),
-      nextDue: () => queue.nextDue(),
-    };
-  };
+  const workerOf = (source: QueueSource, handle: (request: RunRequest) => Promise<void>): WorkerQueue => workerQueueOf(claimsOver(source, options.runs), message => handle(message as RunRequest));
 
   return {
     async inbound(slot, request) {

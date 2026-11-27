@@ -27,12 +27,13 @@ import (
 // search index, and the runtime's orm::calendar and orm::search_tables
 // read them. A Rust server whose database lists sqlite first is refused
 // Recurrence and the calendar by rustrestgen, which knows the database's
-// dialect; the loader refuses @searchable on SQLite for every language.
+// dialect; the loader refuses the Rust types of a service that lists sqlite
+// and declares @searchable (refuseSQLiteReaders, D186).
 // Events and notifications (D153) are served on Postgres (D191): the
 // Postgres definition carries each table's events and what it is to the
 // notifier, and the runtime's notify module raises, routes, delivers and
-// reads replies over them. The loader refuses the notifier on SQLite for
-// every language, and rustgen refuses it for a crate that lists sqlite.
+// reads replies over them. On SQLite the notifier runs in TypeScript alone
+// (D189), and rustgen refuses it for a crate that lists sqlite.
 // Parties, inbound messages and conversations (D157) and the agent
 // orchestration (D158) are served on Postgres (D193): the Postgres
 // definition carries each table's party, conversations and agents part,

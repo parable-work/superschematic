@@ -7,7 +7,10 @@
 // local-process sandbox, whose instances run agent_runner.ts under bun, the
 // model stub, the vault broker the instance resolves a credential through,
 // and an SMS relay an approval is asked for on, each over a stand-in
-// service the test answers.
+// service the test answers. TestAgentRunsEndToEndOnSQLite runs the same
+// cases with ORM_DIALECT sqlite (D189): over the ./orm/sqlite entry's
+// repositories on a file the package's sqlite/create.sql made, every queue
+// claimed over it.
 import { afterEach, describe, expect, test } from 'bun:test';
 import {
   createAgents,
@@ -18,18 +21,18 @@ import {
   issueGrant,
   paramsHash,
   revokeGrant,
-  postgresQueue,
   type Agents,
   type AgentTool,
   type Inbound,
   type Notifier,
   type TranscriptEntry,
+  uuidToDb,
 } from '@superschematic/http-runtime/postgres';
 import { providersFrom, SecretValue, type ModelTurn, type Providers, type SandboxProvider } from '@superschematic/http-runtime/providers';
 import type { Principal } from '@superschematic/http-runtime';
-import { createOrm, type FixtureAgentRunsDbOrm } from './orm';
+import type { FixtureAgentRunsDbOrm } from './orm';
 import { agentRunRequestQueue, noticeWorkQueue, runRequestQueue, taskDeadlineQueue, taskEventQueue } from './queues';
-import { database, dsn, type TestDatabase } from './harness';
+import { available, featureDatabase, ormEntry, type FeatureDatabase } from './dialect';
 import { localSandbox } from './local-sandbox';
 import { stubModel } from './stub-model';
 import { smsRelayA } from './sms-relay-a';
@@ -84,7 +87,7 @@ interface Started {
 }
 
 interface World {
-  db: TestDatabase;
+  db: FeatureDatabase;
   orm: FixtureAgentRunsDbOrm;
   sys: FixtureAgentRunsDbOrm;
   agents: Agents;
@@ -152,8 +155,8 @@ const tools: Record<string, AgentTool> = {
 };
 
 async function world(options: { watchSeconds?: number } = {}): Promise<World> {
-  const db = await database('agents');
-  const orm = createOrm(db.pool);
+  const db = await featureDatabase('agents');
+  const orm = (await ormEntry<FixtureAgentRunsDbOrm>()).createOrm(db.source);
   const sys = orm.asSystem();
   const svc = services();
   const logs: string[] = [];
@@ -336,7 +339,7 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
 /** Indexes every row the search index queue names (D155). */
 async function indexAll(w: World): Promise<void> {
   for (;;) {
-    const { rows } = await w.db.pool.query(`DELETE FROM search_indexing_queue WHERE id IN (SELECT id FROM search_indexing_queue WHERE state = 'ready' LIMIT 100) RETURNING source_table, source_key`);
+    const { rows } = await w.db.raw(`DELETE FROM search_indexing_queue WHERE id IN (SELECT id FROM search_indexing_queue WHERE state = 'ready' LIMIT 100) RETURNING source_table, source_key`);
     if (rows.length === 0) return;
     for (const row of rows) await indexSearch(w.orm, { sourceTable: row.source_table, sourceKey: row.source_key });
   }
@@ -346,7 +349,7 @@ async function indexAll(w: World): Promise<void> {
 async function drain(w: World): Promise<void> {
   for (let round = 0; round < 50; round++) {
     let handled = 0;
-    for (const queue of [w.notifier.workerQueue(w.db.pool), w.agents.workerQueue(w.db.pool), w.inbound.runWorker(w.db.pool, m => w.agents.handle(m))]) {
+    for (const queue of [w.notifier.workerQueue(w.db.source), w.agents.workerQueue(w.db.source), w.inbound.runWorker(w.db.source, m => w.agents.handle(m))]) {
       for (const claim of await queue.claim(20, 60)) {
         await claim.handle(new AbortController().signal);
         await queue.complete(claim.id, claim.token);
@@ -384,7 +387,7 @@ async function exited(w: World, id: string, timeoutMs = 20_000): Promise<void> {
 
 /** Makes the dispatcher's watches due and runs them: the runs whose instances ended end. */
 async function watch(w: World): Promise<void> {
-  await w.db.pool.query(`UPDATE agent_run_request_queue SET due_at = now() WHERE step = 'watch' AND state = 'ready'`);
+  await w.db.raw(`UPDATE agent_run_request_queue SET due_at = now() WHERE step = 'watch' AND state = 'ready'`);
   await drain(w);
 }
 
@@ -431,7 +434,7 @@ async function until(cond: () => Promise<boolean>, timeoutMs = 15_000): Promise<
   }
 }
 
-describe.skipIf(!dsn)('agent runs', () => {
+describe.skipIf(!available)('agent runs', () => {
   let w: World | undefined;
   afterEach(async () => {
     if (!w) return;
@@ -448,13 +451,13 @@ describe.skipIf(!dsn)('agent runs', () => {
     // A schedule on task A falls due: its deadline fires, its run event
     // reaches the notifier, whose route names the reviewer.
     await w.sys.task.schedules.setSchedule(a, { name: 'review', after: 60000 });
-    await w.db.pool.query(`UPDATE task_deadline_queue SET due_at = now()`);
-    const deadlines = postgresQueue(w.db.pool, taskDeadlineQueue);
+    await w.db.raw(`UPDATE task_deadline_queue SET due_at = now()`);
+    const deadlines = w.db.queue(taskDeadlineQueue);
     for (const claim of await deadlines.claim(10, 60)) {
       const m = claim.message as any;
       await w.sys.task.runDeadline({ rowKey: m.rowKey, useId: m.useId, name: m.name, at: m.at, payload: m.payload }, { claim: { id: claim.id, token: claim.token } });
     }
-    const events = postgresQueue(w.db.pool, taskEventQueue);
+    const events = w.db.queue(taskEventQueue);
     const claimed = await events.claim(10, 60);
     expect(claimed.map(c => (c.message as any).kind)).toEqual(['run']);
     for (const claim of claimed) {
@@ -826,7 +829,7 @@ describe.skipIf(!dsn)('agent runs', () => {
     expect((listed as any).items.map((m: any) => m.body)).toEqual(['Which supplier?']);
     expect(await run(w, id)).toMatchObject({ messagesSent: 1 });
     // Nobody answered by the deadline: a follow-up row.
-    await w.db.pool.query(`UPDATE agent_run_request_queue SET due_at = now() WHERE step = 'followUp' AND state = 'ready'`);
+    await w.db.raw(`UPDATE agent_run_request_queue SET due_at = now() WHERE step = 'followUp' AND state = 'ready'`);
     await drain(w);
     expect((await w.sys.task.findMany({ title: { eq: 'Follow up: Which supplier?' } })).rows.length).toBe(1);
     // Answered in the thread, the next ask makes none.
@@ -836,7 +839,7 @@ describe.skipIf(!dsn)('agent runs', () => {
     const messages = (await w.sys.task.comments.listMessages(a, {} as never)) as any;
     const asked = messages.items.find((m: any) => m.body === 'Which day?');
     await w.sys.task.comments.post(a, { body: 'Tuesday', thread: asked.id } as never, { caller: { subject: w.ids.ann, permissions: [] } });
-    await w.db.pool.query(`UPDATE agent_run_request_queue SET due_at = now() WHERE step = 'followUp' AND state = 'ready'`);
+    await w.db.raw(`UPDATE agent_run_request_queue SET due_at = now() WHERE step = 'followUp' AND state = 'ready'`);
     await drain(w);
     expect((await w.sys.task.findMany({ title: { eq: 'Follow up: Which day?' } })).rows.length).toBe(0);
     // Asking on a row outside its targets is refused.
@@ -858,7 +861,7 @@ describe.skipIf(!dsn)('agent runs', () => {
     expect((await mcp(w, id, 'read_task', { key: a })).status).toBe(401);
     // Retries' backoff holds the next start until retryAt.
     await until(async () => Date.now() > new Date(failed.retriesRetryAt as never).getTime() + 50);
-    await w.db.pool.query(`UPDATE agent_run_request_queue SET due_at = now() WHERE state = 'ready' AND step = 'start'`);
+    await w.db.raw(`UPDATE agent_run_request_queue SET due_at = now() WHERE state = 'ready' AND step = 'start'`);
     await drain(w);
     const running = await run(w, id);
     expect(running).toMatchObject({ status: 'running', attempts: 2, leaseHolder: 'agent-dispatcher' });
@@ -875,6 +878,19 @@ describe.skipIf(!dsn)('agent runs', () => {
     const { a } = w.ids;
     const definer: Principal = { subject: w.ids.ann, kind: 'user', permissions: ['agents.define'] };
     await w.agents.define(definer, { name: 'helper', role: 'worker-agent', tools: ['read_task'] });
+    // A definition is @versioned: each version it takes is in its history,
+    // which a run's definitionVersion names, on SQLite as on Postgres (D189).
+    await w.agents.define(definer, { name: 'helper', role: 'worker-agent', tools: ['read_task', 'add_note'] });
+    const helper = (await w.sys.agent.findOne({ name: { eq: 'helper' } }))!;
+    expect(Number(helper._version)).toBe(2);
+    const history = await w.db.raw(`SELECT _version, operation, data FROM agent_history WHERE id = $1 ORDER BY _version`, [uuidToDb(String(helper.id))]);
+    expect(history.rows.map(r => [Number(r._version), r.operation])).toEqual([
+      [1, 'INSERT'],
+      [2, 'UPDATE'],
+    ]);
+    const image = (row: Record<string, any>) => (typeof row.data === 'string' ? JSON.parse(row.data) : row.data);
+    expect(image(history.rows[0]!).tools).toEqual(['read_task']);
+    expect(image(history.rows[1]!)).toMatchObject({ tools: ['read_task', 'add_note'], _version: 2 });
     await expect(w.agents.define(definer, { name: 'helper', role: 'worker-agent', credentials: [{ ref: 'vault://ops/site/password' }] })).rejects.toMatchObject({ code: 'forbidden' });
     await expect(w.agents.define(w.ann, { name: 'other', role: 'worker-agent' })).rejects.toMatchObject({ status: 403 });
     await expect(w.agents.setPolicy(w.ann, { operation: 'read_task', mode: 'auto' })).rejects.toMatchObject({ status: 403 });

@@ -1,0 +1,2526 @@
+{
+  "dialect": "sqlite",
+  "service": "fixture-parties-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Account.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "email",
+          "origin": "Account.email",
+          "type": "TEXT COLLATE NOCASE"
+        }
+      ],
+      "kind": "entity",
+      "name": "account",
+      "origin": "Account",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "account_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "email"
+          ],
+          "name": "account_email_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "object_key",
+          "origin": "AttachmentReleased.objectKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "content_hash",
+          "nullable": true,
+          "origin": "AttachmentReleased.contentHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "reason",
+          "origin": "AttachmentReleased.reason",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_attachment_released_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_attachment_released_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_attachment_released_queue_updated_at",
+          "where": "state = 'done'"
+        }
+      ],
+      "kind": "entity",
+      "name": "attachment_released_queue",
+      "origin": "AttachmentReleased",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "attachment_released_queue_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "ChannelIdentity.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "kind",
+          "origin": "ChannelIdentity.kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "address",
+          "origin": "ChannelIdentity.address",
+          "type": "TEXT"
+        },
+        {
+          "default": "'user'",
+          "name": "principal_kind",
+          "origin": "ChannelIdentity.principalKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "principal_table",
+          "nullable": true,
+          "origin": "ChannelIdentity.principalTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "principal",
+          "origin": "ChannelIdentity.principal",
+          "type": "TEXT"
+        },
+        {
+          "default": "'unverified'",
+          "name": "trust",
+          "origin": "ChannelIdentity.trust",
+          "type": "TEXT"
+        },
+        {
+          "name": "verified_at",
+          "nullable": true,
+          "origin": "ChannelIdentity.verifiedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "code_hash",
+          "nullable": true,
+          "origin": "ChannelIdentity.codeHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "code_purpose",
+          "nullable": true,
+          "origin": "ChannelIdentity.codePurpose",
+          "type": "TEXT"
+        },
+        {
+          "name": "code_expires_at",
+          "nullable": true,
+          "origin": "ChannelIdentity.codeExpiresAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "code_attempts",
+          "origin": "ChannelIdentity.codeAttempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "ChannelIdentity.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "ChannelIdentity.revokedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "opted_out_at",
+          "nullable": true,
+          "origin": "ChannelIdentity.optedOutAt",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "kind",
+            "address"
+          ],
+          "method": "BTREE",
+          "name": "idx_channel_identity_address"
+        },
+        {
+          "columns": [
+            "principal"
+          ],
+          "method": "BTREE",
+          "name": "idx_channel_identity_principal"
+        }
+      ],
+      "kind": "entity",
+      "name": "channel_identity",
+      "origin": "ChannelIdentity",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "channel_identity_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "ChannelTrust.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "channel_kind",
+          "origin": "ChannelTrust.channelKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "level",
+          "origin": "ChannelTrust.level",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "permissions",
+          "nullable": true,
+          "origin": "ChannelTrust.permissions",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "channel_trust",
+      "origin": "ChannelTrust",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "channel_trust_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "channel_kind"
+          ],
+          "name": "channel_trust_channel_kind_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Contact.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Contact.name",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "contact",
+      "origin": "Contact",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "contact_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Conversation.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "channel_kind",
+          "origin": "Conversation.channelKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "address",
+          "origin": "Conversation.address",
+          "type": "TEXT"
+        },
+        {
+          "name": "party_table",
+          "nullable": true,
+          "origin": "Conversation.partyTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "party",
+          "nullable": true,
+          "origin": "Conversation.party",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject",
+          "nullable": true,
+          "origin": "Conversation.subject",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Conversation.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_message_at",
+          "nullable": true,
+          "origin": "Conversation.lastMessageAt",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "channel_kind",
+            "address"
+          ],
+          "method": "BTREE",
+          "name": "idx_conversation_address"
+        },
+        {
+          "columns": [
+            "party",
+            "channel_kind"
+          ],
+          "method": "BTREE",
+          "name": "idx_conversation_party"
+        }
+      ],
+      "kind": "entity",
+      "name": "conversation",
+      "origin": "Conversation",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "conversation_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Delivery.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "notice",
+          "nullable": true,
+          "origin": "Delivery.notice",
+          "type": "TEXT"
+        },
+        {
+          "default": "'notice'",
+          "name": "purpose",
+          "origin": "Delivery.purpose",
+          "type": "TEXT"
+        },
+        {
+          "name": "recipient",
+          "nullable": true,
+          "origin": "Delivery.recipient",
+          "type": "TEXT"
+        },
+        {
+          "name": "channel_kind",
+          "origin": "Delivery.channelKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "slot",
+          "nullable": true,
+          "origin": "Delivery.slot",
+          "type": "TEXT"
+        },
+        {
+          "name": "address",
+          "nullable": true,
+          "origin": "Delivery.address",
+          "type": "TEXT"
+        },
+        {
+          "default": "1",
+          "name": "attempt",
+          "origin": "Delivery.attempt",
+          "type": "INTEGER"
+        },
+        {
+          "default": "'queued'",
+          "name": "state",
+          "origin": "Delivery.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "provider_message_id",
+          "nullable": true,
+          "origin": "Delivery.providerMessageId",
+          "type": "TEXT"
+        },
+        {
+          "name": "detail",
+          "nullable": true,
+          "origin": "Delivery.detail",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "queued_at",
+          "origin": "Delivery.queuedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "due_at",
+          "nullable": true,
+          "origin": "Delivery.dueAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "sent_at",
+          "nullable": true,
+          "origin": "Delivery.sentAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "delivered_at",
+          "nullable": true,
+          "origin": "Delivery.deliveredAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "read_at",
+          "nullable": true,
+          "origin": "Delivery.readAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "failed_at",
+          "nullable": true,
+          "origin": "Delivery.failedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "acknowledged_at",
+          "nullable": true,
+          "origin": "Delivery.acknowledgedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "ended_at",
+          "nullable": true,
+          "origin": "Delivery.endedAt",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "ended_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_delivery_ended"
+        },
+        {
+          "columns": [
+            "notice"
+          ],
+          "method": "BTREE",
+          "name": "idx_delivery_notice"
+        },
+        {
+          "columns": [
+            "provider_message_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_delivery_provider_message"
+        }
+      ],
+      "kind": "entity",
+      "name": "delivery",
+      "origin": "Delivery",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "delivery_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Grant.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "holder",
+          "origin": "Grant.holder",
+          "type": "TEXT"
+        },
+        {
+          "name": "holder_kind",
+          "origin": "Grant.holderKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "role",
+          "origin": "Grant.role",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_type",
+          "origin": "Grant.targetType",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_id",
+          "origin": "Grant.targetId",
+          "type": "TEXT"
+        },
+        {
+          "name": "starts_at",
+          "origin": "Grant.startsAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "ends_at",
+          "nullable": true,
+          "origin": "Grant.endsAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "ends_when_field",
+          "nullable": true,
+          "origin": "Grant.endsWhenField",
+          "type": "TEXT"
+        },
+        {
+          "name": "ends_when_state",
+          "nullable": true,
+          "origin": "Grant.endsWhenState",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "Grant.revokedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "nullable": true,
+          "origin": "Grant.tokenHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Grant.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_by",
+          "nullable": true,
+          "origin": "Grant.createdBy",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "holder"
+          ],
+          "method": "BTREE",
+          "name": "idx_grant_holder"
+        },
+        {
+          "columns": [
+            "target_type",
+            "target_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_grant_target"
+        }
+      ],
+      "kind": "entity",
+      "name": "grant",
+      "origin": "Grant",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "grant_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "grant_token_hash_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Job.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Job.title",
+          "type": "TEXT"
+        },
+        {
+          "default": "'open'",
+          "name": "status",
+          "origin": "Job.status",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "job",
+      "origin": "Job",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "job_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Message.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "conversation",
+          "origin": "Message.conversation",
+          "type": "TEXT"
+        },
+        {
+          "name": "direction",
+          "origin": "Message.direction",
+          "type": "TEXT"
+        },
+        {
+          "name": "via",
+          "origin": "Message.via",
+          "type": "TEXT"
+        },
+        {
+          "name": "slot",
+          "nullable": true,
+          "origin": "Message.slot",
+          "type": "TEXT"
+        },
+        {
+          "name": "from_address",
+          "origin": "Message.fromAddress",
+          "type": "TEXT"
+        },
+        {
+          "name": "to_address",
+          "nullable": true,
+          "origin": "Message.toAddress",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject",
+          "nullable": true,
+          "origin": "Message.subject",
+          "type": "TEXT"
+        },
+        {
+          "name": "body",
+          "origin": "Message.body",
+          "type": "TEXT"
+        },
+        {
+          "name": "message_id",
+          "nullable": true,
+          "origin": "Message.messageId",
+          "type": "TEXT"
+        },
+        {
+          "name": "in_reply_to",
+          "nullable": true,
+          "origin": "Message.inReplyTo",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "thread_refs",
+          "nullable": true,
+          "origin": "Message.threadRefs",
+          "type": "TEXT"
+        },
+        {
+          "name": "provider_message_id",
+          "nullable": true,
+          "origin": "Message.providerMessageId",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "authentication",
+          "nullable": true,
+          "origin": "Message.authentication",
+          "type": "TEXT"
+        },
+        {
+          "name": "identity",
+          "nullable": true,
+          "origin": "Message.identity",
+          "type": "TEXT"
+        },
+        {
+          "name": "trust",
+          "nullable": true,
+          "origin": "Message.trust",
+          "type": "TEXT"
+        },
+        {
+          "name": "party_table",
+          "nullable": true,
+          "origin": "Message.partyTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "party",
+          "nullable": true,
+          "origin": "Message.party",
+          "type": "TEXT"
+        },
+        {
+          "name": "author",
+          "nullable": true,
+          "origin": "Message.author",
+          "type": "TEXT"
+        },
+        {
+          "name": "author_kind",
+          "nullable": true,
+          "origin": "Message.authorKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "for_subject",
+          "nullable": true,
+          "origin": "Message.forSubject",
+          "type": "TEXT"
+        },
+        {
+          "name": "disposition",
+          "nullable": true,
+          "origin": "Message.disposition",
+          "type": "TEXT"
+        },
+        {
+          "name": "state",
+          "nullable": true,
+          "origin": "Message.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "triage",
+          "nullable": true,
+          "origin": "Message.triage",
+          "type": "TEXT"
+        },
+        {
+          "name": "triage_closed_by",
+          "nullable": true,
+          "origin": "Message.triageClosedBy",
+          "type": "TEXT"
+        },
+        {
+          "name": "triage_closed_at",
+          "nullable": true,
+          "origin": "Message.triageClosedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "grant",
+          "nullable": true,
+          "origin": "Message.grant",
+          "type": "TEXT"
+        },
+        {
+          "name": "detail",
+          "nullable": true,
+          "origin": "Message.detail",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "at",
+          "origin": "Message.at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Message.createdAt",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "conversation",
+            "at"
+          ],
+          "method": "BTREE",
+          "name": "idx_message_conversation"
+        },
+        {
+          "columns": [
+            "message_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_message_message_id"
+        },
+        {
+          "columns": [
+            "provider_message_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_message_provider_message"
+        },
+        {
+          "columns": [
+            "triage"
+          ],
+          "method": "BTREE",
+          "name": "idx_message_triage"
+        }
+      ],
+      "kind": "entity",
+      "name": "message",
+      "origin": "Message",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "message_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "MessageAttachments.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "message_id",
+          "origin": "MessageAttachments.message",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "MessageAttachments.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "media_type",
+          "origin": "MessageAttachments.mediaType",
+          "type": "TEXT"
+        },
+        {
+          "name": "size",
+          "origin": "MessageAttachments.size",
+          "type": "INTEGER"
+        },
+        {
+          "name": "content_hash",
+          "origin": "MessageAttachments.contentHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "object_key",
+          "origin": "MessageAttachments.objectKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "caption",
+          "nullable": true,
+          "origin": "MessageAttachments.caption",
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "state",
+          "origin": "MessageAttachments.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "uploaded_by",
+          "nullable": true,
+          "origin": "MessageAttachments.uploadedBy",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "uploaded_at",
+          "origin": "MessageAttachments.uploadedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "expires_at",
+          "nullable": true,
+          "origin": "MessageAttachments.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "filed_from",
+          "nullable": true,
+          "origin": "MessageAttachments.filedFrom",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "extraction",
+          "origin": "MessageAttachments.extraction",
+          "type": "TEXT"
+        },
+        {
+          "name": "extracted_text",
+          "nullable": true,
+          "origin": "MessageAttachments.extractedText",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "preview",
+          "origin": "MessageAttachments.preview",
+          "type": "TEXT"
+        },
+        {
+          "name": "preview_object",
+          "nullable": true,
+          "origin": "MessageAttachments.previewObject",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "message_id"
+          ],
+          "name": "fk_message_attachments_message_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "message"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "object_key"
+          ],
+          "method": "BTREE",
+          "name": "idx_message_attachments_object"
+        },
+        {
+          "columns": [
+            "message_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_message_attachments_row"
+        }
+      ],
+      "kind": "entity",
+      "name": "message_attachments",
+      "origin": "MessageAttachments",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "message_attachments_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "MessageReferences.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "message_id",
+          "origin": "MessageReferences.message",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_table",
+          "origin": "MessageReferences.targetTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_key",
+          "origin": "MessageReferences.targetKey",
+          "type": "TEXT"
+        },
+        {
+          "default": "''",
+          "name": "role",
+          "origin": "MessageReferences.role",
+          "type": "TEXT"
+        },
+        {
+          "name": "added_by",
+          "nullable": true,
+          "origin": "MessageReferences.addedBy",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "added_at",
+          "origin": "MessageReferences.addedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "message_id"
+          ],
+          "name": "fk_message_references_message_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "message"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "target_table",
+            "target_key"
+          ],
+          "method": "BTREE",
+          "name": "idx_message_references_target"
+        },
+        {
+          "columns": [
+            "message_id",
+            "target_table",
+            "target_key",
+            "role"
+          ],
+          "method": "BTREE",
+          "name": "uq_message_references_target_role",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "message_references",
+      "origin": "MessageReferences",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "message_references_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Notice.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "recipient",
+          "origin": "Notice.recipient",
+          "type": "TEXT"
+        },
+        {
+          "default": "'user'",
+          "name": "recipient_kind",
+          "origin": "Notice.recipientKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "reference",
+          "origin": "Notice.reference",
+          "type": "INTEGER"
+        },
+        {
+          "name": "event_id",
+          "origin": "Notice.eventId",
+          "type": "TEXT"
+        },
+        {
+          "name": "event_kind",
+          "origin": "Notice.eventKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "urgency",
+          "origin": "Notice.urgency",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject_table",
+          "nullable": true,
+          "origin": "Notice.subjectTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject_key",
+          "nullable": true,
+          "origin": "Notice.subjectKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Notice.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "body",
+          "nullable": true,
+          "origin": "Notice.body",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "payload",
+          "nullable": true,
+          "origin": "Notice.payload",
+          "type": "TEXT"
+        },
+        {
+          "name": "route",
+          "nullable": true,
+          "origin": "Notice.route",
+          "type": "TEXT"
+        },
+        {
+          "default": "'unread'",
+          "name": "state",
+          "origin": "Notice.state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "escalation",
+          "origin": "Notice.escalation",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Notice.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "read_at",
+          "nullable": true,
+          "origin": "Notice.readAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "acknowledged_at",
+          "nullable": true,
+          "origin": "Notice.acknowledgedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "acknowledged_via",
+          "nullable": true,
+          "origin": "Notice.acknowledgedVia",
+          "type": "TEXT"
+        },
+        {
+          "name": "digested_at",
+          "nullable": true,
+          "origin": "Notice.digestedAt",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "recipient",
+            "state"
+          ],
+          "method": "BTREE",
+          "name": "idx_notice_waiting"
+        },
+        {
+          "columns": [
+            "event_id",
+            "recipient"
+          ],
+          "method": "BTREE",
+          "name": "uq_notice_event",
+          "unique": true
+        },
+        {
+          "columns": [
+            "recipient",
+            "reference"
+          ],
+          "method": "BTREE",
+          "name": "uq_notice_reference",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "notice",
+      "origin": "Notice",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "notice_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "NoticeRoute.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "NoticeRoute.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "event_kind",
+          "origin": "NoticeRoute.eventKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "subject_table",
+          "nullable": true,
+          "origin": "NoticeRoute.subjectTable",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "filter",
+          "nullable": true,
+          "origin": "NoticeRoute.filter",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "recipients",
+          "origin": "NoticeRoute.recipients",
+          "type": "TEXT"
+        },
+        {
+          "name": "urgency",
+          "nullable": true,
+          "origin": "NoticeRoute.urgency",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "escalation",
+          "nullable": true,
+          "origin": "NoticeRoute.escalation",
+          "type": "TEXT"
+        },
+        {
+          "default": "1",
+          "name": "enabled",
+          "origin": "NoticeRoute.enabled",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "NoticeRoute.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "created_by",
+          "nullable": true,
+          "origin": "NoticeRoute.createdBy",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "event_kind"
+          ],
+          "method": "BTREE",
+          "name": "idx_notice_route_event_kind"
+        }
+      ],
+      "kind": "entity",
+      "name": "notice_route",
+      "origin": "NoticeRoute",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "notice_route_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "step",
+          "origin": "NoticeWork.step",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "event",
+          "nullable": true,
+          "origin": "NoticeWork.event",
+          "type": "TEXT"
+        },
+        {
+          "name": "notice",
+          "nullable": true,
+          "origin": "NoticeWork.notice",
+          "type": "TEXT"
+        },
+        {
+          "name": "delivery",
+          "nullable": true,
+          "origin": "NoticeWork.delivery",
+          "type": "TEXT"
+        },
+        {
+          "name": "recipient",
+          "nullable": true,
+          "origin": "NoticeWork.recipient",
+          "type": "TEXT"
+        },
+        {
+          "name": "subscription",
+          "nullable": true,
+          "origin": "NoticeWork.subscription",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_notice_work_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_notice_work_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_notice_work_queue_updated_at",
+          "where": "state = 'done'"
+        }
+      ],
+      "kind": "entity",
+      "name": "notice_work_queue",
+      "origin": "NoticeWork",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "notice_work_queue_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "holder_table",
+          "origin": "ReferenceCleared.holderTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "holder_key",
+          "origin": "ReferenceCleared.holderKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_table",
+          "origin": "ReferenceCleared.targetTable",
+          "type": "TEXT"
+        },
+        {
+          "name": "target_key",
+          "origin": "ReferenceCleared.targetKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "role",
+          "origin": "ReferenceCleared.role",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_reference_cleared_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_reference_cleared_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_reference_cleared_queue_updated_at",
+          "where": "state = 'done'"
+        }
+      ],
+      "kind": "entity",
+      "name": "reference_cleared_queue",
+      "origin": "ReferenceCleared",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "reference_cleared_queue_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Reply.id",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "received_at",
+          "origin": "Reply.receivedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "channel_kind",
+          "origin": "Reply.channelKind",
+          "type": "TEXT"
+        },
+        {
+          "name": "slot",
+          "nullable": true,
+          "origin": "Reply.slot",
+          "type": "TEXT"
+        },
+        {
+          "name": "address",
+          "origin": "Reply.address",
+          "type": "TEXT"
+        },
+        {
+          "name": "provider_message_id",
+          "nullable": true,
+          "origin": "Reply.providerMessageId",
+          "type": "TEXT"
+        },
+        {
+          "name": "identity",
+          "nullable": true,
+          "origin": "Reply.identity",
+          "type": "TEXT"
+        },
+        {
+          "name": "principal",
+          "nullable": true,
+          "origin": "Reply.principal",
+          "type": "TEXT"
+        },
+        {
+          "name": "body",
+          "origin": "Reply.body",
+          "type": "TEXT"
+        },
+        {
+          "name": "interpreter",
+          "origin": "Reply.interpreter",
+          "type": "TEXT"
+        },
+        {
+          "name": "verb",
+          "nullable": true,
+          "origin": "Reply.verb",
+          "type": "TEXT"
+        },
+        {
+          "name": "notice",
+          "nullable": true,
+          "origin": "Reply.notice",
+          "type": "TEXT"
+        },
+        {
+          "name": "reference",
+          "nullable": true,
+          "origin": "Reply.reference",
+          "type": "INTEGER"
+        },
+        {
+          "name": "outcome",
+          "origin": "Reply.outcome",
+          "type": "TEXT"
+        },
+        {
+          "name": "detail",
+          "nullable": true,
+          "origin": "Reply.detail",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "undo",
+          "nullable": true,
+          "origin": "Reply.undo",
+          "type": "TEXT"
+        },
+        {
+          "name": "undone_at",
+          "nullable": true,
+          "origin": "Reply.undoneAt",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "principal",
+            "received_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_reply_principal"
+        }
+      ],
+      "kind": "entity",
+      "name": "reply",
+      "origin": "Reply",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "reply_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Report.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "job_id",
+          "origin": "Report.job",
+          "type": "TEXT"
+        },
+        {
+          "name": "body",
+          "origin": "Report.body",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Report.createdAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "job_id"
+          ],
+          "name": "fk_report_job_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "job"
+        }
+      ],
+      "kind": "entity",
+      "name": "report",
+      "origin": "Report",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "report_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "ReportAttachments.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "report_id",
+          "origin": "ReportAttachments.report",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "ReportAttachments.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "media_type",
+          "origin": "ReportAttachments.mediaType",
+          "type": "TEXT"
+        },
+        {
+          "name": "size",
+          "origin": "ReportAttachments.size",
+          "type": "INTEGER"
+        },
+        {
+          "name": "content_hash",
+          "origin": "ReportAttachments.contentHash",
+          "type": "TEXT"
+        },
+        {
+          "name": "object_key",
+          "origin": "ReportAttachments.objectKey",
+          "type": "TEXT"
+        },
+        {
+          "name": "caption",
+          "nullable": true,
+          "origin": "ReportAttachments.caption",
+          "type": "TEXT"
+        },
+        {
+          "default": "'pending'",
+          "name": "state",
+          "origin": "ReportAttachments.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "uploaded_by",
+          "nullable": true,
+          "origin": "ReportAttachments.uploadedBy",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "uploaded_at",
+          "origin": "ReportAttachments.uploadedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "expires_at",
+          "nullable": true,
+          "origin": "ReportAttachments.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "filed_from",
+          "nullable": true,
+          "origin": "ReportAttachments.filedFrom",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "extraction",
+          "origin": "ReportAttachments.extraction",
+          "type": "TEXT"
+        },
+        {
+          "name": "extracted_text",
+          "nullable": true,
+          "origin": "ReportAttachments.extractedText",
+          "type": "TEXT"
+        },
+        {
+          "default": "'none'",
+          "name": "preview",
+          "origin": "ReportAttachments.preview",
+          "type": "TEXT"
+        },
+        {
+          "name": "preview_object",
+          "nullable": true,
+          "origin": "ReportAttachments.previewObject",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "report_id"
+          ],
+          "name": "fk_report_attachments_report_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "report"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "object_key"
+          ],
+          "method": "BTREE",
+          "name": "idx_report_attachments_object"
+        },
+        {
+          "columns": [
+            "report_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_report_attachments_row"
+        }
+      ],
+      "kind": "entity",
+      "name": "report_attachments",
+      "origin": "ReportAttachments",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "report_attachments_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Role.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Role.name",
+          "type": "TEXT COLLATE NOCASE"
+        },
+        {
+          "default": "'[]'",
+          "element": "TEXT",
+          "holds": "list",
+          "name": "permissions",
+          "origin": "Role.permissions",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "reaches",
+          "nullable": true,
+          "origin": "Role.reaches",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "role",
+      "origin": "Role",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "role_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "name"
+          ],
+          "name": "role_name_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "type": "TEXT"
+        },
+        {
+          "name": "trigger",
+          "origin": "RunRequest.trigger",
+          "type": "TEXT"
+        },
+        {
+          "holds": "json",
+          "name": "party",
+          "nullable": true,
+          "origin": "RunRequest.party",
+          "type": "TEXT"
+        },
+        {
+          "name": "message",
+          "nullable": true,
+          "origin": "RunRequest.message",
+          "type": "TEXT"
+        },
+        {
+          "name": "grant",
+          "nullable": true,
+          "origin": "RunRequest.grant",
+          "type": "TEXT"
+        },
+        {
+          "default": "'ready'",
+          "name": "state",
+          "type": "TEXT"
+        },
+        {
+          "default": "0",
+          "name": "attempts",
+          "type": "INTEGER"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "due_at",
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_expires_at",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "claim_token",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "name": "last_error",
+          "nullable": true,
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "updated_at",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "claim_expires_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_run_request_queue_claim_expires_at",
+          "where": "state = 'claimed'"
+        },
+        {
+          "columns": [
+            "due_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_run_request_queue_due_at",
+          "where": "state = 'ready'"
+        },
+        {
+          "columns": [
+            "updated_at"
+          ],
+          "method": "BTREE",
+          "name": "idx_run_request_queue_updated_at",
+          "where": "state = 'done'"
+        }
+      ],
+      "kind": "entity",
+      "name": "run_request_queue",
+      "origin": "RunRequest",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "run_request_queue_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "Session.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "Session.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "origin": "Session.tokenHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "Session.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "expires_at",
+          "origin": "Session.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_seen_at",
+          "nullable": true,
+          "origin": "Session.lastSeenAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "Session.revokedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_session_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_session_user"
+        }
+      ],
+      "kind": "entity",
+      "name": "session",
+      "origin": "Session",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "session_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "session_token_hash_key"
+        }
+      ]
+    },
+    {
+      "checks": [
+        {
+          "column": "name",
+          "maxLength": 100,
+          "minLength": 1,
+          "name": "ck_user_api_key_name"
+        }
+      ],
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UserApiKey.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserApiKey.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "UserApiKey.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "origin": "UserApiKey.tokenHash",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "permissions",
+          "nullable": true,
+          "origin": "UserApiKey.permissions",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "UserApiKey.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "expires_at",
+          "origin": "UserApiKey.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_used_at",
+          "nullable": true,
+          "origin": "UserApiKey.lastUsedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "UserApiKey.revokedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_api_key_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_user_api_key_user"
+        }
+      ],
+      "kind": "entity",
+      "name": "user_api_key",
+      "origin": "UserApiKey",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_api_key_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "user_api_key_token_hash_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UserCredential.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserCredential.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "password_hash",
+          "origin": "UserCredential.passwordHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "password_changed_at",
+          "origin": "UserCredential.passwordChangedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "disabled_at",
+          "nullable": true,
+          "origin": "UserCredential.disabledAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "pending_at",
+          "nullable": true,
+          "origin": "UserCredential.pendingAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_credential_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "kind": "entity",
+      "name": "user_credential",
+      "origin": "UserCredential",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_credential_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "user_credential_user_id_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "UserRoleGrant.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "UserRoleGrant.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "role_id",
+          "origin": "UserRoleGrant.role",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "granted_at",
+          "origin": "UserRoleGrant.grantedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "role_id"
+          ],
+          "name": "fk_user_role_grant_role_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "role"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_user_role_grant_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id",
+            "role_id"
+          ],
+          "method": "BTREE",
+          "name": "uq_user_role_grant_user_role",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "user_role_grant",
+      "origin": "UserRoleGrant",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "user_role_grant_pkey"
+      }
+    }
+  ],
+  "triggers": [
+    {
+      "definition": "CREATE TRIGGER \"trg_account_references_clear\" AFTER DELETE ON \"account\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Account deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Account' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Account' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_account_references_clear",
+      "origin": "Account",
+      "table": "account"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_channel_identity_references_clear\" AFTER DELETE ON \"channel_identity\" FOR EACH ROW\nBEGIN\n  -- The references to the row of ChannelIdentity deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'ChannelIdentity' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'ChannelIdentity' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_channel_identity_references_clear",
+      "origin": "ChannelIdentity",
+      "table": "channel_identity"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_channel_trust_references_clear\" AFTER DELETE ON \"channel_trust\" FOR EACH ROW\nBEGIN\n  -- The references to the row of ChannelTrust deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'ChannelTrust' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'ChannelTrust' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_channel_trust_references_clear",
+      "origin": "ChannelTrust",
+      "table": "channel_trust"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_contact_references_clear\" AFTER DELETE ON \"contact\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Contact deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Contact' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Contact' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_contact_references_clear",
+      "origin": "Contact",
+      "table": "contact"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_conversation_references_clear\" AFTER DELETE ON \"conversation\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Conversation deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Conversation' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Conversation' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_conversation_references_clear",
+      "origin": "Conversation",
+      "table": "conversation"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_delivery_references_clear\" AFTER DELETE ON \"delivery\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Delivery deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Delivery' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Delivery' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_delivery_references_clear",
+      "origin": "Delivery",
+      "table": "delivery"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_grant_references_clear\" AFTER DELETE ON \"grant\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Grant deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Grant' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Grant' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_grant_references_clear",
+      "origin": "Grant",
+      "table": "grant"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_job_references_clear\" AFTER DELETE ON \"job\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Job deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Job' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Job' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_job_references_clear",
+      "origin": "Job",
+      "table": "job"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_message_attachments_release\" AFTER DELETE ON \"message_attachments\" FOR EACH ROW\nBEGIN\n  -- The object the file of MessageAttachments deleted named (D154, D182), released\n  -- once no file of the table names it: its worker deletes it once no\n  -- file of any table does.\n  INSERT INTO \"attachment_released_queue\" (\"object_key\", \"content_hash\", \"reason\")\n    SELECT OLD.\"object_key\", OLD.\"content_hash\", 'detached' WHERE NOT EXISTS (SELECT 1 FROM \"message_attachments\" WHERE \"object_key\" = OLD.\"object_key\");\nEND",
+      "name": "trg_message_attachments_release",
+      "origin": "MessageAttachments",
+      "table": "message_attachments"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_message_references_clear\" AFTER DELETE ON \"message\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Message deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Message' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Message' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_message_references_clear",
+      "origin": "Message",
+      "table": "message"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_notice_references_clear\" AFTER DELETE ON \"notice\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Notice deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Notice' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Notice' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_notice_references_clear",
+      "origin": "Notice",
+      "table": "notice"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_notice_route_references_clear\" AFTER DELETE ON \"notice_route\" FOR EACH ROW\nBEGIN\n  -- The references to the row of NoticeRoute deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'NoticeRoute' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'NoticeRoute' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_notice_route_references_clear",
+      "origin": "NoticeRoute",
+      "table": "notice_route"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_reply_references_clear\" AFTER DELETE ON \"reply\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Reply deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Reply' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Reply' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_reply_references_clear",
+      "origin": "Reply",
+      "table": "reply"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_report_attachments_release\" AFTER DELETE ON \"report_attachments\" FOR EACH ROW\nBEGIN\n  -- The object the file of ReportAttachments deleted named (D154, D182), released\n  -- once no file of the table names it: its worker deletes it once no\n  -- file of any table does.\n  INSERT INTO \"attachment_released_queue\" (\"object_key\", \"content_hash\", \"reason\")\n    SELECT OLD.\"object_key\", OLD.\"content_hash\", 'detached' WHERE NOT EXISTS (SELECT 1 FROM \"report_attachments\" WHERE \"object_key\" = OLD.\"object_key\");\nEND",
+      "name": "trg_report_attachments_release",
+      "origin": "ReportAttachments",
+      "table": "report_attachments"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_report_references_clear\" AFTER DELETE ON \"report\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Report deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Report' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Report' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_report_references_clear",
+      "origin": "Report",
+      "table": "report"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_role_references_clear\" AFTER DELETE ON \"role\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Role deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Role' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Role' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_role_references_clear",
+      "origin": "Role",
+      "table": "role"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_session_references_clear\" AFTER DELETE ON \"session\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Session deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'Session' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'Session' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_session_references_clear",
+      "origin": "Session",
+      "table": "session"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_user_api_key_references_clear\" AFTER DELETE ON \"user_api_key\" FOR EACH ROW\nBEGIN\n  -- The references to the row of UserApiKey deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'UserApiKey' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'UserApiKey' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_user_api_key_references_clear",
+      "origin": "UserApiKey",
+      "table": "user_api_key"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_user_credential_references_clear\" AFTER DELETE ON \"user_credential\" FOR EACH ROW\nBEGIN\n  -- The references to the row of UserCredential deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'UserCredential' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'UserCredential' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_user_credential_references_clear",
+      "origin": "UserCredential",
+      "table": "user_credential"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_user_role_grant_references_clear\" AFTER DELETE ON \"user_role_grant\" FOR EACH ROW\nBEGIN\n  -- The references to the row of UserRoleGrant deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Message', CAST(\"message_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"message_references\" WHERE \"target_table\" = 'UserRoleGrant' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"message_references\" WHERE \"target_table\" = 'UserRoleGrant' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_user_role_grant_references_clear",
+      "origin": "UserRoleGrant",
+      "table": "user_role_grant"
+    }
+  ],
+  "version": 1
+}

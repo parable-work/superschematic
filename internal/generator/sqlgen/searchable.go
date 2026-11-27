@@ -30,8 +30,8 @@ import (
 //
 // An enqueue skips a row that holds a ready message already (the queue's
 // key, which the loader gives it, D80), so a row written many times before
-// a worker claims it is rebuilt once. Both are in the Postgres dialect
-// alone: the loader refuses @searchable in a service that lists sqlite.
+// a worker claims it is rebuilt once. These are the Postgres triggers;
+// searchable_sqlite.go writes SQLite's (D186).
 
 // The suffix of the functions, after the table; each trigger's name is its
 // function's after trg_.
@@ -39,11 +39,12 @@ const searchSuffix = "_search"
 
 // SearchQueue is the queue a @searchable declaration names: its quoted
 // table, its message's columns in ir.SearchIndexingFields' order, quoted,
-// and the clause that ends an enqueue on it.
+// and the clause that ends an enqueue on it in each dialect.
 type SearchQueue struct {
-	Table    string
-	Columns  []string
-	Conflict string
+	Table          string
+	Columns        []string
+	Conflict       string
+	SQLiteConflict string
 }
 
 // SearchTrigger is the trigger of one @searchable table.
@@ -148,7 +149,7 @@ func buildSearchables(schema *ir.Schema, tableTypes []*ir.TypeDef, tables []Tabl
 		}
 		table := sqlutil.QuoteIdentifier(QueueTableName(td))
 		spec := sqlutil.QueueSpecOf(td, table, columns, true)
-		return SearchQueue{Table: table, Columns: columns, Conflict: sqlutil.PostgresQueueStatements(spec).Conflict}, nil
+		return SearchQueue{Table: table, Columns: columns, Conflict: sqlutil.PostgresQueueStatements(spec).Conflict, SQLiteConflict: sqlutil.SQLiteQueueStatements(spec).Conflict}, nil
 	}
 	tooLong := func(td *ir.TypeDef, name string) error {
 		if len(name) > sqlutil.PostgresIdentifierLimit {

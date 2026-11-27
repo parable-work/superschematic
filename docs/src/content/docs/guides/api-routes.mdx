@@ -2377,7 +2377,7 @@ with behavior operations builds only in a checkout that sets `[paths]
 rules_adapter_rust` and `rules_behaviors_rust`
 ([Naming](/superschematic/reference/naming/#pathsrules_adapter_rust)). The
 TypeScript repositories run a table's behaviors on SQLite and D1 too, over
-the rules module's SQLite store (D182), so a TypeScript server over a
+the rules module's SQLite store (D182, D186), so a TypeScript server over a
 database that lists `sqlite` first serves its behavior operations through
 `Deps.orm`, the repositories of the database's `./orm/sqlite` entry. A
 Rust server there runs them in a transaction of the SQLite file's writing
@@ -2696,7 +2696,9 @@ one, and nothing that hears them runs until a worker does. An API that serves
 gets a warning; declare one on that API or on another over the same
 database. The worker claims on Postgres, as every worker does. A
 TypeScript one over a database that lists `sqlite` first is refused, as
-a TypeScript behavior worker claims its queues on Postgres alone. On
+a TypeScript behavior worker claims its queues on Postgres alone; there an
+app's worker runs the `./orm/sqlite` entry's `runDeadline` and `runChange`
+over `sqliteQueue`'s claims (D186). On
 Cloudflare Workers a TypeScript one drains its table's queues at each
 firing of a Cron Trigger, and a deadline or an event due before the next
 firing wakes it through its Workflow
