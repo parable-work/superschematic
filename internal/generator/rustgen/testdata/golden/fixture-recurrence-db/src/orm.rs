@@ -40,7 +40,7 @@ use superschematic_http_runtime::orm;
 pub use orm::{
     Caller, Constraint, ConstraintKind, Equals, Error, FieldCell, FieldKeyring, FieldKeys,
     FindOptions, Found, OrderBy, Ordered, PageOptions, ReferencedBy, Refusal, RowPage, Text,
-    UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
+    UpsertManyOptions, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
 };
 
 #[allow(unused_imports)]
@@ -625,9 +625,12 @@ pub const POSTGRES: &str = r#"{
     "offset": " OFFSET %d",
     "changed": "(%s) IS DISTINCT FROM (%s)",
     "never": "FALSE",
-    "null": "NULL"
+    "null": "NULL",
+    "setExcluded": "%s = EXCLUDED.%s",
+    "excluded": "EXCLUDED.%s"
   },
   "defaultLimit": 100,
+  "maxParameters": 65535,
   "tables": [
     {
       "name": "Contract",
@@ -1325,7 +1328,9 @@ pub const SQLITE: &str = r#"{
     "offset": " OFFSET %d",
     "changed": "(%s) IS DISTINCT FROM (%s)",
     "never": "FALSE",
-    "null": "NULL"
+    "null": "NULL",
+    "setExcluded": "%s = EXCLUDED.%s",
+    "excluded": "EXCLUDED.%s"
   },
   "jsonClauses": {
     "eq": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) = (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
@@ -1335,6 +1340,7 @@ pub const SQLITE: &str = r#"{
     "value": "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))"
   },
   "defaultLimit": 100,
+  "maxParameters": 32766,
   "tables": [
     {
       "name": "Contract",
