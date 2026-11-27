@@ -1,0 +1,149 @@
+{
+  "image": "sha256:6a1f0c5d2b7e4f8093a1c6d5e4b3a29187f6e5d4c3b2a1908f7e6d5c4b3a2918",
+  "platform": "linux/amd64",
+  "sections": {
+    "forge": {
+      "tiers": [
+        "pr",
+        "nightly"
+      ]
+    }
+  },
+  "tasks": {
+    "lint": {
+      "hermetic": true,
+      "inputs": [
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              ".golangci.yml"
+            ]
+          }
+        },
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "go"
+            ]
+          }
+        }
+      ],
+      "run": [
+        "golangci-lint",
+        "run"
+      ]
+    },
+    "schema-build": {
+      "hermetic": true,
+      "inputs": [
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "go.mod"
+            ]
+          }
+        },
+        {
+          "kind": "schema",
+          "spec": {
+            "root": "schemas",
+            "service": "shop-api"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "paths",
+          "name": "generated",
+          "paths": [
+            "schemas/dist",
+            "schemas/gen"
+          ]
+        },
+        {
+          "kind": "image",
+          "name": "sdk"
+        }
+      ],
+      "run": [
+        "superschematic",
+        "build-all",
+        "schemas/services"
+      ]
+    },
+    "smoke": {
+      "after": [
+        "test"
+      ],
+      "hermetic": false,
+      "run": [
+        "scripts/run.sh"
+      ]
+    },
+    "test": {
+      "after": [
+        "lint",
+        "schema-build"
+      ],
+      "env": {
+        "CGO_ENABLED": "1"
+      },
+      "hermetic": true,
+      "image": "sha256:0b1c2d3e4f5061728394a5b6c7d8e9f00b1c2d3e4f5061728394a5b6c7d8e9f0",
+      "inputs": [
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "go"
+            ]
+          }
+        },
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "go.mod"
+            ]
+          }
+        }
+      ],
+      "platform": "linux/arm64",
+      "run": [
+        "go",
+        "test",
+        "./..."
+      ],
+      "sections": {
+        "forge": {
+          "tier": "pr",
+          "timeoutSeconds": 600
+        }
+      },
+      "services": [
+        {
+          "image": "postgres@sha256:0b1c2d3e4f5061728394a5b6c7d8e9f00b1c2d3e4f5061728394a5b6c7d8e9f0",
+          "name": "postgres"
+        },
+        {
+          "image": "valkey@sha256:0b1c2d3e4f5061728394a5b6c7d8e9f00b1c2d3e4f5061728394a5b6c7d8e9f0",
+          "name": "valkey"
+        }
+      ],
+      "uses": [
+        {
+          "output": "generated",
+          "task": "schema-build"
+        },
+        {
+          "output": "sdk",
+          "task": "schema-build"
+        }
+      ]
+    }
+  },
+  "version": 1
+}

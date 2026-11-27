@@ -7,7 +7,8 @@ package packages
 import "embed"
 
 // Sources holds each package's src/*.ts files, at api/src, db/src,
-// schema/src, schema-config/src, stack/src and memory-store/src.
+// schema/src, schema-config/src, stack/src, memory-store/src and
+// tasks/src.
 //
-//go:embed api/src/*.ts db/src/*.ts schema/src/*.ts schema-config/src/*.ts stack/src/*.ts memory-store/src/*.ts
+//go:embed api/src/*.ts db/src/*.ts schema/src/*.ts schema-config/src/*.ts stack/src/*.ts memory-store/src/*.ts tasks/src/*.ts
 var Sources embed.FS

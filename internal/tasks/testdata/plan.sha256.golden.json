@@ -1,0 +1,84 @@
+{
+  "commit": "1111111111111111111111111111111111111111",
+  "keyVersion": "1:sha256",
+  "order": [
+    "lint",
+    "schema-build",
+    "test",
+    "smoke"
+  ],
+  "sections": {
+    "forge": {
+      "tiers": [
+        "pr"
+      ]
+    }
+  },
+  "tasks": {
+    "lint": {
+      "inputs": [
+        {
+          "digest": "046ecd09db1cbd043d614b2436277a8138d0ae995b32bb3fd290cee583df53fc",
+          "files": 1,
+          "kind": "path"
+        },
+        {
+          "digest": "8796d545845f2f58ecb4e4beaecfa7207657bc660ee1996653d5dcd99c95a82b",
+          "files": 2,
+          "kind": "path"
+        }
+      ],
+      "key": "38a3dfd669a4ad45c68cb0935087067310947bd83496251b93377ff153f7d7f7",
+      "workHash": "de01c0115184212e135b3746b2fc91f5180bc28b65af3228b72c42e0dfddd487"
+    },
+    "schema-build": {
+      "inputs": [
+        {
+          "digest": "68c266a76a3e9c4d6647a5c06fabab35d86dea641ada232ee2bb8b0af503f86f",
+          "files": 9,
+          "kind": "schema"
+        }
+      ],
+      "key": "b03353fec624f221df727524be06dbbcd17322b9a80f2247978b028cfbf99424",
+      "workHash": "407b20a24c624f4c5493caf054526c57144f65f906cc105c76455ad1f8b443e9"
+    },
+    "smoke": {
+      "after": [
+        "test"
+      ],
+      "key": null,
+      "workHash": "16163f1a724701f2a636d6bf473d25b9c0a461082eed11dd5e7ef6e2c3fd9c25"
+    },
+    "test": {
+      "after": [
+        "lint"
+      ],
+      "inputs": [
+        {
+          "digest": "70d3e9d6265c72cfe18004d5ab4083ac15870b4b7360c4d48d6800d8bcc785cf",
+          "files": 3,
+          "kind": "path"
+        },
+        {
+          "digest": "3d08b93a15e9ac6b47ffab5b2c5b05363035dd8e43a7d2bcf3a3bcc12417771e",
+          "files": 1,
+          "kind": "path"
+        }
+      ],
+      "key": "4ac1a5b89ab8e65deb5ca85f623729df5fbec33226533e3b8f4ae6f079370e19",
+      "sections": {
+        "forge": {
+          "tier": "pr"
+        }
+      },
+      "uses": [
+        {
+          "output": "generated",
+          "task": "schema-build"
+        }
+      ],
+      "workHash": "bb43832e75d0175e3c4266177a8476a343458c49d67219b019dfb4d29d0e8ead"
+    }
+  },
+  "version": 1
+}

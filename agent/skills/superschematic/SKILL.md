@@ -92,6 +92,7 @@ The **kind** decides what a class means:
 | `API` | a request or response type; with `@source(Table)` a view of a table; a class of methods is an operation set | `+ @superschematic/api` | types, server, OpenAPI, SDKs |
 | `Stack` | the stack, a server, a database or an environment | `@superschematic/stack` | entrypoints, `environment.json`, CI |
 | `MemoryStore` | with `@channel` or `@key`, a channel or a key of a Redis or Valkey store that replicas share and can lose; its fields are the name's parts | `@superschematic/memory-store`, `superscalar` | typed definitions per language |
+| `Tasks` | with `@task`, one unit of the work a commit needs: a command, the tracked files it reads (`inputs`), the outputs of other tasks it reads (`uses`), the tasks it only waits for (`after`) and the outputs it writes; with `@tasks`, the defaults of every task (D203) | `@superschematic/tasks` | the task file a forge reads, installed at `outputs.tasks.install` and held current by `tasks --check`; `tasks plan <commit>` gives each task an input key |
 | `Bucket`, `Site` | config only: a file bucket, a static front end | | |
 
 Schema classes are `abstract`. An operation's body is
@@ -1104,13 +1105,14 @@ the checkout's runtimes), `tsconfig.base.json` (whose `paths` map
 nothing is published, so it needs a checkout prepared with `make setup`:
 `--superschematic` names it, else the checkout that holds the project.
 
-`new service <name> --kind DB|API|General|Bucket|Site|MemoryStore [--root <schemas-root>]`
+`new service <name> --kind DB|API|General|Bucket|Site|MemoryStore|Tasks [--root <schemas-root>]`
 writes `services/<name>/`: `schema.config.ts` with an `outputs` block
 that loads, `package.json` (`<npm_scope>/<name>`), `tsconfig.json`,
-`src/index.ts` and, for DB, API, General and MemoryStore, a starter
-`src/<name>.schema.ts` to rename and grow. Then it builds the service
-once, which writes `src/service.generated.ts`, so other configs can
-import its handle at once. Wire services together afterwards in the
+`src/index.ts` and, for DB, API, General, MemoryStore and Tasks, a
+starter `src/<name>.schema.ts` to rename and grow. Then it builds the
+service once, which writes `src/service.generated.ts`, so other configs
+can import its handle at once; a Tasks service, which nothing names, has
+none. Wire services together afterwards in the
 configs (`authDb`, `calls`, `buckets`, `memoryStores`, `rateLimitStore`,
 `dependencies`).
 

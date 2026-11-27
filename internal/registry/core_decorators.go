@@ -218,6 +218,10 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// (core_memorystore.go, D75).
 	specs = append(specs, memoryStoreDecorators()...)
 
+	// A Tasks service's declarations: @tasks and @task (core_tasks.go,
+	// D203).
+	specs = append(specs, tasksDecorators()...)
+
 	// An API service's apps, the project's own HTTP programs over its Deps
 	// (core_apps.go, D78).
 	specs = append(specs, appDecorator())

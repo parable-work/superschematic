@@ -71,6 +71,9 @@ type Registry struct {
 	// stack holds the stack model's platforms, connectors, targets, DNS
 	// platforms and provisioners (stack.go).
 	stack stackSpecs
+	// tasks holds the Tasks kind's input resolvers and task sections
+	// (tasks.go, D203).
+	tasks taskSpecs
 
 	// authoring is Naming.AuthoringPackages plus every registered
 	// decorator's Packages: the set IsAuthoringPackage answers from.
@@ -113,6 +116,7 @@ func New(n naming.Naming) *Registry {
 		behaviors:     map[string]Behavior{},
 		bundles:       map[string]Bundle{},
 		stack:         newStackSpecs(),
+		tasks:         newTaskSpecs(),
 		authoring:     map[string]bool{},
 		extensions:    map[string]bool{},
 	}
@@ -122,7 +126,7 @@ func New(n naming.Naming) *Registry {
 	for specifier := range r.naming.PackageAliases {
 		r.authoring[specifier] = true
 	}
-	for _, spec := range coreKinds() {
+	for _, spec := range coreKinds(r) {
 		if err := r.RegisterKind(spec); err != nil {
 			panic("registry: core kinds: " + err.Error())
 		}

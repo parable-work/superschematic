@@ -1,7 +1,9 @@
 // Package official lists the official extensions the installed binary
 // links (docs/stack-model.md, section 13): every official target and DNS
-// platform, the provisioner that applies them, and the embedded target,
-// which builds an environment as one binary and applies nothing (D116). cmd/superschematic is
+// platform, the provisioner that applies them, the embedded target,
+// which builds an environment as one binary and applies nothing (D116),
+// and the resolvers of a task's common inputs, a Go module, a Rust crate,
+// a JS package and an image (D203). cmd/superschematic is
 // the core with them; a binary that links another extension beside them,
 // such as extensions/topcoat's superschematic-topcoat, takes the same
 // list from here, so the two never differ in what else they link.
@@ -15,6 +17,7 @@ import (
 	"github.com/parable-work/superschematic/extensions/embedded"
 	"github.com/parable-work/superschematic/extensions/gcp"
 	"github.com/parable-work/superschematic/extensions/pulumi"
+	"github.com/parable-work/superschematic/extensions/resolvers"
 )
 
 // Extensions lists the official extensions, in the order a binary passes
@@ -28,6 +31,7 @@ func Extensions() []registry.Extension {
 		gcp.Extension{},
 		cloudflare.Extension{},
 		embedded.Extension{},
+		resolvers.Extension{},
 		pulumi.Extension{ProviderVersions: map[string]string{
 			"gcp":              gcp.ProviderVersion,
 			cloudflare.Package: cloudflare.ProviderVersion,
