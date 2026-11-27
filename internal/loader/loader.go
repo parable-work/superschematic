@@ -22,6 +22,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/agents"
 	"github.com/parable-work/superschematic/internal/loader/behaviorfields"
 	"github.com/parable-work/superschematic/internal/loader/behaviorops"
+	"github.com/parable-work/superschematic/internal/loader/bundles"
 	"github.com/parable-work/superschematic/internal/loader/conversations"
 	"github.com/parable-work/superschematic/internal/loader/graphops"
 	"github.com/parable-work/superschematic/internal/loader/idempotency"
@@ -636,6 +637,12 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	// (D118), so the pass and the generators read one order from every
 	// form.
 	orderStateMachines(schema, vin.ExternalEnums)
+	// A table's bundles join it as their parts, ordinary uses, before
+	// anything reads its uses (D103's step 5), so every check, expansion
+	// and generator below meets the parts alone.
+	if err := bundles.Expand(schema, reg); err != nil {
+		return nil, err
+	}
 	// A @source view of another service's table reads the fields its
 	// behaviors own as the table's own (D103).
 	behaviorfields.ExpandExternal(vin.ExternalTypes, reg)

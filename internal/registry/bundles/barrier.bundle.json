@@ -1,0 +1,68 @@
+{
+  "name": "Barrier",
+  "description": "A point an update waits at (D104): a Workflow on status with fixed states (waiting, released, cancelled); Rollups' all over the rows of another table that relate to the barrier, ready when every one of them has finished with the outcome success, which gates released; a Timers deadline whose then releases the barrier once the timeout has passed since it began waiting; and the move from waiting to released behind a permission, a person's go-ahead. The gate holds the deadline's move and the go-ahead's alike, so a barrier is released only once every row is ready: the deadline's release, at the timeout, is vetoed while a row is not, its fire then recorded vetoed and not tried again, and a person's go-ahead releases the barrier once every row is ready. The worker that runs the table's deadlines holds the release permission.",
+  "settingsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["rows", "link", "timeoutMs", "releasePermission"],
+    "properties": {
+      "rows": {
+        "description": "The table whose rows relate to the barrier, each of which says it is ready by finishing its Workflow with the outcome success.",
+        "type": "string",
+        "minLength": 1
+      },
+      "link": {
+        "description": "The to-one relation of that table to the barrier.",
+        "type": "string",
+        "minLength": 1
+      },
+      "timeoutMs": {
+        "description": "How long after the barrier begins waiting its deadline releases it, in milliseconds.",
+        "type": "integer",
+        "minimum": 0
+      },
+      "releasePermission": {
+        "description": "The permission a caller needs to release the barrier: a person's go-ahead.",
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "parts": [
+    {
+      "behavior": "Rollups",
+      "config": {
+        "rollups": {
+          "ready": {
+            "schema": { "$setting": "rows" },
+            "link": { "$setting": "link" },
+            "function": "all",
+            "outcomes": ["success"],
+            "gatedStates": ["released"]
+          }
+        }
+      }
+    },
+    {
+      "behavior": "Timers",
+      "config": {
+        "deadlines": {
+          "timeout": { "start": { "enters": "waiting" }, "afterMs": { "$setting": "timeoutMs" }, "then": { "transition": "released" } }
+        }
+      }
+    },
+    {
+      "behavior": "Workflow",
+      "field": "status",
+      "config": {
+        "states": ["waiting", "released", "cancelled"],
+        "initial": "waiting",
+        "transitions": [
+          { "from": "waiting", "to": "released", "permission": { "$setting": "releasePermission" } },
+          { "from": "waiting", "to": "cancelled" }
+        ],
+        "outcomes": { "cancelled": "neutral" }
+      }
+    }
+  ]
+}

@@ -7,7 +7,7 @@ import (
 )
 
 // canonicalizeDocument rewrites every extension and document value and
-// every behavior config in the decoded document into the form the IR
+// every behavior config and bundle's settings in the decoded document into the form the IR
 // persists (ir.CanonicalJSON), so the JSON and YAML readers, which hand
 // values over with different whitespace and key order, produce the same
 // IR. It covers the four holders the IR defines: the root, types, fields
@@ -24,6 +24,9 @@ func canonicalizeDocument(doc *Document) error {
 			return fmt.Errorf("type %q: %w", name, err)
 		}
 		if err := ir.CanonicalizeBehaviors(def.Behaviors); err != nil {
+			return fmt.Errorf("type %q: %w", name, err)
+		}
+		if err := ir.CanonicalizeBundles(def.Bundles); err != nil {
 			return fmt.Errorf("type %q: %w", name, err)
 		}
 		for _, field := range def.Fields {

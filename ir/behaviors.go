@@ -46,6 +46,12 @@ type BehaviorRef struct {
 	// every authoring form. Empty when the type configures nothing; a
 	// config of {} is stored as empty, as [SetExtension] drops {}.
 	Config json.RawMessage `json:"config,omitempty" yaml:"config,omitempty"`
+
+	// Bundle names the bundle that added the use, one of its parts (D103,
+	// step 5); empty for a use the schema writes. A use with Bundle set is
+	// the loader's, as an owned field is: the data forms have no key for
+	// it, and a schema writer writes the bundle in its place.
+	Bundle string `json:"bundle,omitempty" yaml:"bundle,omitempty" jsonschema:"-"`
 }
 
 // FieldAnchored reports whether the use is anchored on a field (D103).

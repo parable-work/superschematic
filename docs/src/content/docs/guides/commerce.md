@@ -29,6 +29,11 @@ A table numbers its rows with a `Numbering` field instead, `number:
 Numbering<{ format: "ORD-{yyyy}-{seq:5}"; reset: "yearly" }>`, counted in
 a table of its own
 ([A row's number and its history](/superschematic/guides/database-tables/#a-rows-number-and-its-history)).
+A booking on a table that holds a resource's time and waits for its
+payment is the `Reservation` bundle, which presets Workflow, Holds,
+Payments and a Timers expiry, so the booking says only its resource, its
+interval, its amount and its currency
+([Bundles](/superschematic/guides/database-tables/#bundles-behaviors-with-their-wiring-preset)).
 
 This page assumes you know [the engine](/superschematic/guides/engine/)
 and [engine behaviors](/superschematic/guides/engine-behaviors/). The

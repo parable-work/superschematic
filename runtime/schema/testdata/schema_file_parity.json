@@ -377,6 +377,55 @@
       "error": "a worker with neither a queue nor a table: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/Document'\n- at '/workers/0': missing property 'queue'"
     },
     {
+      "name": "a bundle a table implements",
+      "registry": "core",
+      "input": "{\"name\": \"Booking\", \"role\": \"DBTable\", \"bundles\": [\n\t\t{\"name\": \"Reservation\", \"settings\": {\"resource\": \"room\", \"interval\": {\"start\": \"startsAt\", \"end\": \"endsAt\"}, \"amount\": \"priceCents\", \"currency\": \"GBP\"}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Booking\":{\"bundles\":[{\"name\":\"Reservation\",\"settings\":{\"amount\":\"priceCents\",\"currency\":\"GBP\",\"interval\":{\"end\":\"endsAt\",\"start\":\"startsAt\"},\"resource\":\"room\"}}],\"name\":\"Booking\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "a bundle's settings of {} are stored as none",
+      "registry": "core",
+      "input": "{\"name\": \"Chore\", \"role\": \"DBTable\", \"bundles\": [{\"name\": \"Assignment\", \"settings\": {}}]}",
+      "accept": true,
+      "canonical": "{\"types\":{\"Chore\":{\"bundles\":[{\"name\":\"Assignment\"}],\"name\":\"Chore\",\"role\":\"DBTable\"}}}"
+    },
+    {
+      "name": "an unregistered bundle",
+      "registry": "core",
+      "input": "{\"name\": \"Booking\", \"role\": \"DBTable\", \"bundles\": [{\"name\": \"Rental\"}]}",
+      "accept": false,
+      "error": "an unregistered bundle: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/bundles/0/name': value must be one of 'Assignment', 'Barrier', 'Mailbox', 'Reservation'"
+    },
+    {
+      "name": "a bundle's missing required settings",
+      "registry": "core",
+      "input": "{\"name\": \"Booking\", \"role\": \"DBTable\", \"bundles\": [{\"name\": \"Reservation\"}]}",
+      "accept": false,
+      "error": "a bundle's missing required settings: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/bundles/0': 'allOf' failed\n  - at '/bundles/0': missing property 'settings'"
+    },
+    {
+      "name": "a bundle's settings its schema rejects",
+      "registry": "core",
+      "input": "{\"name\": \"Booking\", \"role\": \"DBTable\", \"bundles\": [\n\t\t{\"name\": \"Reservation\", \"settings\": {\"resource\": \"room\", \"interval\": {\"start\": \"startsAt\", \"end\": \"endsAt\"}, \"amount\": \"priceCents\", \"currency\": \"pounds\"}}]}",
+      "accept": false,
+      "error": "a bundle's settings its schema rejects: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/bundles/0': 'allOf' failed\n  - at '/bundles/0/settings/currency': 'pounds' does not match pattern '^[A-Z]{3}$'"
+    },
+    {
+      "name": "a bundle's setting its schema lacks",
+      "registry": "core",
+      "input": "{\"name\": \"Chore\", \"role\": \"DBTable\", \"bundles\": [{\"name\": \"Assignment\", \"settings\": {\"seat\": \"owner\"}}]}",
+      "accept": false,
+      "error": "a bundle's setting its schema lacks: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/bundles/0': 'allOf' failed\n  - at '/bundles/0/settings': additional properties 'seat' not allowed"
+    },
+    {
+      "name": "a use that names a bundle",
+      "registry": "core",
+      "input": "{\"name\": \"Chore\", \"role\": \"DBTable\", \"behaviors\": [\n\t\t{\"name\": \"Seats\", \"implements\": true, \"bundle\": \"Assignment\", \"config\": {\"seats\": {\"assignee\": {\"max\": 1}}}}]}",
+      "accept": false,
+      "error": "a use that names a bundle: jsonschema validation failed with 'superschematic://schema-file.json#/$defs/TypeDef'\n- at '/behaviors/0': additional properties 'bundle' not allowed"
+    },
+    {
       "name": "visible tool without a policy gets the default",
       "registry": "core",
       "input": "{\"kind\": \"OperationSet\", \"name\": \"Ops\", \"operations\": [\n\t\t{\"name\": \"deleteOrder\", \"typeRef\": {\"name\": \"Order\"}, \"httpMethod\": \"DELETE\", \"mcp\": {\"handle\": \"delete_order\", \"hidden\": false}}]}",

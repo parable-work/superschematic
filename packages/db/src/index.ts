@@ -137,6 +137,17 @@ export type {
   WorkflowConfig,
   WorkflowTransitionOn,
 } from "./wrappers";
+export type {
+  Assignment,
+  AssignmentSettings,
+  Barrier,
+  BarrierSettings,
+  Bundle,
+  Mailbox,
+  MailboxSettings,
+  Reservation,
+  ReservationSettings,
+} from "./bundles";
 export type { IdempotencyKeys, RoleSeed, User, UserConfig, UserRole } from "./user";
 export type { Mergeable } from "./mergeable";
 export { seedRoles } from "./user";

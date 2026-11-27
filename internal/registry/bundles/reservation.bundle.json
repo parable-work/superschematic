@@ -1,0 +1,80 @@
+{
+  "name": "Reservation",
+  "description": "A booking of a resource's time that waits for its payment (D103): a Workflow on status with fixed states (draft, held, booked, expired, cancelled); Holds, which takes the resource's time for the booking's interval as it enters held, commits it as it is booked and lets it go as it expires or is cancelled; Payments, which owes the booking's amount in its currency, holds booked until it is paid, and voids what is authorized when the booking expires or is cancelled; and a Timers deadline that expires a booking fifteen minutes after it enters held. The resource is a to-one relation of the table to a table that implements Calendar, the supply of its time, whose hours and capacity are the resource's own.",
+  "settingsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["resource", "interval", "amount", "currency"],
+    "properties": {
+      "resource": {
+        "description": "The to-one relation of the table to the resource whose time a booking holds: a table that implements Calendar.",
+        "type": "string",
+        "minLength": 1
+      },
+      "interval": {
+        "description": "The booking's time: the own date-time fields it starts and ends at.",
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["start", "end"],
+        "properties": {
+          "start": { "description": "The own date-time field the booking starts at.", "type": "string", "minLength": 1 },
+          "end": { "description": "The own date-time field the booking ends at.", "type": "string", "minLength": 1 }
+        }
+      },
+      "amount": {
+        "description": "The own integer field that holds what a booking owes, in the currency's minor units.",
+        "type": "string",
+        "minLength": 1
+      },
+      "currency": {
+        "description": "The currency of the amount: an ISO 4217 code.",
+        "type": "string",
+        "pattern": "^[A-Z]{3}$"
+      }
+    }
+  },
+  "parts": [
+    {
+      "behavior": "Holds",
+      "config": {
+        "holds": { "slot": { "link": { "$setting": "resource" }, "interval": { "$setting": "interval" } } },
+        "takeOn": ["held"],
+        "commitOn": ["booked"],
+        "releaseOn": ["expired", "cancelled"]
+      }
+    },
+    {
+      "behavior": "Payments",
+      "config": {
+        "amount": { "field": { "$setting": "amount" } },
+        "currency": { "$setting": "currency" },
+        "require": { "booked": "paid" },
+        "voidOn": ["expired", "cancelled"],
+        "record": { "permission": "payments.record" }
+      }
+    },
+    {
+      "behavior": "Timers",
+      "config": {
+        "deadlines": {
+          "holdExpiry": { "start": { "enters": "held" }, "afterMs": 900000, "then": { "transition": "expired" } }
+        }
+      }
+    },
+    {
+      "behavior": "Workflow",
+      "field": "status",
+      "config": {
+        "states": ["draft", "held", "booked", "expired", "cancelled"],
+        "initial": "draft",
+        "transitions": [
+          { "from": "draft", "to": "held" },
+          { "from": "held", "to": "booked" },
+          { "from": "held", "to": "expired" },
+          { "from": "held", "to": "cancelled" },
+          { "from": "draft", "to": "cancelled" }
+        ]
+      }
+    }
+  ]
+}

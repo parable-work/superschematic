@@ -56,6 +56,11 @@ func (w *walker) behaviorOfIdentity(id symbolIdentity) (registry.Behavior, bool)
 	if id.pkg != behaviorFieldPackage {
 		return registry.Behavior{}, false
 	}
+	// A bundle is no behavior's carrier, though it may share a behavior's
+	// name: Assignment, the engine's behavior and the core's bundle (D104).
+	if id.decl != nil && id.decl.Kind == kindTypeAliasDeclaration && w.isBundleMarker(id.decl.AsTypeAliasDeclaration().Type) {
+		return registry.Behavior{}, false
+	}
 	return w.reg.Behavior(id.name)
 }
 
@@ -319,11 +324,16 @@ func (w *walker) behaviorImplementsOf(class, t *astNode, behavior registry.Behav
 // that composes behaviors both ways is the verification pass's to refuse
 // (verify.checkTypeBehaviors), as it is for the data forms.
 func (w *walker) applyFieldBehaviors(node *astNode, td *ir.TypeDef) {
-	implemented, uses := w.classImplements[node], w.classUses[node]
-	if len(implemented) == 0 && len(uses) == 0 {
+	implemented, uses, bundled := w.classImplements[node], w.classUses[node], w.classBundles[node]
+	if len(implemented) == 0 && len(uses) == 0 && len(bundled) == 0 {
 		return
 	}
 	if w.cfg.Kind != ir.SchemaKindDB || td.Role != ir.RoleDBTable || td.JsonField {
+		if len(bundled) > 0 && len(implemented) == 0 {
+			use := bundled[0]
+			w.addErr(errorAtNode(use.node, "type %s implements the bundle %s, and a bundle is implemented by a DB table, which %s is not (D103)", td.Name, use.ref.Name, td.Name))
+			return
+		}
 		if len(implemented) > 0 {
 			use := implemented[0]
 			w.addErr(errorAtNode(use.node, "type %s implements %s, and a type implements a behavior on a DB table, which %s is not (D103)", td.Name, use.ref.Name, td.Name))
@@ -339,6 +349,45 @@ func (w *walker) applyFieldBehaviors(node *astNode, td *ir.TypeDef) {
 	for _, use := range uses {
 		td.Behaviors = append(td.Behaviors, use.ref)
 	}
+	// A bundle's parts follow the table's own uses, bundle by bundle, as
+	// the loader adds a data form's (D103, step 5). A registered one is
+	// recorded as the table's bundle, which the loader holds its parts
+	// to; one the project declares records its parts alone.
+	for _, use := range bundled {
+		if use.registered {
+			if _, twice := td.Bundle(use.ref.Name); twice {
+				w.addErr(errorAtNode(use.node, "type %s implements the bundle %s twice", td.Name, use.ref.Name))
+				continue
+			}
+			td.Bundles = append(td.Bundles, use.ref)
+		}
+		for _, part := range use.parts {
+			if serr := bundlePartConflict(td, part, use.node); serr != nil {
+				w.addErr(serr)
+				continue
+			}
+			td.Behaviors = append(td.Behaviors, part)
+		}
+	}
+}
+
+// bundlePartConflict refuses a bundle's part that td cannot take beside the
+// uses it holds: a behavior a use of the table, or another bundle's part,
+// implements already, or a field another use is anchored on (D103, step 5).
+func bundlePartConflict(td *ir.TypeDef, part ir.BehaviorRef, node *astNode) *SchemaError {
+	for _, use := range td.Behaviors {
+		by := "the type"
+		if use.Bundle != "" {
+			by = "the bundle " + use.Bundle
+		}
+		switch {
+		case part.FieldAnchored() && use.Field == part.Field:
+			return errorAtNode(node, "type %s: bundle %s anchors %s on field %s, which %s anchors %s on already (D103)", td.Name, part.Bundle, part.Name, part.Field, by, use.Name)
+		case !part.FieldAnchored() && use.Implements && use.Name == part.Name:
+			return errorAtNode(node, "type %s: bundle %s implements %s, which %s implements already, and a table implements a behavior at most once (D103)", td.Name, part.Bundle, part.Name, by)
+		}
+	}
+	return nil
 }
 
 // inheritedBehaviorImplements refuses a base class or a trait that
@@ -348,6 +397,9 @@ func (w *walker) applyFieldBehaviors(node *astNode, td *ir.TypeDef) {
 // base.
 func (w *walker) inheritedBehaviorImplements(class string, heritage, base *astNode, baseName string) *SchemaError {
 	implemented := w.classImplements[base]
+	if bundled := w.classBundles[base]; len(implemented) == 0 && len(bundled) > 0 {
+		return errorAtNode(heritage, "type %s: %s implements the bundle %s, which %s does not inherit: a bundle a table implements is on the table that declares it (D103)", class, baseName, bundled[0].ref.Name, class)
+	}
 	if len(implemented) == 0 {
 		return nil
 	}
@@ -392,6 +444,9 @@ type configReader struct {
 	// root is the type argument, where an error without a node of its own
 	// is located.
 	root *astNode
+	// bundle binds a bundle alias's type parameters while one of its
+	// parts' configs is read (D103, step 5): nil for any other config.
+	bundle *bundleBinding
 }
 
 // fail is an error at node (the root when node is nil) and the JSON pointer
@@ -418,6 +473,13 @@ func (r *configReader) value(t *checkerType, node *astNode, at string, depth int
 	node = r.written(node)
 	if depth > maxConfigDepth {
 		return nil, r.fail(node, at, "the config nests more than %d levels deep", maxConfigDepth)
+	}
+	// A bundle's part reads a setting as S["name"], which the class's
+	// settings answer (D103, step 5).
+	if r.bundle != nil && node != nil {
+		if v, handled, serr := r.setting(node, at, depth); handled {
+			return v, serr
+		}
 	}
 	if t == nil {
 		return nil, r.fail(node, at, "the checker cannot resolve this type")
@@ -481,6 +543,11 @@ func (r *configReader) object(t *checkerType, node *astNode, at string, depth in
 		if serr != nil {
 			return nil, serr
 		}
+		// A member that reads a setting the class leaves out is left
+		// out with it (D103, step 5).
+		if _, absent := v.(absentSetting); absent {
+			continue
+		}
 		out[prop.Name] = v
 	}
 	return out, nil
@@ -511,6 +578,9 @@ func (r *configReader) tuple(t *checkerType, node *astNode, at string, depth int
 		v, serr := r.value(elements[i], elementNode, elementAt, depth+1)
 		if serr != nil {
 			return nil, serr
+		}
+		if _, absent := v.(absentSetting); absent {
+			return nil, r.fail(elementNode, elementAt, "a tuple's element reads a setting the table leaves out, and an element takes a value")
 		}
 		out = append(out, v)
 	}

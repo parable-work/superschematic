@@ -4,9 +4,10 @@
 // multi-definition Document or one definition in its file form. They are
 // written from the JSON Schema `superschematic json-schema` emits for the
 // core registry (schema-file.json in this package), which is reflected from
-// the Go IR structs. A registry closes six parts of that schema, which
+// the Go IR structs. A registry closes seven parts of that schema, which
 // these types leave open: the extensions slots, the documents, the schema
-// kinds, the MCP invocation policy key, and a behavior's name and config.
+// kinds, the MCP invocation policy key, a behavior's name and config, and a
+// bundle's name and settings.
 // Regenerate with:
 //   go run ./internal/tools/schemafiletypes
 
@@ -121,6 +122,20 @@ export interface BehaviorRef {
 export interface BehaviorWorkerConfig {
   permissions?: string[];
   type: string;
+}
+
+export interface BundleRef {
+  /**
+   * The bundle's registered name (D103, step 5). A registry admits the bundles
+   * it declares: the core's Reservation, Barrier, Mailbox and Assignment.
+   */
+  name: string;
+  /**
+   * The values the table gives the bundle's settings, which the registry holds
+   * to the bundle's settings schema and the loader substitutes into its parts'
+   * configs. Settings of {} are stored as none.
+   */
+  settings?: unknown;
 }
 
 export interface CalendarSourceDef {
@@ -930,6 +945,7 @@ export interface TypeDef {
    * implements, and its extensions'.
    */
   behaviors?: BehaviorRef[];
+  bundles?: BundleRef[];
   calendarSources?: CalendarSourceDef[];
   channelIdentities?: ChannelIdentitiesDef;
   comment?: string;

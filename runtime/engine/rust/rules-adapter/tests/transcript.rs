@@ -91,7 +91,7 @@ use common::{camel, column_types, p, snake, storage_key, Param};
 /// The transcripts every dialect replays, each with the steps it holds,
 /// the testkit's floor (`tests/transcript.rs`): each dialect replays every
 /// one, so a regression cannot pass by skipping.
-const TRANSCRIPTS: [(&str, usize); 36] = [
+const TRANSCRIPTS: [(&str, usize); 37] = [
     ("core-workflow", 96),
     ("core-timers", TIMERS_FLOOR),
     ("core-reactions", REACTIONS_FLOOR),
@@ -128,6 +128,7 @@ const TRANSCRIPTS: [(&str, usize); 36] = [
     ("core-payments", PAYMENTS_FLOOR),
     ("core-blueprint", BLUEPRINT_FLOOR),
     ("core-aliased", ALIASED_FLOOR),
+    ("core-bundles", BUNDLES_FLOOR),
 ];
 
 /// core-timers' floor, as the core's milestone states it: 139 steps, 85
@@ -361,6 +362,12 @@ const BLUEPRINT_FLOOR: usize = 151;
 /// removeAlias, resolve a command without a row, and a delete that deletes
 /// the row's rows of the shared table.
 const ALIASED_FLOOR: usize = 46;
+/// core-bundles' floor (D103's step 5): 84 steps of the scenarios written
+/// by hand, 72 commands and 12 checks: the core's four bundles, each a
+/// table whose uses are the parts the loader expands the bundle into, a
+/// booking's hold, payment and expiry, a rollout's gate and deadline, a
+/// message's lease and its expiry back to the queue, and one seat.
+const BUNDLES_FLOOR: usize = 84;
 
 /// How many runs a check makes before the test calls it unsettled.
 const CHECK_ROUNDS: usize = 16;
