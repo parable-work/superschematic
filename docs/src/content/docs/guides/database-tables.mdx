@@ -4558,9 +4558,9 @@ behaviors it anchors on fields, by field. A config reads a setting as
 settings through the checker:
 
 ```ts
-import { Bundle, StateRules, Workflow } from "@superschematic/db";
+import { Bundle, StateRules, Workflow, type FieldOf } from "@superschematic/db";
 
-type Reviewed<T, S extends { reviewer: Extract<keyof T, string> }> = Bundle<
+type Reviewed<T, S extends { reviewer: FieldOf<T> }> = Bundle<
   [StateRules<T, { states: { review: { frozen: "all"; by: [S["reviewer"]] } } }>],
   {
     status: Workflow<{

@@ -74,8 +74,8 @@ export abstract class Problem implements Assignment<Problem, { assign: "problems
 // element among them.
 func TestAProjectsOwnBundle(t *testing.T) {
 	dir := decoratorTestService(t, "DB", map[string]string{"src/a.schema.ts": `import { Identity } from "superscalar";
-import { AutoGenerate, Bundle, StateRules, Workflow, key } from "@superschematic/db";
-type Frozen<T, S extends { by: Extract<keyof T, string> }> = Bundle<
+import { AutoGenerate, Bundle, StateRules, Workflow, key, type FieldOf } from "@superschematic/db";
+type Frozen<T, S extends { by: FieldOf<T> }> = Bundle<
   [StateRules<T, { states: { done: { frozen: "all"; by: [S["by"]] } } }>],
   { state: Workflow<{ states: ["open", "done"]; transitions: [{ from: "open"; to: "done" }] }> }
 >;

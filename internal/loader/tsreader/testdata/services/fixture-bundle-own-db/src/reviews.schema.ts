@@ -1,11 +1,11 @@
 import { Identity } from "superscalar";
-import { AutoGenerate, Bundle, StateRules, Workflow, key } from "@superschematic/db";
+import { AutoGenerate, Bundle, StateRules, Workflow, key, type FieldOf } from "@superschematic/db";
 
 // A bundle the project declares (D103, step 5): a draft that a reviewer
 // reviews, frozen while it is in review but for the reviewer the setting
 // names, who alone approves it. TypeScript alone reads it: the data forms
 // carry its parts.
-type Reviewed<T, S extends { reviewer: Extract<keyof T, string>; approvePermission?: string }> = Bundle<
+type Reviewed<T, S extends { reviewer: FieldOf<T>; approvePermission?: string }> = Bundle<
   [StateRules<T, { states: { review: { frozen: "all"; by: [S["reviewer"]] } } }>],
   {
     status: Workflow<{
