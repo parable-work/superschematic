@@ -131,6 +131,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-workflow-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-workflow-api', options);
@@ -153,9 +160,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.orderStatusTransition,
-      timeoutSeconds: options.timeouts?.orderStatusTransition,
+      bodyLimitBytes: bodyLimits.orderStatusTransition,
+      rateLimitPerMinute: rateLimits.orderStatusTransition,
+      timeoutSeconds: timeouts.orderStatusTransition,
     }
   );
   mountOperation(
@@ -170,9 +177,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getOrder,
-      rateLimitPerMinute: options.rateLimits?.getOrder,
-      timeoutSeconds: options.timeouts?.getOrder,
+      bodyLimitBytes: bodyLimits.getOrder,
+      rateLimitPerMinute: rateLimits.getOrder,
+      timeoutSeconds: timeouts.getOrder,
     }
   );
   // Shipment's paymentStatus transition, a Workflow (D103): the
@@ -194,9 +201,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ShipmentPaymentStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.paymentStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.paymentStatusTransition,
-      timeoutSeconds: options.timeouts?.paymentStatusTransition,
+      bodyLimitBytes: bodyLimits.paymentStatusTransition,
+      rateLimitPerMinute: rateLimits.paymentStatusTransition,
+      timeoutSeconds: timeouts.paymentStatusTransition,
     }
   );
   // Shipment's status transition, a Workflow (D103): the
@@ -218,9 +225,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ShipmentStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.shipmentStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.shipmentStatusTransition,
-      timeoutSeconds: options.timeouts?.shipmentStatusTransition,
+      bodyLimitBytes: bodyLimits.shipmentStatusTransition,
+      rateLimitPerMinute: rateLimits.shipmentStatusTransition,
+      timeoutSeconds: timeouts.shipmentStatusTransition,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

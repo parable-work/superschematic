@@ -79,6 +79,13 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
 /** Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application. */
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'scalar-lists-api', options);
@@ -99,9 +106,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.storeDocument,
-      rateLimitPerMinute: options.rateLimits?.storeDocument,
-      timeoutSeconds: options.timeouts?.storeDocument,
+      bodyLimitBytes: bodyLimits.storeDocument,
+      rateLimitPerMinute: rateLimits.storeDocument,
+      timeoutSeconds: timeouts.storeDocument,
     }
   );
   mountOperation(
@@ -119,9 +126,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.findTags,
-      rateLimitPerMinute: options.rateLimits?.findTags,
-      timeoutSeconds: options.timeouts?.findTags,
+      bodyLimitBytes: bodyLimits.findTags,
+      rateLimitPerMinute: rateLimits.findTags,
+      timeoutSeconds: timeouts.findTags,
     }
   );
   mountOperation(
@@ -143,9 +150,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.saveTags,
-      rateLimitPerMinute: options.rateLimits?.saveTags,
-      timeoutSeconds: options.timeouts?.saveTags,
+      bodyLimitBytes: bodyLimits.saveTags,
+      rateLimitPerMinute: rateLimits.saveTags,
+      timeoutSeconds: timeouts.saveTags,
     }
   );
   return router;

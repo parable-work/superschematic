@@ -279,6 +279,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-derived-provenance-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-derived-provenance-api', options);
@@ -300,9 +307,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ArticleDerivedFailedDerivationsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.articleSummariesDerivedFailedDerivations,
-      rateLimitPerMinute: options.rateLimits?.articleSummariesDerivedFailedDerivations,
-      timeoutSeconds: options.timeouts?.articleSummariesDerivedFailedDerivations,
+      bodyLimitBytes: bodyLimits.articleSummariesDerivedFailedDerivations,
+      rateLimitPerMinute: rateLimits.articleSummariesDerivedFailedDerivations,
+      timeoutSeconds: timeouts.articleSummariesDerivedFailedDerivations,
     }
   );
   // Article's Derived settleDerivations, a Derived's operation of the table as a
@@ -322,9 +329,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ArticleDerivedSettleDerivationsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.articleSummariesDerivedSettleDerivations,
-      rateLimitPerMinute: options.rateLimits?.articleSummariesDerivedSettleDerivations,
-      timeoutSeconds: options.timeouts?.articleSummariesDerivedSettleDerivations,
+      bodyLimitBytes: bodyLimits.articleSummariesDerivedSettleDerivations,
+      rateLimitPerMinute: rateLimits.articleSummariesDerivedSettleDerivations,
+      timeoutSeconds: timeouts.articleSummariesDerivedSettleDerivations,
     }
   );
   // Article's Derived staleDerivations, a Derived's operation of the table as a
@@ -345,9 +352,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ArticleDerivedStaleDerivationsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.articleSummariesDerivedStaleDerivations,
-      rateLimitPerMinute: options.rateLimits?.articleSummariesDerivedStaleDerivations,
-      timeoutSeconds: options.timeouts?.articleSummariesDerivedStaleDerivations,
+      bodyLimitBytes: bodyLimits.articleSummariesDerivedStaleDerivations,
+      rateLimitPerMinute: rateLimits.articleSummariesDerivedStaleDerivations,
+      timeoutSeconds: timeouts.articleSummariesDerivedStaleDerivations,
     }
   );
   // Article's Derived applyDerived, a Derived (D103): the
@@ -368,9 +375,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ArticleDerivedApplyDerivedResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.articleSummariesDerivedApplyDerived,
-      rateLimitPerMinute: options.rateLimits?.articleSummariesDerivedApplyDerived,
-      timeoutSeconds: options.timeouts?.articleSummariesDerivedApplyDerived,
+      bodyLimitBytes: bodyLimits.articleSummariesDerivedApplyDerived,
+      rateLimitPerMinute: rateLimits.articleSummariesDerivedApplyDerived,
+      timeoutSeconds: timeouts.articleSummariesDerivedApplyDerived,
     }
   );
   // Article's Derived rederive, a Derived (D103): the
@@ -392,9 +399,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ArticleDerivedRederiveResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.articleSummariesDerivedRederive,
-      rateLimitPerMinute: options.rateLimits?.articleSummariesDerivedRederive,
-      timeoutSeconds: options.timeouts?.articleSummariesDerivedRederive,
+      bodyLimitBytes: bodyLimits.articleSummariesDerivedRederive,
+      rateLimitPerMinute: rateLimits.articleSummariesDerivedRederive,
+      timeoutSeconds: timeouts.articleSummariesDerivedRederive,
     }
   );
   // Ticket's Derived failedDerivations, a Derived's operation of the table as a
@@ -415,9 +422,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketDerivedFailedDerivationsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.ticketTriageDerivedFailedDerivations,
-      rateLimitPerMinute: options.rateLimits?.ticketTriageDerivedFailedDerivations,
-      timeoutSeconds: options.timeouts?.ticketTriageDerivedFailedDerivations,
+      bodyLimitBytes: bodyLimits.ticketTriageDerivedFailedDerivations,
+      rateLimitPerMinute: rateLimits.ticketTriageDerivedFailedDerivations,
+      timeoutSeconds: timeouts.ticketTriageDerivedFailedDerivations,
     }
   );
   // Ticket's Derived settleDerivations, a Derived's operation of the table as a
@@ -437,9 +444,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketDerivedSettleDerivationsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.ticketTriageDerivedSettleDerivations,
-      rateLimitPerMinute: options.rateLimits?.ticketTriageDerivedSettleDerivations,
-      timeoutSeconds: options.timeouts?.ticketTriageDerivedSettleDerivations,
+      bodyLimitBytes: bodyLimits.ticketTriageDerivedSettleDerivations,
+      rateLimitPerMinute: rateLimits.ticketTriageDerivedSettleDerivations,
+      timeoutSeconds: timeouts.ticketTriageDerivedSettleDerivations,
     }
   );
   // Ticket's Derived staleDerivations, a Derived's operation of the table as a
@@ -460,9 +467,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketDerivedStaleDerivationsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.ticketTriageDerivedStaleDerivations,
-      rateLimitPerMinute: options.rateLimits?.ticketTriageDerivedStaleDerivations,
-      timeoutSeconds: options.timeouts?.ticketTriageDerivedStaleDerivations,
+      bodyLimitBytes: bodyLimits.ticketTriageDerivedStaleDerivations,
+      rateLimitPerMinute: rateLimits.ticketTriageDerivedStaleDerivations,
+      timeoutSeconds: timeouts.ticketTriageDerivedStaleDerivations,
     }
   );
   // Ticket's Derived applyDerived, a Derived (D103): the
@@ -483,9 +490,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketDerivedApplyDerivedResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.ticketTriageDerivedApplyDerived,
-      rateLimitPerMinute: options.rateLimits?.ticketTriageDerivedApplyDerived,
-      timeoutSeconds: options.timeouts?.ticketTriageDerivedApplyDerived,
+      bodyLimitBytes: bodyLimits.ticketTriageDerivedApplyDerived,
+      rateLimitPerMinute: rateLimits.ticketTriageDerivedApplyDerived,
+      timeoutSeconds: timeouts.ticketTriageDerivedApplyDerived,
     }
   );
   // Ticket's Derived rederive, a Derived (D103): the
@@ -507,9 +514,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketDerivedRederiveResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.ticketTriageDerivedRederive,
-      rateLimitPerMinute: options.rateLimits?.ticketTriageDerivedRederive,
-      timeoutSeconds: options.timeouts?.ticketTriageDerivedRederive,
+      bodyLimitBytes: bodyLimits.ticketTriageDerivedRederive,
+      rateLimitPerMinute: rateLimits.ticketTriageDerivedRederive,
+      timeoutSeconds: timeouts.ticketTriageDerivedRederive,
     }
   );
   // Ticket's Provenance accept, a Provenance (D103): the
@@ -530,9 +537,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketProvenanceAcceptResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.provenanceAccept,
-      rateLimitPerMinute: options.rateLimits?.provenanceAccept,
-      timeoutSeconds: options.timeouts?.provenanceAccept,
+      bodyLimitBytes: bodyLimits.provenanceAccept,
+      rateLimitPerMinute: rateLimits.provenanceAccept,
+      timeoutSeconds: timeouts.provenanceAccept,
     }
   );
   // Ticket's Provenance reject, a Provenance (D103): the
@@ -554,9 +561,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketProvenanceRejectResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.provenanceReject,
-      rateLimitPerMinute: options.rateLimits?.provenanceReject,
-      timeoutSeconds: options.timeouts?.provenanceReject,
+      bodyLimitBytes: bodyLimits.provenanceReject,
+      rateLimitPerMinute: rateLimits.provenanceReject,
+      timeoutSeconds: timeouts.provenanceReject,
     }
   );
   // Ticket's status transition, a Workflow (D103): the
@@ -578,9 +585,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.statusTransition,
-      rateLimitPerMinute: options.rateLimits?.statusTransition,
-      timeoutSeconds: options.timeouts?.statusTransition,
+      bodyLimitBytes: bodyLimits.statusTransition,
+      rateLimitPerMinute: rateLimits.statusTransition,
+      timeoutSeconds: timeouts.statusTransition,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

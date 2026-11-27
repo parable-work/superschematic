@@ -487,6 +487,22 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
   }
 {{- end }}
   const router = new Hono<E>();
+{{- if .Endpoints }}
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+{{- end }}
+{{- if .ReadsBodyLimits }}
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+{{- end }}
+{{- if .Endpoints }}
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
+{{- end }}
+{{- if .HasManualRoutes }}
+  const manualRoutes: NonNullable<typeof options.manualRoutes> = options.manualRoutes ?? {};
+{{- end }}
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, {{ tsString .SchemaName }}, options);
@@ -502,14 +518,14 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- range .Endpoints }}
 {{- if .IdentityOperation }}
   mountManualOperation(router, operationSpecs.{{ .Key }}, identityHandler(runtime.identity, {{ tsString .IdentityOperation }}), runtime, {
-    bodyLimitBytes: options.bodyLimits?.{{ .Key }},
-    rateLimitPerMinute: options.rateLimits?.{{ .Key }},
-    timeoutSeconds: options.timeouts?.{{ .Key }},
+    bodyLimitBytes: bodyLimits.{{ .Key }},
+    rateLimitPerMinute: rateLimits.{{ .Key }},
+    timeoutSeconds: timeouts.{{ .Key }},
   });
 {{- else if .ManualRouteRegistration }}
-  mountManualOperation(router, operationSpecs.{{ .Key }}, options.manualRoutes?.{{ .Key }}, {{ $runtime }}, {
-    rateLimitPerMinute: options.rateLimits?.{{ .Key }},
-    timeoutSeconds: options.timeouts?.{{ .Key }},
+  mountManualOperation(router, operationSpecs.{{ .Key }}, manualRoutes.{{ .Key }}, {{ $runtime }}, {
+    rateLimitPerMinute: rateLimits.{{ .Key }},
+    timeoutSeconds: timeouts.{{ .Key }},
 {{- if .WebhookProvider }}
     webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
@@ -561,9 +577,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<{{ .OutputType }}>,
     {{ $runtime }},
     {
-      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
-      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
-      timeoutSeconds: options.timeouts?.{{ .Key }},
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
 {{- if .WebhookProvider }}
       webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
@@ -579,9 +595,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => {{ .Graph.Handler }}(options.orm, options.graphs.{{ .Graph.Member }}, graphOperations.{{ .Key }}, ctx, request),
     {{ $runtime }},
     {
-      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
-      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
-      timeoutSeconds: options.timeouts?.{{ .Key }},
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
     }
   );
 {{- else if .Table }}
@@ -611,9 +627,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- end }}
     {{ $runtime }},
     {
-      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
-      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
-      timeoutSeconds: options.timeouts?.{{ .Key }},
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
 {{- if .WebhookProvider }}
       webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
@@ -657,9 +673,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     },
     {{ $runtime }},
     {
-      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
-      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
-      timeoutSeconds: options.timeouts?.{{ .Key }},
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
 {{- if .WebhookProvider }}
       webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
@@ -703,9 +719,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     {{ $runtime }},
     {
-      bodyLimitBytes: options.bodyLimits?.{{ .Key }},
-      rateLimitPerMinute: options.rateLimits?.{{ .Key }},
-      timeoutSeconds: options.timeouts?.{{ .Key }},
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
 {{- if .WebhookProvider }}
       webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}

@@ -390,6 +390,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the table operations of fixture-tracker-api (D106)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-tracker-api', options);
@@ -402,9 +409,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableDelete(options.orm, tableOperations.deleteIssue, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.deleteIssue,
-      rateLimitPerMinute: options.rateLimits?.deleteIssue,
-      timeoutSeconds: options.timeouts?.deleteIssue,
+      bodyLimitBytes: bodyLimits.deleteIssue,
+      rateLimitPerMinute: rateLimits.deleteIssue,
+      timeoutSeconds: timeouts.deleteIssue,
     }
   );
   // A read of Issue (D106): the runtime's handler runs it through the
@@ -416,9 +423,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableRead(options.orm, tableOperations.getIssue, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getIssue,
-      rateLimitPerMinute: options.rateLimits?.getIssue,
-      timeoutSeconds: options.timeouts?.getIssue,
+      bodyLimitBytes: bodyLimits.getIssue,
+      rateLimitPerMinute: rateLimits.getIssue,
+      timeoutSeconds: timeouts.getIssue,
     }
   );
   // An update of Issue (D106): the runtime's handler runs it through the
@@ -430,9 +437,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableUpdate(options.orm, tableOperations.updateIssue, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.updateIssue,
-      rateLimitPerMinute: options.rateLimits?.updateIssue,
-      timeoutSeconds: options.timeouts?.updateIssue,
+      bodyLimitBytes: bodyLimits.updateIssue,
+      rateLimitPerMinute: rateLimits.updateIssue,
+      timeoutSeconds: timeouts.updateIssue,
     }
   );
   // A list of Comment (D106): the runtime's handler runs it through the
@@ -447,9 +454,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     },
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listComments,
-      rateLimitPerMinute: options.rateLimits?.listComments,
-      timeoutSeconds: options.timeouts?.listComments,
+      bodyLimitBytes: bodyLimits.listComments,
+      rateLimitPerMinute: rateLimits.listComments,
+      timeoutSeconds: timeouts.listComments,
     }
   );
   // A create of Comment (D106): the runtime's handler runs it through the
@@ -461,9 +468,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableCreate(options.orm, tableOperations.createComment, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.createComment,
-      rateLimitPerMinute: options.rateLimits?.createComment,
-      timeoutSeconds: options.timeouts?.createComment,
+      bodyLimitBytes: bodyLimits.createComment,
+      rateLimitPerMinute: rateLimits.createComment,
+      timeoutSeconds: timeouts.createComment,
     }
   );
   // A delete of Comment (D106): the runtime's handler runs it through the
@@ -475,9 +482,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableDelete(options.orm, tableOperations.deleteComment, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.deleteComment,
-      rateLimitPerMinute: options.rateLimits?.deleteComment,
-      timeoutSeconds: options.timeouts?.deleteComment,
+      bodyLimitBytes: bodyLimits.deleteComment,
+      rateLimitPerMinute: rateLimits.deleteComment,
+      timeoutSeconds: timeouts.deleteComment,
     }
   );
   // A create of Note (D106): the runtime's handler runs it through the
@@ -489,9 +496,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableCreate(options.orm, tableOperations.createNote, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.createNote,
-      rateLimitPerMinute: options.rateLimits?.createNote,
-      timeoutSeconds: options.timeouts?.createNote,
+      bodyLimitBytes: bodyLimits.createNote,
+      rateLimitPerMinute: rateLimits.createNote,
+      timeoutSeconds: timeouts.createNote,
     }
   );
   // A list of Member (D106): the runtime's handler runs it through the
@@ -506,9 +513,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     },
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listMembers,
-      rateLimitPerMinute: options.rateLimits?.listMembers,
-      timeoutSeconds: options.timeouts?.listMembers,
+      bodyLimitBytes: bodyLimits.listMembers,
+      rateLimitPerMinute: rateLimits.listMembers,
+      timeoutSeconds: timeouts.listMembers,
     }
   );
   // A create of Member (D106): the runtime's handler runs it through the
@@ -520,9 +527,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableCreate(options.orm, tableOperations.createMember, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.createMember,
-      rateLimitPerMinute: options.rateLimits?.createMember,
-      timeoutSeconds: options.timeouts?.createMember,
+      bodyLimitBytes: bodyLimits.createMember,
+      rateLimitPerMinute: rateLimits.createMember,
+      timeoutSeconds: timeouts.createMember,
     }
   );
   // A list of Note (D106): the runtime's handler runs it through the
@@ -541,9 +548,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     },
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listNotes,
-      rateLimitPerMinute: options.rateLimits?.listNotes,
-      timeoutSeconds: options.timeouts?.listNotes,
+      bodyLimitBytes: bodyLimits.listNotes,
+      rateLimitPerMinute: rateLimits.listNotes,
+      timeoutSeconds: timeouts.listNotes,
     }
   );
   // A delete of Note (D106): the runtime's handler runs it through the
@@ -555,9 +562,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableDelete(options.orm, tableOperations.deleteNote, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.deleteNote,
-      rateLimitPerMinute: options.rateLimits?.deleteNote,
-      timeoutSeconds: options.timeouts?.deleteNote,
+      bodyLimitBytes: bodyLimits.deleteNote,
+      rateLimitPerMinute: rateLimits.deleteNote,
+      timeoutSeconds: timeouts.deleteNote,
     }
   );
   // A read of Note (D106): the runtime's handler runs it through the
@@ -569,9 +576,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableRead(options.orm, tableOperations.getNote, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getNote,
-      rateLimitPerMinute: options.rateLimits?.getNote,
-      timeoutSeconds: options.timeouts?.getNote,
+      bodyLimitBytes: bodyLimits.getNote,
+      rateLimitPerMinute: rateLimits.getNote,
+      timeoutSeconds: timeouts.getNote,
     }
   );
   // An update of Note (D106): the runtime's handler runs it through the
@@ -583,9 +590,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableUpdate(options.orm, tableOperations.updateNote, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.updateNote,
-      rateLimitPerMinute: options.rateLimits?.updateNote,
-      timeoutSeconds: options.timeouts?.updateNote,
+      bodyLimitBytes: bodyLimits.updateNote,
+      rateLimitPerMinute: rateLimits.updateNote,
+      timeoutSeconds: timeouts.updateNote,
     }
   );
   // A read of Issue (D106): the runtime's handler runs it through the
@@ -597,9 +604,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableRead(options.orm, tableOperations.getIssueForGuest, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getIssueForGuest,
-      rateLimitPerMinute: options.rateLimits?.getIssueForGuest,
-      timeoutSeconds: options.timeouts?.getIssueForGuest,
+      bodyLimitBytes: bodyLimits.getIssueForGuest,
+      rateLimitPerMinute: rateLimits.getIssueForGuest,
+      timeoutSeconds: timeouts.getIssueForGuest,
     }
   );
   // A list of Team (D106): the runtime's handler runs it through the
@@ -614,9 +621,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     },
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listTeams,
-      rateLimitPerMinute: options.rateLimits?.listTeams,
-      timeoutSeconds: options.timeouts?.listTeams,
+      bodyLimitBytes: bodyLimits.listTeams,
+      rateLimitPerMinute: rateLimits.listTeams,
+      timeoutSeconds: timeouts.listTeams,
     }
   );
   // A create of Team (D106): the runtime's handler runs it through the
@@ -628,9 +635,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableCreate(options.orm, tableOperations.createTeam, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.createTeam,
-      rateLimitPerMinute: options.rateLimits?.createTeam,
-      timeoutSeconds: options.timeouts?.createTeam,
+      bodyLimitBytes: bodyLimits.createTeam,
+      rateLimitPerMinute: rateLimits.createTeam,
+      timeoutSeconds: timeouts.createTeam,
     }
   );
   // A read of Team (D106): the runtime's handler runs it through the
@@ -642,9 +649,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableRead(options.orm, tableOperations.getTeam, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getTeam,
-      rateLimitPerMinute: options.rateLimits?.getTeam,
-      timeoutSeconds: options.timeouts?.getTeam,
+      bodyLimitBytes: bodyLimits.getTeam,
+      rateLimitPerMinute: rateLimits.getTeam,
+      timeoutSeconds: timeouts.getTeam,
     }
   );
   mountOperation(
@@ -659,9 +666,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.summarizeTeam,
-      rateLimitPerMinute: options.rateLimits?.summarizeTeam,
-      timeoutSeconds: options.timeouts?.summarizeTeam,
+      bodyLimitBytes: bodyLimits.summarizeTeam,
+      rateLimitPerMinute: rateLimits.summarizeTeam,
+      timeoutSeconds: timeouts.summarizeTeam,
     }
   );
   // A list of Issue (D106): the runtime's handler runs it through the
@@ -680,9 +687,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     },
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listIssues,
-      rateLimitPerMinute: options.rateLimits?.listIssues,
-      timeoutSeconds: options.timeouts?.listIssues,
+      bodyLimitBytes: bodyLimits.listIssues,
+      rateLimitPerMinute: rateLimits.listIssues,
+      timeoutSeconds: timeouts.listIssues,
     }
   );
   // A create of Issue (D106): the runtime's handler runs it through the
@@ -694,9 +701,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     (ctx, request) => tableCreate(options.orm, tableOperations.createIssue, ctx, request),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.createIssue,
-      rateLimitPerMinute: options.rateLimits?.createIssue,
-      timeoutSeconds: options.timeouts?.createIssue,
+      bodyLimitBytes: bodyLimits.createIssue,
+      rateLimitPerMinute: rateLimits.createIssue,
+      timeoutSeconds: timeouts.createIssue,
     }
   );
   return router;
