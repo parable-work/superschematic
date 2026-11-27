@@ -15,7 +15,7 @@ takes one path, which decides who sent it and what it may reach.
 
 | Built | Not built yet |
 | --- | --- |
-| `@party` on a table; the conversations' tables and the run requests queue, which the build fills | Go and Rust runtimes; SQLite and D1 |
+| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Go and Rust runtimes |
 | one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a generated server that mounts the path and its workers |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
 | threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
@@ -139,3 +139,15 @@ An email carries a `Message-ID` and asks for its reply at the inbound
 address, so the answer threads. A text of STOP is the adapter's to read:
 the core records it on every identity of the address and sends nothing to
 it until START.
+
+## On SQLite and D1
+
+A database that lists `sqlite` keeps the parties, the conversations and
+the run requests queue as Postgres does (D189). `createInbound` comes from
+the runtime's `./d1` entry too, over the `./orm/sqlite` entry's
+repositories, and `inbound.runWorker(db, handle)` claims the run requests
+over a `SqlDatabase`, a D1 binding or `openSqlite`'s file, as over a pg
+pool. A message, its files and its run request are written as the
+repositories write them, each statement its own on D1, which holds no
+transaction open: a run request is enqueued once the message and its
+files are stored.

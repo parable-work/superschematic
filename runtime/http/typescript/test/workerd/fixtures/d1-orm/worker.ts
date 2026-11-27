@@ -1,9 +1,10 @@
-// The D1 repositories fixture (D182, D186): the generated repositories on
-// SQLite of three databases, each its orm-sqlite.ts (<prefix>-orm.ts) and its
-// sqlite/create.sql (<prefix>-sql.ts), which TestTheWorkerdD1FixtureIsCurrent
-// writes here, run over the runtime's built ./d1 entry inside workerd:
-// fixture-references-db's (records), fixture-recurrence-db's (filings) and
-// fixture-search-db's (search). The behaviors' core is the wasm32 module the
+// The D1 repositories fixture (D182, D186, D189): the generated repositories
+// on SQLite of four databases, each its orm-sqlite.ts (<prefix>-orm.ts) and
+// its sqlite/create.sql (<prefix>-sql.ts), which
+// TestTheWorkerdD1FixtureIsCurrent writes here, run over the runtime's built
+// ./d1 entry inside workerd: fixture-references-db's (records),
+// fixture-recurrence-db's (filings), fixture-search-db's (search) and
+// fixture-notifications-db's (notices, with its queues.ts). The behaviors' core is the wasm32 module the
 // rules package ships, which the Worker passes createOrm (rules).
 //
 // D1 is SQLite behind a binding, which workerd does not serve on its own, so
@@ -34,10 +35,16 @@
 //     rows' words workerd's SQLite keeps in FTS5, and a search ranks them
 //     with each caller's audience checked inside the query: a private row
 //     never shows to another, a delete and an audience change hold at once,
-//     a row's conversation is found with it, and scope keeps to its filter.
+//     a row's conversation is found with it, and scope keeps to its filter;
+//   - an event raised in a transaction is routed by the notifier's worker
+//     queue, claimed over the D1 binding: the owner hears of it by SMS, a
+//     watcher who cannot read the ticket does not, the escalation waits as a
+//     delayed message, a reply acknowledges as its sender, and a released
+//     claim is due again.
 import { DurableObject } from 'cloudflare:workers';
 import {
   NotFoundError,
+  createNotifier,
   indexSearch,
   readCalendar,
   searchTables,
@@ -58,6 +65,10 @@ import { createOrm as createFilings } from './filings-orm.ts';
 import { createSQL as filingsSQL } from './filings-sql.ts';
 import { createOrm as createSearch } from './search-orm.ts';
 import { createSQL as searchSQL } from './search-sql.ts';
+import { createOrm as createNotices } from './notices-orm.ts';
+import { createSQL as noticesSQL } from './notices-sql.ts';
+import { noticeWorkQueue } from './notices-queues.ts';
+import type { ChannelAdapter, Providers } from '../../../../dist/providers/index.js';
 
 type Row = Record<string, unknown>;
 
@@ -184,8 +195,76 @@ export default {
     await records(database('records'), rules);
     await filings(database('filings'), rules);
     await search(database('search'), rules);
+    await notices(database('notices'));
   },
 };
+
+/**
+ * fixture-notifications-db's notifier on D1 (D153, D189): an event raised
+ * in a transaction is a message of the dispatch queue, which the notifier's
+ * worker queue claims over the D1 binding; the route reaches the ticket's
+ * owner by SMS and skips a watcher who cannot read it; the escalation waits
+ * as a delayed message; a reply acknowledges as its sender, and the
+ * escalation then sends nothing; a claim released is due again.
+ */
+async function notices(db: SqlDatabase): Promise<void> {
+  await db.exec(noticesSQL);
+  const orm = createNotices(db);
+  const system = orm.asSystem();
+  const sent: { to: string; body: string }[] = [];
+  const sms: ChannelAdapter = {
+    kind: 'sms',
+    async send(message) {
+      sent.push({ to: message.to, body: message.body });
+      return { state: 'sent', providerMessageId: `sms-${sent.length}` };
+    },
+    async health() {
+      return { ok: true };
+    },
+  };
+  const providers = {
+    configured: () => [{ slot: 'SMS', iface: 'channel' }],
+    channel: async () => sms,
+  } as unknown as Providers;
+  const notifier = createNotifier({ orm, dispatch: noticeWorkQueue, providers });
+  const queue = notifier.workerQueue(db);
+  const drain = async (): Promise<number> => {
+    let n = 0;
+    for (let round = 0; round < 20; round++) {
+      const claims = await queue.claim(10, 30);
+      if (claims.length === 0) return n;
+      for (const claim of claims) {
+        await claim.handle(new AbortController().signal);
+        await queue.complete(claim.id, claim.token);
+        n++;
+      }
+    }
+    throw new Error('d1-orm: the dispatch queue did not drain');
+  };
+  const PHONE = '+15550100001';
+  await system.channelIdentity.createOne({ kind: 'phone', address: PHONE, principal: ALICE, trust: 'verified', verifiedAt: new Date() } as never);
+  await system.channelIdentity.createOne({ kind: 'phone', address: '+15550100002', principal: BOB, trust: 'verified', verifiedAt: new Date() } as never);
+  await system.noticePreference.createOne({ principal: null, eventKind: '*', urgency: '*', channels: ['sms'] } as never);
+  await system.noticeRoute.createOne({ name: 'Overdue', eventKind: 'ticket.overdue', recipients: [{ path: 'owner' }, { path: 'watchers' }], escalation: [{ afterSeconds: 600, channels: ['sms'] }] } as never);
+  const ticket = (await system.ticket.createOne({ title: 'Boiler pressure low', status: 'open', owner: ALICE, watchers: [BOB], audience: 'private' } as never)).id as string;
+
+  await orm.transaction(tx => notifier.raise(tx, { table: 'Ticket', key: ticket, kind: 'ticket.overdue' }));
+  check((await drain()) === 2, 'the event is routed and its delivery sent');
+  check(sent.length === 1 && sent[0]!.to === PHONE && sent[0]!.body.includes('Boiler pressure low'), `the owner hears of it by SMS, and the watcher who cannot read it does not: ${JSON.stringify(sent)}`);
+  check((await notifier.inbox({ kind: 'user', id: BOB })).length === 0, 'the watcher gets no notice');
+  const waiting = await system.query<{ step: string; later: number }>("SELECT step, due_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+500 seconds') AS later FROM notice_work_queue WHERE state = 'ready'");
+  check(waiting.rows.length === 1 && waiting.rows[0]!.step === 'escalate' && Number(waiting.rows[0]!.later) === 1, `the escalation waits ten minutes: ${JSON.stringify(waiting.rows)}`);
+
+  // A reply acknowledges as its sender, and the escalation sends nothing.
+  const acked = await notifier.reply({ channel: 'sms', from: PHONE, body: 'ack' });
+  check(acked.outcome === 'done', `a reply of ack acknowledges: ${JSON.stringify(acked)}`);
+  check((await notifier.inbox({ kind: 'user', id: ALICE }))[0]!.state === 'acknowledged', 'the notice is acknowledged');
+  await system.exec("UPDATE notice_work_queue SET due_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE step = 'escalate'");
+  const [claim] = await queue.claim(1, 30);
+  check(claim !== undefined, 'the escalation falls due');
+  await queue.release(claim!.id, claim!.token);
+  check((await drain()) === 1 && sent.length === 2 && sent[1]!.body.includes('UNDO'), `a released claim is due again, and the escalation of an acknowledged notice sends nothing: ${JSON.stringify(sent)}`);
+}
 
 /** fixture-references-db's references, files and a conversation on D1 (D182, D186). */
 async function records(db: SqlDatabase, rules: ReturnType<typeof initSync>): Promise<void> {

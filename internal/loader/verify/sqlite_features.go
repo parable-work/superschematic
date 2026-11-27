@@ -53,3 +53,33 @@ func refuseSQLiteReaders(schema *ir.Schema, in Input, td *ir.TypeDef, decorator 
 	r.errorf(td.Owner, "%s on %s: %s lists the sqlite dialect and enables the %s types, whose repositories read %s's rows on SQLite without it; on SQLite only the TypeScript repositories serve %s so far (D182). Build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]), or leave its %s types out",
 		decorator, td.Name, schema.Name, strings.Join(others, " and "), td.Name, decorator, schema.Name, strings.Join(others, " and "))
 }
+
+// checkSQLiteVersioned refuses a @versioned table in a DB service that
+// lists the sqlite dialect and enables the Go or the Rust types (D189). On
+// SQLite a @versioned table's history is a table its row triggers keep
+// (sqlmigrate's sqlite_history.go), whichever ORM writes the row, and the
+// TypeScript repositories read the row's version; the Go and Rust
+// repositories read a history with Postgres's statements alone. A service
+// whose config the loader did not read is left unchecked.
+func checkSQLiteVersioned(schema *ir.Schema, in Input, r *Result) {
+	if !slices.Contains(in.Dialects, registry.SQLDialectSQLite) {
+		return
+	}
+	var others []string
+	for _, lang := range in.TypesLanguages {
+		if lang != registry.LangTypeScript {
+			others = append(others, registry.LanguageName(lang))
+		}
+	}
+	if len(others) == 0 {
+		return
+	}
+	for _, name := range sortedTypeNames(schema.Types) {
+		td := schema.Types[name]
+		if td == nil || !td.Versioned || td.Role != ir.RoleDBTable {
+			continue
+		}
+		r.errorf(td.Owner, "@versioned on %s: %s lists the sqlite dialect and enables the %s types, whose repositories read a history with Postgres's statements alone; on SQLite only the TypeScript repositories serve a @versioned table so far (D189). Build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]), or leave its %s types out",
+			td.Name, schema.Name, strings.Join(others, " and "), schema.Name, strings.Join(others, " and "))
+	}
+}

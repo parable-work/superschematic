@@ -14,14 +14,14 @@ person who sent it.
 
 | Built | Not built yet |
 | --- | --- |
-| `@event` on a table; the notifier's tables and the channel identities, which the build fills | Go and Rust runtimes; SQLite and D1 |
+| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Go and Rust runtimes |
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties | a generated server that builds the notifier into its `Deps` |
 | the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
 | urgent, normal, digest and record; quiet hours; digests and briefs | an inbox page in Topcoat |
 | deliveries that fall through, time out and escalate | an event at an occurrence's due time itself; a reply interpreter other than keywords |
 | replies by reference, trust per channel kind, echo and undo, and the audit | |
-| verifying an address by a code, and password reset by email | |
+| verifying an address by a code, and password reset by email | the dispatch queue drained on Workers over D1 |
 
 D153 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
 records the design and what is left. `examples/notifications` is the
@@ -213,3 +213,31 @@ sends a six-digit code to it, and a reply with the code, or
 sends a reset code to the address the login names, through the email
 adapter, and `complete` sets the new password with the identity service's
 `resetPassword`, which ends every session, and verifies the address.
+
+## On SQLite and D1
+
+A database that lists `sqlite` keeps the notifier's tables, its dispatch
+queue and the channel identities as Postgres does (D189), and the
+notifier runs over the `./orm/sqlite` entry's repositories. `createNotifier`
+comes from the runtime's `./d1` entry, which a Worker bundles, as well as
+from `./postgres`:
+
+```ts
+import { createNotifier } from "@superschematic/http-runtime/d1";
+import { createOrm } from "@acme/tickets-db-types/orm/sqlite";
+import { noticeWorkQueue } from "@acme/tickets-db-types/queues";
+
+const notifier = createNotifier({ orm: createOrm(db), dispatch: noticeWorkQueue, providers });
+await orm.transaction(tx => notifier.raise(tx, { table: "Ticket", key, kind: "ticket.overdue" }));
+await runWorker(notifier.workerQueue(db), { signal });
+```
+
+| On SQLite and D1 | Why |
+| --- | --- |
+| `raise` writes the event as SQLite's statement of the dispatch queue in the ORM's transaction (`enqueue`, which writes the statement of the ORM's dialect) | on a file it commits with the change; D1 holds no transaction open, so there it is committed as it runs, as each of the transaction's statements is |
+| `workerQueue(db)` takes a `SqlDatabase`, a pg pool or a queue's claims; over a `SqlDatabase` its claims are `sqliteQueue`'s, each in the connection's turn | a file is one connection, and a claim made while a handler's transaction is open on it would run inside it |
+| a delivery after quiet hours, a timeout, an escalation and a digest are messages with a delay, due by the database's clock | the queue's `dueIn` statement on SQLite |
+| the queue on SQLite has no slots and no next due time | a worker in drain mode over a SQLite file is not built (D145) |
+
+A Worker drains no queue on D1 yet: a Workflow that wakes the
+dispatch queue's worker on D1 is D151's design, and not built.

@@ -1,6 +1,7 @@
-# The D1 repositories fixture (D182, D186): one Worker, whose test handler
-# runs the generated repositories on SQLite of fixture-references-db,
-# fixture-recurrence-db and fixture-search-db over a stand-in of D1, a
+# The D1 repositories fixture (D182, D186, D189): one Worker, whose test
+# handler runs the generated repositories on SQLite of fixture-references-db,
+# fixture-recurrence-db, fixture-search-db and fixture-notifications-db (its
+# notifier and dispatch queue) over a stand-in of D1, a
 # Durable Object of the Worker's own on workerd's SQLite storage, in a file
 # of the run's directory, with the behaviors' core's module embedded as a
 # deploy's bundle carries it. The runtime reads the caller of an

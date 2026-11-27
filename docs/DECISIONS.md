@@ -2325,7 +2325,7 @@ is refused `done`; and password reset sends through the email adapter.
 Left:
 
 - Go and Rust: the notifier, `@event` raising, the reply entry point and
-  password reset, and SQLite and D1.
+  password reset. SQLite and D1 run them in TypeScript (D189).
 - Comments raising its mentions and replies into the inbox, and the core's
   Comments `inbox` operation retired.
 - A generated server that builds the notifier into its `Deps` (with D159's
@@ -2431,8 +2431,8 @@ approval policy and STOP.
 
 Left:
 
-- Go and Rust: the inbound path, party principals and sends, and SQLite
-  and D1.
+- Go and Rust: the inbound path, party principals and sends. SQLite and
+  D1 run them in TypeScript (D189).
 - Comments' `via` on a table: the rules core's caller carries no channel,
   so a message posted into a row's Comments for a text's sender records
   its `for` and not its channel. The core's `Caller` gains a channel, the
@@ -2533,7 +2533,7 @@ its Lease; and administration is permissions.
 Left:
 
 - Go and Rust: the dispatcher, the run's authenticator, autonomy and the
-  runner; SQLite and D1.
+  runner. SQLite and D1 run them in TypeScript (D189).
 - A real container platform's sandbox provider and one model API's
   provider (D159's left), and the live Workers run (`smoke.sh
   Cloudflare`), which is the maintainer's. The dispatcher's module reaches
@@ -2716,9 +2716,8 @@ Left:
 - An atomic write of several statements on D1, through its batch.
 - A cleared message that names a holder the same delete statement
   deleted, which a row trigger cannot tell.
-- The notifier's queues, parties and agents on SQLite and D1 (D189), on
-  these shapes. D186 serves the behaviors' core, Recurrence, the calendar
-  and search there.
+- D186 serves the behaviors' core, Recurrence, the calendar and search on
+  these shapes, and D189 the notifier's queues, parties and agents.
 
 
 ## D183. An entered sender's run asks before every write, a party's run reaches only its grant's paths, a generated MCP tool carries its operation's @autonomy, and a generated TypeScript server builds the dispatcher into its Deps and runs its queues (D157, D158 amended)
@@ -2792,8 +2791,11 @@ implementation.
 
 Left:
 
-- Go, Rust and SQLite: the trust, the narrowed paths, the tool records'
+- Go and Rust: the trust, the narrowed paths, the tool records'
   `@autonomy` read by their gates, and the generated wiring (D158's left).
+  On SQLite the trust and the narrowed paths run as on Postgres (D189);
+  the generated wiring over a database that lists sqlite first waits on
+  `Deps.orm` over a SqlDatabase (D182's left).
 - A run's token on the API's own routes: the generated server accepts it
   only where the implementation's authenticator does
   (`deps.agents.authenticator(inner)`), and a route holds the call to its
@@ -3026,3 +3028,61 @@ Left:
   D1, where no worker claims yet (D151's wake on SQLite and D1).
 - Embeddings on SQLite and D1.
 - Go and Rust on SQLite for search and the calendar (D194+).
+
+## D189. The notifier, parties and agent runs run on SQLite and D1, an enqueue writes the statement of its ORM's dialect, a worker claims over a SqlDatabase in its connection's turn, and a @versioned table keeps its history on SQLite by row triggers (D153, D157, D158, D182, D183 amended)
+
+D153, D157 and D158 were Postgres alone: the loader refused `@event`,
+`@notifier`, `@channelIdentities`, `@party`, `@conversations`,
+`@runRequests` and `@agents` on the sqlite dialect, since the notifier, the
+inbound path and the dispatcher enqueued through the Postgres queue client
+and claimed over a pg pool, and the SQLite model refused `@versioned`, which
+the agents' definitions are. This entry serves the three on SQLite and D1,
+in TypeScript, as the third of the SQLite workstreams, on what D182 and
+D186 settled.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `enqueue(client, queue, message, options)` writes the statement of the client's dialect (`queue-orm.ts`): SQLite's, numbered `?n`, on an ORM or a transaction of sqliteOrm's (`ormDialect`), on the transaction's connection, and Postgres's on anything else. The notifier's `raise`, the inbound path's run request and the dispatcher's requests and watches enqueue through it, so one call runs on both. It sends the queue's wake after the statement, as on Postgres. | A second enqueue per feature for SQLite, which every caller would choose between. `enqueueStatement` in a batch, which takes no read between its statements. |
+| A worker's queue is made over what it is given (`claimsOver`): a `SqlDatabase`, whose claims are `sqliteQueue`'s; a queue's claims already made; or a pg pool, whose claims are `postgresQueue`'s, which `./postgres`'s queue client serves (`servePostgresClaims`) as it loads, since it alone imports pg. `notifier.workerQueue`, `inbound.runWorker` and `agents.workerQueue` take any of them, and `workerQueueOf` makes the worker's queue. So none of the three imports pg, and `./d1` exports them for a Worker. | The three in `./postgres` alone, which a Worker on D1 could not bundle. A queue factory option of each, which every app would pass. |
+| A claim over a `SqlDatabase` takes the connection's turn with the repositories' (`inSqliteTurn`): a file is one connection, and a claim, a completion or a failure made while a handler's transaction is open on it would run inside the transaction and be undone by its rollback. Within the transaction's own turn it runs at once. | A second connection for the claims, which on D1 is the same binding, and on a file a second writer the transaction's lock would make wait anyway. |
+| On D1 each of a feature's writes is its own statement, as D182 settled: a notice, its delivery and the delivery's message are three, and a run request is enqueued once the message and its files are stored. A handler that fails part way is retried by its queue and finds what it wrote (the inbox's one notice per event and recipient, a delivery's state). | A batch per handler, which takes no read between its statements, and every handler reads. |
+| A `@versioned` table on SQLite keeps Postgres's history table, in SQLite's types, and four row triggers under Postgres's names (`sqlmigrate/sqlite_history.go`): the bump, an `@optimistic` table's; a capture of each insert and of each update that moves the version (`_insert`, `_update`), which records the row as stored at its version, so each version a row takes is recorded once, the bump's own update recording what an update that left the version made; and the delete's tombstone at the version and one. An image is a `json_object` of the row as SQLite holds it, JSON as JSON, the excluded columns left out. A plan that makes a table with rows `@versioned` seeds its history, and a file read back carries the history's name. | Refusing `@versioned` on SQLite, which refuses the agents' definitions with it. The definitions `@optimistic` on SQLite, a version no history names. One trigger per update that bumps and captures, which the bump's own update would capture twice. |
+| What SQLite has no form of is refused: a history kept for some days (`retentionDays`), pinned (`pruneKeepReferencedBy`) or partitioned (`partitionBy`), which Postgres prunes with a function and partitions by month. A hard delete's actor is the row's own, since SQLite has no setting the delete names it in. | A prune the runtime runs, which no language's client has. |
+| The loader refuses a `@versioned` table in a service that lists sqlite and enables the Go or the Rust types (`checkSQLiteVersioned`), whose repositories read a history with Postgres's statements alone; the TypeScript repositories read the row's version and no history. The seven decorators of the three features are served on sqlite, and the Go and Rust outputs refuse them on every dialect as before. | Refusing the features on SQLite until Go and Rust serve them there. |
+| The generated server stays refused the dispatcher over a database that lists sqlite first, and its message names why: `Deps.orm` is built over a pg pool alone (D182's left). The app builds `createAgents` of `./d1` over the `./orm/sqlite` entry itself. | Lifting it here, which is the generated server over SQLite, D182's left item. |
+| The features' end-to-end tests run every case on both dialects: `runFeature` (tsgen) builds the package, its create.sql or its SQLite create.sql, and runs one test file with `ORM_DIALECT`, whose harness (`dialect.ts`) opens a schema of its own or a file of its own, and runs the test's own statements in the dialect's words. | A SQLite copy of each test file, which would drift. |
+
+Built: `queue-orm.ts` (`enqueue`, `claimsOver`, `workerQueueOf`,
+`servePostgresClaims`), `sqliteEnqueueOf`, `inSqliteTurn`; the notifier,
+the inbound path and the dispatcher over them, and their exports from
+`./d1` (and the queue helpers from `./sqlite`); the loader's lifted
+refusals and `checkSQLiteVersioned`; the SQLite history
+(`sqlmigrate/sqlite_history.go`, its seed and its read); tsrestgen's
+message; fixture-notifications-db, fixture-parties-db and
+fixture-agent-runs-db listing sqlite, with their SQLite model goldens; the
+guides' "On SQLite and D1" sections and the migrations reference. The
+tests: `TestNotificationsEndToEndOnSQLite`, `TestPartiesEndToEndOnSQLite`
+and `TestAgentRunsEndToEndOnSQLite`, every case of D153's, D157's and
+D158's on bun:sqlite, the agents' now with a definition's history on both
+dialects; the queue client's enqueue in a transaction and claims in turn
+(`queue-sqlite.test.ts`); `TestVersionedOnSQLite`; the SQLite refusals,
+model goldens, round trip and convergence, which now read every fixture
+with a `@versioned` table; and the workerd fixture `d1-orm`, which runs
+fixture-notifications-db's notifier over D1's stand-in: an event routed by
+its worker queue claimed over the binding, a watcher who cannot read the
+ticket skipped, a delayed escalation, a reply that acknowledges, and a
+released claim due again.
+
+Left:
+
+- A drain of the dispatch, run request and agent request queues on Workers
+  over D1: a Worker's Workflow that wakes their worker (D151's design), and
+  `PlatformSpec.NoQueueClaims` lifted for them. A Worker's own handler may
+  claim within an invocation meanwhile.
+- The generated server and workers over a database that lists sqlite
+  first: `Deps.orm` from `createOrm(db)`, which lifts tsrestgen's refusal
+  of the dispatcher there (D182's).
+- A `@versioned` history's retention, pins and partitions on SQLite, and
+  the Go and Rust repositories' history on SQLite.
+- A drain worker over a SQLite file (slots and a next due time, D145).
+- Go and Rust on SQLite for the three features (their own decisions).

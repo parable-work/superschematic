@@ -7,6 +7,12 @@ import type { SqlDatabase, SqlExecResult, SqlMeta, SqlPreparedStatement, SqlResu
 export { ClaimLostError } from './queue-core.js';
 export type { EnqueueOptions, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
 export { enqueueSqlite, enqueueStatement, sqliteQueue } from './queue-sqlite.js';
+// The enqueue in an ORM's transaction in its dialect, and a worker's claims
+// over what it is given, which the notifier, the inbound path and the agent
+// dispatcher drain their queues through on the file (D189); ./d1 exports
+// the features themselves.
+export { claimsOver, enqueue, workerQueueOf } from './queue-orm.js';
+export type { QueueQueryable, QueueSource } from './queue-orm.js';
 // The generated repositories over the file (D182), as ./d1 exports them, and
 // the field keys' reader, which needs node:crypto, as Bun has it: under
 // Bun, createOrm(db, { fieldKeys: parseFieldKeys(secret) }) opens a
