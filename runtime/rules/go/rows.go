@@ -66,7 +66,7 @@ func readRows(ctx context.Context, store Store, table *Table, request ReadReques
 			conditions = append(conditions, quote(column.Column)+" IS NULL")
 			continue
 		}
-		if uuidTypes[column.Type] {
+		if uuidTypes[column.Type] && !column.List {
 			var text string
 			if json.Unmarshal(raw, &text) != nil {
 				return &LinkedRows{Rows: []KeyedRow{}}, nil

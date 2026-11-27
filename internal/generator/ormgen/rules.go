@@ -242,6 +242,29 @@ func (c CoreOwnColumn) Present(variable string) string {
 	return ""
 }
 
+// CoreOwnDefaults reports whether one of the repository's own columns the
+// core reads takes a default when its member is "" (CoreOwnColumn's
+// EnumDefault), which coreOwn hands the core.
+func (r Repository) CoreOwnDefaults() bool {
+	for _, c := range r.CoreOwn {
+		if c.EnumDefault() != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// EnumDefault is the default the core is handed for the column's field
+// when variable's member holds "", as createColumns binds it
+// (Field.EnumDefault): an enum's, or an @audience table's audience or
+// agent access (D156); "" for a column with none, and a to-one relation.
+func (c CoreOwnColumn) EnumDefault() string {
+	if c.Column == nil {
+		return ""
+	}
+	return c.Column.EnumDefault
+}
+
 // Value is the core's value of the column's field in variable, a
 // *types.<Type> whose member holds it (Present): read through the pointer
 // a nullable member is.

@@ -2157,6 +2157,16 @@ operation's transaction. A route of an API whose database has an
 there is no option to pass. A revealed field holds text, and the database
 needs an `@accessLog` table, or the build is refused.
 
+A Go create that leaves `Audience` or `AgentAccess` at `""` takes the
+table's default, `@audience`'s `default` and `agents`, as a create
+through a route does, whose body takes the schema's defaults. A table
+that composes behaviors creates, reads and writes its rows through the
+behaviors' core, which reads `audienceNamed` and `effectiveAudience` as
+lists of ids, so its operations, and a Go deriver of its Derived fields,
+run on a private or a named row. A deriver reads and settles every row,
+as a job does, and the rows keep to their audience for every other
+caller.
+
 A Go server refuses at build time the platform features it does not
 serve yet, on its database's tables and its own: `@party`,
 `@conversations` and `@runRequests`, `@agents`, a provider with no Go
