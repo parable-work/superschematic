@@ -1203,6 +1203,21 @@ impl Service {
             .map_err(|err| internal(&err))
     }
 
+    /// Sets a user's password with no session and no current password:
+    /// what a password reset runs once its code checked (D81, D153), and
+    /// which ends every session of the user. The TypeScript service's
+    /// `resetPassword`.
+    pub async fn reset_password(&self, user_id: &str, password: &str) -> Result<(), ApiError> {
+        let mut errors = FieldErrors::default();
+        check_password_field(&mut errors, "password", password);
+        errors.check()?;
+        let hash = self.hash(password).await?;
+        self.store
+            .set_password(user_id, &hash, self.now(), None)
+            .await
+            .map_err(|err| internal(&err))
+    }
+
     /// Refuses a caller the rule does not give the administration
     /// permission `name`.
     fn require(&self, caller: &IdentityPrincipal, name: &str) -> Result<(), ApiError> {

@@ -41,6 +41,7 @@
 
 pub mod calendar;
 pub mod fieldcrypt;
+pub mod notify;
 mod plan;
 #[cfg(feature = "postgres")]
 pub mod postgres;
@@ -376,6 +377,34 @@ pub struct Table {
     /// [`search_tables::index_search`] writes; Postgres alone (D188).
     #[serde(default)]
     pub searchable: Option<search_tables::SearchableDefinition>,
+    /// The table's `@event` declarations (D153), which
+    /// [`notify::Notifier::raise`] holds an event to and whose payload and
+    /// title it reads; none for most tables, and on Postgres alone (D191).
+    #[serde(default)]
+    pub events: Vec<EventDefinition>,
+    /// What the table is to the notifier (D153): its `@notifier` part
+    /// (`inbox`, `deliveries`, `routes`, `preferences`, `subscriptions`,
+    /// `channelTrust`, `replies`, `dispatch`), or `channelIdentities` for
+    /// the table of channel identities; none for every other.
+    #[serde(default)]
+    pub notifier: Option<String>,
+}
+
+/// One `@event` of a table (D153): its kind, its default urgency, the
+/// member a notice is titled by and the members its payload carries.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct EventDefinition {
+    /// Dotted lower-camel words: `ticket.overdue`.
+    pub kind: String,
+    /// `urgent`, `normal`, `digest` or `record`.
+    pub urgency: String,
+    /// The member a notice of it is titled by; the kind and the key unless
+    /// set.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// The members of the row its payload carries.
+    #[serde(default)]
+    pub payload: Vec<String>,
 }
 
 /// A one-to-many relation of a table (D90, D156): the rows of another

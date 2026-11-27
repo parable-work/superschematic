@@ -388,6 +388,13 @@ impl Tables {
         self.keys.as_ref()
     }
 
+    /// What runs the behaviors of the tables that compose them, when
+    /// given: what a write across tables of its own (a reply's action,
+    /// D191) opens its repositories with.
+    pub fn rules(&self) -> Option<&Arc<PoolRules>> {
+        self.rules.as_ref()
+    }
+
     /// The definition of the database's tables.
     pub fn definition(&self) -> Result<&'static Definition, Error> {
         (self.definition)()

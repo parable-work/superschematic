@@ -62,6 +62,29 @@ export abstract class Ticket {
   dueAt: Nullable<Temporal.DateTime>;
 }
 
+// An approval someone asked for, in the shape of D158's approvals: whoever
+// holds its permission hears of it and decides it by a reply (D153's
+// approve and deny).
+@event<Approval>({ kind: "approval.requested", title: "summary", urgency: "urgent" })
+export abstract class Approval {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  operation: string;
+
+  summary: string;
+
+  permission: string;
+
+  state: string;
+
+  decidedBy: Nullable<string>;
+
+  decidedVia: Nullable<string>;
+
+  decidedAt: Nullable<Temporal.DateTime>;
+}
+
 // The notifier's tables, which the build fills (D153).
 @notifier("inbox")
 export abstract class Notice {}

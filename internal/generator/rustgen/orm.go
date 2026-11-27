@@ -76,6 +76,11 @@ type ORMInfo struct {
 	// orm::calendar and orm::search_tables read on Postgres (D188).
 	Calendar   bool
 	Searchable bool
+
+	// Notifications is whether a table of the database declares an @event
+	// or is one of the notifier's (D153), which the runtime's notify module
+	// reads on Postgres (D191).
+	Notifications bool
 }
 
 // ORMUse is a use of a behavior on a table that has operations (D103), as
@@ -230,6 +235,11 @@ type ormTable struct {
 	// search read (D188); on Postgres alone.
 	Calendar   []rustCalendarSource `json:"calendar,omitempty"`
 	Searchable *rustSearchable      `json:"searchable,omitempty"`
+	// Events are the table's @event declarations, and Notifier what the
+	// table is to the notifier (D153), which the runtime's notify module
+	// reads (D191); on Postgres alone.
+	Events   []rustEvent `json:"events,omitempty"`
+	Notifier string      `json:"notifier,omitempty"`
 }
 
 // ormFence is a fence of a table, a @fenced field (D119), the runtime's
@@ -581,6 +591,9 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		}
 		info.Calendar = info.Calendar || len(onPostgres.Calendar) > 0
 		info.Searchable = info.Searchable || onPostgres.Searchable != nil
+		onPostgres.Events = eventsOfTable(schema.Types[t.Type])
+		onPostgres.Notifier = notifierOfTable(schema.Types[t.Type])
+		info.Notifications = info.Notifications || len(onPostgres.Events) > 0 || onPostgres.Notifier != ""
 		for _, k := range t.UniqueKeys {
 			onPostgres.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 		}
