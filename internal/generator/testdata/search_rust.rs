@@ -190,7 +190,7 @@ impl Database {
             Who::System => repos.as_system(),
             Who::User(user) => repos
                 .acting(Some(user.clone()))
-                .with_caller(Caller { subject: user.clone(), permissions: Vec::new(), stands_in: false })
+                .with_caller(Caller { subject: user.clone(), permissions: Vec::new(), stands_in: false, ..Default::default() })
                 .with_access(AccessCaller::of(Some(&Principal::new(user.clone(), Vec::<String>::new())))),
         };
         let out = work(&repos).await;

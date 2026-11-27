@@ -37,6 +37,40 @@ pub struct Caller {
     /// (D73). `None` for a caller that acts for no one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub acting_for: Option<String>,
+    /// What the caller is (D156): `user`, `party`, `agent` or `extension`.
+    /// `None` reads as a user, as every host's caller did before D200.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// What the subject it acts for is, in the words of `kind`. `None`
+    /// reads as a user: the engine's caller names the subject alone (D77).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acting_for_kind: Option<String>,
+    /// The Agent whose run the caller is (D158, D200). Each run is a
+    /// principal of its own, so a rule that asks "the same Agent" reads
+    /// this. `None` for a caller that is no agent run, or whose host does
+    /// not say.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
+    /// How the host authenticated the caller for this call (D200), which an
+    /// Approvals requirement's proof reads. `None` when the host reports
+    /// nothing, which proves nothing.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assurance: Option<Assurance>,
+}
+
+/// How the host authenticated a caller for one call (D200). The core
+/// trusts the host's report as it trusts the subject.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Assurance {
+    /// When the caller's session last signed in, in epoch milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_in_at: Option<i64>,
+    /// Whether the caller proved user verification for this call: a
+    /// passkey assertion with the UV flag, over a challenge bound to the
+    /// request. It counts as a sign-in at the call's time.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub user_verified: bool,
 }
 
 fn is_false(flag: &bool) -> bool {
@@ -53,7 +87,7 @@ impl Caller {
             subject: subject.into(),
             permissions: permissions.into_iter().map(Into::into).collect(),
             stands_in: false,
-            acting_for: None,
+            ..Caller::default()
         }
     }
 
@@ -64,13 +98,40 @@ impl Caller {
             subject: subject.into(),
             permissions: Vec::new(),
             stands_in: true,
-            acting_for: None,
+            ..Caller::default()
         }
     }
 
     /// The caller acting for a subject (D77).
     pub fn acting_for(mut self, subject: impl Into<String>) -> Self {
         self.acting_for = Some(subject.into());
+        self
+    }
+
+    /// The caller as a principal of a kind (D156): `user`, `party`,
+    /// `agent` or `extension`.
+    pub fn of_kind(mut self, kind: impl Into<String>) -> Self {
+        self.kind = Some(kind.into());
+        self
+    }
+
+    /// The kind of the subject the caller acts for (D156).
+    pub fn acting_for_kind(mut self, kind: impl Into<String>) -> Self {
+        self.acting_for_kind = Some(kind.into());
+        self
+    }
+
+    /// The caller as a run of an Agent (D158, D200): a principal of kind
+    /// agent whose Agent the rules that ask for one read.
+    pub fn run_of(mut self, agent: impl Into<String>) -> Self {
+        self.kind = Some("agent".to_owned());
+        self.agent = Some(agent.into());
+        self
+    }
+
+    /// The caller with the assurance its host reports for the call (D200).
+    pub fn with_assurance(mut self, assurance: Assurance) -> Self {
+        self.assurance = Some(assurance);
         self
     }
 }

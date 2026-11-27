@@ -26,6 +26,11 @@ type ormSearchable struct {
 	// index row's weighed words over it as searchIndexAlias.
 	Index    string `json:"index"`
 	Document string `json:"document"`
+	// FTS is the FTS5 table of the index's words on SQLite, quoted, which
+	// a search there matches and ranks in place of Document (D186).
+	FTS string `json:"fts,omitempty"`
+	// IndexAudience is how the index's audience is compared on SQLite.
+	IndexAudience *ormSearchIndexAudience `json:"indexAudience,omitempty"`
 	// Table is the table, quoted; Key its key column, quoted, KeyType the
 	// key column's SQL type, and UUID whether its wire form is base62.
 	Table   string `json:"table"`
@@ -50,6 +55,14 @@ type ormSearchable struct {
 type ormSearchAudience struct {
 	Effective string `json:"effective"`
 	Agents    string `json:"agents"`
+}
+
+// ormSearchIndexAudience is how a search compares the index's copied
+// audience with a caller's ids on SQLite (sqlutil.SQLiteAudienceContains),
+// absent on Postgres, whose array overlap the runtime writes (D186).
+type ormSearchIndexAudience struct {
+	Contains    string `json:"contains"`
+	Placeholder string `json:"placeholder"`
 }
 
 type ormSearchComments struct {

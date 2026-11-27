@@ -23,19 +23,31 @@ not a Uint8Array (new Uint8Array(row.image) makes one), a boolean as 1 or
 This is the package's ./d1 entry. It imports nothing from node: or a
 driver, so a Worker bundles it. It exports the enqueue of the queue client
 on SQLite (queue-sqlite.ts, D53, amended): enqueueStatement, whose
-statement a Worker adds to the batch whose writes caused the message. It
-exports no claims: no worker claims on D1 (PlatformSpec.NoQueueClaims), and
-a Worker is no process that claims until it is stopped.
+statement a Worker adds to the batch whose writes caused the message, and
+enqueue, which writes a message in an ORM's transaction in the ORM's
+dialect (queue-orm.ts, D189). A generated worker claims on no D1
+(PlatformSpec.NoQueueClaims), and a Worker is no process that claims until
+it is stopped; claimsOver and workerQueueOf make a queue's claims over a
+SqlDatabase all the same, sqliteQueue's statements, which a Worker's own
+handler may run within an invocation (D151's drain of these queues on D1
+is not built).
 
 It exports the behaviors' adapter (rules.ts, D103), which imports nothing
 from node: or a driver either: a Worker, or a server over openSqlite, runs a
 command of a table that composes behaviors on sqliteRulesStore, over the
 layout its database's generated orm.ts embeds.
 
+It exports the notifier (D153), the inbound path and parties (D157) and
+the agent dispatcher (D158), which run over the repositories and enqueue
+in their transactions, on D1 as on Postgres (D189).
+
 It exports the generated repositories over a SqlDatabase (orm-sqlite.ts,
 D182), sqliteOrm, which a types package's ./orm/sqlite entry calls, with
-references and attachments (D154) and the audience and grants each read
-keeps to (D156). They import node:async_hooks alone of node:, which a
+references and attachments (D154), the audience and grants each read
+keeps to (D156), and the behaviors' writes, operations, deadlines and
+changes (D186), whose change set D1 applies in one batch; withRulesCore,
+which the entry's createOrm passes the rules package's core through, or a
+Worker's own: createOrm(db, { rules: initSync(wasmModule) }). They import node:async_hooks alone of node:, which a
 Worker has under the nodejs_als flag, for the caller of the operation being
 run.
 */
@@ -46,7 +58,137 @@ export { enqueueSqlite, enqueueStatement } from './queue-sqlite.js';
 // ./orm/sqlite entry's createOrm calls sqliteOrm, and the predicates and
 // members a read across tables applies on SQLite as on Postgres.
 export { SQLITE_ORM_RUNTIME, sqliteOrm, sqliteOrmPool, type TransactionalSqlDatabase } from './orm-sqlite.js';
-export { AccessRefusedError, MergeError, NoUserError, NotFoundError, PageKeyError, TooManyRowsError, audienceConditions, ormOfRuntime } from './orm.js';
+export { AccessRefusedError, MergeError, NoUserError, NotFoundError, PageKeyError, TooManyRowsError, audienceConditions, ormDialect, ormOfRuntime } from './orm.js';
+// Grants (D156), the calendar (D152) and search across tables (D155) over
+// the repositories, on SQLite and D1 as on Postgres (D186): none of them
+// imports a driver.
+export { GRANT_TOKEN_PREFIX, accessLogOf, activeGrants, grantAuthenticator, grantEnded, grantTokenHash, issueGrant, reachesOf, revokeGrant } from './access.js';
+export type { AccessLog, AccessLogEntry, ActiveGrantsFilter, GrantAuthenticatorOptions, GrantRow, IssueGrantInput } from './access.js';
+export {
+  CALENDAR_FEED,
+  CALENDAR_FEED_DAYS,
+  calendarFeedOf,
+  calendarIcs,
+  calendarMcpTool,
+  calendarReference,
+  calendarRoutes,
+  calendarSourcesOf,
+  callCalendarTool,
+  isCalendarFeed,
+  issueCalendarFeed,
+  readCalendar,
+  revokeCalendarFeed,
+  rotateCalendarFeed,
+} from './calendar.js';
+export type * from './calendar.js';
+export {
+  MAX_INDEXED_TEXT,
+  MAX_SEARCH_WORDS,
+  RRF_K,
+  RRF_WINDOW,
+  callSearchTool,
+  indexSearch,
+  reindexSearch,
+  searchEmbeddingsOf,
+  searchMcpTool,
+  searchRoutes,
+  searchSourcesOf,
+  searchTables,
+  searchWords,
+} from './search-tables.js';
+export type * from './search-tables.js';
+// The platform's features that enqueue in a transaction and drain a queue,
+// on SQLite and D1 as on Postgres (D189): the notifier (D153), the inbound
+// path and parties (D157) and the agent dispatcher (D158), over the
+// repositories, with the enqueue in the ORM's dialect and a worker's
+// claims over a SqlDatabase.
+export { claimsOver, enqueue, workerQueueOf } from './queue-orm.js';
+export type { QueueQueryable, QueueSource } from './queue-orm.js';
+export type { WorkerMessage, WorkerQueue } from './worker.js';
+// Events, notifications and channels (D153): the notifier that raises a
+// table's events in the caller's transaction, routes them by rows, holds
+// each recipient to the record's audience, delivers through the channel
+// adapters an environment configures, and runs a reply as its sender; and
+// password reset over the email channel (D81).
+export {
+  CODE_ATTEMPTS,
+  CODE_TTL_SECONDS,
+  DEFAULT_DELIVERY_RETENTION_DAYS,
+  DEFAULT_DELIVERY_TIMEOUT_SECONDS,
+  HEALTH_TTL_MS,
+  INAPP,
+  NotifierError,
+  createNotifier,
+  normaliseAddress,
+  passwordReset,
+  quietDelaySeconds,
+  sameId,
+  type AddIdentityInput,
+  type ChannelIdentityRow,
+  type EscalationStep,
+  type NoticeRow,
+  type NoticeWork,
+  type Notifier,
+  type NotifierOptions,
+  type PasswordResetOptions,
+  type RaiseInput,
+  type RaisedEvent,
+  type RecipientRef,
+  type RecipientSpec,
+  type RenderedNotice,
+  type ReplyAction,
+  type ReplyContext,
+  type ReplyInput,
+  type ReplyOutcome,
+  type Urgency,
+} from './notify.js';
+// Agent orchestration (D158): the dispatcher of agent runs, their tokens,
+// autonomy, budgets and stop switches, over the @agents tables.
+export {
+  AGENT_PERMISSIONS,
+  AgentsError,
+  DEFAULT_TRANSCRIPT_RETENTION_DAYS,
+  createAgents,
+  defaultAutonomy,
+  effectiveAutonomy,
+  narrowReaches,
+  paramsHash,
+  trustOf,
+  type AgentRunRequest,
+  type AgentSandboxTool,
+  type AgentTool,
+  type AgentToolContext,
+  type AgentTrigger,
+  type Agents,
+  type AgentsOptions,
+  type AskThread,
+  type Autonomy,
+  type GateOutcome,
+  type OperationClass,
+  type PrincipalRef,
+  type RunTrust,
+  type TranscriptEntry,
+  type TranscriptStore,
+} from './agents.js';
+// Outside parties and inbound messages (D157): the principal a party is,
+// the one path every inbound message takes, conversations whose messages
+// are rows, and sending to a party as a permission.
+export {
+  InboundError,
+  createInbound,
+  emailAuthenticated,
+  type Inbound,
+  type InboundDisposition,
+  type InboundOptions,
+  type InboundOutcome,
+  type MessageRow,
+  type ReceivedMessage,
+  type RunRequest,
+  type SendDecision,
+  type SendInput,
+  type SendOutcome,
+} from './inbound.js';
+export { identityLapsed, partyPrincipal, partyTablesOf, type IdentityStanding, type PartyPrincipalOptions, type PartyRef } from './parties.js';
 export type * from './orm.js';
 export { RowFeatureError, attachmentBlock, previewObjectOf } from './rowfeatures.js';
 export type * from './rowfeatures.js';
@@ -121,6 +263,7 @@ export type {
   RulesSubTable,
   RulesTable,
   RulesUse,
+  SqliteRulesStoreOptions,
   TableChange,
 } from './rules.js';
 

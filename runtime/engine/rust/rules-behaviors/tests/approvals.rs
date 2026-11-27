@@ -119,7 +119,22 @@ fn the_declaration_is_the_files() {
             .sub_table(TableDecl::new(
                 "signOffs",
                 "number",
-                ["number", "state", "subject", "note", "at", "consumedAt"]
+                [
+                    "number",
+                    "state",
+                    "subject",
+                    "kind",
+                    "actingFor",
+                    "actingForKind",
+                    "agent",
+                    "signedInAt",
+                    "userVerified",
+                    "held",
+                    "values",
+                    "note",
+                    "at",
+                    "consumedAt"
+                ]
             ))
             .operation("signOff", true)
             .operation("withdrawSignOff", true)
@@ -129,6 +144,7 @@ fn the_declaration_is_the_files() {
             .veto("creator_cannot_sign")
             .veto("in_state")
             .veto("no_gate")
+            .veto("not_counted")
             .veto("not_signed")
             .veto("stale")
     );
@@ -151,15 +167,48 @@ fn the_config_checks_are_the_config_schema() {
                 "gates": {
                     "additionalProperties": {
                         "additionalProperties": false,
+                        "if": {"required": ["requirementsFrom"]},
+                        "else": {"required": ["count", "permission"]},
                         "properties": {
+                            "callers": {"items": {"enum": ["person", "acting-for-person", "agent"], "type": "string"}, "minItems": 1, "type": "array", "uniqueItems": true},
                             "count": {"maximum": 100, "minimum": 1, "type": "integer"},
                             "excludeCreator": {"type": "boolean"},
+                            "excludeCreatorPerson": {"type": "boolean"},
+                            "excludeSubjectsIn": {"items": text, "maxItems": 64, "type": "array", "uniqueItems": true},
                             "from": {"items": text, "minItems": 1, "type": "array", "uniqueItems": true},
                             "permission": text,
+                            "pinOn": {"items": text, "maxItems": 16, "minItems": 1, "type": "array", "uniqueItems": true},
                             "pinned": {"type": "boolean"},
-                            "resetOn": {"items": text, "maxItems": 64, "type": "array", "uniqueItems": true}
+                            "proof": {"enum": ["none", "recent-sign-in", "user-verification"], "type": "string"},
+                            "proofWithinMs": {"minimum": 1, "type": "integer"},
+                            "recheckPermission": {"type": "boolean"},
+                            "requirementsFrom": {
+                                "additionalProperties": false,
+                                "properties": {
+                                    "in": text,
+                                    "link": text,
+                                    "schema": {"pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$", "type": "string"}
+                                },
+                                "required": ["schema", "link"],
+                                "type": "object"
+                            },
+                            "resetOn": {"items": text, "maxItems": 64, "type": "array", "uniqueItems": true},
+                            "when": {
+                                "items": {
+                                    "additionalProperties": false,
+                                    "properties": {
+                                        "field": text,
+                                        "negate": {"type": "boolean"},
+                                        "test": {"enum": ["every-matches", "any-matches", "contains", "at-most"], "type": "string"},
+                                        "values": {"items": {"type": "string"}, "maxItems": 256, "minItems": 1, "type": "array"}
+                                    },
+                                    "required": ["field", "test", "values"],
+                                    "type": "object"
+                                },
+                                "maxItems": 32,
+                                "type": "array"
+                            }
                         },
-                        "required": ["count", "permission"],
                         "type": "object"
                     },
                     "minProperties": 1,
@@ -186,7 +235,10 @@ fn the_config_checks_are_the_config_schema() {
     );
     assert_eq!(
         shaped(json!({"gates": {"approved": {"count": 1}}})),
-        ["/config/gates/approved: must have required property 'permission'"]
+        [
+            "/config/gates/approved: must match \"else\" schema",
+            "/config/gates/approved: must have required property 'permission'"
+        ]
     );
     // The rest of the schema's keywords.
     assert_eq!(
@@ -245,6 +297,7 @@ fn the_operations_parameters_are_held_to_their_params_schemas() {
                 "signOff".to_owned(),
                 json!({"additionalProperties": false, "properties": {
                     "note": {"maxLength": 10000, "type": "string"},
+                    "read": {"maxProperties": 16, "type": "object"},
                     "state": text,
                     "version": {"minimum": 1, "type": "integer"}
                 }, "required": ["state"], "type": "object"})
