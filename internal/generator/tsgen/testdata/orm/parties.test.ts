@@ -7,6 +7,9 @@
 // cases through the inbound path over the generated repositories, with the
 // runtime-providers example's SMS and mail relays (D159) as the stub
 // adapters, each over a stand-in service the test answers.
+// TestPartiesEndToEndOnSQLite runs the same cases with ORM_DIALECT sqlite
+// (D189): over the ./orm/sqlite entry's repositories on a file the
+// package's sqlite/create.sql made, the run requests claimed over it.
 import { afterEach, describe, expect, test } from 'bun:test';
 import { createHash, createHmac } from 'node:crypto';
 import {
@@ -14,7 +17,6 @@ import {
   createInbound,
   createNotifier,
   issueGrant,
-  postgresQueue,
   revokeGrant,
   type Inbound,
   type Notifier,
@@ -23,9 +25,9 @@ import {
 } from '@superschematic/http-runtime/postgres';
 import type { Principal } from '@superschematic/http-runtime';
 import { providersFrom, SecretValue } from '@superschematic/http-runtime/providers';
-import { createOrm, type FixturePartiesDbOrm } from './orm';
+import type { FixturePartiesDbOrm } from './orm';
 import { noticeWorkQueue, runRequestQueue } from './queues';
-import { database, dsn, type TestDatabase } from './harness';
+import { available, featureDatabase, ormEntry, type FeatureDatabase } from './dialect';
 import { smsRelayA } from './sms-relay-a';
 import { mailRelay } from './mail-relay';
 
@@ -99,7 +101,7 @@ function memoryBucket() {
 const PHONE = { dee: '+15550100011', eve: '+15550100012', ann: '+15550100001' };
 
 interface World {
-  db: TestDatabase;
+  db: FeatureDatabase;
   orm: FixturePartiesDbOrm;
   notifier: Notifier;
   inbound: Inbound;
@@ -115,8 +117,8 @@ interface World {
 }
 
 async function world(options: { approve?: (body: string) => SendDecision } = {}): Promise<World> {
-  const db = await database('parties');
-  const orm = createOrm(db.pool);
+  const db = await featureDatabase('parties');
+  const orm = (await ormEntry<FixturePartiesDbOrm>()).createOrm(db.source);
   const sys = orm.asSystem();
   const relay = relays();
   const files = memoryBucket();
@@ -173,7 +175,7 @@ function fileOnGrantedRecord(w: World) {
 
 /** Runs every run request that is waiting through the stub handler; resolves to how many. */
 async function drainRuns(w: World): Promise<number> {
-  const queue = w.inbound.runWorker(w.db.pool, fileOnGrantedRecord(w));
+  const queue = w.inbound.runWorker(w.db.source, fileOnGrantedRecord(w));
   let handled = 0;
   for (let round = 0; round < 20; round++) {
     const claims = await queue.claim(10, 30);
@@ -189,7 +191,7 @@ async function drainRuns(w: World): Promise<number> {
 
 /** The run requests waiting, read and put back. */
 async function pendingRuns(w: World): Promise<RunRequest[]> {
-  const queue = postgresQueue(w.db.pool, runRequestQueue);
+  const queue = w.db.queue(runRequestQueue);
   const claims = await queue.claim(50);
   for (const claim of claims) await queue.release(claim.id, claim.token);
   return claims.map(c => c.message as unknown as RunRequest);
@@ -209,7 +211,7 @@ async function reportsOf(w: World) {
   return (await w.orm.asSystem().report.findMany({ jobId: { eq: w.job } })).rows;
 }
 
-describe.skipIf(!dsn)('parties', () => {
+describe.skipIf(!available)('parties', () => {
   let w: World;
   afterEach(async () => {
     await w?.db.drop();

@@ -101,12 +101,27 @@ type RelationSpec struct {
 
 // Caller is who makes a call: a subject and the permissions it holds;
 // StandsIn for a service standing in for an end user, which holds none;
-// ActingFor the subject it acts for (D77), which Provenance records (D73).
+// ActingFor the subject it acts for (D77), which Provenance records (D73);
+// Kind and ActingForKind what each is (D156), "" for a user; Agent the
+// Agent whose run it is (D158); and Assurance how the host verified it for
+// the call (D200), which an Approvals requirement's proof reads.
 type Caller struct {
-	Subject     string   `json:"subject"`
-	Permissions []string `json:"permissions,omitempty"`
-	StandsIn    bool     `json:"standsIn,omitempty"`
-	ActingFor   string   `json:"actingFor,omitempty"`
+	Subject       string     `json:"subject"`
+	Permissions   []string   `json:"permissions,omitempty"`
+	StandsIn      bool       `json:"standsIn,omitempty"`
+	ActingFor     string     `json:"actingFor,omitempty"`
+	Kind          string     `json:"kind,omitempty"`
+	ActingForKind string     `json:"actingForKind,omitempty"`
+	Agent         string     `json:"agent,omitempty"`
+	Assurance     *Assurance `json:"assurance,omitempty"`
+}
+
+// Assurance is how a host verified a caller for one call (D200): when its
+// session last signed in, in epoch milliseconds, and whether the call
+// carried a passkey assertion with user verification.
+type Assurance struct {
+	SignedInAt   *int64 `json:"signedInAt,omitempty"`
+	UserVerified bool   `json:"userVerified,omitempty"`
 }
 
 // ActionKind is what an Action does.

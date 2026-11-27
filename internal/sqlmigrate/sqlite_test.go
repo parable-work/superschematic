@@ -79,8 +79,10 @@ func refusedSchemas(t *testing.T) []struct {
 		schema  *ir.Schema
 		want    string
 	}{
-		{"@versioned", shop(func(s *ir.Schema) { versioned(s, "Order", nil) }),
-			"Order is @versioned, which the sqlite dialect does not support"},
+		{"@versioned retention", shop(func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{RetentionDays: intPtr(30)}) }),
+			"Order is @versioned with a history kept 30 days (retentionDays), which Postgres prunes with a function, which the sqlite dialect does not support"},
+		{"@versioned partitions", shop(func(s *ir.Schema) { versioned(s, "Order", &ir.VersionedConfig{PartitionBy: "month"}) }),
+			"Order is @versioned with its history partitioned (partitionBy), which the sqlite dialect does not support"},
 		{"projection", planCase{}.load(t, nil),
 			"OrderSummary is a projection (report.order_summary), which the sqlite dialect does not support"},
 		{"GIN index", shop(func(s *ir.Schema) {

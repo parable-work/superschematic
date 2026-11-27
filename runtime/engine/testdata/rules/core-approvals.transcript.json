@@ -11067,9 +11067,17 @@
               "code": "invalid_schema",
               "status": 422,
               "class": "SchemaDocumentError",
-              "message": "type Doc: behavior Approvals config: /gates/approved: must have required property 'permission'",
+              "message": "type Doc: behavior Approvals config: /gates/approved: must match \"else\" schema; type Doc: behavior Approvals config: /gates/approved: must have required property 'permission'",
               "details": {
                 "issues": [
+                  {
+                    "use": "Approvals",
+                    "index": 1,
+                    "behavior": "Approvals",
+                    "kind": "schema",
+                    "path": "/config/gates/approved",
+                    "message": "must match \"else\" schema"
+                  },
                   {
                     "use": "Approvals",
                     "index": 1,

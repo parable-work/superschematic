@@ -54,6 +54,22 @@ pub struct Principal {
     /// The credential the call came with, for the access log (D114, D156):
     /// an API key's or a grant's id; `None` for a session.
     pub credential: Option<Credential>,
+    /// How the authenticator verified the principal for this call (D200),
+    /// which an Approvals requirement's proof reads. `None` proves nothing.
+    pub assurance: Option<Assurance>,
+}
+
+/// How an authenticator verified a principal for one call (D200).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Assurance {
+    /// When the principal's session last signed in, in epoch milliseconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signed_in_at: Option<i64>,
+    /// Whether the call carried a passkey assertion with user verification,
+    /// over a challenge bound to it.
+    #[serde(default)]
+    pub user_verified: bool,
 }
 
 impl Principal {
@@ -94,6 +110,26 @@ impl Principal {
     pub fn with_credential(mut self, credential: Credential) -> Self {
         self.credential = Some(credential);
         self
+    }
+
+    /// The principal as its authenticator verified it for the call (D200).
+    #[must_use]
+    pub fn with_assurance(mut self, assurance: Assurance) -> Self {
+        self.assurance = Some(assurance);
+        self
+    }
+
+    /// The Agent whose run the principal is (D158, D200): an agent run's
+    /// `agent` claim, which the agents' authenticator sets; `None` for any
+    /// other principal.
+    pub fn agent(&self) -> Option<&str> {
+        if self.kind != PrincipalKind::Agent {
+            return None;
+        }
+        self.claims
+            .get("agent")
+            .and_then(Value::as_str)
+            .filter(|agent| !agent.is_empty())
     }
 }
 

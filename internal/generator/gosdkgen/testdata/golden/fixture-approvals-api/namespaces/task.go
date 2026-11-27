@@ -31,7 +31,7 @@ func NewTaskNamespace(
 //
 // Endpoints:
 // - ListSignOffs: Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it. Requires authentication.
-// - SignOff: Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. Requires authentication.
+// - SignOff: Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. Requires authentication.
 // - WithdrawSignOff: Withdraws the caller's sign-off for a gated state, one not yet consumed. Requires authentication.
 type TaskApprovalsOperations struct {
 	client jsonClient
@@ -69,7 +69,7 @@ func (n *TaskApprovalsOperations) ListSignOffs(
 	return out, nil
 }
 
-// SignOff Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.
+// SignOff Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.
 // Requires authentication.
 func (n *TaskApprovalsOperations) SignOff(
 	ctx context.Context,

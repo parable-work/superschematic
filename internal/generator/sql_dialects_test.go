@@ -138,7 +138,8 @@ func TestOutputsSQLDialects(t *testing.T) {
 
 // TestRunRefusesWhatSQLiteDoesNotSupport: a service that lists sqlite fails
 // its build when its schema uses a feature the SQLite dialect refuses, with
-// the feature and the dialect named; an @optimistic table is not one.
+// the feature and the dialect named; an @optimistic table is not one, and
+// neither is a @versioned one whose history keeps every version (D189).
 func TestRunRefusesWhatSQLiteDoesNotSupport(t *testing.T) {
 	load := func(fixture string) (*ir.Schema, *schemaconfig.SchemaConfig) {
 		t.Helper()
@@ -165,7 +166,13 @@ func TestRunRefusesWhatSQLiteDoesNotSupport(t *testing.T) {
 		change  func(*ir.Schema)
 		want    string
 	}{
-		{"@versioned", "", func(s *ir.Schema) { tasting(s).Versioned = true }, "Tasting is @versioned"},
+		// A @versioned table is SQLite's (D189), but not a history kept
+		// for some days, which Postgres prunes with a function.
+		{"@versioned retention", "", func(s *ir.Schema) {
+			days := 30
+			tasting(s).Versioned = true
+			tasting(s).VersionedConfig = &ir.VersionedConfig{RetentionDays: &days}
+		}, "Tasting is @versioned with a history kept 30 days"},
 		{"projection", "fixture-projection", nil, "is a projection (app.preferences)"},
 		{"GIN index", "", func(s *ir.Schema) {
 			tasting(s).Indexes = []ir.IndexDef{{Keys: []string{"retastedAt"}}}

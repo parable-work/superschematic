@@ -1337,6 +1337,19 @@ export type OrmTx<R, X = unknown> = R &
 /** The members a repository's table may not take, which an ORM holds itself. */
 export const ORM_MEMBERS: readonly string[] = ['actingUser', 'withUser', 'as', 'asSystem', 'withBehaviorCaller', 'transaction', 'query', 'exec', 'queries', 'references', 'attachments'];
 
+/** The key an ORM and a transaction hold their dialect under, which no member name takes. */
+const ORM_DIALECT = Symbol.for('superschematic.orm.dialect');
+
+/**
+ * The dialect an ORM or a transaction runs its statements in (D186):
+ * 'sqlite' for one sqliteOrm opened, 'postgres' for the rest. A read across
+ * tables written as raw SQL (the calendar's occurrences, search) writes its
+ * statement in it.
+ */
+export function ormDialect(orm: object): 'postgres' | 'sqlite' {
+  return (orm as { [ORM_DIALECT]?: 'postgres' | 'sqlite' })[ORM_DIALECT] ?? 'postgres';
+}
+
 /**
  * Fills a format string's %s and %d, in order, with args, and %% with %, as
  * Go's fmt.Sprintf fills the statements sqlutil writes.
@@ -3744,6 +3757,7 @@ function txOf<R>(orm: OrmDefinition, base: RunnerBase, client: OrmQueryable, act
   const runner: Runner = { queryable: client, inTransaction: true, ...base };
   const query = queryOf(orm, runner, acting, keys);
   return withRowFeatures(orm, viewer, {
+    [ORM_DIALECT]: orm.dialect ?? 'postgres',
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
     ...declaredQueries(orm, runner),
     get actingUser() {
@@ -3836,6 +3850,7 @@ function ormWith<R>(pool: OrmPool, orm: OrmDefinition, runtime: OrmRuntime, acti
   const runner: Runner = { queryable: pool, inTransaction: false, pool, types: runtime.types, sqlite: pool.sqlite };
   const query = queryOf(orm, runner, acting, keys);
   return withRowFeatures(orm, viewer, {
+    [ORM_DIALECT]: orm.dialect ?? 'postgres',
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
     ...declaredQueries(orm, runner),
     get actingUser() {
