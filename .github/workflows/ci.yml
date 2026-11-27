@@ -1249,8 +1249,13 @@ jobs:
           # Outside a pull request alone (engine-rust says why).
           save-if: ${{ github.event_name != 'pull_request' }}
 
-      - name: Cache the superscalar checkout
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the superscalar checkout
+        # Restored and never saved from here: this job checks the sources
+        # out and builds nothing of superscalar, and the jobs that build
+        # all of it (go, typescript, python) save under the same key. A
+        # checkout saved first had each of those build superscalar again on
+        # every run until the pin moved.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             third_party/superscalar
@@ -1421,8 +1426,9 @@ jobs:
           workspaces: runtime/engine/rust
           save-if: ${{ github.event_name != 'pull_request' && matrix.shard == 'rest' }}
 
-      - name: Cache the superscalar checkout
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the superscalar checkout
+        # Restored and never saved from here (the rust job says why).
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             third_party/superscalar
@@ -1617,8 +1623,9 @@ jobs:
           # Outside a pull request alone (engine-rust says why).
           save-if: ${{ github.event_name != 'pull_request' }}
 
-      - name: Cache the superscalar checkout
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the superscalar checkout
+        # Restored and never saved from here (the rust job says why).
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             third_party/superscalar
@@ -1718,11 +1725,12 @@ jobs:
           # Outside a pull request alone (engine-rust says why).
           save-if: ${{ github.event_name != 'pull_request' }}
 
-      - name: Cache the superscalar checkout
+      - name: Restore the superscalar checkout
         # The archive's crate is a member of the engine's workspace, which
         # cargo loads whole, and the engine reaches superscalar's core by
         # path; scripts/rules-archive.sh checks it out when it is missing.
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        # Restored and never saved from here (the rust job says why).
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             third_party/superscalar
