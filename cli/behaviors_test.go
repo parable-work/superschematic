@@ -301,18 +301,6 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 	_, err = runCommandWith(t, nil, "build", filepath.Join(loaderTestdata, "fixture-behaviors-json"), "--out", t.TempDir())
 	require.NoError(t, err)
 
-	// A DB service's engine types build: sql and orm leave them out and
-	// the enginedoc generator writes their engine document (D58).
-	dist := t.TempDir()
-	_, err = runCommandWith(t, nil, "build", filepath.Join(loaderTestdata, "fixture-engine-db-json"), "--out", dist)
-	require.NoError(t, err)
-	engineDocument, err := os.ReadFile(filepath.Join(dist, "types", "go", "fixture-engine-db", "engine", "fixture-engine-db.json"))
-	require.NoError(t, err)
-	assert.Contains(t, string(engineDocument), `"namespace": "fixture-engine-db"`)
-	createSQL, err := os.ReadFile(filepath.Join(dist, "sql", "fixture-engine-db", "create.sql"))
-	require.NoError(t, err)
-	assert.NotContains(t, string(createSQL), "ticket")
-
 	schemaOut, err := runCommandWith(t, nil, "json-schema")
 	require.NoError(t, err)
 	var def struct {

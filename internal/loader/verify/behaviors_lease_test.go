@@ -91,7 +91,7 @@ func TestLeaseConfigIsHeldToTheTable(t *testing.T) {
 		{"directOn", lease(map[string]any{"directOn": []any{map[string]any{"revised": map[string]any{"link": "spec"}, "name": "rebase"}}}),
 			prefix + "directOn sends a directive when a link's target gains a revision or a release, which the core does not hear on a table: a release is a @versioned table's since Branches folded into @versioned (D103), and the core reads no version graph"},
 		{"sweepMs", lease(map[string]any{"sweepMs": 1000}),
-			prefix + "sweepMs is how often the engine's runner swept the lapsed leases: a table's lease expires at its own deadline, which the API's behavior worker runs when it falls due (D103), so a table's Lease takes no sweepMs"},
+			prefix + "sweepMs is how often a sweep found the lapsed leases: a table's lease expires at its own deadline, which the API's behavior worker runs when it falls due (D103), so a table's Lease takes no sweepMs"},
 		{"the first problem alone", lease(map[string]any{"maxHoldField": "note", "sweepMs": 1000}),
 			prefix + `maxHoldField "note" is not an integer field of Job`},
 	})

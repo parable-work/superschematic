@@ -132,7 +132,7 @@ func holdProblem(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry, name
 		return ""
 	}
 	target := schema.Types[supply]
-	if target == nil || target.Role != ir.RoleDBTable || target.JsonField || target.IsEngineType() {
+	if target == nil || target.Role != ir.RoleDBTable || target.JsonField {
 		return fmt.Sprintf("%s names %s, which is not a table of %s: a hold takes what a table that implements %s gives (D103)", at, supply, schema.Name, supplyContract)
 	}
 	var suppliers []string

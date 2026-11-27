@@ -290,8 +290,7 @@ func (e *emitter) emitApp(app *ir.App) {
 // emitDeriver renders a deriver as the class the reader reads it from
 // (D74): `@deriver({ schemas: ["<type>", ...], ... })` on an abstract class
 // with no members, or `@deriver()` when it sets nothing. Each schema is the
-// name of an engine type of the API's database, which the schema does not
-// import.
+// name of a table of the API's database, which the schema need not import.
 func (e *emitter) emitDeriver(deriver *ir.Deriver) {
 	if deriver == nil {
 		return

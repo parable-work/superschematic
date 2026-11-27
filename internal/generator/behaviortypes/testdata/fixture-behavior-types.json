@@ -481,6 +481,30 @@
               "kind": "boolean"
             },
             "required": true
+          },
+          {
+            "json": "retryAt",
+            "name": "RetryAt",
+            "doc": "When the row may run again after its last failure, in epoch milliseconds, as its class's backoff gives it; absent when it may run at once. A table's alone: an engine type keeps none.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "failingSince",
+            "name": "FailingSince",
+            "doc": "When the first failure since the row's last success was recorded, in epoch milliseconds, which giveUpAfterMs counts from; absent after a success, and without giveUpAfterMs. A table's alone: an engine type keeps none.",
+            "shape": {
+              "kind": "integer"
+            }
+          },
+          {
+            "json": "keyedBy",
+            "name": "KeyedBy",
+            "doc": "The value of keyField the counts were made under, as text; absent without keyField. A table's alone: an engine type keeps none.",
+            "shape": {
+              "kind": "string"
+            }
           }
         ]
       },

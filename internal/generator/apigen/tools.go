@@ -170,8 +170,8 @@ var reservedToolPropertyKeys = []string{
 
 // ResolveToolKeys returns the vendor keys the tool documents are written
 // with for schema: DefaultToolKeys as hooks leave them, run over a tool set
-// with no tools. The engine document (internal/generator/enginedoc) carries
-// them, since an engine writes its own tool documents (D11, D58).
+// with no tools, and an error when a hook leaves a key a JSON Schema
+// keyword.
 func ResolveToolKeys(schema *ir.Schema, hooks []ToolHook) (ToolKeys, error) {
 	return applyToolHooks(schema, nil, hooks)
 }

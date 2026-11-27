@@ -66,10 +66,6 @@ type DepsInfo struct {
 	// keeps each replica's in-process limiter (D75).
 	RateLimitStore string
 
-	// Engine is the engine Deps holds when Database is an engine database
-	// (D58), nil otherwise.
-	Engine *DepsEngine
-
 	// DatabaseTypesPackage is the TypeScript types package of Database
 	// when the API declares a worker (D53): it declares the queues'
 	// messages, which the Workers interface takes, and exports their
@@ -140,20 +136,6 @@ const AgentOptionsFunc = "createAgentOptions"
 
 // HasAgents reports whether Deps holds the agent dispatcher (D183).
 func (o *APIOutput) HasAgents() bool { return o.Deps.Agents != nil }
-
-// DepsEngine is the engine in Deps (D58): the engine of the API's engine
-// database, which the entrypoint opens in the background, an
-// EngineBackground of the engine's ./server entry.
-type DepsEngine struct {
-	// Database is the engine database, Namespace the namespace its engine
-	// types live in.
-	Database  string
-	Namespace string
-
-	// Package is the engine's npm package, whose ./server entry declares
-	// EngineBackground.
-	Package string
-}
 
 // DepsBucket is a bucket in Deps: the HTTP runtime's provider-neutral
 // Bucket, which the entrypoint opens on the bucket's provider (D54).
@@ -336,9 +318,8 @@ func (o *APIOutput) ChecksEndUsers() bool {
 // DepsPeerPackages lists the packages deps.ts imports beside the runtime:
 // each callee's SDK, in order, then the types of the database whose queues
 // the Workers interface's messages are, when the API declares a worker,
-// whose engine types the Derivers interface's methods fill (D74), or whose
-// repositories Deps.orm holds (D79), then the engine's package, when Deps
-// holds the engine (D58).
+// whose tables the Derivers interface's methods fill (D146), or whose
+// repositories Deps.orm holds (D79).
 func (o *APIOutput) DepsPeerPackages() []string {
 	var out []string
 	for _, call := range o.Deps.Calls {
@@ -346,9 +327,6 @@ func (o *APIOutput) DepsPeerPackages() []string {
 	}
 	if (o.HasWorkers() || o.HasDerivers() || o.DepsORM()) && o.Deps.DatabaseTypesPackage != "" && !slices.Contains(o.PeerPackages, o.Deps.DatabaseTypesPackage) {
 		out = append(out, o.Deps.DatabaseTypesPackage)
-	}
-	if o.Deps.Engine != nil && !slices.Contains(o.PeerPackages, o.Deps.Engine.Package) {
-		out = append(out, o.Deps.Engine.Package)
 	}
 	return out
 }

@@ -113,7 +113,7 @@ func TestReactionsFromTheDataForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if project := schema.Types["Project"]; !project.Optimistic || len(project.ImplementsBehaviors()) != 1 || project.IsEngineType() {
+	if project := schema.Types["Project"]; !project.Optimistic || len(project.ImplementsBehaviors()) != 1 || len(project.TypeBehaviors()) > 0 {
 		t.Errorf("Project = %+v", project)
 	}
 	task := schema.BehaviorQueueOf("Task", ir.BehaviorQueueChanges)
@@ -133,8 +133,7 @@ func TestReactionsFromTheDataForms(t *testing.T) {
 // holds a list, or composes no Workflow or several; and a then.link that
 // is no to-one relation, or whose target composes no Workflow, several, or
 // one without the state. A table whose writes are heard has one key field
-// and leaves its change queue's name to the build. An engine type's
-// Reactions that names status is refused too.
+// and leaves its change queue's name to the build.
 func TestReactionsChecks(t *testing.T) {
 	enters := func(state string) map[string]any { return map[string]any{"enters": state} }
 	changes := func(field string) map[string]any { return map[string]any{"changes": map[string]any{"field": field}} }
@@ -226,12 +225,6 @@ func TestReactionsChecks(t *testing.T) {
 		{"a then.transition the target has not", func(_, _, task map[string]any) {
 			reactionsRules(task, []any{rule(changes("title"), linkTo("project", "archived"))})
 		}, `type Task: behavior Reactions config: rule 1: then.transition "archived" is not a state of Project's Workflow (active, done)`},
-		{"an engine type's status", func(doc, _, _ map[string]any) {
-			doc["types"].(map[string]any)["Note"] = map[string]any{"name": "Note", "role": "DBTable", "behaviors": []any{
-				map[string]any{"name": "Workflow", "config": map[string]any{"states": []any{"a", "b"}, "transitions": []any{map[string]any{"from": "a", "to": "b"}}}},
-				map[string]any{"name": "Reactions", "config": map[string]any{"status": "Workflow", "rules": []any{rule(enters("b"), moveTo("b"))}}},
-			}, "fields": []any{map[string]any{"name": "id", "typeRef": map[string]any{"name": "Identity.UUID"}, "required": true, "key": true}}}
-		}, "type Note: @behavior Reactions names status, the Workflow field a table's Reactions reads (implements Reactions<Note, C>, D103); an engine type's Reactions reads its one Workflow, so leave status out"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := loadProjects(t, tc.edit)

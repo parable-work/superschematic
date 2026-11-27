@@ -21,7 +21,7 @@ import (
 // The rule for tests that need a runtime package of this checkout built
 // (CONTRIBUTING.md, "Shared build outputs"): `go test ./...` runs each
 // package's tests in its own process, in parallel, and they share the
-// checkout's runtime/http/typescript (and the engine's package and addon).
+// checkout's runtime/http/typescript.
 // A test that ran `bun install` and `bun run build` there itself rebuilt
 // dist/ and node_modules under another package's test reading them. Build
 // such a package only through BuildTypeScriptPackage or BuildHTTPRuntime;

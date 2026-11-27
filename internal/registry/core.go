@@ -25,10 +25,7 @@ func coreKinds() []KindSpec {
 			AllowedReferences: map[string]bool{
 				string(ir.SchemaKindGeneral): true,
 			},
-			// enginedoc writes the engine document of the schema's engine
-			// types, the types that compose a behavior, which sql and orm
-			// leave to the engine (D58).
-			Pipeline: []string{"sql", "orm", "types", "enginedoc"},
+			Pipeline: []string{"sql", "orm", "types"},
 		},
 		{
 			Name:                 string(ir.SchemaKindAPI),

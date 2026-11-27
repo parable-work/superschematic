@@ -80,7 +80,8 @@ func TestCoreBehaviors(t *testing.T) {
 	if len(rollups.Operations) != 0 || len(rollups.Fields) != 1 || rollups.Fields[0].Name != "values" {
 		t.Errorf("Rollups: operations %v, fields %v; want none and values", rollups.Operations, rollups.Fields)
 	}
-	// Reactions adds no field and no operation: the engine's runner runs it.
+	// Reactions adds no field and no operation: its API's @behaviorWorker
+	// runs it.
 	if len(reactions.Fields) != 0 || len(reactions.Operations) != 0 {
 		t.Errorf("Reactions fields %v and operations %v, want none", reactions.Fields, reactions.Operations)
 	}
@@ -146,8 +147,7 @@ func TestCoreBehaviors(t *testing.T) {
 	// operation, no requirement, and no precondition, since what they
 	// refuse is an issue at a field (invalid_instance). Variants declares no
 	// veto code; Constants declares one_way alone, a table's oneWay field
-	// moved back (D104), which an engine type, refusing oneWay, never
-	// answers.
+	// moved back (D104).
 	constants, _ := reg.Behavior("Constants")
 	variants, _ := reg.Behavior("Variants")
 	for _, b := range []Behavior{constants, variants} {

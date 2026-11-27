@@ -144,6 +144,12 @@ type JobRetries struct {
 	Exhausted bool `json:"exhausted"`
 	// Whether the instance failed with the same signature stuckAfter times in a row.
 	Stuck bool `json:"stuck"`
+	// When the row may run again after its last failure, in epoch milliseconds, as its class's backoff gives it; absent when it may run at once. A table's alone: an engine type keeps none.
+	RetryAt *int64 `json:"retryAt,omitempty"`
+	// When the first failure since the row's last success was recorded, in epoch milliseconds, which giveUpAfterMs counts from; absent after a success, and without giveUpAfterMs. A table's alone: an engine type keeps none.
+	FailingSince *int64 `json:"failingSince,omitempty"`
+	// The value of keyField the counts were made under, as text; absent without keyField. A table's alone: an engine type keeps none.
+	KeyedBy *string `json:"keyedBy,omitempty"`
 }
 
 // JobRetriesClassAttempts types JobRetries.classAttempts.

@@ -69,7 +69,7 @@ By making a contribution to this project, I certify that:
 | --- | --- |
 | [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, embedded, pulumi) linked |
 | [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
-| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `queries`, `json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog`, `new`, `stack`, `identity` |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `queries`, `json-schema`, `format`, `behaviors`, `env`, `catalog`, `new`, `stack`, `identity` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
@@ -239,9 +239,7 @@ The Makefile mirrors `.github/workflows/ci.yml`, which runs in two tiers
   (`examples/acme-schematic/scripts/smoke.sh`, `check_second_decorator.sh`
   and `examples/acme-shop/scripts/check.sh`),
   `examples/engine-notes/scripts/check.sh`,
-  `examples/engine-jobs/scripts/check.sh`, the generated servers over the
-  engine (`make engine-servers`, three servers in Go, Rust and TypeScript
-  answering one script alike on Postgres) and the version-graph scenarios
+  `examples/engine-jobs/scripts/check.sh` and the version-graph scenarios
   (`make versiongraph-scenarios`, `-ts`, `-rust` and `-python`). It runs
   twice a day on `main` as the release candidate (`release-candidate.yml`),
   and before every release. A red candidate opens an issue, "Release
@@ -401,13 +399,9 @@ workerd (D91 and D92 Left):
 Golden files under `testdata/golden`, the scalar catalogs
 (`runtime/schema/typescript/src/runtime/builtin-scalars.generated.ts`,
 `runtime/schema/python/superschematic_schema_runtime/_generated_default_registry.py`),
-the docs' scalar page (`docs/src/content/docs/reference/scalars.md`), the
-schema-file JSON Schema and TypeScript types
-(`ir/typescript/schema-file.json`, `ir/typescript/schema-file.d.ts`) and
-the modules `superschematic engine-client` writes for the engine's tests
-and the engine-notes example (`runtime/engine/typescript/test/generated/`,
-`examples/engine-notes/src/notes.client.ts`) with their parity vector
-(`runtime/engine/testdata/client_codegen_parity.json`) are
+the docs' scalar page (`docs/src/content/docs/reference/scalars.md`) and
+the schema-file JSON Schema and TypeScript types
+(`ir/typescript/schema-file.json`, `ir/typescript/schema-file.d.ts`) are
 regenerated, not edited. Change the generator or the pin, run
 `make go-goldens`, `go run ./internal/tools/scalarcatalog` or
 `go run ./internal/tools/schemafiletypes`, review the diff by eye, and

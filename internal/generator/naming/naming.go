@@ -63,7 +63,7 @@ type Naming struct {
 	PythonSDKModuleSuffix string `toml:"python_sdk_module_suffix"`
 
 	// RustCratePrefix prefixes generated crates: <prefix><name>-types,
-	// <prefix><name>-sdk, <prefix><name>-api, <prefix><name>-engine.
+	// <prefix><name>-sdk, <prefix><name>-api, <prefix><name>-rules.
 	RustCratePrefix string `toml:"rust_crate_prefix"`
 
 	// Scalar library coordinates, one per target language.
@@ -105,12 +105,6 @@ type Naming struct {
 	// static archive through cgo.
 	RulesGoModule string `toml:"rules_go_module"`
 
-	// EngineGoModule is the Go binding of the behavior engine (D58), which
-	// the entrypoint of a Go server whose API's database holds engine
-	// types imports to open the engine and mount its routes. It links the
-	// engine's static archive through cgo.
-	EngineGoModule string `toml:"engine_go_module"`
-
 	// VersionGraphRustCrate is the Rust engine of the version graph (D19),
 	// which a generated Rust types crate depends on when its schema
 	// declares a graph: its typed facade runs on the engine.
@@ -130,10 +124,6 @@ type Naming struct {
 	// fields are behaviors import its initSync and pass the core to the
 	// HTTP runtime's adapter.
 	RulesNpmPackage string `toml:"rules_npm_package"`
-
-	// EngineNpmPackage is the engine (D16), whose ./client subpath the
-	// module `superschematic engine-client` writes imports (D49).
-	EngineNpmPackage string `toml:"engine_npm_package"`
 
 	// VersionGraphPyPIDist and VersionGraphPythonModule are the Python
 	// version-graph runtime (D19): the engine, its Postgres adapter and the
@@ -601,29 +591,6 @@ type PathsConfig struct {
 	VersionGraphTypeScript string `toml:"versiongraph_typescript"`
 	// VersionGraphRust holds the version graph's Rust engine crate.
 	VersionGraphRust string `toml:"versiongraph_rust"`
-	// EngineRust holds the behavior engine's Rust crate,
-	// superschematic-engine (D58), which a Rust server links, with its
-	// postgres and axum features, to mount the engine's routes, and the
-	// project's engine crate depends on (projectengine).
-	EngineRust string `toml:"engine_rust"`
-	// EngineBehaviorsRust, EngineWorkQueueRust and EngineCommerceRust hold
-	// the Rust crates of the core's behaviors, the work queue's (D58) and
-	// the commerce behaviors' (D70), superschematic-engine-behaviors,
-	// superschematic-engine-workqueue and superschematic-engine-commerce,
-	// which the project's engine crate depends on beside EngineRust.
-	EngineBehaviorsRust string `toml:"engine_behaviors_rust"`
-	EngineWorkQueueRust string `toml:"engine_workqueue_rust"`
-	EngineCommerceRust  string `toml:"engine_commerce_rust"`
-	// EngineABIRust holds the engine's C ABI as a library,
-	// superschematic-engine-abi (D58), whose export_engine_c_abi! the
-	// project's engine crate's ffi member expands: the archive a Go server
-	// links in the core's place.
-	EngineABIRust string `toml:"engine_abi_rust"`
-	// EngineNapiRust holds the engine's Node-API addon as a library,
-	// superschematic-engine-napi (D58), whose export_engine_napi! the
-	// project's engine crate's napi member expands: the addon a TypeScript
-	// server loads in the core's place.
-	EngineNapiRust string `toml:"engine_napi_rust"`
 	// RulesAdapterRust holds the behaviors' adapter for a Rust server,
 	// superschematic-rules-adapter (D103), which a Rust API crate whose
 	// @behaviorOperations sets serve a table's behavior operations depends
@@ -641,23 +608,6 @@ type PathsConfig struct {
 	// starts, from the plans it carries. The crate is unpublished, so an
 	// embedded environment builds only in a checkout.
 	MigrateRust string `toml:"migrate_rust"`
-	// EngineGo holds the behavior engine's Go binding module (D58), which
-	// a Go server whose API's database holds engine types requires. A
-	// server's checkout Dockerfile builds the engine's static archive from
-	// the Cargo workspace beside it (the binding's ../rust), which reaches
-	// the work queue's crate, the schema IR's and the version graph's
-	// engine at their places in the same checkout.
-	EngineGo string `toml:"engine_go"`
-	// EngineTypeScript holds the behavior engine's npm package (D58),
-	// @superschematic/engine (its package.json), whose ./server entry a
-	// TypeScript server whose API's database holds engine types opens the
-	// engine with, through the engine's Node-API addon. The output root's
-	// Bun workspace overrides the servers' dependency on it with it. A
-	// server's checkout Dockerfile builds the core's addon from the Cargo
-	// workspace beside it (the package's ../rust), or the project's
-	// engine crate's napi member for a database that composes an
-	// extension's behavior.
-	EngineTypeScript string `toml:"engine_typescript"`
 	// VersionGraphPython holds the version graph's Python package.
 	VersionGraphPython string `toml:"versiongraph_python"`
 	// HTTPRuntimeGo holds the http runtime Go module.
@@ -697,17 +647,9 @@ type LocalPaths struct {
 	RulesGo                string
 	VersionGraphTypeScript string
 	VersionGraphRust       string
-	EngineRust             string
-	EngineBehaviorsRust    string
-	EngineWorkQueueRust    string
-	EngineCommerceRust     string
-	EngineABIRust          string
-	EngineNapiRust         string
 	RulesAdapterRust       string
 	RulesBehaviorsRust     string
 	MigrateRust            string
-	EngineGo               string
-	EngineTypeScript       string
 	VersionGraphPython     string
 	HTTPRuntimeGo          string
 	HTTPRuntimeRust        string
@@ -736,17 +678,9 @@ func (n Naming) LocalPaths(repoRoot string) LocalPaths {
 		RulesGo:                resolve(n.Paths.RulesGo),
 		VersionGraphTypeScript: resolve(n.Paths.VersionGraphTypeScript),
 		VersionGraphRust:       resolve(n.Paths.VersionGraphRust),
-		EngineRust:             resolve(n.Paths.EngineRust),
-		EngineBehaviorsRust:    resolve(n.Paths.EngineBehaviorsRust),
-		EngineWorkQueueRust:    resolve(n.Paths.EngineWorkQueueRust),
-		EngineCommerceRust:     resolve(n.Paths.EngineCommerceRust),
-		EngineABIRust:          resolve(n.Paths.EngineABIRust),
-		EngineNapiRust:         resolve(n.Paths.EngineNapiRust),
 		RulesAdapterRust:       resolve(n.Paths.RulesAdapterRust),
 		RulesBehaviorsRust:     resolve(n.Paths.RulesBehaviorsRust),
 		MigrateRust:            resolve(n.Paths.MigrateRust),
-		EngineGo:               resolve(n.Paths.EngineGo),
-		EngineTypeScript:       resolve(n.Paths.EngineTypeScript),
 		VersionGraphPython:     resolve(n.Paths.VersionGraphPython),
 		HTTPRuntimeGo:          resolve(n.Paths.HTTPRuntimeGo),
 		HTTPRuntimeRust:        resolve(n.Paths.HTTPRuntimeRust),
@@ -781,17 +715,9 @@ func (p PathsConfig) checkRelative() error {
 		{"rules_go", p.RulesGo},
 		{"versiongraph_typescript", p.VersionGraphTypeScript},
 		{"versiongraph_rust", p.VersionGraphRust},
-		{"engine_rust", p.EngineRust},
-		{"engine_behaviors_rust", p.EngineBehaviorsRust},
-		{"engine_workqueue_rust", p.EngineWorkQueueRust},
-		{"engine_commerce_rust", p.EngineCommerceRust},
-		{"engine_abi_rust", p.EngineABIRust},
-		{"engine_napi_rust", p.EngineNapiRust},
 		{"rules_adapter_rust", p.RulesAdapterRust},
 		{"rules_behaviors_rust", p.RulesBehaviorsRust},
 		{"migrate_rust", p.MigrateRust},
-		{"engine_go", p.EngineGo},
-		{"engine_typescript", p.EngineTypeScript},
 		{"versiongraph_python", p.VersionGraphPython},
 		{"http_runtime_go", p.HTTPRuntimeGo},
 		{"http_runtime_rust", p.HTTPRuntimeRust},
@@ -955,14 +881,12 @@ func Default() Naming {
 		VersionGraphGoModule:     "github.com/parable-work/superschematic/runtime/versiongraph/go",
 		RulesGoModule:            "github.com/parable-work/superschematic/runtime/rules/go",
 		VersionGraphRustCrate:    "superschematic-versiongraph-engine",
-		EngineGoModule:           "github.com/parable-work/superschematic/runtime/engine/go",
 		HTTPRuntimeGoModule:      "github.com/parable-work/superschematic/runtime/http/go",
 		HTTPRuntimeRustCrate:     "superschematic-http-runtime",
 		PtrGoModule:              "github.com/parable-work/superschematic/runtime/schema/go/ptr",
 		HTTPRuntimeNpmPackage:    "@superschematic/http-runtime",
 		VersionGraphNpmPackage:   "@superschematic/versiongraph",
 		RulesNpmPackage:          "@superschematic/rules",
-		EngineNpmPackage:         "@superschematic/engine",
 		VersionGraphPyPIDist:     "superschematic-versiongraph",
 		VersionGraphPythonModule: "superschematic_versiongraph",
 		SchemaLanguage:           "Superschematic",
@@ -1032,14 +956,12 @@ func (n Naming) OrDefault() Naming {
 	fill(&n.VersionGraphGoModule, d.VersionGraphGoModule)
 	fill(&n.RulesGoModule, d.RulesGoModule)
 	fill(&n.VersionGraphRustCrate, d.VersionGraphRustCrate)
-	fill(&n.EngineGoModule, d.EngineGoModule)
 	fill(&n.HTTPRuntimeGoModule, d.HTTPRuntimeGoModule)
 	fill(&n.HTTPRuntimeRustCrate, d.HTTPRuntimeRustCrate)
 	fill(&n.PtrGoModule, d.PtrGoModule)
 	fill(&n.HTTPRuntimeNpmPackage, d.HTTPRuntimeNpmPackage)
 	fill(&n.VersionGraphNpmPackage, d.VersionGraphNpmPackage)
 	fill(&n.RulesNpmPackage, d.RulesNpmPackage)
-	fill(&n.EngineNpmPackage, d.EngineNpmPackage)
 	fill(&n.VersionGraphPyPIDist, d.VersionGraphPyPIDist)
 	fill(&n.VersionGraphPythonModule, d.VersionGraphPythonModule)
 	fill(&n.SchemaLanguage, d.SchemaLanguage)
@@ -1262,14 +1184,6 @@ func (n Naming) RustAPICrate(schemaName string) string {
 	return n.RustCratePrefix + schemaName + "-api"
 }
 
-// RustEngineCrate returns the crate name of a schema's project engine
-// (D58), which the projectengine generator writes when the schema's types
-// compose an extension's behavior: the core's behaviors, the work queue's
-// and the extensions' compiled into one engine.
-func (n Naming) RustEngineCrate(schemaName string) string {
-	return n.RustCratePrefix + schemaName + "-engine"
-}
-
 // RustRulesCrate returns the crate name of a DB schema's rules crate
 // (D103's step 5): the behaviors' core with the behaviors its tables
 // compose that the core's crate does not ship (internal/generator/
@@ -1329,13 +1243,6 @@ func (n Naming) RustAppCrate(stack, app string) string {
 // suffix -app.
 func (n Naming) RustAppImplementationCrate(service, app string) string {
 	return n.RustCratePrefix + ir.AppDeployableName(service, app) + "-app"
-}
-
-// RustRunnerCrate returns the crate name of the entrypoint of a Rust
-// engine's runner of a stack (D58), as RustJobCrate names a job's, without
-// a suffix: a runner's deployable, <db>-engine-runner, names it.
-func (n Naming) RustRunnerCrate(stack, runner string) string {
-	return strings.TrimSuffix(n.RustServerCrate(stack, runner), "-server")
 }
 
 // ScalarRustCrateIdent is the scalar crate as Rust source spells it: the

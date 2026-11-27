@@ -370,8 +370,8 @@ func (o *APIOutput) checkSQLiteDeps(deps *DepsInfo) error {
 	refuse := func(what string) error {
 		return fmt.Errorf("rustrestgen: %s is a Rust API on %s, whose DB service lists sqlite first, and %s on Postgres alone so far (D116); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", o.SchemaName, deps.Database, what, deps.Database)
 	}
-	if len(o.Derivers) > 0 || deps.Engine != nil {
-		return refuse("the Rust server opens an engine")
+	if len(o.Derivers) > 0 {
+		return refuse("the Rust server runs a deriver")
 	}
 	if len(o.PostgresFeatures) > 0 {
 		return refuse("the Rust server serves " + strings.Join(o.PostgresFeatures, ", ") + " (D152, D188)")

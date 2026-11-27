@@ -1,4 +1,6 @@
-import { behavior } from "@superschematic/schema";
+import { Identity } from "superscalar";
+import { Nullable } from "@superschematic/schema";
+import { AutoGenerate, Comments, Derived, key } from "@superschematic/db";
 
 export enum Category {
   Billing = "billing",
@@ -6,24 +8,31 @@ export enum Category {
   Other = "other"
 }
 
-@behavior("Derived", {
-  fields: {
-    category: { from: ["subject", "body"], instruction: "Classify the ticket.", model: "standard" },
-    summary: { from: ["body"], instruction: "Summarize it in one sentence.", model: "simple" }
-  },
-  permission: "tickets.derive"
-})
-export abstract class Ticket {
+export abstract class Ticket
+  implements
+    Derived<Ticket, {
+      fields: {
+        category: { from: ["subject", "body"]; instruction: "Classify the ticket."; model: "standard" };
+        summary: { from: ["body"]; instruction: "Summarize it in one sentence."; model: "simple" };
+      };
+      permission: "tickets.derive";
+    }>
+{
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
   subject: string;
 
-  body?: string;
+  body: Nullable<string>;
 
-  category?: Category;
+  category: Nullable<Category>;
 
-  summary?: string;
+  summary: Nullable<string>;
 }
 
-@behavior("Comments")
-export abstract class Note {
+export abstract class Note implements Comments<Note, {}> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
   text: string;
 }

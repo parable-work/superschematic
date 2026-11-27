@@ -21,8 +21,8 @@ carries extensions. A binary hands the error `Execute` returns to
 that already said why, such as `superschematic-identity`, exits with that
 program's status.
 
-The core has fifteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
-`json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
+The core has fourteen commands: `init`, `check`, `build`, `build-all`, `migrate`,
+`json-schema`, `format`, `behaviors`, `env`, `catalog` and the
 `new`, `queries`, `stack` and `identity` groups, beside cobra's own `help` and
 `completion`. `--version` prints the binary's name and release,
 `superschematic version 1.2.3`, or `0.0.0` for a binary built from a
@@ -258,50 +258,28 @@ default export or a module for its side effects) fails to load with a
 message naming the import, in every build command:
 `schema.config.ts imports Product from "@acme/shop-db", which is a class, not a service sentinel; a config imports only @superschematic/schema-config and other services' sentinels (D34)`.
 
-A type that composes a behavior (`behaviors` in the data forms) loads,
-and `--emit-ir` prints it. The `types` generator renders it: each
-language's types write `<Type>Behaviors`, the type's behaviors' fields as
-a read returns them, narrowed by the type's config
+A General schema's type that composes a behavior with `@behavior`
+(`behaviors` in the data forms) loads, and `--emit-ir` prints it. The
+`types` generator renders it: each language's types write
+`<Type>Behaviors`, the type's behaviors' fields as a read returns them,
+narrowed by the type's config
 ([Behavior fields](/superschematic/guides/engine-behaviors/#behavior-fields)).
-A General schema with such a type builds. In a DB schema it is an engine
-type, whose instances the engine keeps: `sql` and `orm` leave it out, and
-the `enginedoc` generator writes the schema's engine document,
-`types/go/<service>/engine/<service>.json`, which the types hold as a
-constant too
-([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
-`outputs.engine.namespace` names the engine namespace its documents live
-in, the service's name unless set; `outputs.engine.mount` where a Go
-server of an API on the database mounts the engine's routes,
-`/engine/<service>` unless set; `outputs.engine.policy` the access
-policy it opens the engine with, `permission` unless set; and
-`outputs.engine.retention` how long the event log keeps events, which the
-database's runner prunes, every event unless set; and
-`outputs.engine.tools.invocation` the MCP invocation policy of an engine
-tool or a behavior operation (`Payments.capturePayment: ask`), which the
-build checks against the behaviors the engine types compose and requires
-for each commerce operation that moves money or stock, and
-`outputs.engine.tools.hidden` the behavior operations the engine's MCP
-tools leave out
-([In a generated server](/superschematic/guides/engine-behaviors/#in-a-generated-server)).
-When a type of a DB or General schema
-composes an extension's behavior whose registration names a Rust crate,
-the `projectengine` generator writes the project's engine crate,
-`engine/rust/<service>`, which compiles the core's behaviors and the
-extension's crates into the Rust engine (D58), with the C ABI's archive
-over them a Go server links as its `ffi` member and the Node-API addon a
-TypeScript server loads as its `napi` member
-([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)).
-The build fails before its generators
-run, one line per problem, when an engine type reaches a table or another
-engine type through a field, a table references an engine type, or an
-engine type declares what only a table has:
-`generator: field Ticket.customer of engine type Ticket is typed as table Customer, but an engine type cannot reach a table: make Customer an engine type too and link to it with the Links behavior (D16), or hold its key in a plain field`.
-An API's own type cannot compose a behavior, and the API generators do
-not serve an engine type yet, so an API that imports or projects one
-fails, naming the first generator that would run:
-`generator: api does not render engine types yet: shop-api imports shop-db.Ticket, which composes behavior Workflow (D58)`.
-An engine runs a General schema's types as they are; `engine-client`
-(below) types the engine's client for it.
+A General schema with such a type builds, and development mode serves it
+(D117). A DB schema's type is a table, which composes a behavior by a
+field type or by `implements` (D103), so the load refuses `@behavior` on
+it and names the table form:
+`type Ticket composes behavior Workflow with @behavior, which a DB type does not take: a DB type is a table, which composes it as status: Workflow<{ ... }> (D103)`.
+A schema config that sets `outputs.engine` fails to load as well: an API
+serves a table's behavior operations through `@behaviorOperations`, and
+an operation's `@mcp` sets its tool's `invocationPolicy`. When a table
+composes a behavior the core's crate does not ship, one a class or an
+extension declares whose hooks a Rust crate implements, the `rulescore`
+generator writes the project's rules crate, `rules/rust/<service>`: the
+behaviors' core with each such behavior's crate added
+([The project's rules core](/superschematic/extending/write-an-extension/#the-projects-rules-core)).
+An API's own type cannot compose a behavior, and the build fails before
+its generators run when one does:
+`generator: type Ticket of API shop-api composes behavior Workflow, but behaviors compose on DB tables, by implements and field types, and an API serves their operations through @behaviorOperations (D103)`.
 
 A generated package that imports a package the build does not generate
 fails the build:
@@ -840,8 +818,9 @@ The file is read with the binary's registry, so a file that uses a linked
 extension's kind, decorators, documents or behaviors converts between JSON
 and YAML with its extension data. The TypeScript writer cannot render an
 extension's decorators: converting such a file to `ts` fails and names the
-extension slot instead of dropping it. It writes a type's behaviors as
-`@behavior` decorators. It imports each scalar namespace from the npm
+extension slot instead of dropping it. It writes a General schema type's
+behaviors as `@behavior` decorators, and a table's as `implements` uses
+and field types (`status: Workflow<{ ... }>`). It imports each scalar namespace from the npm
 package the linked extension's scalar catalog names for it (`Acme` from
 `@acme/schema`), and the others from superscalar. A file with a scalar
 that superscalar does not have, in a namespace no catalog names a package
@@ -899,61 +878,6 @@ D70), and `Seats`, `Reconcile`, `Schedules` and `Pool`, which no engine implemen
 (`runtime/engine/rust/rules-behaviors/declarations`, D104) (`make
 behaviors`; `make behaviors-check` in CI). Without `--extension`, an extension's binary
 writes the core's declarations beside its own.
-
-## `engine-client --out <file.ts> <schema file>...`
-
-Write one TypeScript module of typed wrappers over the engine's client
-(`@superschematic/engine/client`) for engine schemas (D49). Per schema it
-exports:
-
-| Export | What it is |
-| --- | --- |
-| `<T>Fields` | the instance type's own fields, as a create gives them; with `Variants`, a union by the field that picks the type |
-| `<T>` | an instance's data as a read returns it: its own fields, `<T>Fields` |
-| `<T>Behaviors` | an instance's behaviors as a read returns them: by behavior name, each behavior that declares a field, with its fields `readonly`, optional where the engine can leave one out |
-| `<T>Patch` | a merge patch of the own fields |
-| `<T>State`, `<T>LinkName` | a `Workflow`'s states and a `Links` config's names, where the type composes them |
-| `<T>CommentMessage`, `<T>CommentBlock`, `<T>CommentPostedBlock` | a `Comments` message as every operation that returns one gives it (`listPinned`'s items too), a block a post, a finish or an edit gives (`ref`, `action`, `code` or `attachment`), and a block as the record and `listEdits` hold it, a code block with the members `moveAnchor` adds, where the type composes `Comments` |
-| `<T>CreateParams`, `<T>Preconditions` | each behavior's create parameters and preconditions, by behavior name; an entry is required when its schema requires something, such as a required link |
-| `<T><Op>Params`, `<T><Op>Result`, `<T>Operations` | each behavior operation's parameters and result |
-| `<T>Vetoes`, `is<T>Veto` | the codes each behavior's vetoes carry, and `isVeto` typed by them |
-| `<T><Signal>Signal`, `<T>Signals`, `<T>SignalMessage`, `is<T>Signal` | where a behavior declares signals (D77): each signal's data, `<T><Behavior><Signal>Signal` when two behaviors declare its name; the data by behavior and name; a stream's signal message narrowed to them; and a guard that tells the type's signals from a stream's other messages, by behavior and name when given, and types their data |
-| `<Schema>Client`, `<schema>Client(client)` | the wrapper: `create`, `get`, `list`, `update`, `delete`, `operate`, a method per behavior operation, and `send<Signal>(id, data?, options?)` per signal a caller may send (access `read` or `write`; `send<Behavior><Signal>` when an operation or another signal takes the name) |
-
-`<T>` is the instance type's name, the type named like the schema or its
-only type, and `<Schema>` the schema's name in PascalCase. A behavior's
-config narrows its declaration's shapes for the core's behaviors:
-`Workflow`'s states, `Links`' names and targets, `Dependencies`' blocker
-schemas, `Rollups`' values, `Revisions`' patches, the kinds of block
-`Comments` lets a post or a finish give and `Variants`' types.
-Another behavior, an extension's among them, is typed by its declaration,
-and its fields hold any JSON. A scalar is typed by the JSON its values
-are on the wire (`Temporal.DateTime` a string), not by its scalar
-library's symbol.
-
-```
-superschematic engine-client --out src/notes.client.ts schemas/notes.schema.json
-superschematic engine-client --out src/jobs.client.ts schemas/batches.schema.json schemas/jobs.schema.json schemas/workers.schema.json
-superschematic engine-client --out src/notes.client.ts --check schemas/notes.schema.json
-```
-
-| Flag | Default | Meaning |
-| --- | --- | --- |
-| `--out` | (required) | the TypeScript file the module is written to |
-| `--check` | false | write nothing; fail when the file is not what would be written |
-| `--naming` | the `superschematic.toml` found walking up from the first file | naming config file |
-
-Each file is one schema document as the engine takes it: `kind: General`,
-a `name`, no imports and no operation sets. A `.schema.json` or
-`.schema.yaml` file is read on its own, and a `.schema.ts` file in the
-context of its service, as `format` reads it. The command runs the
-loader's checks, the behaviors' configs against their declarations
-included, and refuses what the engine refuses: a map or union field, and
-two schemas whose exports share a name. The module imports the client
-from `engine_npm_package`'s `/client` entry point and nothing else, so it
-runs wherever the client does. It is a command of its own rather than a
-`build` target: an engine schema has no service config, and one module
-types schemas that link to each other.
 
 ## `stack init [<services-root>]`
 
@@ -1708,7 +1632,8 @@ build writes, `permissions.json` beside each API's `openapi.json`. When
 the default output root, `<schemas-root>/dist`, holds catalogs of APIs
 whose `authDb` is this service, a `--permission` that is none of their
 permissions and covers none draws a warning on stderr. It is granted all
-the same: an engine's schemas name permissions at run time.
+the same: a project in development or runtime mode names permissions in
+the schemas it publishes at run time.
 
 ```
 superschematic identity bootstrap ./schemas/services/shop-db --login admin@example.com --permission identity --permission orders
@@ -1779,7 +1704,8 @@ superschematic generates needs on this machine, in a project whose naming
 file names no superscalar checkout
 ([`[paths] scalar_go`](/superschematic/reference/naming/#pathsscalar_go)).
 Such code links superscalar's static archive, the version graph's and the
-engine's through cgo, and no module the module proxy serves carries them.
+behaviors' core's through cgo, and no module the module proxy serves
+carries them.
 `env` downloads the release's
 `superschematic-archives_<version>_<platform>.tar.gz` for this machine
 once, checks it against the digest the binary names, unpacks it into
@@ -1822,7 +1748,7 @@ place of documentation that could describe another version.
   An extension's decorator has no declaration in the binary, so its entry
   gives the JSON Schema of its argument instead. The core's declarations
   are the binary's copy of `packages/`.
-- `behaviors`: every engine behavior, with its config's type, what it
+- `behaviors`: every behavior, with its config's type, what it
   requires and conflicts with, the fields and operations it adds and the
   codes its refusals carry, then the core's config types. An extension's
   behavior gives its config's JSON Schema.

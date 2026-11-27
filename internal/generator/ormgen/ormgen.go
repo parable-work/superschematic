@@ -1110,9 +1110,6 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		opts.Clock = codegen.DefaultClock()
 	}
 	opts.Naming = opts.Naming.OrDefault()
-	// An engine type gets no repository: the engine keeps its instances
-	// (D58).
-	schema = codegen.WithoutEngineTypes(schema)
 
 	tableTypes := tableTypeDefs(schema)
 	if len(tableTypes) == 0 && len(schema.Queues()) == 0 && len(schema.Queries()) == 0 {

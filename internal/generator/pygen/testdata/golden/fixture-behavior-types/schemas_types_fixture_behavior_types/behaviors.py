@@ -175,6 +175,12 @@ class JobRetries(BaseModel):
     exhausted: bool = Field(..., alias="exhausted", serialization_alias="exhausted")
     # Whether the instance failed with the same signature stuckAfter times in a row.
     stuck: bool = Field(..., alias="stuck", serialization_alias="stuck")
+    # When the row may run again after its last failure, in epoch milliseconds, as its class's backoff gives it; absent when it may run at once. A table's alone: an engine type keeps none.
+    retry_at: Optional[int] = Field(default=None, alias="retryAt", serialization_alias="retryAt")
+    # When the first failure since the row's last success was recorded, in epoch milliseconds, which giveUpAfterMs counts from; absent after a success, and without giveUpAfterMs. A table's alone: an engine type keeps none.
+    failing_since: Optional[int] = Field(default=None, alias="failingSince", serialization_alias="failingSince")
+    # The value of keyField the counts were made under, as text; absent without keyField. A table's alone: an engine type keeps none.
+    keyed_by: Optional[str] = Field(default=None, alias="keyedBy", serialization_alias="keyedBy")
 
 class JobBudgetMetersCpuSeconds(BaseModel):
     """

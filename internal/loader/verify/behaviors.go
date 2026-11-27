@@ -25,28 +25,54 @@ import (
 // behavior's fields sit under its name). A table's uses, the behaviors it
 // implements and those anchored on its fields (D103), are held to
 // checkTableUses as well, and a behavior it implements is one the
-// behaviors' core runs and that names no value field. A behavior no engine
-// implements (registry.EngineImplements: Seats, Reconcile and Schedules,
-// D104) is refused on an engine type, naming the table form. A
-// declaration's own field and operation names are checked when it
-// registers. A behavior D103 folds into a schema feature (Links, Search,
-// Queue, Branches) is refused first, naming its replacement
-// (checkFoldedBehaviors).
+// behaviors' core runs and that names no value field. A behavior D103
+// folds into a schema feature (Links, Search, Queue, Branches) is refused
+// first, in every kind, naming its replacement (checkFoldedBehaviors). A
+// type of a schema whose kind keeps its structs in tables, as the DB kind
+// does, composes no behavior with @behavior: refuseTypeBehaviors names the
+// table form instead (D103). A declaration's own field and operation names
+// are checked when it registers.
 func checkBehaviors(schema *ir.Schema, reg *registry.Registry, r *Result) {
 	bases := codegen.BaseTypeNames(schema)
+	kind, ok := reg.Kind(string(schema.Kind))
+	tables := ok && kind.StructRole == ir.RoleDBTable
 	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
 		for _, name := range sortedTypeNames(types) {
-			if td := types[name]; td != nil && len(td.Behaviors) > 0 && !checkFoldedBehaviors(td, r) {
-				checkTypeBehaviors(schema, td, bases, reg, r)
+			td := types[name]
+			if td == nil || len(td.Behaviors) == 0 || checkFoldedBehaviors(td, r) {
+				continue
 			}
+			if tables && refuseTypeBehaviors(td, reg, r) {
+				continue
+			}
+			checkTypeBehaviors(schema, td, bases, reg, r)
 		}
 	}
+}
+
+// refuseTypeBehaviors refuses each @behavior use of td, a type of a DB
+// schema, and reports whether it refused one. A DB type is a table, which
+// composes its behaviors by implements and field types (D103), so the
+// refusal names the form the behavior takes there: a field of its value
+// field's name for a behavior anchored on one (status: Workflow<{ ... }>),
+// and implements for the rest. @behavior stays a General schema's (D16),
+// which development mode serves (D117).
+func refuseTypeBehaviors(td *ir.TypeDef, reg *registry.Registry, r *Result) bool {
+	uses := td.TypeBehaviors()
+	for _, ref := range uses {
+		form := fmt.Sprintf("implements %s<%s, { ... }>", ref.Name, td.Name)
+		if behavior, ok := reg.Behavior(ref.Name); ok && behavior.Value != "" {
+			form = fmt.Sprintf("%s: %s<{ ... }>", behavior.Value, ref.Name)
+		}
+		r.errorf(td.Owner, "type %s composes behavior %s with @behavior, which a DB type does not take: a DB type is a table, which composes it as %s (D103)", td.Name, ref.Name, form)
+	}
+	return len(uses) > 0
 }
 
 func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, reg *registry.Registry, r *Result) {
 	if onType := td.TypeBehaviors(); len(onType) > 0 {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
-			r.errorf(td.Owner, "type %s composes behavior %s on the type (@behavior) and behavior %s by implements: a type composes its behaviors with @behavior (an engine type, D58) or on a table, by implements and field types (D103), never both", td.Name, onType[0].Name, implemented[0].Name)
+			r.errorf(td.Owner, "type %s composes behavior %s on the type (@behavior) and behavior %s by implements: a type composes its behaviors with @behavior, a General schema's (D16), or on a table, by implements and field types (D103), never both", td.Name, onType[0].Name, implemented[0].Name)
 			return
 		}
 		if onFields := td.FieldBehaviors(); len(onFields) > 0 {
@@ -87,14 +113,6 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 		if ref.Implements && !implementable(behavior, reg, td, r) {
 			continue
 		}
-		if !ref.Implements && !ref.FieldAnchored() && !registry.EngineImplements(behavior) {
-			// Seats, Reconcile and Schedules are the behaviors' core's
-			// alone (D104): no engine registers them, so an engine type
-			// cannot compose any of them, and the build names the table
-			// form.
-			r.errorf(td.Owner, "%s", engineRefusal(td, behavior))
-			continue
-		}
 		if err := behavior.ValidateConfig(ref.Config); err != nil {
 			if ref.FieldAnchored() {
 				r.errorf(td.Owner, "type %s: field %s: %s", td.Name, ref.Field, err)
@@ -103,48 +121,6 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			}
 		} else if ref.Name == "Derived" && !ref.FieldAnchored() && !ref.Implements {
 			checkDerivedInputs(td, ref.Config, r)
-		} else if ref.Name == "Timers" && !ref.FieldAnchored() && !ref.Implements && configNames(ref.Config, "status") {
-			// Timers' declaration takes status for a table, whose core
-			// reads the Workflow it names; the engine's Timers reads its
-			// one Workflow and would ignore it (D103).
-			r.errorf(td.Owner, "type %s: @behavior Timers names status, the Workflow field a table's Timers reads (implements Timers<%s, C>, D103); an engine type's Timers reads its one Workflow, so leave status out", td.Name, td.Name)
-		} else if ref.Name == reactionsBehavior && !ref.FieldAnchored() && !ref.Implements && configNames(ref.Config, "status") {
-			// Reactions' declaration takes status for a table, whose core
-			// reads and moves the Workflow it names; the engine's Reactions
-			// reads its one Workflow and would ignore it (D103).
-			r.errorf(td.Owner, "type %s: @behavior Reactions names status, the Workflow field a table's Reactions reads (implements Reactions<%s, C>, D103); an engine type's Reactions reads its one Workflow, so leave status out", td.Name, td.Name)
-		} else if ref.Name == holdsBehavior && !ref.FieldAnchored() && !ref.Implements && configNames(ref.Config, "status") {
-			// Holds' declaration takes status for a table, whose core
-			// reads the Workflow it names; the engine's Holds reads its one
-			// Workflow and would ignore it (D103's step 4).
-			r.errorf(td.Owner, "type %s: @behavior Holds names status, the Workflow field a table's Holds reads (implements Holds<%s, C>, D103); an engine type's Holds reads its one Workflow, so leave status out", td.Name, td.Name)
-		} else if ref.Name == workflowBehavior && !ref.FieldAnchored() && !ref.Implements {
-			// Workflow's declaration takes by, overridePermission and
-			// repeat for a table, whose core runs them; the engine's
-			// Workflow refuses each (D104).
-			checkEngineWorkflowConfig(td, ref, r)
-		} else if !ref.FieldAnchored() && !ref.Implements {
-			// Constants' oneWay, StateRules' by and status, Approvals'
-			// resetOn, pinned and status, Lease's status, Retries' waits,
-			// Presence's ttlByState and status and Budget's periods and
-			// observePermission are a table's, whose core runs them; the
-			// engine refuses each (D104).
-			switch ref.Name {
-			case constantsBehavior:
-				checkEngineConstantsConfig(td, ref, r)
-			case stateRulesBehavior:
-				checkEngineStateRulesConfig(td, ref, r)
-			case approvalsBehavior:
-				checkEngineApprovalsConfig(td, ref, r)
-			case leaseBehavior:
-				checkEngineLeaseConfig(td, ref, r)
-			case retriesBehavior:
-				checkEngineRetriesConfig(td, ref, r)
-			case presenceBehavior:
-				checkEnginePresenceConfig(td, ref, r)
-			case budgetBehavior:
-				checkEngineBudgetConfig(td, ref, r)
-			}
 		}
 		if ref.FieldAnchored() || ref.Implements {
 			uses[id] = behavior
@@ -203,16 +179,6 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 			opOwner[op.Name] = behavior.Name
 		}
 	}
-}
-
-// configNames reports whether config, a JSON object, has the member key.
-func configNames(config json.RawMessage, key string) bool {
-	var members map[string]json.RawMessage
-	if json.Unmarshal(config, &members) != nil {
-		return false
-	}
-	_, ok := members[key]
-	return ok
 }
 
 // implementable reports whether a table may implement behavior (D103): one

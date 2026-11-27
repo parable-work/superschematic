@@ -29,7 +29,7 @@ func checkSQLNames(schema *ir.Schema, r *Result) {
 				checkColumnName(schema, td, fd, bases, r)
 			}
 		}
-		if !hasTable(td, bases) || codegen.IsEngineType(td) {
+		if !hasTable(td, bases) {
 			continue
 		}
 		table := sqlutil.TableName(td)
@@ -57,7 +57,7 @@ func checkJoinTableNames(schema *ir.Schema, bases map[string]bool, tables map[st
 	joins := map[string]string{}
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
-		if !hasTable(td, bases) || codegen.IsEngineType(td) {
+		if !hasTable(td, bases) {
 			continue
 		}
 		for _, fd := range td.Fields {
@@ -65,7 +65,7 @@ func checkJoinTableNames(schema *ir.Schema, bases map[string]bool, tables map[st
 				continue
 			}
 			target := schema.Types[fd.TypeRef.Name]
-			if !hasTable(target, bases) || codegen.IsEngineType(target) {
+			if !hasTable(target, bases) {
 				continue
 			}
 			join := sqlutil.TableName(td) + "_" + sqlutil.TableName(target)
@@ -85,8 +85,6 @@ func checkJoinTableNames(schema *ir.Schema, bases map[string]bool, tables map[st
 // overrideRefusal is why td's names take no override, or "".
 func overrideRefusal(td *ir.TypeDef) string {
 	switch {
-	case codegen.IsEngineType(td):
-		return "it composes behaviors, so the engine keeps its rows in tables of its own"
 	case td.VersionGraph != nil || td.GraphMember != nil:
 		return "a version graph's runtimes name its tables themselves (support follows)"
 	case td.Origin == ir.OriginIdentity:
