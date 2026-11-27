@@ -249,18 +249,18 @@ pub struct NoticePreference {
     pub urgency: String,
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     pub channels: Vec<String>,
-    /// When quiet hours start, HH:MM in the time zone; null for none.
+    /// When quiet hours start, a time of day in the time zone; null for none.
     #[serde(default, rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<String>,
-    /// When they end, HH:MM.
+    pub quiet_start: Option<TemporalTime>,
+    /// When they end.
     #[serde(default, rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<String>,
+    pub quiet_end: Option<TemporalTime>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null.
     #[serde(default, rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
+    pub digest: Option<TemporalRecurrenceRule>,
 }
 
 impl Default for NoticePreference {
@@ -467,12 +467,12 @@ pub struct Subscription {
     #[serde(default, rename = "titleField", skip_serializing_if = "Option::is_none")]
     pub title_field: Option<String>,
     /// The RRULE it goes out on (D152).
-    pub rule: String,
+    pub rule: TemporalRecurrenceRule,
     /// The wall date-time the rule starts from: 2026-01-05T08:00.
     pub start: String,
     /// The IANA time zone the rule is read in.
     #[serde(rename = "timeZone")]
-    pub time_zone: String,
+    pub time_zone: TemporalTimeZone,
     /// The channel kinds it goes out on.
     pub channels: Vec<String>,
     /// Whether it goes out.

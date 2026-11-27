@@ -279,8 +279,13 @@ function sqlType(dialect: 'sqlite' | 'postgres', column: RulesColumn): string {
   if (column.convert === 'epochMillis') return t.timestamp;
   switch (column.type) {
     case 'string':
+    // The scalars a declaration types a text field by (D201).
+    case 'Crypto.SHA256':
+    case 'Temporal.TimeZone':
+    case 'Text.Markdown':
       return t.text;
     case 'number':
+    case 'Generic.Probability':
       return t.number;
     case 'boolean':
       return t.boolean;

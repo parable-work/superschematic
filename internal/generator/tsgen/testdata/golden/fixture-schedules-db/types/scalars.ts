@@ -6,6 +6,7 @@ export type {
   GenericJSON,
   IdentityUUID,
   TemporalDateTime,
+  TemporalTimeZone,
 } from 'superscalar/scalars';
 
 export type { JSONValue } from 'superscalar/scalars';

@@ -1,6 +1,6 @@
 // Derived's class (D103): the build derives derived.behavior.json from it
 // (make behaviors), which the behaviors' core and the engine read.
-import { Generic, Temporal } from "superscalar";
+import { Crypto, Generic, Temporal } from "superscalar";
 import { computed, declaresBehavior, subTable, volatile, type Integer, type JsonSchema } from "@superschematic/db";
 
 /** A string that is not empty. */
@@ -271,13 +271,13 @@ export abstract class Derived<C extends DerivedConfig> {
      * The SHA-256 of the model label, the instruction, the output schema and
      * the inputs that hold a value; absent while no input holds one.
      */
-    sourceHash: string;
+    sourceHash: Crypto.SHA256;
     /** The source hash of the last value settled; absent before the first. */
-    settledHash: string;
+    settledHash: Crypto.SHA256;
     /** The model label the last value was settled under. */
     model: string;
     /** The confidence the last value was settled with, from 0 to 1. */
-    confidence: number;
+    confidence: Generic.Probability;
     /** When the last value was settled, in epoch milliseconds. */
     settledAt: Temporal.DateTime;
     /** The subject of the deriver that settled it. */

@@ -30,7 +30,7 @@ CREATE TABLE problem_schedules_schedules (
   "name" TEXT NOT NULL,
   kind TEXT,
   spec TEXT,
-  time_zone TEXT,
+  time_zone VARCHAR(100),
   state TEXT,
   set_at TIMESTAMPTZ,
   next_at TIMESTAMPTZ,

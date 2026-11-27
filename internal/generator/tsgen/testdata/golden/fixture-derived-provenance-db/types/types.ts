@@ -2,8 +2,10 @@
 
 import type {
   JSDate,
+  CryptoSHA256,
   GenericInt64,
   GenericJSON,
+  GenericProbability,
   IdentityUUID,
   TemporalDateTime,
 } from './scalars';
@@ -31,13 +33,13 @@ export interface ArticleDerivedDerivations {
   /** The derived field's name. */
   field: string;
   /** The SHA-256 of the model label, the instruction, the output schema and the inputs that hold a value; absent while no input holds one. */
-  sourceHash?: string | null;
+  sourceHash?: CryptoSHA256 | null;
   /** The source hash of the last value settled; absent before the first. */
-  settledHash?: string | null;
+  settledHash?: CryptoSHA256 | null;
   /** The model label the last value was settled under. */
   model?: string | null;
   /** The confidence the last value was settled with, from 0 to 1. */
-  confidence?: number | null;
+  confidence?: GenericProbability | null;
   /** When the last value was settled, in epoch milliseconds. */
   settledAt?: TemporalDateTime | null;
   /** The subject of the deriver that settled it. */
@@ -86,13 +88,13 @@ export interface TicketDerivedDerivations {
   /** The derived field's name. */
   field: string;
   /** The SHA-256 of the model label, the instruction, the output schema and the inputs that hold a value; absent while no input holds one. */
-  sourceHash?: string | null;
+  sourceHash?: CryptoSHA256 | null;
   /** The source hash of the last value settled; absent before the first. */
-  settledHash?: string | null;
+  settledHash?: CryptoSHA256 | null;
   /** The model label the last value was settled under. */
   model?: string | null;
   /** The confidence the last value was settled with, from 0 to 1. */
-  confidence?: number | null;
+  confidence?: GenericProbability | null;
   /** When the last value was settled, in epoch milliseconds. */
   settledAt?: TemporalDateTime | null;
   /** The subject of the deriver that settled it. */
@@ -126,7 +128,7 @@ export interface TicketProvenanceRecords {
   /** When, in epoch milliseconds. */
   writtenAt?: TemporalDateTime | null;
   /** The confidence the write's attribution gave, from 0 to 1. */
-  confidence?: number | null;
+  confidence?: GenericProbability | null;
   /** proposed, accepted, rejected or edited; absent for a write that entered no review. */
   review?: string | null;
   /** The subject of the reviewer, or of the caller whose write edited a proposal. */

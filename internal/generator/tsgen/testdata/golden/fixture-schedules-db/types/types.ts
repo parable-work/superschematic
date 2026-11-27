@@ -6,6 +6,7 @@ import type {
   GenericJSON,
   IdentityUUID,
   TemporalDateTime,
+  TemporalTimeZone,
 } from './scalars';
 
 /**
@@ -87,7 +88,7 @@ export interface ProblemSchedulesSchedules {
   /** The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart. */
   spec?: string | null;
   /** The IANA time zone a cron line is read in, as the bundled database spells it; absent for after and every. */
-  timeZone?: string | null;
+  timeZone?: TemporalTimeZone | null;
   /** active, paused or finished. */
   state?: string | null;
   /** When it was set, in epoch milliseconds: an every schedule's runs fall at whole intervals from it. */

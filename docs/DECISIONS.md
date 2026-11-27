@@ -19,7 +19,7 @@ the item's design and the alternatives not taken are written out.
 ## Writing here
 
 - A new decision is appended at the end of this file, numbered one past
-  the highest number any branch has used. D201 is the highest so far.
+  the highest number any branch has used. D204 is the highest so far.
   Check every local branch before taking a number, since an unpushed
   branch may hold the next one. A number is never reused, even after its
   entry has left.
@@ -403,8 +403,10 @@ a generated server's own answer to a fence's refusal.
   paths become published package versions.
 - **D31, amended** (L 9357). Whether `Temporal.Duration` takes a sign.
 - **D84** (L 11727). A `decimal` format hint in superscalar's Go metadata.
-- **D107** (L 17644). `Text`, `Float64` and `Boolean` in superscalar's
-  `Generic` namespace.
+- **D204**. `Temporal.LocalDateTime`, `Temporal.Period`, `File.MediaType`,
+  `Geo.CountryCode` and `Network.Port`, which superscalar adds after the
+  commit `superscalar.pin` names. When the pin moves, the fields D204
+  lists as left take them.
 
 ### Never run live
 
@@ -3810,3 +3812,30 @@ Left:
   the Go and Rust repositories' history on SQLite.
 - A drain worker over a SQLite file (slots and a next due time, D145).
 - Go and Rust on SQLite for the three features (their own decisions).
+
+## D204. The fields the build adds take the scalar that says what they hold, where superscalar has one (D103, D153, D154, D155, D158 amended)
+
+The tables the loader fills and the sub-tables a behavior keeps typed a
+hash, a time zone, a recurrence rule, a time of day and a file's size as
+`string` and `Generic.Int64`, each with its shape written in the field's
+comment. superscalar has had a scalar for each of them. This entry types
+those fields by it, so the column, the validators and the generated types
+say what the comment said.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A SHA-256 is `Crypto.SHA256`: an attachment's `contentHash` and its released message's (D154), the search index's `textHash` (D155), an agent approval's `paramsHash` (D158), and Derived's `sourceHash` and `settledHash` (D103). The grants' and sessions' `tokenHash` already were. | `string`, which let a row hold a hash no reader would match. |
+| An attachment's `size` is `File.SizeBytes` (D154). | `Generic.Int64`, which takes a negative length. |
+| A notice preference's `quietStart` and `quietEnd` are `Temporal.Time`, its `timeZone` and a subscription's are `Temporal.TimeZone`, and its `digest` and a subscription's `rule` are `Temporal.RecurrenceRule` (D153). Schedules' `timeZone` is `Temporal.TimeZone` (D103). A time of day is stored as the scalar writes it, `HH:MM:SS`, and Postgres holds it in a `TIME`; TypeScript's `quietDelaySeconds`, Go's `QuietDelaySeconds` and Rust's `quiet_delay_seconds` read `HH:MM` and `HH:MM:SS` alike, which the parity file holds them to, and Go's notifier, which reads its rows as the driver gives them, writes the driver's time of day as that text. | A notifier that normalizes each to `HH:MM` on its way in, a second rule for one value. |
+| A Comments message's `body`, and an edit's, are `Text.Markdown`, and Derived's and Provenance's `confidence` are `Generic.Probability` (D103). | `string` and `number` with the shape in the description. |
+| `Temporal.TimeZone` checks a name's shape, not the zone database: it takes `UTC`, `GMT` and a name of two or more segments, so a link name of one segment (`Japan`, `EST`) is refused where a repository validates the field. | A looser field than the scalar, which every other time zone in a schema is held to. |
+
+Left: a subscription's `start` and a Recurrence occurrence's `key` and
+`due`, which are wall date-times (`Temporal.LocalDateTime`); Recurrence's
+`opensBefore`, `remindBefore` and `overdueAfter`, which are ISO 8601
+durations (`Temporal.Period`); an attachment's `mediaType`
+(`File.MediaType`); and a stack's ports (`Network.Port`). Each waits on
+the pin (see "Waits on superscalar"). The example schemas still write a
+price as `Generic.Int64` and a currency as `string` where `Finance.Money`
+and `Finance.Currency` would do: retyping them changes the type of each
+in the examples' hand-written Go, TypeScript, Rust and Python.

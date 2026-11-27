@@ -133,7 +133,7 @@
         {
           "name": "timeZone",
           "description": "The IANA time zone a cron line is read in, as the bundled database spells it; absent for after and every.",
-          "type": "string"
+          "type": "Temporal.TimeZone"
         },
         {
           "name": "state",

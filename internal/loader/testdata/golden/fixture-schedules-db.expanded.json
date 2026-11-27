@@ -64,6 +64,22 @@
         "typescript": "JSDate"
       },
       "hasCustomParse": true
+    },
+    "Temporal.TimeZone": {
+      "name": "Temporal.TimeZone",
+      "description": "IANA tz database name: UTC, GMT, or two or more '/'-separated segments of ASCII letters, digits, '_', '-', and '+', each starting with a letter (e.g., America/New_York, America/Port-au-Prince, Etc/GMT+5). Checks the name's shape, not that a tz release lists it.",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "TemporalTimeZone",
+        "json_schema": "string",
+        "python": "str",
+        "rust": "String",
+        "sql": "VARCHAR(100)",
+        "typescript": "string"
+      },
+      "maxLength": 100,
+      "pattern": "^(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$"
     }
   },
   "types": {
@@ -425,7 +441,7 @@
           "name": "timeZone",
           "description": "The IANA time zone a cron line is read in, as the bundled database spells it; absent for after and every.",
           "typeRef": {
-            "name": "string"
+            "name": "Temporal.TimeZone"
           }
         },
         {
