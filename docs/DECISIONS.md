@@ -1670,25 +1670,31 @@ typed by the table's key. Its operations are `rename`, `addAlias`,
 `into` and adds its name as one, through `MergeStep.Before`. The Rust
 repositories gain `merge_into` on Postgres and on SQLite
 (`sqlutil.SQLiteMergePlanOf`), where a merge that deletes `@versioned`
-rows is refused; opened for a caller (D181), `merge_into` finds only the
-two rows the caller may write. A `@tableOperation` merge
-(`ir.TableOperationMerge`) serves a table's `mergeInto` as a route, which
-the TypeScript server serves on Postgres, its repositories refusing a
-merge on SQLite (D182). It settled what the text left open: `resolve`
-answers `{ row: null }` for a name no row holds; `T` is `string`; a name
-is at most 256 characters; and a name whose holder is no live row is
-taken over.
+rows is refused. Under per-record access a merge finds only the two rows
+its caller may write, and either one beyond the caller is not found
+before a statement runs, as an update's row is: Rust's `merge_into`
+opened for a caller (D181), and Go's `MergeInto` under `WithPrincipal`
+(D180), each held to it on Postgres, and in Rust on SQLite too. A
+`@tableOperation` merge (`ir.TableOperationMerge`) serves a table's
+`mergeInto` as a route, which the TypeScript server serves on Postgres;
+the build refuses it over a database whose first dialect is sqlite, where
+the TypeScript repositories refuse a merge (D182). It settled what the
+text left open: `resolve` answers `{ row: null }` for a name no row
+holds; `T` is `string`; a name is at most 256 characters; and a name
+whose holder is no live row is taken over.
 
-Left: Go and Rust handlers of the merge route; a create on development
-mode, whose handler refuses the name a create gives as Aliased's owned
-field, though its stores replay `core-aliased`; a merge that repoints a
-version graph's table, which needs the merge as a commit; a Derived field
-whose input is a repointed relation, which the merge does not hash again
-(Derived hears no set-based write); a check of cycles longer than `into`
-under `from` in a relation of the table to itself; and `MergeResult`,
-which the generated Rust `orm.rs` does not re-export. A merge in the
-TypeScript repositories on SQLite and D1, which refuse it, is D182's to
-build.
+Left: Go and Rust handlers of the merge route; the rows of the tables
+that reference the two, which a merge repoints and deletes whether or not
+its caller may see them, in Go, TypeScript and Rust; a create on
+development mode, whose handler refuses the name a create gives as
+Aliased's owned field, though its stores replay `core-aliased`; a merge
+that repoints a version graph's table, which needs the merge as a commit;
+a Derived field whose input is a repointed relation, which the merge does
+not hash again (Derived hears no set-based write); a check of cycles
+longer than `into` under `from` in a relation of the table to itself; and
+`MergeResult`, which the generated Rust `orm.rs` does not re-export. A
+merge in the TypeScript repositories on SQLite and D1, which refuse it,
+is D182's to build.
 
 ## D149. Rollups and Blueprint stay behaviors, Revisions keeps its own log, and Variants becomes a discriminated-union field type (D103 amended)
 
