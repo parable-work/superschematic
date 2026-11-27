@@ -19,13 +19,11 @@ export {
   CheckoutPayment,
   CheckoutStatus,
   CheckoutView,
-  CheckoutTimers,
   Checkouts,
   OrdersConfig,
   PaymentEventReceipt,
   PaymentWebhooks,
   PaymentsSecrets,
-  RefundActions,
   RefundView,
   RequestRefundInput,
   StartCheckoutInput

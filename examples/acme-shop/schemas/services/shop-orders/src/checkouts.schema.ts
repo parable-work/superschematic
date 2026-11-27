@@ -4,8 +4,6 @@ import { envVars } from "@superschematic/schema-config";
 import {
   Authenticated,
   HttpMethod,
-  behaviorOperations,
-  behaviorWorker,
   docs,
   hmacVerified,
   mcp,
@@ -14,7 +12,7 @@ import {
   rest,
   webhook
 } from "@superschematic/api";
-import { Checkout, Refund, ShippingAddress } from "@acme/shop-db";
+import { ShippingAddress } from "@acme/shop-db";
 
 // acmepay's keys, declared once, so every deployable whose config holds
 // them shares one secret of each per environment (stack-model 4.2): the
@@ -195,24 +193,6 @@ export class Checkouts extends Authenticated {
     throw new Error("schema declaration only");
   }
 }
-
-// A refund's sign-offs and its moves, for staff who hold refunds.approve
-// (D70, D103): Approvals' signOff, which counts two members of staff, not
-// the one who asked for it, before the move to approved, and the status
-// Workflow's transition, whose move into approved asks the checkout's
-// Payments for the refund. The build serves each, with no method of the
-// implementation's.
-@behaviorOperations(Refund)
-@requirePermission(["refunds.approve"])
-export abstract class RefundActions {}
-
-// Runs Checkout's deadlines and its change queue (D103): it expires a
-// checkout still held fifteen minutes on, or at the two-hour backstop
-// while a payment is in flight, which lets go of the units and the slot
-// it holds. A worker of shop-orders', with no method of the
-// implementation's.
-@behaviorWorker(Checkout)
-export abstract class CheckoutTimers {}
 
 // acmepay's events: its signature is checked before anything else
 // (D26), and each event is recorded on the checkout or the refund it is

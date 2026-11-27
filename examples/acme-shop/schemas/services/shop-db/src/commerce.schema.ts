@@ -23,7 +23,7 @@ import { User } from "./shop.schema";
 // repositories' transactions. shop-stock keeps the stock, shop-cart fills a
 // shopper's cart and reads the pickup slots, and shop-orders holds, pays
 // for, places and refunds a checkout, each through shop-db's generated
-// repositories; shop-orders' behavior worker CheckoutTimers expires a
+// repositories; shop-api's behavior worker CheckoutTimers expires a
 // checkout held too long.
 
 // The units the warehouse holds of a product: one row per product, whose

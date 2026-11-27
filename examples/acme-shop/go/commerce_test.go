@@ -18,12 +18,16 @@ import (
 	"testing"
 	"time"
 
+	shopapi "example.com/acme/api/shop-api"
 	shoporders "example.com/acme/api/shop-orders"
 	orm "example.com/acme/orm/shop-db"
+	apisdk "example.com/acme/sdk/go/shop-api"
 	sdk "example.com/acme/sdk/go/shop-orders"
 	stocksdk "example.com/acme/sdk/go/shop-stock"
 	"example.com/acme/shop/acmepay"
+	shopapiimpl "example.com/acme/shop/shop-api"
 	shopordersimpl "example.com/acme/shop/shop-orders"
+	apitypes "example.com/acme/types/go/shop-api"
 	db "example.com/acme/types/go/shop-db"
 	types "example.com/acme/types/go/shop-orders"
 	"github.com/go-chi/chi/v5"
@@ -54,6 +58,7 @@ const (
 type commerceShop struct {
 	database orm.DatabaseInterface
 	orders   *httptest.Server
+	api      *httptest.Server
 	pay      *acmepay.Provider
 	payAPI   *acmepay.Client
 	sold     *soldLines
@@ -211,7 +216,32 @@ func newCommerceShop(t *testing.T, open commerceDatabase) *commerceShop {
 	s.orders = httptest.NewServer(router)
 	t.Cleanup(s.orders.Close)
 	s.pay.SetWebhookURL(s.orders.URL + "/api/payments/acmepay/events")
+
+	// shop-api over the same database, which serves Refund's operations
+	// to staff (RefundActions).
+	apiDeps := shopapi.Deps{DB: database, Logger: zap.NewNop()}
+	apiImplementations, err := shopapiimpl.New(apiDeps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	apiRouter := chi.NewRouter()
+	apiRouter.Use(chimiddleware.RequestID)
+	if err := shopapi.RegisterRoutes(apiRouter, shopapi.Config{DB: apiDeps.DB, Logger: apiDeps.Logger, Identity: u.shopAPI(t), Implementations: apiImplementations}); err != nil {
+		t.Fatal(err)
+	}
+	s.api = httptest.NewServer(apiRouter)
+	t.Cleanup(s.api.Close)
 	return s
+}
+
+// apiSDK is shop-api's SDK with a session's token.
+func (s *commerceShop) apiSDK(t *testing.T, token string) *apisdk.ShopApiSDK {
+	t.Helper()
+	client, err := apisdk.New(apisdk.SDKConfig{BaseURL: s.api.URL, Auth: &apisdk.AuthConfig{Token: token}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
 }
 
 // stock adds a product and gives it an Inventory row as shop-stock's
@@ -307,12 +337,12 @@ func (s *commerceShop) counter(t *testing.T) (db.IdentityUUID, time.Time) {
 	return *point.Id, time.Date(day.Year(), day.Month(), day.Day(), 10, 0, 0, 0, london)
 }
 
-// staffSDK is shop-orders' SDK with a member of staff's session, who holds
+// staffSDK is shop-api's SDK with a member of staff's session, who holds
 // permissions.
-func (s *commerceShop) staffSDK(t *testing.T, login, name string, permissions ...string) *sdk.ShopOrdersSDK {
+func (s *commerceShop) staffSDK(t *testing.T, login, name string, permissions ...string) *apisdk.ShopApiSDK {
 	t.Helper()
 	s.users.add(t, login, name, name+"'s password", permissions...)
-	return sdkFor(t, s.orders.URL, signIn(t, productsClient(t, productsServer(t, s.users)), login, name+"'s password"))
+	return s.apiSDK(t, signIn(t, productsClient(t, s.api), login, name+"'s password"))
 }
 
 // A shopper's checkout holds the units it asks and a pickup slot, all or
@@ -321,7 +351,7 @@ func (s *commerceShop) staffSDK(t *testing.T, login, name string, permissions ..
 // the slot, and shop-orders writes its order once and tells shop-stock what
 // it sold; a webhook whose signature does not verify is refused before
 // anything reads it, and one acmepay sends again changes nothing; a refund
-// two members of staff sign off through RefundActions' routes is made at
+// two members of staff sign off through shop-api's RefundActions is made at
 // acmepay by SettlePayments and issued (D70, D103).
 func TestACheckoutHoldsPaysPlacesAndRefunds(t *testing.T) {
 	for name, open := range commerceDatabases(t) {
@@ -454,18 +484,19 @@ func aCheckoutHoldsPaysPlacesAndRefunds(t *testing.T, open commerceDatabase) {
 		t.Fatalf("RequestRefund answered %+v, %v", refund, err)
 	}
 	refundID := refund.Id.String()
-	approve := types.RefundApprovalsSignOffInput{State: types.RefundApprovalsGate_Approved}
-	toApproved := types.RefundStatusTransitionInput{To: types.RefundStatusState_Approved}
-	// The shopper who asked for it holds no refunds.approve, and the
-	// routes refuse them.
-	if _, err := orders.RefundNamespace.Approvals.SignOff(ctx, refundID, approve); !errors.As(err, &refused) || refused.StatusCode != http.StatusForbidden {
+	approve := apitypes.RefundApprovalsSignOffInput{State: apitypes.RefundApprovalsGate_Approved}
+	toApproved := apitypes.RefundStatusTransitionInput{To: apitypes.RefundStatusState_Approved}
+	// The shopper who asked for it holds no refunds.approve, and
+	// shop-api's routes refuse them.
+	var staffRefused *apisdk.APIError
+	if _, err := s.apiSDK(t, s.token).RefundNamespace.Approvals.SignOff(ctx, refundID, approve); !errors.As(err, &staffRefused) || staffRefused.StatusCode != http.StatusForbidden {
 		t.Fatalf("the shopper's sign-off answered %v, want 403", err)
 	}
 	bob := s.staffSDK(t, "bob@example.com", "Bob", "refunds.approve")
 	if _, err := bob.RefundNamespace.Approvals.SignOff(ctx, refundID, approve); err != nil {
 		t.Fatalf("Bob's sign-off: %v", err)
 	}
-	if _, err := bob.RefundNamespace.Status.Transition(ctx, refundID, toApproved); !errors.As(err, &refused) || refused.StatusCode != http.StatusConflict {
+	if _, err := bob.RefundNamespace.Status.Transition(ctx, refundID, toApproved); !errors.As(err, &staffRefused) || staffRefused.StatusCode != http.StatusConflict {
 		t.Fatalf("a refund one member of staff signed off moved on: %v", err)
 	}
 	carol := s.staffSDK(t, "carol@example.com", "Carol", "refunds.approve")
@@ -506,7 +537,7 @@ func aCheckoutHoldsPaysPlacesAndRefunds(t *testing.T, open commerceDatabase) {
 }
 
 // A checkout still held fifteen minutes on expires: its hold's deadline,
-// which shop-orders' behavior worker CheckoutTimers runs when it falls due,
+// which shop-api's behavior worker CheckoutTimers runs when it falls due,
 // moves it to expired, which lets go of the units and the pickup slot it
 // holds and voids the payment it opened (D70, D103).
 func TestAHeldCheckoutExpires(t *testing.T) {
@@ -547,7 +578,7 @@ func aHeldCheckoutExpires(t *testing.T, open commerceDatabase) {
 	if due := time.UnixMilli(expiry.At); due.Before(time.Now().Add(14*time.Minute)) || due.After(time.Now().Add(16*time.Minute)) {
 		t.Fatalf("holdExpiry falls due at %s, want fifteen minutes on", due)
 	}
-	worker := orm.WithBehaviorCaller(ctx, rules.Caller{Subject: "shop-orders/CheckoutTimers"})
+	worker := orm.WithBehaviorCaller(ctx, rules.Caller{Subject: "shop-api/CheckoutTimers"})
 	run, err := s.database.GetCheckoutRepository().RunDeadline(worker, db.CheckoutDeadline{RowKey: checkout, UseId: expiry.UseID, Name: expiry.Name, At: db.GenericInt64(expiry.At)}, nil)
 	if err != nil || !run.Ran {
 		t.Fatalf("the hold's deadline ran %+v, %v", run, err)

@@ -173,7 +173,7 @@ func (c *Checkouts) GetCheckout(ctx context.Context, id types.IdentityUUID) (*ty
 }
 
 // RequestRefund asks for a refund of a placed checkout: a Refund row of
-// it, which two members of staff sign off, through RefundActions'
+// it, which two members of staff sign off, through shop-api's RefundActions
 // routes, before it is issued, and SettlePayments then makes at acmepay.
 // The repositories stamp the caller as the one who asked for it, whose
 // own sign-off Approvals counts for nothing. More than the checkout has

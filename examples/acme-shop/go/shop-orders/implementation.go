@@ -10,8 +10,8 @@
 // in go/acmepay, through its Payments and this package's adapter, and once
 // placed writes its Order row and tells shop-stock, a Rust server, what it
 // sold, through the client of shop-stock's Go SDK its Deps holds (D57).
-// Staff sign refunds off through RefundActions' routes, which the build
-// serves, and shop-orders' behavior worker CheckoutTimers expires a
+// Staff sign refunds off through shop-api's RefundActions routes, which the
+// build serves, and shop-api's behavior worker CheckoutTimers expires a
 // checkout held too long. Its lists of orders, reviews and products answer
 // a page at a time, in the sort a request asks for, through the ORM's
 // FindPage (D60, amended), and the reviews' and the products' searches
