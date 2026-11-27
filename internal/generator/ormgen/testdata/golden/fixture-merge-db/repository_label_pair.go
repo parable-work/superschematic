@@ -417,10 +417,12 @@ func (r *LabelPairRepository) GetOne(ctx context.Context, id types.IdentityUUID,
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple LabelPair records by their IDs in a single query
+// GetManyByIDs retrieves multiple LabelPair records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *LabelPairRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelPair, error) {
+	resultMap := make(map[types.IdentityUUID]*types.LabelPair, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.LabelPair{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -432,7 +434,22 @@ func (r *LabelPairRepository) GetManyByIDs(ctx context.Context, ids []types.Iden
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *LabelPairRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.LabelPair, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -501,7 +518,6 @@ func (r *LabelPairRepository) GetManyByIDs(ctx context.Context, ids []types.Iden
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -1722,7 +1738,9 @@ func (r *LabelPairRepository) heldOfKey(ctx context.Context, on LabelPairUniqueK
 	return row, nil
 }
 
-// CreateMany inserts multiple LabelPair records in a single statement
+// CreateMany inserts multiple LabelPair records and returns them in the
+// inputs' order: a statement of at most 21844 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *LabelPairRepository) CreateMany(ctx context.Context, inputs []*types.LabelPair) ([]*types.LabelPair, error) {
 	if len(inputs) == 0 {
 		return []*types.LabelPair{}, nil
@@ -1769,18 +1787,40 @@ func (r *LabelPairRepository) CreateMany(ctx context.Context, inputs []*types.La
 		}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 21844 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.LabelPair, error) {
+		return (&LabelPairRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "first_id", "second_id"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 21844 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *LabelPairRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.LabelPair, error) {
+	results := make([]*types.LabelPair, 0, len(batch))
+	for start := 0; start < len(batch); start += 21844 {
+		created, err := r.createBatch(ctx, batch[start:min(start+21844, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *LabelPairRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.LabelPair, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO label_pair (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"id", "first_id", "second_id"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -1792,46 +1832,17 @@ func (r *LabelPairRepository) CreateMany(ctx context.Context, inputs []*types.La
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.LabelPair{}
+	results := make([]*types.LabelPair, 0, len(batch))
 	for rows.Next() {
-		result := &types.LabelPair{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		var tempRelFirst *types.IdentityUUID
-		var tempRelSecond *types.IdentityUUID
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.Id,
-
-			&tempRelFirst,
-
-			&tempRelSecond,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		// Set relationship IDs from scanned FK values
-		if tempRelFirst != nil {
-			result.First.Id = labelPairUUIDPtr(*tempRelFirst)
-		}
-		if tempRelSecond != nil {
-			result.Second.Id = labelPairUUIDPtr(*tempRelSecond)
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

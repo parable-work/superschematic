@@ -429,6 +429,55 @@ fn add_blocker_refuses_itself_an_unlisted_schema_one_without_workflow_a_missing_
     }
 }
 
+// The cycle check is one recursive query over the edges: it follows a
+// long chain to its end, and a cycle among the blockers, which addBlocker
+// never writes but the walk must still leave, ends it.
+#[test]
+fn the_cycle_check_follows_a_long_chain_and_ends_on_a_cycle_among_the_blockers() {
+    for target in targets("dependencies_long_chain") {
+        let engine = world(&target, |_| {}, None);
+        let ids: Vec<String> = (0..60).map(|i| format!("c{i:02}")).collect();
+        for id in ids.iter().chain(["k1".to_owned(), "k2".to_owned()].iter()) {
+            create(&engine, "Task", Some(id), None).expect("task");
+        }
+        // c00 is blocked by c01, which is blocked by c02, ..., by c59.
+        for pair in ids.windows(2) {
+            task(&engine, &pair[0], "addBlocker", json!({"id": pair[1]})).expect("addBlocker");
+        }
+        assert_eq!(
+            reason(task(&engine, "c59", "addBlocker", json!({"id": "c00"}))),
+            "Task c00 is blocked by Task c59, directly or through others: the edge would close a cycle"
+        );
+        // c59 is blocked by k1, and k1 and k2 by each other.
+        engine
+            .db()
+            .write(
+                superschematic_engine::storage::Lock::Namespace("default"),
+                |tx| {
+                    tx.run(
+                        "INSERT INTO bhv_dependencies__edges (namespace, schema, id, blocker_schema, blocker_id, created_by, created_at)
+                         VALUES ('default', 'Task', 'c59', 'Task', 'k1', 'alice', 0),
+                                ('default', 'Task', 'k1', 'Task', 'k2', 'alice', 0),
+                                ('default', 'Task', 'k2', 'Task', 'k1', 'alice', 0)",
+                        &[],
+                    )
+                },
+            )
+            .expect("seed a cycle");
+        assert_eq!(
+            reason(task(&engine, "k2", "addBlocker", json!({"id": "c00"}))),
+            "Task c00 is blocked by Task k2, directly or through others: the edge would close a cycle"
+        );
+        // The walk from c00 reaches the cycle, goes round it once and ends:
+        // t1 is not among c00's blockers.
+        task(&engine, "t1", "addBlocker", json!({"id": "c00"})).expect("addBlocker");
+        assert_eq!(
+            reason(task(&engine, "c30", "addBlocker", json!({"id": "t1"}))),
+            "Task t1 is blocked by Task c30, directly or through others: the edge would close a cycle"
+        );
+    }
+}
+
 #[test]
 fn an_instance_in_a_gated_state_no_transition_leaves_takes_no_open_blocker() {
     for target in targets("dependencies_terminal_gate") {

@@ -337,10 +337,12 @@ func (r *RecipeSnapshotEntryRepository) GetOne(ctx context.Context, id types.Ide
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple RecipeSnapshotEntry records by their IDs in a single query
+// GetManyByIDs retrieves multiple RecipeSnapshotEntry records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *RecipeSnapshotEntryRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeSnapshotEntry, error) {
+	resultMap := make(map[types.IdentityUUID]*types.RecipeSnapshotEntry, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.RecipeSnapshotEntry{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -352,7 +354,22 @@ func (r *RecipeSnapshotEntryRepository) GetManyByIDs(ctx context.Context, ids []
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *RecipeSnapshotEntryRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.RecipeSnapshotEntry, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -423,7 +440,6 @@ func (r *RecipeSnapshotEntryRepository) GetManyByIDs(ctx context.Context, ids []
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -1675,7 +1691,9 @@ func (r *RecipeSnapshotEntryRepository) heldOfKey(ctx context.Context, on Recipe
 	return row, nil
 }
 
-// CreateMany inserts multiple RecipeSnapshotEntry records in a single statement
+// CreateMany inserts multiple RecipeSnapshotEntry records and returns them in the
+// inputs' order: a statement of at most 10922 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *RecipeSnapshotEntryRepository) CreateMany(ctx context.Context, inputs []*types.RecipeSnapshotEntry) ([]*types.RecipeSnapshotEntry, error) {
 	if len(inputs) == 0 {
 		return []*types.RecipeSnapshotEntry{}, nil
@@ -1737,18 +1755,40 @@ func (r *RecipeSnapshotEntryRepository) CreateMany(ctx context.Context, inputs [
 		}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 10922 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.RecipeSnapshotEntry, error) {
+		return (&RecipeSnapshotEntryRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 10922 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *RecipeSnapshotEntryRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.RecipeSnapshotEntry, error) {
+	results := make([]*types.RecipeSnapshotEntry, 0, len(batch))
+	for start := 0; start < len(batch); start += 10922 {
+		created, err := r.createBatch(ctx, batch[start:min(start+10922, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *RecipeSnapshotEntryRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.RecipeSnapshotEntry, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO recipe_snapshot_entry (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"id", "commit_id", "entity_kind", "entity_key", "entity_id", "entity_version"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -1760,48 +1800,17 @@ func (r *RecipeSnapshotEntryRepository) CreateMany(ctx context.Context, inputs [
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.RecipeSnapshotEntry{}
+	results := make([]*types.RecipeSnapshotEntry, 0, len(batch))
 	for rows.Next() {
-		result := &types.RecipeSnapshotEntry{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		var tempRelCommit *types.IdentityUUID
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.Id,
-
-			&tempRelCommit,
-
-			&result.EntityKind,
-
-			&result.EntityKey,
-
-			&result.EntityId,
-
-			&result.EntityVersion,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		// Set relationship IDs from scanned FK values
-		if tempRelCommit != nil {
-			result.Commit.Id = recipeSnapshotEntryUUIDPtr(*tempRelCommit)
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

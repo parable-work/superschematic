@@ -146,8 +146,10 @@ engine = Engine(descriptor, adapter.storage(client), schema_epoch=1, snapshot_ev
 ```
 
 - The SQLite adapter is the TypeScript package's
-  (`runtime/versiongraph/README.md`, "SQLite"), statement for statement and
-  stored form for stored form, so a file one writes the other reads: nine
+  (`runtime/versiongraph/README.md`, "SQLite"), statement for statement
+  (but that it writes patches, snapshot entries and released rows 100 to a
+  statement) and stored form for stored form, so a file one writes the
+  other reads: nine
   `STRICT` tables, the same for every graph, each row carrying its graph's
   name, history written in the statements that change a row, and every
   value stored canonical. It reads only the descriptor's kinds.

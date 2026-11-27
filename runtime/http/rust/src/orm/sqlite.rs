@@ -1193,6 +1193,103 @@ mod tests {
         assert_eq!(at(&filed, "createdAt"), at(&created, "createdAt"));
     }
 
+    /// A table keyed by text, with the statements a reach reads.
+    const MEMO: &str = r#"{
+  "dialect": "sqlite",
+  "clauses": {
+    "eq": "%s = ?%d", "ne": "%s IS DISTINCT FROM ?%d", "gt": "%s > ?%d", "gte": "%s >= ?%d",
+    "lt": "%s < ?%d", "lte": "%s <= ?%d", "ilike": "%s LIKE ?%d ESCAPE '\\'", "in": "%s IN (%s)",
+    "noneOf": "(%s IN (%s)) IS NOT TRUE", "isNull": "%s IS NULL", "isNotNull": "%s IS NOT NULL",
+    "search": "%s LIKE ?%d ESCAPE '\\'", "exists": "EXISTS (%s)", "notExists": "NOT EXISTS (%s)",
+    "set": "%s = ?%d", "setNull": "%s = NULL", "pageKey": "page_key.%s", "placeholder": "?%d",
+    "default": "", "or": " OR ", "group": "(%s)", "where": " WHERE ", "and": " AND ",
+    "orderBy": " ORDER BY ", "orderTerm": "%s %s", "limit": " LIMIT %d", "offset": " OFFSET %d",
+    "changed": "(%s) IS DISTINCT FROM (%s)", "never": "FALSE", "null": "NULL"
+  },
+  "defaultLimit": 100,
+  "tables": [{
+    "name": "Memo",
+    "table": "memo",
+    "key": "id",
+    "columns": [
+      {"name": "id", "column": "id", "field": "id", "qualified": "memo.id", "key": true, "required": true, "filter": ["eq", "in"]},
+      {"name": "title", "column": "title", "field": "title", "qualified": "memo.title", "required": true}
+    ],
+    "statements": {
+      "columns": "\"id\", \"title\"",
+      "getOne": "SELECT \"id\", \"title\" FROM memo WHERE id = ?1",
+      "findOne": "SELECT %s FROM memo%s%s LIMIT 1",
+      "findMany": "SELECT %s FROM memo%s%s%s",
+      "count": "SELECT COUNT(*) FROM memo%s",
+      "insert": "INSERT INTO memo (%s) VALUES (%s) RETURNING %s",
+      "update": "UPDATE memo SET %s WHERE id = ?%d",
+      "returning": " RETURNING \"id\", \"title\"",
+      "updateMany": "UPDATE memo SET %s%s",
+      "delete": "DELETE FROM memo WHERE id = ?1"
+    }
+  }]
+}"#;
+
+    /// A batch create by a caller with grants checks the rows it made in
+    /// one read of their keys (D156), and is refused as a row at a time
+    /// was when one of them is a row no grant reaches.
+    #[test]
+    fn a_batch_create_reads_the_reach_of_its_rows_at_once_and_refuses_one_unreached() {
+        let definition = Definition::parse(MEMO).expect("the definition");
+        let connection = Connection::open_in_memory().expect("open");
+        connection
+            .execute_batch("CREATE TABLE memo (id TEXT PRIMARY KEY, title TEXT NOT NULL)")
+            .expect("create the table");
+        let grant = |target: &str| crate::auth::GrantReach {
+            id: format!("g-{target}"),
+            target_type: "Memo".to_owned(),
+            target_id: target.to_owned(),
+            reaches: Default::default(),
+        };
+        let statements = std::sync::Mutex::new(Vec::<String>::new());
+        let trace = |sql: &str| statements.lock().unwrap().push(sql.to_owned());
+        let orm = Repositories::new(&connection, &definition)
+            .expect("the repositories")
+            .with_session(Session {
+                trace: Some(&trace),
+                access: Some(AccessCaller {
+                    subject: Some("party".to_owned()),
+                    grants: Some(vec![grant("m1"), grant("m2"), grant("m3")]),
+                    ..AccessCaller::default()
+                }),
+                ..Session::default()
+            });
+        let memos = orm.table("Memo").expect("the table");
+        let input = |id: &str| {
+            let mut values = Values::new();
+            values.insert("id".to_owned(), Value::from(id));
+            values.insert("title".to_owned(), Value::from(id));
+            values
+        };
+        let reads = |statements: &std::sync::Mutex<Vec<String>>| {
+            statements
+                .lock()
+                .unwrap()
+                .drain(..)
+                .filter(|sql| sql.starts_with("SELECT"))
+                .collect::<Vec<_>>()
+        };
+        let created = memos
+            .create_many(&[input("m1"), input("m2")])
+            .expect("the grants reach both");
+        assert_eq!(created.len(), 2);
+        assert_eq!(
+            reads(&statements),
+            ["SELECT \"id\", \"title\" FROM memo WHERE memo.id IN (?1, ?2) AND (memo.id = ?3 OR memo.id = ?4 OR memo.id = ?5)"]
+        );
+        let refused = memos.create_many(&[input("m3"), input("m4")]);
+        assert!(
+            matches!(&refused, Err(Error::AccessRefused(message)) if message == "Memo: the row is not one the caller's grants reach"),
+            "{refused:?}"
+        );
+        assert_eq!(reads(&statements).len(), 1);
+    }
+
     #[test]
     fn a_constraint_names_its_columns() {
         assert_eq!(

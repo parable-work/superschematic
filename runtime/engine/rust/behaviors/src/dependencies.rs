@@ -249,38 +249,29 @@ fn open_blockers(view: &InstanceView<'_, DependenciesConfig>) -> Result<Vec<Bloc
 }
 
 // reaches reports whether an instance is blocked by goal, directly or
-// through other blockers, in any schema of the namespace.
+// through other blockers, in any schema of the namespace: one recursive
+// query over the edges, seeded with from's own blockers, so from itself
+// counts only when an edge leads back to it. UNION, not UNION ALL, drops a
+// pair already reached, so a cycle among the blockers ends the walk.
 fn reaches<C>(view: &InstanceView<'_, C>, from: (&str, &str), goal: (&str, &str)) -> Result<bool> {
     let table = view.sql().table("edges")?;
-    let mut seen: Vec<(String, String)> = vec![(from.0.to_owned(), from.1.to_owned())];
-    let mut queue: std::collections::VecDeque<(String, String)> =
-        std::collections::VecDeque::from([(from.0.to_owned(), from.1.to_owned())]);
-    while let Some((schema, id)) = queue.pop_front() {
-        let rows = view.sql().all(
-            format!(
-                "SELECT blocker_schema, blocker_id FROM {table} WHERE namespace = ? AND schema = ? AND id = ?"
-            ),
-            &[
-                SqlValue::from(view.namespace()),
-                SqlValue::from(schema.as_str()),
-                SqlValue::from(id.as_str()),
-            ],
-        )?;
-        for row in rows {
-            let next = (
-                row.text("blocker_schema")?.to_owned(),
-                row.text("blocker_id")?.to_owned(),
-            );
-            if next.0 == goal.0 && next.1 == goal.1 {
-                return Ok(true);
-            }
-            if !seen.contains(&next) {
-                seen.push(next.clone());
-                queue.push_back(next);
-            }
-        }
-    }
-    Ok(false)
+    let found = view.sql().get(
+        format!(
+            "WITH RECURSIVE r(s, i) AS (\
+             SELECT blocker_schema, blocker_id FROM {table} WHERE namespace = ? AND schema = ? AND id = ? \
+             UNION SELECT e.blocker_schema, e.blocker_id FROM {table} e JOIN r ON e.namespace = ? AND e.schema = r.s AND e.id = r.i\
+             ) SELECT 1 AS found FROM r WHERE s = ? AND i = ? LIMIT 1"
+        ),
+        &[
+            SqlValue::from(view.namespace()),
+            SqlValue::from(from.0),
+            SqlValue::from(from.1),
+            SqlValue::from(view.namespace()),
+            SqlValue::from(goal.0),
+            SqlValue::from(goal.1),
+        ],
+    )?;
+    Ok(found.is_some())
 }
 
 /// Where an edge's checks point when they refuse: at the parameter they
