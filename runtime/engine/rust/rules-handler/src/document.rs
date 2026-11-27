@@ -10,11 +10,14 @@
 //! uses, each anchored on a field (`field`, the field form
 //! `status: Workflow<{ ... }>`) or on the type (the `implements` form, and a
 //! General schema's `@behavior` form, which publishes as the table `format
-//! --to=ts` writes it as). Each use adds the owned fields its behavior
-//! declares, named as a table names their columns' fields: a field
-//! anchor's value is the field itself (`status`), its other fields the
-//! field's name then theirs (`statusEnteredAt`), and a type anchor's fields
-//! the behavior's storage key then theirs (`workflowStatus`).
+//! --to=ts` writes it as). A use with no field of a behavior whose
+//! declaration names a value field is anchored on a field of that name, as
+//! that table has it: a General schema's Workflow is the field `status`
+//! (D117). Each use adds the owned fields its behavior declares, named as a
+//! table names their columns' fields: a field anchor's value is the field
+//! itself (`status`), its other fields the field's name then theirs
+//! (`statusEnteredAt`), and a type anchor's fields the behavior's storage
+//! key then theirs (`leaseHolder`).
 
 use serde_json::{json, Map, Value};
 use superschematic_rules::{Code, FieldSpec, Refusal, SchemaIssue, TypeSpec, UseSpec};
@@ -758,10 +761,18 @@ pub fn read(document: &Value, declarations: &Declarations) -> Result<Model, Refu
             continue;
         }
         let config = entry.get("config").cloned();
+        // A use with no field of a behavior that declares a value field is
+        // anchored on a field of that name: the table `format --to=ts`
+        // writes a General schema as has `status: Workflow<{ ... }>`.
         let anchor = entry
             .get("field")
             .and_then(Value::as_str)
-            .filter(|field| !field.is_empty());
+            .filter(|field| !field.is_empty())
+            .or_else(|| {
+                declarations
+                    .get(behavior)
+                    .and_then(|declared| declared.value.as_deref())
+            });
         let spec = match anchor {
             Some(field) => UseSpec::on_field(field, behavior, config),
             None => UseSpec::on_type(behavior, config),
@@ -945,14 +956,58 @@ mod tests {
     #[test]
     fn a_type_anchor_names_its_fields_by_its_storage_key() {
         assert_eq!(
-            owned_field_name(None, "Workflow", "enteredAt", false),
-            "workflowEnteredAt"
+            owned_field_name(None, "Lease", "active", false),
+            "leaseActive"
         );
         assert_eq!(
             owned_field_name(Some("status"), "Workflow", "status", true),
             "status"
         );
         assert_eq!(storage_key("test.Gate"), "test_gate");
+    }
+
+    /// A General schema's Workflow, a use with no field, reads as the
+    /// field `status: Workflow<{ ... }>` the table form has (D117,
+    /// decision 3): its use is `status` and its fields `status` and
+    /// `statusEnteredAt`, and a type with its own `status` is refused.
+    /// A behavior with no value field stays on the type.
+    #[test]
+    fn a_general_workflow_reads_as_the_field_status() {
+        let document = json!({
+            "kind": "General",
+            "name": "Note",
+            "types": {"Note": {
+                "name": "Note",
+                "behaviors": [
+                    {"name": "Workflow", "config": {"states": ["draft", "published"], "transitions": [{"from": "draft", "to": "published"}]}},
+                    {"name": "Lease", "config": {"ttlMs": 1000}}
+                ],
+                "fields": [{"name": "title", "typeRef": {"name": "string"}}]
+            }}
+        });
+        let model = read(&document, &declarations()).expect("the document reads");
+        let ids: Vec<&str> = model.uses.iter().map(Use::id).collect();
+        assert_eq!(ids, ["status", "Lease"]);
+        assert_eq!(model.uses[0].spec.field(), Some("status"));
+        let owned: Vec<&str> = model
+            .owned
+            .iter()
+            .filter(|owned| owned.use_id == "status")
+            .map(|owned| owned.field.as_str())
+            .collect();
+        assert_eq!(owned, ["status", "statusEnteredAt"]);
+        assert!(model.owned_field("leaseHolder").is_some());
+        assert!(model.owned_field("workflowStatus").is_none());
+
+        let mut clashing = document;
+        clashing["types"]["Note"]["fields"] =
+            json!([{"name": "status", "typeRef": {"name": "string"}}]);
+        let refusal = read(&clashing, &declarations()).expect_err("refused");
+        assert!(
+            refusal.message.contains("the field status is Workflow's"),
+            "{}",
+            refusal.message
+        );
     }
 
     #[test]
