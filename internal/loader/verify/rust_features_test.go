@@ -112,7 +112,7 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 			t.Errorf("the Rust server's findings lack %s:\n%s", want, joined)
 		}
 	}
-	for _, name := range []string{"listTickets", "Folder", "Config", "relay-b", "Chore", "Visit", "Article", "Ticket", "Notice", "Identity"} {
+	for _, name := range []string{"listTickets", "Folder", "Config", "relay-b", "Chore", "Visit", "Article", "platform-db.Ticket", "platform-db.Notice", "platform-db.Identity"} {
 		if strings.Contains(joined, name+":") {
 			t.Errorf("the Rust server refuses %s, which it serves:\n%s", name, joined)
 		}
