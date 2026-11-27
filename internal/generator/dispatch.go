@@ -1376,6 +1376,9 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		if err := verify.GoServerDatabaseErr(r.Schema, schema); err != nil {
 			return deps, nil, err
 		}
+		if err := r.goServerSQLiteErr(db, schema); err != nil {
+			return deps, nil, err
+		}
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)

@@ -18,8 +18,8 @@ import (
 
 // goAccessCases are the cases goAccessTest runs, by name: D156's "done
 // when" in the generated Go server (D180), as TestGeneratedAccessEndToEnd
-// holds the TypeScript server to it, but the calendar feed, which Go does
-// not serve yet.
+// holds the TypeScript server to it, and D152's calendar feed, which the
+// schema runtime's crosstable serves over the ORM (D187).
 var goAccessCases = []string{
 	"a private row never appears to another user in a list, a read or a search",
 	"the reads, counts and writes of the repositories keep to the caller",
@@ -30,6 +30,7 @@ var goAccessCases = []string{
 	"a party with a grant reaches only the rows its role's paths allow",
 	"an expired or revoked grant is refused on the very next call",
 	"a reveal opens the value for a holder of its permission and writes an access-log row",
+	"a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused",
 }
 
 // TestGoAccessEndToEnd builds fixture-access-go-db and
@@ -139,6 +140,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
+	"github.com/parable-work/superschematic/runtime/schema/go/crosstable"
 	"go.uber.org/zap"
 
 	api "example.com/schemas/api/fixture-access-go-api"
@@ -710,6 +712,137 @@ func TestAccess(t *testing.T) {
 		// A grant's holder whose role holds no reveal sees it masked.
 		if masked := as(token).ok(http.MethodGet, path, nil); masked["terms"] != "[secret]" {
 			t.Errorf("a grant's read: %v", masked["terms"])
+		}
+	})
+
+	t.Run("a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused", func(t *testing.T) {
+		// The calendar's routes, behind the same authenticators: a feed's
+		// fetch carries no header, and reads as its token's holder.
+		calendar := httptest.NewServer(session.GrantAuthenticator(db, callers, nil)(crosstable.CalendarRoutes(crosstable.CalendarRoutesOptions{
+			Host: db.CrossTables(),
+			Authenticate: func(r *http.Request) (*crosstable.Caller, error) {
+				caller := session.GetCaller(r.Context())
+				if caller.Anonymous() {
+					return nil, nil
+				}
+				var held []string
+				for _, role := range session.GetRoles(r.Context()) {
+					held = append(held, role.Permissions...)
+				}
+				return &crosstable.Caller{Principal: caller, Permissions: held}, nil
+			},
+		})))
+		t.Cleanup(calendar.Close)
+		if _, err := db.GetRoleRepository().CreateOne(system, &dbtypes.Role{Name: dbtypes.IdentitySlug("calendar-feed"), Permissions: []string{"documents.calendar"}}); err != nil {
+			t.Fatal(err)
+		}
+		send := func(method, path, who string) (int, string, http.Header) {
+			t.Helper()
+			var body io.Reader
+			if method == http.MethodPost && strings.HasSuffix(path, "/feeds") {
+				body = strings.NewReader(fmt.Sprintf(` + "`" + `{"role":"calendar-feed","detail":%q}` + "`" + `, who[strings.Index(who, "|")+1:]))
+				who = who[:strings.Index(who, "|")]
+			}
+			request, err := http.NewRequest(method, calendar.URL+path, body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Header.Set("Content-Type", "application/json")
+			if who != "" {
+				request.Header.Set("Authorization", "Bearer "+who)
+			}
+			response, err := http.DefaultClient.Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			raw, _ := io.ReadAll(response.Body)
+			return response.StatusCode, string(raw), response.Header
+		}
+		window := "from=" + time.Now().Add(-24*time.Hour).UTC().Format(time.RFC3339) + "&to=" + time.Now().Add(24*time.Hour).UTC().Format(time.RFC3339)
+		// The read: each caller's documents of the day, as each reads them.
+		read := func(who string) []string {
+			t.Helper()
+			status, raw, _ := send(http.MethodGet, "/api/calendar?"+window, who)
+			var body struct {
+				Data crosstable.Calendar ` + "`" + `json:"data"` + "`" + `
+			}
+			if err := json.Unmarshal([]byte(raw), &body); err != nil || status != http.StatusOK {
+				t.Fatalf("the read as %s: %d %s", who, status, raw)
+			}
+			var titles []string
+			for _, entry := range body.Data.Entries {
+				titles = append(titles, entry.Title)
+			}
+			return titles
+		}
+		if titles := read(owner); !slices.Contains(titles, "Secret plan") || !slices.Contains(titles, "Public plan") {
+			t.Errorf("the owner's calendar: %q", titles)
+		}
+		if titles := read(other); !slices.Contains(titles, "Public plan") || slices.Contains(titles, "Secret plan") {
+			t.Errorf("another's calendar: %q", titles)
+		}
+		type feed struct {
+			ID, Token, Path string
+		}
+		issue := func(who, detail string) feed {
+			t.Helper()
+			status, raw, _ := send(http.MethodPost, "/api/calendar/feeds", who+"|"+detail)
+			var body struct{ Data feed }
+			if err := json.Unmarshal([]byte(raw), &body); err != nil || status != http.StatusCreated {
+				t.Fatalf("issue a feed as %s: %d %s", who, status, raw)
+			}
+			return body.Data
+		}
+		// The other user's feed, in full, read by a client with no header.
+		others := issue(other, "full")
+		if !strings.HasPrefix(others.Token, "grant_") {
+			t.Fatalf("the feed's token %q", others.Token)
+		}
+		status, ics, header := send(http.MethodGet, others.Path, "")
+		if status != http.StatusOK || !strings.Contains(header.Get("Content-Type"), "text/calendar") {
+			t.Fatalf("the feed: %d %s %s", status, header.Get("Content-Type"), ics)
+		}
+		if !strings.Contains(ics, "SUMMARY:Public plan") || strings.Contains(ics, "Secret plan") {
+			t.Errorf("another's feed:\n%s", ics)
+		}
+		// The owner's busy feed holds the owner's private document, as Busy
+		// and a reference, and no title.
+		owners := issue(owner, "busy")
+		_, busy, _ := send(http.MethodGet, owners.Path, "")
+		if strings.Contains(busy, "plan") || !strings.Contains(busy, "SUMMARY:Busy (") {
+			t.Errorf("the busy feed:\n%s", busy)
+		}
+		ownersDocuments := len(read(owner))
+		if events := strings.Count(busy, "BEGIN:VEVENT"); events != ownersDocuments {
+			t.Errorf("the busy feed holds %d events, and the owner reads %d", events, ownersDocuments)
+		}
+		// A feed's token is no credential of any other route.
+		is(t, "a feed's token on another route", as(others.Token).status(http.MethodGet, "/documents", nil), http.StatusUnauthorized)
+		// Rotated: the old URL is refused, the new one reads.
+		status, raw, _ := send(http.MethodPost, "/api/calendar/feeds/"+others.ID+"/rotate", other)
+		var rotated struct{ Data feed }
+		if err := json.Unmarshal([]byte(raw), &rotated); err != nil || status != http.StatusOK {
+			t.Fatalf("rotate: %d %s", status, raw)
+		}
+		if status, _, _ := send(http.MethodGet, others.Path, ""); status != http.StatusUnauthorized {
+			t.Errorf("the rotated feed's old URL: %d", status)
+		}
+		if status, _, _ := send(http.MethodGet, rotated.Data.Path, ""); status != http.StatusOK {
+			t.Errorf("the rotated feed's new URL: %d", status)
+		}
+		// Another user cannot revoke it; its holder can, and it is refused.
+		if status, _, _ := send(http.MethodDelete, "/api/calendar/feeds/"+rotated.Data.ID, owner); status != http.StatusNotFound {
+			t.Errorf("another's revocation: %d", status)
+		}
+		if status, _, _ := send(http.MethodDelete, "/api/calendar/feeds/"+rotated.Data.ID, other); status != http.StatusNoContent {
+			t.Errorf("the holder's revocation: %d", status)
+		}
+		if status, _, _ := send(http.MethodGet, rotated.Data.Path, ""); status != http.StatusUnauthorized {
+			t.Errorf("the revoked feed: %d", status)
+		}
+		if status, _, _ := send(http.MethodGet, "/api/calendar/feed/grant_unknown.ics", ""); status != http.StatusUnauthorized {
+			t.Errorf("an unknown feed: %d", status)
 		}
 	})
 }
