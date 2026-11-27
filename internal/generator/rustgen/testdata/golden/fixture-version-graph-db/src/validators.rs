@@ -1135,7 +1135,7 @@ pub fn parse_recipe_patch(value: Value, unknown_fields: rt::UnknownFields) -> Re
 }
 
 /// The fields `RecipePublished` declares, by their wire names.
-pub const RECIPE_PUBLISHED_FIELDS: &[&str] = &["root", "commit"];
+pub const RECIPE_PUBLISHED_FIELDS: &[&str] = &["root", "commit", "sequence"];
 
 /// Validates a JSON value as `RecipePublished`. A null value passes; the errors
 /// are empty when the value is valid.
@@ -1151,6 +1151,12 @@ pub fn validate_recipe_published(value: &Value) -> ValidationErrors {
     {
         let field = value.get("commit");
         errors.set_result("commit", scalars::validate_identity_uuid_required(field));
+    }
+    {
+        let field = value.get("sequence");
+        if !rt::is_absent(field) {
+            errors.set_result("sequence", scalars::validate_generic_int64(field));
+        }
     }
     errors
 }

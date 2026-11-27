@@ -1,14 +1,17 @@
 //! The provider-neutral interface of a bucket an API lists in its config's
 //! buckets (D54, section 8.9 of `docs/stack-model.md`), the twin of the Go
 //! runtime's `bucket` package and of the TypeScript runtime's `Bucket`:
-//! private object storage the API's implementation puts, gets, deletes and
-//! lists objects in, and signs URLs for, so that a browser uploads or
-//! downloads an object directly. The generated `Deps` holds an
-//! `Arc<dyn Bucket>` per listed bucket, and the generated entrypoint opens
-//! it with the implementation the bucket's provider needs: GCS's, the
-//! `gcs` feature's [`crate::gcs`], which reaches the local target's
-//! emulator too. Nothing here is a provider's client, so a crate that names
-//! this module needs no feature.
+//! private object storage the API's implementation puts, gets, heads,
+//! deletes and lists objects in, and signs URLs for, so that a browser
+//! uploads or downloads an object directly. A put may write only when no
+//! object has the name, and a Bucket service whose config says
+//! `contentAddressed` gives `Deps` a [`ContentBucket`], which names each
+//! object by the SHA-256 of its bytes (D142). The generated `Deps` holds an
+//! `Arc<dyn Bucket>` per listed bucket, or that content bucket, and the
+//! generated entrypoint opens it with the implementation the bucket's
+//! provider needs: GCS's, the `gcs` feature's [`crate::gcs`], which reaches
+//! the local target's emulator too. Nothing here is a provider's client, so
+//! a crate that names this module needs no feature.
 //!
 //! Object names are slash-separated paths, such as
 //! `products/7b0e/image.png`; a bucket has no directories, and a list's
@@ -32,6 +35,13 @@ pub use futures_core::Stream;
 
 use crate::BoxError;
 
+mod content;
+
+pub use content::{
+    content_name, ContentBucket, ContentObject, ContentPutOptions, CONTENT_PREFIX,
+    DEFAULT_CONTENT_MAX_BYTES,
+};
+
 /// One bucket.
 #[async_trait]
 pub trait Bucket: Send + Sync {
@@ -39,10 +49,19 @@ pub trait Bucket: Send + Sync {
     fn name(&self) -> &str;
 
     /// Writes the object `name` from `body`, replacing any object of that
-    /// name, and returns what the provider stored. It streams `body`: the
+    /// name, or with `options.if_absent` leaving one that is there, and
+    /// returns what the bucket holds under the name. It streams `body`: the
     /// object is whole once `put` returns `Ok`, and absent if it fails.
-    async fn put(&self, name: &str, body: Body, options: PutOptions)
-        -> Result<Object, BucketError>;
+    async fn put(
+        &self,
+        name: &str,
+        body: Body,
+        options: PutOptions,
+    ) -> Result<PutResult, BucketError>;
+
+    /// What the bucket holds of the object `name`, without its bytes, and
+    /// `None` when there is no such object (D142).
+    async fn head(&self, name: &str) -> Result<Option<Object>, BucketError>;
 
     /// Opens the object `name` for reading: what the bucket holds of it,
     /// and its bytes, which the caller reads or drops.
@@ -88,6 +107,10 @@ pub struct PutOptions {
     /// The object's media type; `None` lets the provider pick,
     /// `application/octet-stream` on GCS.
     pub content_type: Option<String>,
+    /// Writes only when no object has the name (D142): the provider checks
+    /// and writes in one step, so of two puts of one name one creates the
+    /// object and the other finds it. The result's `created` says which.
+    pub if_absent: bool,
 }
 
 impl PutOptions {
@@ -95,8 +118,27 @@ impl PutOptions {
     pub fn content_type(content_type: impl Into<String>) -> Self {
         Self {
             content_type: Some(content_type.into()),
+            ..Self::default()
         }
     }
+
+    /// These options, writing only when no object has the name (D142).
+    #[must_use]
+    pub fn if_absent(mut self) -> Self {
+        self.if_absent = true;
+        self
+    }
+}
+
+/// What `put` answers: the object the bucket holds under the name, and
+/// whether this put wrote it. `created` is false only for a put with
+/// `if_absent` that found an object there, which it left as it was.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct PutResult {
+    /// What the bucket holds under the name.
+    pub object: Object,
+    /// Whether this put wrote the object.
+    pub created: bool,
 }
 
 /// What `list` selects.
@@ -284,12 +326,20 @@ pub enum BucketError {
     /// provider's client could not be built: a message that names the
     /// bucket, what the operation was, and why, with its causes.
     Failed(String),
+    /// A content bucket's `put` read more than its `max_bytes` (D142),
+    /// and wrote nothing.
+    TooLarge { bucket: String, max_bytes: u64 },
 }
 
 impl BucketError {
     /// Whether the error is [`BucketError::NotFound`].
     pub fn is_not_found(&self) -> bool {
         matches!(self, Self::NotFound { .. })
+    }
+
+    /// Whether the error is [`BucketError::TooLarge`].
+    pub fn is_too_large(&self) -> bool {
+        matches!(self, Self::TooLarge { .. })
     }
 
     /// A failure of `operation`, such as `get products/a.png`, on `bucket`,
@@ -306,6 +356,10 @@ impl fmt::Display for BucketError {
             Self::NotFound { bucket, object } => {
                 write!(f, "bucket {bucket} has no object {object:?}")
             }
+            Self::TooLarge { bucket, max_bytes } => write!(
+                f,
+                "content bucket {bucket} puts at most {max_bytes} bytes, and the body is longer"
+            ),
             Self::Invalid(message) | Self::Failed(message) => f.write_str(message),
         }
     }

@@ -46,7 +46,7 @@
       "origin": "RecipeRelease"
     },
     {
-      "definition": "CREATE OR REPLACE FUNCTION recipe_release_enqueue_recipe_published() RETURNS trigger AS $$\nBEGIN\n  -- Enqueues a message of RecipePublished after a write to recipe_release (D80).\n  IF TG_OP = 'UPDATE' AND NOT (OLD.commit_id IS DISTINCT FROM NEW.commit_id) THEN\n    RETURN NULL;\n  END IF;\n  INSERT INTO recipe_published_queue (root, \"commit\") VALUES (NEW.root_id, NEW.commit_id);\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql",
+      "definition": "CREATE OR REPLACE FUNCTION recipe_release_enqueue_recipe_published() RETURNS trigger AS $$\nBEGIN\n  -- Enqueues a message of RecipePublished after a write to recipe_release (D80).\n  IF TG_OP = 'UPDATE' AND NOT (OLD.commit_id IS DISTINCT FROM NEW.commit_id) THEN\n    RETURN NULL;\n  END IF;\n  INSERT INTO recipe_published_queue (root, \"commit\", \"sequence\") VALUES (NEW.root_id, NEW.commit_id, (SELECT \"sequence\" FROM recipe_commit WHERE id = NEW.commit_id));\n  RETURN NULL;\nEND;\n$$ LANGUAGE plpgsql",
       "name": "recipe_release_enqueue_recipe_published",
       "origin": "RecipeRelease"
     },
@@ -1274,6 +1274,12 @@
           "name": "commit",
           "origin": "RecipePublished.commit",
           "type": "UUID"
+        },
+        {
+          "name": "sequence",
+          "nullable": true,
+          "origin": "RecipePublished.sequence",
+          "type": "BIGINT"
         },
         {
           "default": "'ready'",

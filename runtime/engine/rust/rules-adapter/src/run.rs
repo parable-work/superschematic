@@ -500,6 +500,7 @@ async fn attempts<S: Store>(
             .map_err(busy)?,
         );
         if store.apply(&statements).await.map_err(busy)? {
+            wake_queues(host, &changes, run.now);
             let result = changes.result.clone();
             return Ok(DeadlineRun::Ran(Box::new(Executed {
                 changes,
@@ -518,6 +519,47 @@ async fn attempts<S: Store>(
         }
     }
     Err(busy_refusal(type_name, &run, MAX_ATTEMPTS).into())
+}
+
+/// Tells the host's wake of what a unit that applied left a behavior worker
+/// (D145, D151): each event, on its row's table's event queue; each
+/// deadline it armed due within [`crate::WAKE_HORIZON_MS`] of `now`, on its
+/// table's deadline queue; and each row it wrote, on its table's change
+/// queue, which the table's trigger writes. A queue is named once.
+fn wake_queues(host: &Host<'_>, changes: &ChangeSet, now: i64) {
+    let table = |type_name: &str| host.layout.types.get(type_name);
+    let mut queues: Vec<&str> = Vec::new();
+    for event in &changes.events {
+        if let Some(events) = table(&event.row.type_name).and_then(|t| t.events.as_ref()) {
+            queues.push(&events.queue);
+        }
+    }
+    for change in &changes.deadlines {
+        let DeadlineChange::Arm { row, at, .. } = change else {
+            continue;
+        };
+        if at.saturating_sub(now) > crate::WAKE_HORIZON_MS {
+            continue;
+        }
+        if let Some(deadlines) = table(&row.type_name).and_then(|t| t.deadlines.as_ref()) {
+            queues.push(&deadlines.queue);
+        }
+    }
+    for row in &changes.rows {
+        if matches!(row, RowWrite::Gone { .. }) {
+            continue;
+        }
+        if let Some(written) = table(row.type_name()).and_then(|t| t.changes.as_ref()) {
+            queues.push(&written.queue);
+        }
+    }
+    let mut woken: Vec<&str> = Vec::new();
+    for queue in queues {
+        if !woken.contains(&queue) {
+            host.wake(queue);
+            woken.push(queue);
+        }
+    }
 }
 
 /// The change queue of a table a claimed change runs on, or an internal

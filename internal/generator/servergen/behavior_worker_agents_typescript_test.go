@@ -95,7 +95,7 @@ func TestTypeScriptAgentsBehaviorWorkerEntrypoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"fixtureAgentsApiApi.jobDeadlinesQueues(fixtureAgentsDbPool, orm,", "createFixtureAgentsDbOrm(fixtureAgentsDbPool)", "runWorker("} {
+	for _, want := range []string{"fixtureAgentsApiApi.jobDeadlinesQueues(fixtureAgentsDbPool, orm,", "createFixtureAgentsDbOrm(fixtureAgentsDbPool)", "runWorkers("} {
 		if !strings.Contains(string(main), want) {
 			t.Errorf("main.ts has no %s:\n%s", want, main)
 		}

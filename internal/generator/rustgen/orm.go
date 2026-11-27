@@ -139,6 +139,11 @@ type ORMTable struct {
 	// member, which the repository's doc names.
 	ReadOnly   bool
 	ReleasedOf string
+	// LiveRoot is such a table whose graph's root is soft-deletable
+	// (sqlutil.TableModel.LiveRoot): its reads leave out the rows of a
+	// soft-deleted root, which the table's definition reads as a
+	// soft-deletable table's.
+	LiveRoot bool
 }
 
 // ORMMember is a member of one of a table's types.
@@ -507,12 +512,17 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		if td := schema.Types[t.Type]; td != nil {
 			typed.Doc = codegen.DocText(td.Description, td.Comment)
 			typed.ReadOnly, typed.ReleasedOf = td.ReleasedOf != "", td.ReleasedOf
+			typed.LiveRoot = t.LiveRoot != ""
 		}
 		table := ormTable{
-			Name:       t.Type,
-			Table:      t.Quoted,
-			Key:        t.KeyField,
-			SoftDelete: t.SoftDelete,
+			Name:  t.Type,
+			Table: t.Quoted,
+			Key:   t.KeyField,
+			// The released rows of a soft-deletable root (D139) read as a
+			// soft-deletable table's: the runtime holds each read to the
+			// statements' live condition, which leaves out the rows of a
+			// soft-deleted root, and the repository writes nothing.
+			SoftDelete: t.SoftDelete || t.LiveRoot != "",
 			UniqueKeys: map[string]ormUniqueKey{},
 			Access:     t.Access,
 		}

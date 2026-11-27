@@ -281,3 +281,36 @@ func TestDeriverPlatform(t *testing.T) {
 	env = resolve(t, assemble(t), s, services, "Staging")
 	wantJSON(t, "the scaling of a deriver turned off", node(t, env, deriver+".worker-pool").Properties["scaling"], `{"manualInstanceCount":0,"scalingMode":"MANUAL"}`)
 }
+
+// TestTableDeriverPlatform: a deriver of tables that implement Derived on a
+// Go or a Rust API lowers to the Cloud Run worker pool a TypeScript one
+// does (D146): placed on the deriver platform in its API's language, one
+// instance, its concurrency in WORKER_CONCURRENCY, and a database user of
+// its own.
+func TestTableDeriverPlatform(t *testing.T) {
+	for _, lang := range []string{registry.APILanguageGo, registry.APILanguageRust} {
+		t.Run(lang, func(t *testing.T) {
+			services := stacktest.AcmeShop()
+			for i := range services {
+				switch services[i].Name {
+				case "shop-db":
+					services[i].DerivedTables = []string{"Ticket"}
+				case stacktest.ShopOrders.Name:
+					services[i].Language = lang
+					services[i].Derivers = []ir.Deriver{{Name: "TriageTickets", Concurrency: 3}}
+				}
+			}
+			const deriver = "shop-orders-triage-tickets"
+			env := resolve(t, assemble(t), shop(), services, "Staging")
+			d := env.Deployable(deriver)
+			if d == nil || d.Kind != ir.DeployableDeriver || d.Platform != gcp.CloudRunDeriver || d.Language != lang || d.Deriver.Instances != 1 {
+				t.Fatalf("the deriver is %+v", d)
+			}
+			pool := node(t, env, deriver+".worker-pool")
+			wantJSON(t, "the pool's scaling", pool.Properties["scaling"], `{"manualInstanceCount":1,"scalingMode":"MANUAL"}`)
+			envs := pool.Properties["template"].(map[string]any)["containers"].([]any)[0].(map[string]any)["envs"].([]any)
+			wantJSON(t, "the deriver's last variable", envs[len(envs)-1], `{"name":"WORKER_CONCURRENCY","value":"3"}`)
+			wantJSON(t, "the deriver's database user", node(t, env, deriver+".database-user.shop-db").Properties["name"], `"shop-orders-triage-tickets@acme-staging.iam"`)
+		})
+	}
+}

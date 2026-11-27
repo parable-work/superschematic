@@ -5,6 +5,7 @@ import { columnKey, decodeRow, decodeValue, encodeParam, type RowField } from '.
 import { queriesOf, type QueryDefinition } from './queries.js';
 import { execute, postgresRulesStore, prepareCreate, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './pgtext.js';
+import { wakeAfterEnqueue } from './queue-wake.js';
 import type { SearchableDefinition } from './search-tables.js';
 import { rowFeatureMembers, type AttachmentsDefinition, type RowFeatureHost, type RowReferencesDefinition } from './rowfeatures.js';
 import { likePattern, searchTerms } from './search.js';
@@ -406,8 +407,19 @@ export interface TableDefinition {
   /** The columns, in the order every statement lists them. */
   readonly columns: readonly TableColumn[];
   readonly statements: TableStatements;
-  /** A table with deletedAt, which a delete stamps. */
+  /**
+   * A table with deletedAt, which a delete stamps. On a readOnly table of
+   * a graph member's released rows (D139), one whose graph's root has
+   * deletedAt: its statements' live condition leaves out the rows of a
+   * soft-deleted root, as a soft-deleted row's, and no write stamps them.
+   */
   readonly softDelete?: boolean;
+  /**
+   * The table of a graph member's released rows (D139), which the graph's
+   * release owns and rewrites: the ORM's repository of it has the reads
+   * alone (READ_METHODS), and no create, update, upsert or delete.
+   */
+  readonly readOnly?: boolean;
   /** A @versioned table whose hard deletes set the history actor. */
   readonly historyActor?: boolean;
   /** The table's @fenced fields, in the order declared (D119); absent for a table with none. */
@@ -2450,7 +2462,20 @@ class TableRepository {
     sets.push(...fenceBumps(this.def.fences, sets));
     const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length, true)), false);
     const { rowCount } = await run(this.runner, fill(this.def.statements.updateMany, sets.join(', '), where), args);
+    this.wakeChanges(rowCount);
     return rowCount;
+  }
+
+  /**
+   * Wakes the worker of the table's change queue after a write past the
+   * behaviors' core of count rows (D145), each of which its trigger wrote a
+   * change of: updateMany's, deleteMany's and hardDeleteOne's. A write
+   * through the core wakes it from the rules adapter. A table no behavior
+   * hears has none.
+   */
+  private wakeChanges(count: number): void {
+    const queue = this.behaviors?.changes?.queue;
+    if (queue !== undefined && count > 0) wakeAfterEnqueue(queue);
   }
 
   async upsertOne(input: Values, on: readonly string[], update: Values, options: UpsertOptions = {}): Promise<Values> {
@@ -2861,6 +2886,7 @@ class TableRepository {
       const args: unknown[] = deletedBy ? [new Date(), this.encode(user, deletedBy, 'deletedBy')] : [new Date()];
       const where = this.liveWhere(this.whereOf(this.conditions(filter, args, args.length, true)), false);
       const { rowCount } = await run(this.runner, fill(s.softDeleteMany, where), args);
+      this.wakeChanges(rowCount);
       return rowCount;
     }
     const args: unknown[] = this.def.historyActor ? [this.actor()] : [];
@@ -2868,6 +2894,7 @@ class TableRepository {
     const text = (this.def.historyActor ? this.orm.historyActorCTE : '') + fill(s.deleteMany, where);
     const { rowCount } = await run(this.runner, text, args);
     await this.clearActor();
+    this.wakeChanges(rowCount);
     return rowCount;
   }
 
@@ -2880,6 +2907,7 @@ class TableRepository {
     const { rowCount } = await run(this.runner, text, args);
     await this.clearActor();
     if (rowCount === 0) throw new NotFoundError(`${this.def.name} ${String(id)} not found`);
+    this.wakeChanges(rowCount);
   }
 
   async mergeInto(input: { readonly from: unknown; readonly into: unknown }): Promise<MergeResult> {
@@ -3123,8 +3151,15 @@ class TableRepository {
     return error;
   }
 
-  /** Runs an operation of one of the table's uses on a row, in a transaction, as options.caller presenting options.preconditions, and resolves to its result; NotFoundError for a key no live row holds. */
-  private async operate(useId: string, operation: string, key: unknown, params: unknown, options: RulesCallOptions = {}): Promise<unknown> {
+  /**
+   * Runs an operation of one of the table's uses on a row, in a transaction,
+   * as options.caller presenting options.preconditions, and resolves to its
+   * result; NotFoundError for a key no live row holds, and for a row the
+   * caller does not see, or for an operation that writes, may not write
+   * (D156), as a read, an updateOne and a deleteOne of it are.
+   */
+  private async operate(useId: string, operation: string, writes: boolean, key: unknown, params: unknown, options: RulesCallOptions = {}): Promise<unknown> {
+    await this.requireReach(key, writes);
     return this.atomically(async repo => {
       const host = repo.rulesHost();
       const action = { kind: 'operation' as const, key: repo.wireKey(key), useId, operation, params: params ?? {} };
@@ -3218,7 +3253,7 @@ class TableRepository {
       for (const operation of use.operations) {
         operations[operation.name] = operation.table
           ? (params: unknown, options?: RulesTableCallOptions) => this.operateTable(use.id, operation.name, params, options)
-          : (key: unknown, params: unknown, options?: RulesCallOptions) => this.operate(use.id, operation.name, key, params, options);
+          : (key: unknown, params: unknown, options?: RulesCallOptions) => this.operate(use.id, operation.name, operation.writes, key, params, options);
       }
       Object.defineProperty(this, member, { value: Object.freeze(operations), enumerable: true });
     }
@@ -3305,16 +3340,30 @@ function distinct(values: readonly unknown[]): unknown[] {
   return out;
 }
 
-function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Record<string, TableRepository> {
-  const out: Record<string, TableRepository> = {};
+/** The methods of a readOnly table's repository (D139): a table's reads, and no write. */
+export const READ_METHODS = ['getOne', 'getManyByIds', 'findOne', 'findMany', 'findPage', 'nearest'] as const;
+
+/** The repository of a readOnly table (D139): the reads of repository alone, each bound to it. */
+function readsOf(repository: TableRepository): Readonly<Record<(typeof READ_METHODS)[number], unknown>> {
+  const reads: Partial<Record<(typeof READ_METHODS)[number], unknown>> = {};
+  for (const method of READ_METHODS) reads[method] = repository[method].bind(repository);
+  return Object.freeze(reads as Record<(typeof READ_METHODS)[number], unknown>);
+}
+
+function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: FieldKeyring | undefined, rules: RulesCore | undefined, behaviorCaller: CoreCaller | undefined, viewer: Viewer = CALLER): Record<string, unknown> {
+  const tables: Record<string, TableRepository> = {};
   for (const [member, def] of Object.entries(orm.tables)) {
     if (ORM_MEMBERS.includes(member)) throw new Error(`orm: the table ${def.name} would be the ORM's own member ${member}`);
-    out[member] = new TableRepository(orm, def, runner, acting, keys, rules, behaviorCaller, viewer);
-    out[member].bindUses();
+    tables[member] = new TableRepository(orm, def, runner, acting, keys, rules, behaviorCaller, viewer);
+    tables[member].bindUses();
   }
   // An include and a filter through a relation read the target through
   // its repository on the same runner, acting as the same user (D90).
-  for (const repository of Object.values(out)) repository.peers = out;
+  for (const repository of Object.values(tables)) repository.peers = tables;
+  // A readOnly table's repository is its reads alone (D139): the graph's
+  // release owns its rows, so the object carries no write to call.
+  const out: Record<string, unknown> = {};
+  for (const [member, repository] of Object.entries(tables)) out[member] = repository.def.readOnly ? readsOf(repository) : repository;
   return out;
 }
 

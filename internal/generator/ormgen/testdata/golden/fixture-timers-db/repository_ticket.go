@@ -1831,6 +1831,11 @@ func (r *TicketRepository) UpdateMany(ctx context.Context, filter *TicketFilter,
 	if err != nil {
 		return 0, fmt.Errorf("failed to execute update: %w", err)
 	}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of TicketChange (D145).
+		wakeQueue("TicketChange")
+	}
 
 	return int(result.RowsAffected()), nil
 }
@@ -1867,6 +1872,11 @@ func (r *TicketRepository) DeleteMany(ctx context.Context, filter *TicketFilter)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("failed to delete records: %w", err)
+	}
+	if result.RowsAffected() > 0 {
+		// The table's trigger wrote a change of each row: they wake the
+		// worker of TicketChange (D145).
+		wakeQueue("TicketChange")
 	}
 
 	return int(result.RowsAffected()), nil

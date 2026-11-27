@@ -66,6 +66,7 @@ var repositoryMembers = []string{
 	"notFound", "operate", "operateTable", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
 	"clearActor", "runDeadline", "runChange", "runEvent", "refusePreconditions",
 	"viewer", "sees", "held", "accessConditions", "filterConditions", "reachFilter", "requireReach", "requireCreatedReach", "refuseHeldUpsert",
+	"wakeChanges",
 }
 
 // ORMUse is a use of a behavior on a table as orm.ts writes it: ID, the

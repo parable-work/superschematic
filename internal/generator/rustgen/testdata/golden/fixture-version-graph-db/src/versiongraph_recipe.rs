@@ -646,6 +646,34 @@ impl RecipeGraph {
         })
     }
 
+    /// Applies edits to a change set at `version` as `save` does, each
+    /// kind's under its kind as the descriptor names it, each upsert a JSON
+    /// object of the kind's fields by the names their serde form gives them,
+    /// as a typed value of the kind's: what a caller that holds the edits as
+    /// JSON saves with, such as a generated API's graph routes (D138). A kind
+    /// the graph has none of is refused.
+    pub async fn save_values(&self, actor: &IdentityUUID, ref_: &IdentityUUID, version: i64, edits: &[(String, RecipeKindEdits<Value>)]) -> Result<RecipeSaveResult, engine::Error> {
+        let mut canonical = engine::Edits::new();
+        for (kind, kind_edits) in edits {
+            let columns = match kind.as_str() {
+                "cover" => RECIPE_COVER_WRITES,
+                "ingredient" => RECIPE_INGREDIENT_WRITES,
+                "note" => RECIPE_NOTE_WRITES,
+                "part" => RECIPE_PART_WRITES,
+                "step" => RECIPE_STEP_WRITES,
+                "tasting" => RECIPE_TASTING_WRITES,
+                "utensil" => RECIPE_UTENSIL_WRITES,
+                other => return Err(engine::Error::Invalid(format!("the Recipe graph has no kind {other:?}"))),
+            };
+            self.kind_edits(&mut canonical, kind, kind_edits, columns)?;
+        }
+        let saved = self.engine.save(&id(actor)?, &id(ref_)?, version, &canonical).await?;
+        Ok(RecipeSaveResult {
+            ref_: saved.ref_,
+            saved: tree(saved.saved, String::new(), Vec::new())?,
+        })
+    }
+
     /// Puts one parent's children of `kind` in the order `keys` gives, on a
     /// change set at `version`. `keys` are the entity keys of every live
     /// child of `parent` in the ref's tree, in the order wanted; `None` is

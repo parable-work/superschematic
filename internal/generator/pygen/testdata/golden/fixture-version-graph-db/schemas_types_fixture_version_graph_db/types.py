@@ -2335,6 +2335,8 @@ class RecipePublished(BaseModel):
 
     commit: IdentityUUID = Field(..., alias="commit", serialization_alias="commit")
 
+    sequence: Optional[GenericInt64] = Field(default=None, alias="sequence", serialization_alias="sequence")
+
     def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
         """
         Perform comprehensive validation and return all errors.
@@ -2369,6 +2371,22 @@ class RecipePublished(BaseModel):
 
             if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.commit), re.ASCII) is None:
                 errors.add_field_error("commit", "pattern", "invalid format")
+
+        # Validate sequence
+        if self.sequence is not None:
+
+            if float(self.sequence) < -9007199254740991:
+                errors.add_field_error("sequence", "min", "must be at least -9007199254740991")
+            if float(self.sequence) > 9007199254740991:
+                errors.add_field_error("sequence", "max", "must be at most 9007199254740991")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "sequence" or key.startswith("sequence[") for key in errors.errors):
+                try:
+                    TypeAdapter(GenericInt64).validate_python(self.sequence)
+                except PydanticValidationError as e:
+                    errors.add_field_error("sequence", "invalid", str(e))
 
         return errors
 

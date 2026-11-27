@@ -123,7 +123,7 @@ var mergeRulesTest string
 // It needs cargo, which it skips without, and runs outside -short. Without
 // the database the Postgres half is skipped, and the test says so.
 func TestRepositoriesMergeOnSQLiteAndPostgres(t *testing.T) {
-	runBehaviorRepositories(t, "fixture-merge-sqlite-db", "merge_rules", mergeRulesTest)
+	runBehaviorRepositoriesWith(t, "fixture-merge-sqlite-db", "merge_rules", mergeRulesTest, true)
 }
 
 // runBehaviorRepositories generates fixture's Rust types with both
@@ -132,6 +132,14 @@ func TestRepositoriesMergeOnSQLiteAndPostgres(t *testing.T) {
 // SQLite DDL the build writes, at create.sql, and the Postgres DDL, at
 // postgres/create.sql.
 func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
+	t.Helper()
+	runBehaviorRepositoriesWith(t, fixture, name, source, false)
+}
+
+// runBehaviorRepositoriesWith is runBehaviorRepositories, the test crate
+// depending on the HTTP runtime's checkout as well when runtime is set,
+// for a test that runs the runtime's own loops over the repositories.
+func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, runtime bool) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping the behavior tables' cargo test in -short mode")
@@ -206,7 +214,7 @@ func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
 		t.Fatalf("the HTTP runtime's lockfile: %v", err)
 	}
 	for file, content := range map[string]string{
-		"Cargo.toml":            fmt.Sprintf(ormBehaviorsManifest, output.CrateName, filepath.ToSlash(typesDir), filepath.ToSlash(paths.HTTPRuntimeRust)),
+		"Cargo.toml":            fmt.Sprintf(ormBehaviorsManifest, output.CrateName, filepath.ToSlash(typesDir), runtimeDependency(runtime, paths.HTTPRuntimeRust)),
 		"Cargo.lock":            string(lock),
 		"src/lib.rs":            "//! The behavior tables' repositories: see tests/.\n",
 		"create.sql":            sqliteDDL,
@@ -244,8 +252,9 @@ func runBehaviorRepositories(t *testing.T, fixture, name, source string) {
 }
 
 // ormBehaviorsManifest is the test crate's Cargo.toml, given the types
-// crate's name, its directory and the HTTP runtime's, whose access caller
-// (D156) a case opens the repositories for.
+// crate's name, its directory and its dependency on the HTTP runtime
+// (runtimeDependency), which a case that runs the runtime's loops or opens
+// the repositories for an access caller (D156) needs.
 const ormBehaviorsManifest = `# The repositories of a database whose tables compose behaviors (D103,
 # D116), over its generated Rust types, on both dialects.
 [package]
@@ -259,11 +268,20 @@ serde = "1.0.228"
 serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt"] }
 db = { package = %q, path = %q, features = ["postgres", "sqlite"] }
-superschematic-http-runtime = { path = %q }
-
+%s
 # Its own workspace, so no manifest above the test's directory claims it.
 [workspace]
 `
+
+// runtimeDependency is the test crate's dependency on the HTTP runtime's
+// checkout at dir, with its postgres feature, when runtime is set, and
+// nothing otherwise.
+func runtimeDependency(runtime bool, dir string) string {
+	if !runtime {
+		return ""
+	}
+	return fmt.Sprintf("superschematic-http-runtime = { path = %q, features = [\"postgres\"] }\n", filepath.ToSlash(dir))
+}
 
 // TestRepositoriesBindNoCoreWithoutTheBehaviorsCrates: a build whose
 // naming file names neither of the unpublished crates the binding depends

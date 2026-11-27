@@ -430,7 +430,8 @@ export const fixtureBlueprintDbRules: RulesLayout = {
         {
           "field": "flags",
           "column": "flags",
-          "type": "string"
+          "type": "string",
+          "list": true
         }
       ],
       "uses": [

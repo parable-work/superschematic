@@ -20,6 +20,13 @@ This crate provides:
 - `ParamSpec`: how the generated router decodes one path, query or body
   argument, as the TypeScript runtime's `params.ts` does, refusing a value
   with a 400 whose `details` name it
+- `graph_routes`: what a generated crate's graph operations share (D138),
+  which its `src/graphs.rs` runs through each graph's facade: the problem
+  of each refusal of the engine or the core by its code (`refusal`), the
+  bodies of the operations, a save's edits as the facade takes them
+  (`facade_edits`), and a tree's rows as the API's types hold them
+  (`tree`, `rows`). It names neither the database's types nor the engine,
+  as the TypeScript runtime's `graph-routes.ts` does not
 - `page`: the page of a `@paginated` operation (D60). `PageSpec::query`
   reads `cursor` and `limit` from the query with a parameter's 400s,
   `PageSpec::request` and `PageSpec::check` hold a request an in-process
@@ -82,7 +89,10 @@ This crate provides:
   build's table (`mcp::RouteTool`), each call a request to its
   operation's route through `handle`, as the caller the endpoint's
   controls established, with the endpoint request's headers and
-  extensions. `RouterOptions.mcp`, an `mcp::EndpointOptions`, sets its
+  extensions but its `Idempotency-Key`. The tool of an `@idempotent`
+  operation (`RouteTool::idempotent`) takes the call's key in its
+  `idempotencyKey` argument, which goes to the route as that header
+  (D140). `RouterOptions.mcp`, an `mcp::EndpointOptions`, sets its
   server info, its own rate limit and timeout, and the key and the store
   of its confirmations; `tests/mcp_mount.rs` holds it
 - `Authenticator` and `Principal`: how a service tells the router who the
@@ -97,8 +107,8 @@ This crate provides:
   `verify(request, next)` is the body of a generated crate's
   `WebhookVerifier`
 - `RouteControls`: a route's `@rateLimit`, `@bodyLimit`, service step
-  (`@requireService`, `@allowService`), permission check and `@timeout`,
-  applied with `route_layer` in that order. A generated router gives a
+  (`@requireService`, `@allowService`), permission check, `@idempotent`
+  and `@timeout`, applied with `route_layer` in that order. A generated router gives a
   route its operation's limiter from a `RateLimits` registry
   (`rate_limiter(limits.of(&OPERATION))`), one per operation, so the
   routers and the Topcoat procedures and pages that share the registry
@@ -163,6 +173,22 @@ TypeScript runtimes' (D51):
   reads as a JWK. A generated SDK's `ServiceTokenSource` is
   the same type, so its `ServiceCredential` is
   `{ token: credential_source(c)?, headers: c.header_names() }`.
+- `idempotency`, with no feature: the keys of an `@idempotent` operation
+  (D140), the twin of Go's `idempotency` package and TypeScript's
+  `idempotency.ts`. `RouteControls::idempotent(store, operation, ttl,
+  required)` keeps a request's `Idempotency-Key` after the permission
+  check and around the timeout: a repeat is the kept answer with
+  `Idempotent-Replay: true`, the key with another request 422
+  `idempotency_key_reused`, a repeat while the first runs 409
+  `idempotency_in_flight` with `Retry-After`, and a 5xx or a panic keeps
+  nothing. On tokio the handler runs as a task of its own, so a caller
+  that goes away does not stop it before its answer is kept. A `Store`
+  keeps the rows: `MemoryStore` in the process, `PostgresStore` over a
+  pool with the `postgres` feature and `SqliteStore` over a SQLite file
+  with the `sqlite` feature, each on the `Table` a generated crate names
+  as `IDEMPOTENCY_TABLE`. `tests/idempotency_parity.rs` holds the three to
+  `runtime/http/testdata/idempotency_parity.json`, on Postgres when
+  `SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL` names one.
 - `client_version`, with no feature: the oldest version of each client an
   API serves (D143), the twin of Go's `clientversion` package and
   TypeScript's `client-version.ts`. `Minimums::parse` reads
@@ -238,6 +264,15 @@ TypeScript runtimes' (D51):
   logs (`"shutting down"`); a second ends the process at once with 143 or
   130, as a generated server's does. `BoxError` is the error a job's or a
   worker's method returns.
+- The `deriver` module, with the `postgres` or `sqlite` feature: a stack
+  deriver's loop over tables that implement Derived (D146), the twin of
+  the TypeScript runtime's `runDeriver`. `run_deriver` takes the tables by
+  name and one call that runs a table's `staleDerivations` or
+  `settleDerivations` through the database's repositories, hands each
+  stale field to the answer, settles the answers, waits five seconds when
+  a pass settles nothing, waits out a table whose pull or settle fails for
+  a reason time cures, and ends with a `DeriverFailure` naming the table
+  on a refusal of the core's other than busy.
 - The `postgres` feature's `queue` module, the twin of the Go ORM's
   `queues.go` and TypeScript's `queue.ts` (D53): a DB's Rust types carry
   each queue's descriptor as JSON, which `QueueDefinition::parse` reads in
@@ -261,6 +296,21 @@ TypeScript runtimes' (D51):
   UTC as superscalar's `DateTime` writes it, a `UUID` hyphenated, a list
   from its array, JSON as itself. A column of a type it does not read
   (`POINT`, `INTERVAL`, which the descriptors leave out) is refused.
+  `slot(slots)` takes one of a drain worker's session advisory locks of
+  the queue (D145), on a connection it takes out of the pool and closes
+  as the `Slot` drops, and `next_due()` reads how long until the first
+  ready message that waits falls due. An enqueue tells the `wake`
+  module once its statement has run.
+- The `postgres` feature's `wake` module, Go's `wake` package ported
+  (D145): the process's waker reads `QUEUE_WAKES` the first time it is
+  told of an enqueue (`wake::enqueued(queue, delay)`), and POSTs each of
+  the queue's wakes, with the bearer token its token URL answers, at
+  most once per queue in five seconds, in a task of its own; a message
+  due past five minutes sends none, and a wake that fails is a warning
+  and nothing else. `wake::settled()` waits for the wakes sent, which a
+  job and a worker await before they exit. The generated code that runs
+  the behaviors' core hands it to the rules adapter's
+  `Host::with_wake`, which wakes a behavior worker's queues (D151).
 - The `sqlite` feature's half of the `queue` module (D53, amended): a
   descriptor of a database that lists the sqlite dialect also carries
   `sqliteStatements`. `enqueue_sqlite(&tx, &queue, &message)` writes a
@@ -296,7 +346,16 @@ TypeScript runtimes' (D51):
   `pruned`) through `tracing`. It claims through the `WorkerQueue` trait,
   which `PostgresQueue` implements; a queue that does not implement its
   `prune` prunes nothing. With the `otel` feature and export on, each
-  message's handling is a consumer span, `process <queue>`.
+  message's handling is a consumer span, `process <queue>`. With
+  `Options::drain` (`drain_from_env()` reads `WORKER_MODE`,
+  `WORKER_IDLE_SECONDS` and `WORKER_SLOTS`) the worker runs in drain mode
+  (D145): it takes one of the queue's slots first, returning at once when
+  none is free, returns `Ok` once no message was ready or held for the
+  idle time and none falls due within five minutes (`DRAIN_HORIZON`),
+  which it waits for, and returns an error once every claim has failed
+  for the idle time. `Group` runs a behavior worker's queues together:
+  `take_slot` takes one slot for them all, and its loops share one idle
+  clock.
   `SelfCompleting<Q>` wraps a queue whose handler completes each message
   itself, in the transaction that does its work: a behavior worker's
   deadline queue and change queue (D103), whose generated handlers run a
@@ -369,7 +428,10 @@ TypeScript runtimes' (D51):
   `Arc<dyn Bucket>`, the twin of Go's `bucket.Bucket` and TypeScript's
   `Bucket`: `put(name, body, PutOptions)` (a `Body` of bytes, text or a
   `Stream` of chunks, such as an axum request's data stream, with its
-  content type), `get(name)` (a `Reader`, the object's `Object` and its
+  content type, and with `if_absent` written only when no object has the
+  name; a `PutResult`, the object and whether this put `created` it,
+  D142), `head(name)` (the object's `Object`, or `None`), `get(name)` (a
+  `Reader`, the object's `Object` and its
   bytes as a `Stream`, which an axum handler answers with as
   `Body::from_stream(reader)`), `delete(name)`, `list(ListOptions)` (a
   `Page` of the objects under a prefix, in name order, up to 1000 unless it
@@ -380,7 +442,14 @@ TypeScript runtimes' (D51):
   or holds a CR, LF or NUL, and options no provider signs, are
   `BucketError::Invalid` before any request, with Go's and TypeScript's
   messages; anything else is `BucketError::Failed`, naming the bucket, the
-  operation and its causes.
+  operation and its causes. `ContentBucket::new(bucket, max_bytes)` is the
+  `Deps` member of a Bucket service whose config says `contentAddressed`
+  (D142): `put` reads a body whole, up to `max_bytes` (32 MiB for 0,
+  `BucketError::TooLarge` past it, writing nothing), and writes it as
+  `sha256/<hex>` if absent; `has`, `missing`, `get` and `signed_url` read
+  by hash, and refuse anything but 64 lowercase hex digits.
+  `tests/content_bucket_parity.rs` holds it to
+  `runtime/http/testdata/content_bucket_parity.json`.
 - The `gcs` feature's `gcs` module: `open_bucket(&stackconfig::Bucket)`, a
   `GcsBucket` over Cloud Storage's JSON API, with no Google library, as
   Cloud SQL's connection has none. On GCS it sends an access token for the
@@ -392,7 +461,9 @@ TypeScript runtimes' (D51):
   bucket through an emulator. A connection with an endpoint, or `STORAGE_EMULATOR_HOST`,
   reaches an emulator with no credential, and signs its URLs for the
   emulator's host with a key the process makes, which fake-gcs-server takes
-  without checking. `put` is one multipart upload, streamed for a stream;
+  without checking. `put` is one multipart upload, streamed for a stream,
+  with `ifGenerationMatch=0` for `if_absent`, whose 412 it answers with
+  the object that is there; `head` reads the metadata alone;
   `get` reads the metadata, then that generation's bytes; reads that fail
   with 408, 429, a 5xx or no answer are tried twice more. The V4 signature
   is the one `@google-cloud/storage` writes, which a vector of its output

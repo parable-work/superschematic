@@ -2021,8 +2021,8 @@ are operations of the table as a whole, and the value a field's type
 refuses is held to the field's JSON Schema, which the build writes into
 the table's layout
 ([Fields a model fills, and who set each](/superschematic/guides/database-tables/#fields-a-model-fills-and-who-set-each)).
-A `@deriver` of a TypeScript API fills such a table through its
-repository, with the loop above (D146).
+A `@deriver` of a TypeScript, Rust or Go API fills such a table
+through its repository, with the loop above (D146).
 
 ## Provenance
 

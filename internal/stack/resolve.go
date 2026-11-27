@@ -1011,9 +1011,6 @@ func (r *resolver) placeServer(d *deployable) {
 		return
 	}
 	d.res.Language = lang
-	if d.res.Kind == ir.DeployableDeriver && lang == registry.APILanguageGo {
-		return // runDerivers refuses a Go API's deriver, whatever its platform runs
-	}
 	if d.res.Kind == ir.DeployableApp && lang != registry.APILanguageRust {
 		return // runApps refuses a Go or TypeScript API's app, whatever its platform runs
 	}

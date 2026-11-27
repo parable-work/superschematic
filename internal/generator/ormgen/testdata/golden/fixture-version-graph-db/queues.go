@@ -138,9 +138,7 @@ func (t queueTable) insert(ctx context.Context, tx TxInterface, columns []string
 	if _, err := tx.Exec(ctx, sql, values...); err != nil {
 		return fmt.Errorf("enqueue on %s: %w", t.name, err)
 	}
-	if f := onEnqueue.Load(); f != nil {
-		(*f)(t.queue)
-	}
+	wakeQueue(t.queue)
 	return nil
 }
 
@@ -160,6 +158,17 @@ func OnEnqueue(f func(queue string)) {
 		return
 	}
 	onEnqueue.Store(&f)
+}
+
+// wakeQueue calls what OnEnqueue last gave with queue, the `@queue` class,
+// when it gave one: after an enqueue's statement, after a command of the
+// behaviors' core that gave a behavior worker's queue a message (the rules
+// host's Wake, D151), and after a write past the core of a table whose
+// trigger writes its change queue (D145).
+func wakeQueue(queue string) {
+	if f := onEnqueue.Load(); f != nil {
+		(*f)(queue)
+	}
 }
 
 // slot takes one of slots locks named for the table, the first that is
@@ -518,7 +527,7 @@ WHERE state = 'claimed' AND claim_expires_at <= now() AND attempts > $1`,
 UPDATE recipe_published_queue AS q SET state = 'claimed', attempts = q.attempts + 1, claim_token = gen_random_uuid(),
   claim_expires_at = now() + make_interval(secs => $2), updated_at = now()
 FROM due WHERE q.id = due.id
-RETURNING q.id::text, q.claim_token::text, q.attempts, q.root, q."commit"`,
+RETURNING q.id::text, q.claim_token::text, q.attempts, q.root, q."commit", q."sequence"`,
 		complete: `UPDATE recipe_published_queue SET state = 'done', claim_token = NULL, claim_expires_at = NULL, updated_at = now()
 WHERE id = $1::uuid AND claim_token = $2::uuid AND state = 'claimed'`,
 		fail: `UPDATE recipe_published_queue SET
@@ -565,6 +574,10 @@ func EnqueueRecipePublishedIn(ctx context.Context, tx TxInterface, msg *types.Re
 	values = append(values, msg.Root.ToUUID())
 	columns = append(columns, `"commit"`)
 	values = append(values, msg.Commit.ToUUID())
+	if msg.Sequence != nil {
+		columns = append(columns, `"sequence"`)
+		values = append(values, *msg.Sequence)
+	}
 	return recipePublishedQueue.insert(ctx, tx, columns, values, delay)
 }
 
@@ -600,8 +613,12 @@ func (q *RecipePublishedQueue) Claim(ctx context.Context, n int, lease time.Dura
 	err := recipePublishedQueue.claim(ctx, q.pool, n, lease, func(rows pgx.Rows) error {
 		var claim RecipePublishedClaim
 		msg := &claim.Message
-		if err := rows.Scan(&claim.ID, &claim.Token, &claim.Attempt, &msg.Root, &msg.Commit); err != nil {
+		var tempSequence *types.GenericInt64
+		if err := rows.Scan(&claim.ID, &claim.Token, &claim.Attempt, &msg.Root, &msg.Commit, &tempSequence); err != nil {
 			return err
+		}
+		if tempSequence != nil {
+			msg.Sequence = tempSequence
 		}
 		claims = append(claims, claim)
 		return nil

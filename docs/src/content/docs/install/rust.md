@@ -380,14 +380,19 @@ uploads files, or whose result is a `FileDownload`, unless it is
 or answers the file. The Go and TypeScript servers serve both
 ([Files](/superschematic/guides/api-routes/#files)); support here follows.
 
-The router keeps no idempotency keys either. The build refuses an API with
-an `@idempotent` operation
+An `@idempotent` operation's route keeps the key a request sends
 ([A call that runs once](/superschematic/guides/api-routes/#a-call-that-runs-once)),
-since a route that ran a repeated call twice would break what the
-decorator says: serve the API in Go or TypeScript, or drop the decorator
-and keep the keys in the implementation. The Rust SDK sends no
-`Idempotency-Key` for such an operation of an API served in another
-language. Support here follows.
+after the permission check and around the timeout, as the Go and
+TypeScript routers do (D140). `Implementations` gains
+`idempotency_store`, an `Arc<dyn runtime::idempotency::Store>`, and the
+crate states the table that keeps the keys as `IDEMPOTENCY_TABLE`. With
+Deps, `Implementations::new` takes `db` and builds the store over it, the
+runtime's `PostgresStore` or, on a SQLite file, its `SqliteStore`; a test
+hands it a `MemoryStore`. On tokio the route runs its handler as a task of
+its own, so a caller that goes away does not stop it before its answer is
+kept. The Rust SDK's method of such an operation sends an
+`Idempotency-Key` with each call
+([An idempotency key](/superschematic/guides/client-sdks/#an-idempotency-key)).
 
 An `@hmacVerified` operation's route
 ([Webhooks](/superschematic/guides/api-routes/#webhooks)) runs its
@@ -686,8 +691,10 @@ server builds: the `Arc<IdentityAuthenticator>` of an API over the user
 model, and the service authenticator of an API with a service clause,
 each a typed argument, so none is forgotten. A callee needs
 `outputs.sdk` for Rust, which the crate depends on by path. A bucket is
-the runtime's provider-neutral `bucket::Bucket`, which puts, gets,
-deletes and lists objects and signs URLs for them
+the runtime's provider-neutral `bucket::Bucket`, which puts, gets, heads,
+deletes and lists objects and signs URLs for them, or, for a Bucket
+service whose config says `contentAddressed`, the `bucket::ContentBucket`
+over it, which names each object by the SHA-256 of its bytes
 ([Buckets](/superschematic/guides/buckets/)); the server, job or worker
 opens it on GCS, or on the emulator `stack dev` runs, with the runtime's
 `gcs` feature, which the entrypoint's crate turns on and the API crate

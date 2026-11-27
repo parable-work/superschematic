@@ -21,7 +21,7 @@ use axum::middleware::Next;
 {{- if or .WebhookProviders .ManualEndpoints }}
 use axum::response::Response;
 {{- end }}
-use {{ .RuntimeCrateIdent }}::{ {{- if .Identity }}ApiError, IdentityAuthenticator, RequestContext{{ else if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end }}{{ if .HasPrincipalRateLimit }}, PrincipalRateLimitStore{{ end }}{{ if .HasServiceCallers }}, ServiceAuthenticator{{ end -}} };
+use {{ .RuntimeCrateIdent }}::{ {{- if .Identity }}ApiError, IdentityAuthenticator, RequestContext{{ else if .HasAuth }}ApiError, Authenticator, RequestContext{{ else }}ApiError, RequestContext{{ end }}{{ if .HasPrincipalRateLimit }}, PrincipalRateLimitStore{{ end }}{{ if .HasServiceCallers }}, ServiceAuthenticator{{ end }}{{ if .HasIdempotent }}, idempotency{{ end -}} };
 use std::collections::HashMap;
 use std::sync::Arc;
 {{- range .Endpoints }}
@@ -181,6 +181,13 @@ pub struct Implementations {
     /// principal (D131), so each limit holds across replicas.
     pub principal_rate_limit_store: Arc<dyn PrincipalRateLimitStore>,
 {{- end }}
+{{- if .HasIdempotent }}
+    /// Keeps the keys of every @idempotent route (D140), in the table of
+    /// the API's database `IDEMPOTENCY_TABLE` names, so a repeat under a
+    /// key is answered what the first request was on every replica.
+{{- if .Deps }} `Implementations::new` builds it over `Deps.db`.{{ end }}
+    pub idempotency_store: Arc<dyn idempotency::Store>,
+{{- end }}
 {{- if .HasServiceCallers }}
     /// Verifies the `Service-Authorization` credential of every request
     /// that carries one, and establishes the calling service each
@@ -203,6 +210,13 @@ pub struct Implementations {
     /// of {{ .TableDatabase }}, over which the router's handler of each runs it,
     /// so no namespace trait has a method for it.
     pub tables: crate::tables::Tables,
+{{- end }}
+{{- if .HasGraphOperations }}
+    /// What the graph operations run on (D138): the facade of each version
+    /// graph of {{ .GraphDatabase }} they serve, and its repositories, over which
+    /// the router's handler of each runs it, so no namespace trait has a
+    /// method for it.
+    pub graphs: crate::graphs::Graphs,
 {{- end }}
 }
 {{- if .WebhookProviders }}

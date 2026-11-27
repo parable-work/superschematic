@@ -33,7 +33,7 @@ use superschematic_http_runtime::logging::{self, tracing};
 use superschematic_http_runtime::postgres::{self, Pool};
 use superschematic_http_runtime::stackconfig::Database;
 use superschematic_http_runtime::telemetry::{self, Defaults};
-use superschematic_http_runtime::Shutdown;
+use superschematic_http_runtime::{wake, Shutdown};
 
 use schemas_desk_db_types as desk_db_types;
 use schemas_desk_rs_api_api as desk_rs_api_api;
@@ -121,6 +121,8 @@ async fn run() -> Result<(), Failure> {
         "job started"
     );
     let ran = telemetry::job("CloseStaleTickets", jobs.close_stale_tickets(shutdown)).await;
+    // The wakes its enqueues sent are answered before the job ends (D145).
+    wake::settled().await;
     // The engine closes once the job ends, off the runtime.
     desk_db_engine.shutdown().await;
     ran

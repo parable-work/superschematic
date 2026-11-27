@@ -263,11 +263,18 @@ func (r run) generateServers() error {
 		return err
 	}
 	withImages(derivers)
-	if err := r.checkDerivers(st.Name, derivers, services, tsScaffolding, rustScaffolding); err != nil {
+	if err := r.checkDerivers(st.Name, derivers, services, scaffolding, tsScaffolding, rustScaffolding); err != nil {
 		return err
 	}
 	for _, d := range derivers {
 		switch d.Language {
+		case APILanguageGo:
+			// A Go API's deriver fills tables (D146).
+			deriver, _, err := r.planEntrypoint(st.Name, d, cloudSQL[d.Name], nil)
+			if err != nil {
+				return err
+			}
+			plans = append(plans, planned{server: deriver})
 		case APILanguageTypeScript:
 			deriver, _, err := r.planTypeScriptServer(st.Name, d, cloudSQL[d.Name], nil, facts.bundles[d.Name])
 			if err != nil {
@@ -281,8 +288,7 @@ func (r run) generateServers() error {
 			}
 			rustPlans = append(rustPlans, deriver)
 		default:
-			// stack.Derivers refuses a Go API's deriver.
-			return fmt.Errorf("stack %s: deriver %s is a %s deriver; %s (D74)", st.Name, d.Name, d.Language, stack.DeriverLanguages)
+			r.Logf("  - deriver %s: a %s deriver, which gets no generated entrypoint yet\n", d.Name, d.Language)
 		}
 	}
 
@@ -824,12 +830,13 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 }
 
 // checkDerivers refuses a stack one of whose TypeScript APIs declares
-// derivers while its implementation exports no createDerivers, or one of
+// derivers while its implementation exports no createDerivers, one of
 // whose Rust APIs does while its implementation declares no
-// create_derivers (D74), as checkWorkers refuses one without its workers:
-// the implementation is the engineer's, and the build writes into it no
-// more.
-func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, services []stack.Service, tsScaffolding, rustScaffolding map[string]bool) error {
+// create_derivers (D74), or one of whose Go APIs does while its
+// implementation declares no NewDerivers (D146), as checkWorkers refuses
+// one without its workers: the implementation is the engineer's, and the
+// build writes into it no more.
+func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding, rustScaffolding map[string]bool) error {
 	checked := map[string]bool{}
 	for _, d := range derivers {
 		api := d.Deriver.API
@@ -846,6 +853,32 @@ func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, 
 			}
 		}
 		switch d.Language {
+		case APILanguageGo:
+			if scaffolding[api] {
+				continue
+			}
+			impl, _, err := r.implementation(api)
+			if err != nil {
+				return err
+			}
+			exists, err := apigen.ImplementationExists(impl.Dir)
+			if err != nil || !exists {
+				return err
+			}
+			declares, err := apigen.DeclaresFunc(impl.Dir, apigen.DeriversFunc)
+			if err != nil || declares {
+				return err
+			}
+			var fields []string
+			for _, name := range names {
+				fields = append(fields, fmt.Sprintf("\t\t%s: ..., // implements api.%sDeriver", goutil.GoPublicIdentifier(name), goutil.GoPublicIdentifier(name)))
+			}
+			return fmt.Errorf("stack %s: %s declares derivers, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
+				"\tfunc %s(deps api.Deps) (api.Derivers, error)\n\n"+
+				"returning the derivers, each a value with a method per derived field it fills:\n\n"+
+				"\treturn api.Derivers{\n%s\n\t}, nil\n\n"+
+				"where api is %s, whose api.DeriversConstructor is %s's signature (D146)",
+				stackName, api, impl.Dir, apigen.DeriversFunc, apigen.DeriversFunc, strings.Join(fields, "\n"), r.Options.Naming.GoAPIModule(api), apigen.DeriversFunc)
 		case APILanguageTypeScript:
 			if tsScaffolding[api] {
 				continue
@@ -1204,6 +1237,9 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 	}
 	if s.Worker != nil {
 		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
+	}
+	if s.Deriver != nil {
+		in.Deriver = &servergen.DeriverInput{Name: s.Deriver.Name}
 	}
 	var scaffolds []scaffold
 	var versionGraph, rules bool
@@ -1785,8 +1821,9 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 	}
 	if o.Deps.Rules {
 		// The ORM of a database whose tables' fields are behaviors requires
-		// the rules module, which links the behaviors' core (D103).
-		modules = append(modules, runtimeModule(n.RulesGoModule, paths.RulesGo, false))
+		// the rules module, which links the behaviors' core (D103). A
+		// deriver's main.go names its caller and its refusals (D146).
+		modules = append(modules, runtimeModule(n.RulesGoModule, paths.RulesGo, o.HasDerivers()))
 	}
 	return modules
 }

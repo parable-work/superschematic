@@ -201,6 +201,7 @@ var reactionsCases = []string{
 	"a raw SQL write of a task's status is heard and moves its project",
 	"a raw SQL write of a task's priority to urgent starts it, which moves its project",
 	"a then whose target has no transition to its state leaves the target as it is and completes the message",
+	"in drain mode each worker takes a slot, drains what a raw write left, and stops of itself, and a command wakes the change queue of each row it writes",
 }
 
 // TestGeneratedReactionsEndToEnd serves fixture-reactions-api's generated

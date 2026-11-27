@@ -4310,12 +4310,13 @@ state while a field it lists is proposed, refused as
 `unreviewed_fields`.
 
 Neither runs a model or a schedule of its own. A `@deriver` of a
-TypeScript API runs that loop for you (D146): a deployable of a stack
-that pulls each table's stale fields through its repository, hands each
-to a method of your implementation's `Derivers`, typed by the field, and
-settles the answers ([Stacks](/superschematic/guides/stacks/#derivers)).
-In another language, a worker of your own pulls and settles through the
-repository's operations, as above. Each of Derived's pulls reads the
+TypeScript, Rust or Go API runs that loop for you (D146): a deployable of
+a stack that pulls each table's stale fields through its repository,
+hands each to a method of your implementation's `Derivers`, typed by the
+field, and settles the answers
+([Stacks](/superschematic/guides/stacks/#derivers)). Outside a stack, a
+worker of your own pulls and settles through the repository's
+operations, as above. Each of Derived's pulls reads the
 table's rows a page at a time, a scan, since the core keeps no index of
 stale fields yet. Neither behavior can be removed from a table with rows.
 A raw write of the table runs none of these rules: its derived fields'
