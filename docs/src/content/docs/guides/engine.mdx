@@ -172,11 +172,12 @@ curl -X POST http://127.0.0.1:8787/namespaces/default/schemas/Note/instances \
 curl http://127.0.0.1:8787/namespaces/default/schemas/Note/instances/launch -H "$TOKEN"
 curl -X PATCH http://127.0.0.1:8787/namespaces/default/schemas/Note/instances/launch \
   -H "$TOKEN" -H 'content-type: application/merge-patch+json' -d '{"body": "Ships soon."}'
-curl 'http://127.0.0.1:8787/namespaces/default/schemas/Note/instances?filter[workflowStatus]=draft&sort=-title' -H "$TOKEN"
+curl 'http://127.0.0.1:8787/namespaces/default/schemas/Note/instances?filter[status]=draft&sort=-title' -H "$TOKEN"
 ```
 
-- **A row is flat.** Its own fields sit beside its behaviors' fields, each
-  named after its behavior: `workflowStatus`, `commentsMessages`,
+- **A row is flat.** Its own fields sit beside its behaviors' fields.
+  Workflow's is the field `status`, as a table's `status: Workflow<>` is,
+  and the rest are each named after their behavior: `commentsMessages`,
   `revisionsRevision`. Only the behaviors' operations change those.
 - **A row carries its version** as `_version` and as its `ETag`. A create
   answers `201`; the test's create reads `"1"`, and after two transitions
@@ -211,7 +212,7 @@ curl -X POST http://127.0.0.1:8787/namespaces/default/schemas/Note/instances/lau
 It answers `{ "from": "draft", "to": "review" }`. A move with no
 transition, or behind a permission the caller lacks, is refused: alice's
 move to `published` is `403 forbidden`, and bob's is taken. The row's
-`workflowStatus` filters a list.
+`status` filters a list.
 
 ### Comments
 

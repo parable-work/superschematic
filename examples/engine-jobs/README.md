@@ -84,8 +84,9 @@ And:
 - A Batch's create stamps its jobs in its own write, each with a key the
   core draws, and `blueprintChildren` lists the jobs that point at it,
   which a read computes.
-- A row is its own fields beside its behaviors', each named after its
-  behavior (`workflowStatus`, `leaseToken`, `blueprintChildren`).
+- A row is its own fields beside its behaviors'. Workflow's is the field
+  `status`, as a table's `status: Workflow<>` is, and the rest are each
+  named after their behavior (`leaseToken`, `blueprintChildren`).
 
 ## Callers
 

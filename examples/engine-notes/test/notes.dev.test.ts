@@ -103,7 +103,7 @@ test('an author creates a note; a reader may not', async () => {
   assert.equal(created.status, 201);
   assert.equal(created.etag, '"1"');
   assert.deepEqual(
-    [created.body.title, created.body.tags, created.body.workflowStatus, created.body.revisionsRevision],
+    [created.body.title, created.body.tags, created.body.status, created.body.revisionsRevision],
     ['Launch', ['launch'], 'draft', 1]
   );
 });
@@ -238,7 +238,7 @@ test('the MCP tools: each caller lists what the policy lets them call, and calls
     assert.ok(!carols.includes(name), `carol does not list ${name}`);
   }
   const read = await mcp('alice', 'tools/call', { name: 'note_get', arguments: { id: 'launch' } });
-  assert.equal(read.result.structuredContent.workflowStatus, 'published');
+  assert.equal(read.result.structuredContent.status, 'published');
   const proposed = await mcp('carol', 'tools/call', { name: 'note_propose', arguments: { id: 'launch', params: { patch: { tags: ['launch', 'q3'] } } } });
   assert.equal(proposed.result.structuredContent.id, 2);
   // A refusal is a tool error carrying the HTTP API's problem document.

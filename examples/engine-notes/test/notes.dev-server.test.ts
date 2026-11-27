@@ -132,7 +132,7 @@ test('superschematic-dev serves the file the TypeScript host wrote, under the sa
     };
     const note = await call('alice', 'GET', '/schemas/Note/instances/launch');
     assert.equal(note.status, 200);
-    assert.deepEqual([note.body.title, note.body.workflowStatus], ['Launch', 'draft']);
+    assert.deepEqual([note.body.title, note.body.status], ['Launch', 'draft']);
     assert.equal((await call(null, 'GET', '/schemas/Note/instances/launch')).status, 401);
 
     const transition = (subject: string, to: string) => call(subject, 'POST', '/schemas/Note/instances/launch/operations/transition', { to });

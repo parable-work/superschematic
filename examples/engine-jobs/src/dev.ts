@@ -28,8 +28,9 @@
 //   worker no update: the result is the successful attempt's detail, in
 //   Retries' attempts.
 // - The types are Job, Worker and Batch. A row is its own fields beside its
-//   behaviors' fields, each named after its behavior (workflowStatus,
-//   leaseToken, blueprintChildren).
+//   behaviors' fields: Workflow's is the field status, as a table's
+//   status: Workflow<> is (D117), and the rest are each named after their
+//   behavior (leaseToken, blueprintChildren).
 // - A caller is the one its bearer token names (authenticate), and the
 //   policy is data (devPolicy).
 // - The runner is the host's: runDue runs the changes the writes queued,
@@ -193,7 +194,7 @@ export interface Claimed {
  * read goes on. Resolves to null when no job can be claimed.
  */
 export async function claim(client: DevClient, topic?: string): Promise<Claimed | null> {
-  const query = new URLSearchParams({ 'filter[workflowStatus]': 'queued', sort: '-priority,id', limit: '50' });
+  const query = new URLSearchParams({ 'filter[status]': 'queued', sort: '-priority,id', limit: '50' });
   if (topic !== undefined) {
     query.set('filter[topic]', topic);
   }

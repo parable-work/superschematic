@@ -59,8 +59,9 @@ MCP endpoint is `/namespaces/default/mcp`.
 
 - The type is `Note`, as the schema file names it, and its routes are
   under `/namespaces/default/schemas/Note`.
-- A row is its own fields beside its behaviors', each named after its
-  behavior (`workflowStatus`, `commentsMessages`), and its version is
+- A row is its own fields beside its behaviors'. Workflow's is the field
+  `status`, as a table's `status: Workflow<>` is, and the rest are each
+  named after their behavior (`commentsMessages`). Its version is
   `_version`, which the ETag carries.
 - A caller is the one its bearer token names, and the policy is data
   (`devPolicy`), asked before every request.

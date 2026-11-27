@@ -11,9 +11,10 @@
 //
 // - The type is Note, as the schema file names it, and the routes are
 //   under /namespaces/default/schemas/Note.
-// - A row is its own fields beside its behaviors' fields, each named after
-//   its behavior (workflowStatus, commentsMessages), and its version is
-//   _version, which the ETag carries.
+// - A row is its own fields beside its behaviors' fields: Workflow's is
+//   the field status, as a table's status: Workflow<> is (D117), and the
+//   rest are each named after their behavior (commentsMessages). Its
+//   version is _version, which the ETag carries.
 // - A caller is the one its bearer token names (authenticate), and the
 //   access policy is data (devPolicy), asked before every request.
 // - The event stream carries what the behaviors emit about their rows, and
