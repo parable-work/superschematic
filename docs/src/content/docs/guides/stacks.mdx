@@ -48,7 +48,7 @@ on the embedded target builds as one binary.
 | [memory stores](/superschematic/guides/memory-stores/): the `MemoryStore` kind with its `@channel` and `@key` declarations, `memoryStores` and `rateLimitStore` in an API's config, the `memoryStore` deployable and edge, `enabled: false`, typed definitions and a store in `Deps` in Go, TypeScript and Rust, a rate limit the replicas share, Valkey under `stack dev`, and on gcp a Memorystore for Valkey instance | a memory store on cloudflare; a run on gcp |
 | [jobs](#jobs): `@job`, the `job` deployable with its API's edges, its schedule per environment, Go's `Jobs` and `NewJobs`, TypeScript's `Jobs` and `createJobs`, Rust's `Jobs` and `create_jobs`, each job's entrypoint and image, `stack dev`'s schedules and `stack run`, and a job that runs on every deploy; on gcp a Cloud Run job, its schedule a Cloud Scheduler job, and `stack run` and a deploy's run an execution; on cloudflare a TypeScript job's Worker under a Cron Trigger, which `stack run` and a deploy run through its Workflow | |
 | [static sites](/superschematic/guides/static-sites/): the `Site` kind, the `site` deployable and edge, each API's CORS for the sites that call it, `stack dev`'s file server, the deploy's publish through a target's `Sites` seam, the typed browser config that hands out each API's TypeScript SDK, on gcp a bucket per site behind a load balancer with Cloud CDN, and on cloudflare a Worker serving the site as static assets | |
-| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool, or, in [drain mode](#drain-mode), a Cloud Run job that an enqueue wakes, for a Go or a TypeScript worker; on cloudflare a TypeScript worker's Worker that drains its queue at each firing of a Cron Trigger | claims on D1; drain mode for a Rust worker and a behavior worker |
+| [queues and workers](#queues-and-workers): `@queue` on a DB service's message class, its table in every dialect, the Go ORM's `Enqueue` in your transaction and its claims; `@worker`, the `worker` deployable with its API's edges and its instances and concurrency per environment, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers` over the HTTP runtime's queue client, Rust's `Workers` and `create_workers` over the Rust HTTP runtime's, each worker's entrypoint and image, and `stack dev`'s worker processes; on gcp a Cloud Run worker pool, or, in [drain mode](#drain-mode), a Cloud Run job that an enqueue or a behavior's command wakes, for a worker of any language and a behavior worker; on cloudflare a TypeScript worker's Worker that drains its queue at each firing of a Cron Trigger | claims on D1; a drain worker over a SQLite file, and a wake from a raw SQL write |
 
 The design is
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md),
@@ -882,8 +882,8 @@ Three things make it work:
   each server, job, worker and app with a connection to the queue's
   database, is given the worker's wake in `QUEUE_WAKES` and the right to
   use it. After an enqueue's statement has run, the Go ORM and the
-  TypeScript queue client send it, at most once per queue in five seconds
-  per process. It is a hint and no part of the write: nothing waits for
+  TypeScript and Rust queue clients send it, at most once per queue in
+  five seconds per process. It is a hint and no part of the write: nothing waits for
   it, and one that fails is logged as a warning and fails nothing.
   Nothing holds a wake back while workers already hold every slot, so on
   a busy queue each process that enqueues starts an execution up to every
@@ -895,10 +895,10 @@ Three things make it work:
   drain workers. Both cost starts and lose no message.
 - **A tick.** The platform also starts the worker on a schedule, every
   five minutes unless `tick` says. It finds what no wake announces: a
-  message an `@enqueueOnChange` trigger wrote, a retry or a
+  message an `@enqueueOnChange` trigger wrote, a raw SQL write of a table
+  a behavior worker hears, a retry or a
   [delayed message](/superschematic/guides/queues/#enqueue-for-later) that
-  falls due later, a message a Rust API enqueued, and a wake that was
-  lost. A worker that is running and finds its queue idle waits for a
+  falls due later, and a wake that was lost. A worker that is running and finds its queue idle waits for a
   retry or a delayed message that falls due within five minutes, its
   horizon, rather than exit; one due later waits for the tick. So the
   tick bounds how late such a message runs, which is why it is an hour at
@@ -926,11 +926,18 @@ at each firing of its Cron Trigger, and is woken sooner whatever its mode
 ([Queue workers on Cron Triggers](#queue-workers-on-cron-triggers)), so
 `mode` changes nothing there.
 
-A Rust worker's entrypoint does not exit when its queue is empty yet, so
-one in drain mode does not resolve on gcp, and the Rust queue client
-sends no wake. A `@behaviorWorker` does not resolve in drain mode on any
-target: a trigger fills its change queue, which no wake hears. A
-queue on SQLite has no advisory lock, so a worker there takes no slot.
+A worker drains in Go, TypeScript and Rust alike, and so does a
+`@behaviorWorker`: its claim loops, one per queue of its table, take one
+slot for them all, named for its first queue, and stop together once
+none of them was busy for `idle`. Each deployable that may write to its
+database holds its wake under each of its queues. The behaviors' core
+sends them, since no enqueue fills those queues: once a command's
+statements have run, it wakes the event queue of each event, the
+deadline queue of each deadline it armed due within five minutes, and
+the change queue of each row it wrote, whose trigger writes the
+message; a repository's `UpdateMany`, `DeleteMany` and `HardDeleteOne`
+wake the change queue too. A queue on SQLite has no advisory lock, so a
+worker there takes no slot, and an enqueue there sends no wake.
 If your database is reached through a pooler that hands a connection back
 between transactions, a session's lock does not hold, and every start
 drains: keep `instances` in mind as a hint there, not a bound.
@@ -975,8 +982,8 @@ export class TriageTickets {}
 ```
 
 The API's generated `Derivers` type has a method per derived field,
-typed by the field. Your implementation exports `createDerivers` (or
-`create_derivers` in Rust):
+typed by the field. Your implementation exports `createDerivers`, or
+declares `create_derivers` in Rust and `NewDerivers` in Go:
 
 ```ts
 export const createDerivers: DeriversConstructor = deps => ({
@@ -990,6 +997,29 @@ export const createDerivers: DeriversConstructor = deps => ({
 });
 ```
 
+In Go, `Derivers` is a struct of one interface per deriver, and a
+method takes the item's inputs as a struct of the fields they come from
+and answers the field's own type:
+
+```go
+func NewDerivers(deps api.Deps) (api.Derivers, error) {
+	return api.Derivers{TriageTickets: &triage{deps: deps}}, nil
+}
+
+func (t *triage) TicketCategory(ctx context.Context, item deriver.DerivedItem[api.TicketCategoryInputs]) (deriver.DerivedAnswer[shopdb.Category], error) {
+	reply, err := myModel(ctx, item.Model, item.Instruction, item.Inputs, item.Output)
+	if err != nil {
+		return deriver.DerivedAnswer[shopdb.Category]{}, err
+	}
+	return deriver.DerivedAnswer[shopdb.Category]{Value: reply.Category, Confidence: &reply.Confidence}, nil
+}
+```
+
+`deriver` is the Go HTTP runtime's package
+(`runtime/http/go/deriver`). In Rust, `Derivers` holds one trait object
+per deriver, and a method takes a `DerivedItem` of its inputs' struct and
+answers a `DerivedAnswer` of the field's type.
+
 `schemas` names the types by string, and every type of the database that
 composes Derived when it is absent. Nothing in `Derivers` says which
 store a deriver runs over: the methods of a deriver of tables and of one
@@ -998,30 +1028,34 @@ of engine types have the same shape, each typed by its field.
 The deriver is a deployable of its own, `<api>-<deriver>`. It runs as the
 deployable's name, and what it pulls from depends on its schemas:
 
-- **Tables** (D146). A TypeScript API's deriver opens the database's
-  repositories as itself, holding each Derived config's `permission`,
-  and runs the loop over each table's `derived.staleDerivations` and
-  `derived.settleDerivations`: read a page of stale fields, hand each to
-  its method, settle the answers by the hash it pulled. Every answer goes
-  through the behaviors' core, as the table's own operations do. When
-  a pass settles nothing it pulls again after five seconds, and each
-  pull scans the table. An answer of no shape a settle takes fails its
-  own field. A pull or a settle that fails for a reason time cures has
-  its table waited out, a second, doubling to thirty, while the other
-  tables go on; one the core refuses for good, a caller without the
-  permission among them, ends the deriver with the error. The
-  database lists `postgres` first, since the TypeScript repositories run
-  there. A Rust API's deriver of tables is refused until it follows.
+- **Tables** (D146). A TypeScript, Rust or Go API's deriver opens the
+  database's repositories as itself, holding each Derived config's
+  `permission`, and runs its HTTP runtime's loop over each table's
+  `staleDerivations` and `settleDerivations`: read a page of stale
+  fields, hand each to its method, settle the answers by the hash it
+  pulled. Every answer goes through the behaviors' core, as the table's
+  own operations do. A Rust deriver opens the repositories in a
+  transaction of its pool for each pull and each settle. When a pass
+  settles nothing it pulls again after five seconds, and each pull scans
+  the table. An answer of no shape a settle takes fails its own field. A
+  pull or a settle that fails for a reason time cures has its table
+  waited out, a second, doubling to thirty, while the other tables go
+  on; one the core refuses for good, a caller without the permission
+  among them, ends the deriver with the error. The database lists
+  `postgres` first, since the repositories a deriver runs over are
+  Postgres's.
 - **Engine types** (D74). A TypeScript or a Rust API's deriver opens the
   engine and holds each derived type's name and its Derived `permission`,
-  so a `{ rules }` policy needs a rule for it, which the build checks:
+  so a `{ rules }` policy needs a rule for it, which the build checks. A
+  Go API's deriver of engine types is refused:
 
   ```ts
   { subject: ["shop-cart-triage-tickets"], schema: ["Ticket"], action: ["read", "write"], allow: true }
   ```
 
 A deriver fills one kind. Over a database that has both, declare a
-deriver for each and name its schemas.
+deriver for each and name its schemas. A Rust API's derivers all fill
+one kind, so put the others on a second API.
 
 An element sets `enabled`, `instances` (0 or 1) and `concurrency`:
 

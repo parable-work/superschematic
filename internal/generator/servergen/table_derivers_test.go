@@ -189,9 +189,9 @@ func TestTableDeriversOfTheStack(t *testing.T) {
 }
 
 // TestTableDeriverRefusals: the build refuses a deriver of a table that
-// implements no Derived, a Rust API's deriver of tables, and a deriver of
-// tables whose database lists sqlite first, which has no TypeScript
-// repositories.
+// implements no Derived and a deriver of tables whose database lists
+// sqlite first, which has no TypeScript repositories, and builds a Rust
+// API's deriver of tables.
 func TestTableDeriverRefusals(t *testing.T) {
 	build := func(f fixture, services ...string) error {
 		repoRoot := t.TempDir()
@@ -218,8 +218,8 @@ func TestTableDeriverRefusals(t *testing.T) {
 	dbConfig := *f.configs[tableDeriverDB]
 	dbConfig.Outputs = map[string]any{"types": map[string]any{"go": enabled, "typescript": enabled, "rust": enabled}, "sql": map[string]any{"dialects": []any{"postgres"}}}
 	f.configs[tableDeriverDB] = &dbConfig
-	if err := build(f, tableDeriverDB, tableDeriverAPI); err == nil || !strings.Contains(err.Error(), "derived-ts-api declares deriver FillAll, which fills the derived fields of Article, Ticket, tables of its database, and it is a Rust API; a deriver of tables runs on a TypeScript API") {
-		t.Errorf("build = %v, want a Rust API's deriver of tables refused", err)
+	if err := build(f, tableDeriverDB, tableDeriverAPI); err != nil {
+		t.Errorf("build = %v, want a Rust API's deriver of tables built (TestGoRustTableDeriverEntrypointsGolden holds its files)", err)
 	}
 
 	f = loadTableDeriverFixture(t)

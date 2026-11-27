@@ -165,6 +165,11 @@ type EndpointInfo struct {
 	HasFileUpload          bool
 	FileUploadFields       []FileUploadField
 	FilesStructName        string
+	// Idempotent marks an @idempotent operation (D140): its method sends an
+	// Idempotency-Key, the one its options name or a UUID it makes, on
+	// every send of the call. The loader refuses @idempotent on an
+	// @httpBinaryStream result, so an operation is never both.
+	Idempotent bool
 
 	// BinaryStreamContentType is the media type an @httpBinaryStream
 	// operation streams its success body as (D167), "" for every other:
@@ -907,6 +912,7 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 		HasFileUpload:          ep.HasFileUpload,
 		FileUploadFields:       fileUploadFields,
 		FilesStructName:        methodPrefix + "Files",
+		Idempotent:             ep.Idempotent != nil,
 		Filter:                 ep.Filter,
 		FilterFields:           filterFields,
 		SupportsListAll:        supportsListAll,

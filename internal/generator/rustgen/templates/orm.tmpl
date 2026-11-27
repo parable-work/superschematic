@@ -32,6 +32,10 @@
 //!
 //! `{{.Type}}` holds the released rows of `{{.ReleasedOf}}`, which the graph's
 //! release owns (D139): its repository reads them and has no write.
+{{- if .LiveRoot}} Its
+//! reads leave out the rows of a soft-deleted root, unless they include
+//! deleted rows, and a restore of the root sees them again.
+{{- end}}
 {{- end}}
 {{- end}}
 {{- if .BindsRules}}

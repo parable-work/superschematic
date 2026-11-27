@@ -55,12 +55,15 @@ type Endpoint struct {
 // Tool is one tool as a router's table declares it, the runtimes' route
 // tool: what tools/list answers, as the engine lists its tools (the handle
 // as the name, the @docs title and description, tools/schema.json's
-// parameters as the input schema, whether its @docs replay mode only reads,
-// and its _meta with the invocation policy), and the operation whose route
+// parameters as the input schema, the annotations its record in
+// tools/schema.json resolves, and its _meta with the invocation policy),
+// and the operation whose route
 // a call runs through, by its key in the router's operation table
-// (Route.Key), with where each argument goes in that route's request, and
+// (Route.Key), with where each argument goes in that route's request,
 // whether a call runs only once the person confirms it: its policy is one
-// the build's policy confirms (D93).
+// the build's policy confirms (D93), and what the operation is to an agent
+// run's autonomy policy, its @autonomy (D158, D183), which the runtime's
+// mcpGate reads.
 type Tool struct {
 	Name        string          `json:"name"`
 	Title       string          `json:"title"`
@@ -71,11 +74,35 @@ type Tool struct {
 	Operation   string          `json:"operation"`
 	Arguments   []ToolArgument  `json:"arguments"`
 	Confirm     bool            `json:"confirm,omitempty"`
+	// Autonomy is the operation's @autonomy: its class and its mode when no
+	// policy row names it; nil for an operation that declares none, which
+	// an agent run's gate holds as an internal write.
+	Autonomy *ir.OperationAutonomy `json:"autonomy,omitempty"`
 }
 
-// ToolAnnotations are a tool's MCP annotations.
+// ToolAnnotations are a tool's MCP annotations: the resolved record of
+// its @mcp (ir.ResolveMCPToolAnnotations), from its @docs replay mode and
+// its @mcp additive (D123).
 type ToolAnnotations struct {
-	ReadOnlyHint bool `json:"readOnlyHint"`
+	ReadOnlyHint    bool `json:"readOnlyHint"`
+	DestructiveHint bool `json:"destructiveHint"`
+	IdempotentHint  bool `json:"idempotentHint"`
+}
+
+// annotationsOf are a visible tool's annotations, as its record in
+// tools/schema.json holds them; a record the api generator did not resolve
+// reads them from the replay mode alone, as resolution would with no
+// additive.
+func annotationsOf(tool sdkgen.ToolDefinition) ToolAnnotations {
+	resolved := tool.MCP.Annotations
+	if resolved == nil {
+		resolved = ir.ResolveMCPToolAnnotations(ir.DocsReplayMode(tool.ReplayMode), tool.MCP.Additive)
+	}
+	return ToolAnnotations{
+		ReadOnlyHint:    resolved.ReadOnlyHint,
+		DestructiveHint: resolved.DestructiveHint,
+		IdempotentHint:  resolved.IdempotentHint,
+	}
 }
 
 // ToolArgument is where one tool argument goes: in the path, the query
@@ -178,6 +205,7 @@ func Build(generator, schema string, api *apigen.APIOutput, routeOf func(operati
 		if err != nil {
 			return nil, fmt.Errorf("%s: MCP tool %s of %s: %w", generator, tool.MCP.Handle, schema, err)
 		}
+		routed.Autonomy = autonomyOf(api, tool.OperationID)
 		// A tool whose policy the build's policy confirms runs once the
 		// person confirms the call, whose token comes back in an argument
 		// of its own (D93).
@@ -191,6 +219,18 @@ func Build(generator, schema string, api *apigen.APIOutput, routeOf func(operati
 		info.Tools = append(info.Tools, routed)
 	}
 	return info, nil
+}
+
+// autonomyOf is the @autonomy of the operation whose OpenAPI operation id
+// is operationID (D158), a copy, or nil.
+func autonomyOf(api *apigen.APIOutput, operationID string) *ir.OperationAutonomy {
+	for _, ep := range api.Endpoints {
+		if ep.HandlerName == operationID && ep.Operation != nil && ep.Operation.Autonomy != nil {
+			copied := *ep.Operation.Autonomy
+			return &copied
+		}
+	}
+	return nil
 }
 
 // RouteTool is tool as a router serves it, through route.
@@ -209,7 +249,7 @@ func RouteTool(tool sdkgen.ToolDefinition, route Route) (Tool, error) {
 		Title:       tool.MCP.Name,
 		Description: tool.MCP.Description,
 		InputSchema: parameters,
-		Annotations: ToolAnnotations{ReadOnlyHint: tool.ReplayMode == "read_only"},
+		Annotations: annotationsOf(tool),
 		Meta:        meta,
 		Operation:   route.Key,
 		Arguments:   []ToolArgument{},

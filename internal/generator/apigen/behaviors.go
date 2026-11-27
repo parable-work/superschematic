@@ -37,10 +37,10 @@ func (o *APIOutput) HasBehaviorEndpoints() bool {
 // factories call the ORM, in Generate's order (by path, then method).
 // Without the last two they are Endpoints.
 func (o *APIOutput) HandlerEndpoints() []EndpointInfo {
-	if len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 {
+	if len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0 {
 		return o.Endpoints
 	}
-	return sortedEndpoints(o.Endpoints, o.BehaviorEndpoints, o.TableEndpoints)
+	return sortedEndpoints(o.Endpoints, o.BehaviorEndpoints, o.TableEndpoints, o.GraphEndpoints)
 }
 
 // sortedEndpoints are the endpoints of each list, in Generate's order: by

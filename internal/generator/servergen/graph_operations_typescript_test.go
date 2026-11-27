@@ -83,9 +83,10 @@ func tsGraphsFakePaths(repoRoot string) naming.LocalPaths {
 // fixture-graph-api hands its router the repositories Deps holds and the
 // Recipe graph's facade, built over the database's pool with the
 // version-graph package's Postgres client (D138), and its package depends
-// on that package. No stage of a generated image builds the version-graph
-// core's WebAssembly module yet, so the server gets no Dockerfile, and its
-// entrypoint and its package are written still. Regenerate with:
+// on that package. Its image builds the version-graph core's WebAssembly
+// module in a stage of its own, from the core's crate beside the package,
+// and emits the package's dist/ with it, which the workspace's root
+// overrides the package with. Regenerate with:
 //
 //	go test ./internal/generator/servergen -run TestTypeScriptGraphOperationsServerGolden -update
 func TestTypeScriptGraphOperationsServerGolden(t *testing.T) {
@@ -95,7 +96,7 @@ func TestTypeScriptGraphOperationsServerGolden(t *testing.T) {
 	out := filepath.Join(repoRoot, "schemas", "dist")
 	dir := servergen.ServerDir(out, tsGraphsStack, tsGraphsServer)
 	files := map[string]string{}
-	for _, file := range []string{servergen.TypeScriptMainFile, servergen.TypeScriptPackageFile} {
+	for _, file := range []string{servergen.TypeScriptMainFile, servergen.TypeScriptPackageFile, servergen.DockerFile, servergen.DockerIgnoreFile} {
 		files[filepath.Join("server", tsGraphsStack, tsGraphsServer, file)] = filepath.Join(dir, file)
 	}
 	compareGoldens(t, tsGraphsGoldenRoot, files)
@@ -121,8 +122,29 @@ func TestTypeScriptGraphOperationsServerGolden(t *testing.T) {
 	if pkg := read(servergen.TypeScriptPackageFile); !strings.Contains(pkg, `"@superschematic/versiongraph": "*"`) || !strings.Contains(pkg, `"@schemas/fixture-version-graph-db-types": "workspace:*"`) {
 		t.Errorf("the package does not depend on the version-graph package and the database's types:\n%s", pkg)
 	}
-	if _, err := os.Stat(filepath.Join(dir, servergen.DockerFile)); !os.IsNotExist(err) {
-		t.Errorf("a Dockerfile was written, and no stage builds the version-graph core's module: %v", err)
+	dockerfile := read(servergen.DockerFile)
+	for _, want := range []string{
+		"FROM rust:${RUST_VERSION}-trixie AS versiongraph",
+		"COPY runtime/versiongraph/rust runtime/versiongraph/rust",
+		"cargo build --locked --release --target wasm32-unknown-unknown --manifest-path runtime/versiongraph/rust/Cargo.toml",
+		"cp runtime/versiongraph/rust/target/wasm32-unknown-unknown/release/superschematic_versiongraph.wasm /wasm/",
+		"COPY --from=versiongraph /wasm/superschematic_versiongraph.wasm runtime/versiongraph/typescript/dist/",
+		"cd runtime/versiongraph/typescript \\\n    && bun install --frozen-lockfile \\\n    && bunx tsc -p tsconfig.json",
+	} {
+		if !strings.Contains(dockerfile, want) {
+			t.Errorf("the Dockerfile lacks %q:\n%s", want, dockerfile)
+		}
+	}
+	// The package's dist/ is emitted before the workspace's install, which
+	// copies the package with it.
+	if emit, install := strings.Index(dockerfile, "COPY --from=versiongraph"), strings.Index(dockerfile, "bun install --production"); emit < 0 || install < emit {
+		t.Errorf("the build stage installs the workspace before it emits the version-graph package's dist/:\n%s", dockerfile)
+	}
+	ignore := read(servergen.DockerIgnoreFile)
+	for _, want := range []string{"\n!runtime/versiongraph/rust\n", "\n!runtime/versiongraph/typescript\n", "\nruntime/versiongraph/typescript/dist\n"} {
+		if !strings.Contains(ignore, want) {
+			t.Errorf("the ignore file lacks %q:\n%s", strings.TrimSpace(want), ignore)
+		}
 	}
 	if testing.Short() {
 		return

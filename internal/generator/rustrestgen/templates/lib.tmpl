@@ -10,6 +10,9 @@ pub mod behaviors;
 {{ if .HasTableOperations -}}
 pub mod tables;
 {{ end -}}
+{{ if .HasGraphOperations -}}
+pub mod graphs;
+{{ end -}}
 {{ if .HasEnvConfig -}}
 pub mod config;
 {{ end -}}
@@ -34,17 +37,33 @@ pub use {{ .TypesCrateIdent }} as types;
 /// The http runtime crate the router and the interfaces are built on, for a
 /// crate that builds on this one with the same version of it.
 pub use {{ .RuntimeCrateIdent }} as runtime;
+{{- if .HasIdempotent }}
+
+/// The table of the API's database that keeps the keys of its @idempotent
+/// operations, and its columns (D140): what the store of
+/// `Implementations.idempotency_store` reads and writes, such as
+/// `runtime::idempotency::PostgresStore::new(pool, &IDEMPOTENCY_TABLE)`.
+pub const IDEMPOTENCY_TABLE: runtime::idempotency::Table = {{ .IdempotencyTableLiteral }};
+{{- end }}
 {{- if .HasDatabaseTypes }}
 
 /// The Rust types of {{ .Deps.Database }}, the API's database: the messages its
 /// workers handle, and the descriptors of their queues, which a worker claims
 /// with and an implementation enqueues with (D65){{ if .HasTableOperations }}, and the repositories its
-/// table operations are served from (D106, D116){{ end }}.
+/// table operations are served from (D106, D116){{ end }}{{ if .HasGraphOperations }}, and the facades its
+/// graph operations run through (D138){{ end }}.
 pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 {{- else if .HasDerivers }}
+{{- if .HasTableDerivers }}
+
+/// The Rust types of {{ .Deps.Database }}, the API's database: the tables whose
+/// derived fields its derivers fill, which type their methods, and the
+/// repositories its derivers pull and settle through (D146).
+{{- else }}
 
 /// The Rust types of {{ .Deps.Database }}, the API's database: the engine types
 /// whose derived fields its derivers fill, which type their methods (D74).
+{{- end }}
 pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 {{- end }}
 

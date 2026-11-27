@@ -109,7 +109,7 @@ func TestTypeScriptBehaviorWorkerEntrypoint(t *testing.T) {
 		return string(data)
 	}
 	main := read(servergen.TypeScriptMainFile)
-	for _, want := range []string{"fixtureTimersApiApi.ticketTimersQueues(fixtureTimersDbPool, orm,", "createFixtureTimersDbOrm(fixtureTimersDbPool)", "workerConcurrency(2)", "runWorker("} {
+	for _, want := range []string{"fixtureTimersApiApi.ticketTimersQueues(fixtureTimersDbPool, orm,", "createFixtureTimersDbOrm(fixtureTimersDbPool)", "workerConcurrency(2)", "runWorkers("} {
 		if !strings.Contains(main, want) {
 			t.Errorf("main.ts has no %s:\n%s", want, main)
 		}

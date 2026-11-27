@@ -178,7 +178,7 @@ func TestGenerateSchedulesOperations(t *testing.T) {
 		},
 		BehaviorWorkersFile: {
 			"export function problemWakeUpsQueues(pool: Pool, orm: FixtureSchedulesDbOrm, workers: Workers, logger?: Logger): WorkerQueue[] {",
-			".withBehaviorCaller(problemWakeUpsCaller)\n              .transaction(tx => tx.problem.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => problemWakeUpsEvent(workers, tx, claim.message, signal)))",
+			".withBehaviorCaller(problemWakeUpsCaller)\n              .transaction(tx => tx.problem.runEvent(claim.message, { claim: { id: claim.id, token: claim.token } }, () => problemWakeUpsEvent(workers, tx as FixtureSchedulesDbTx, claim.message, signal)))",
 			"if (message.useId === 'Schedules' && message.kind === 'run') {",
 			"no Workers method takes event ${message.kind} of ${message.useId} on Problem ${message.rowKey} (D104)",
 		},

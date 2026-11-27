@@ -656,6 +656,10 @@ type ShelfFilter struct {
 	UpdatedAt *DateTimeFilter
 	UpdatedBy *UUIDFilter
 	Version   *Int64Filter
+	// Stocks keeps the rows that some Stock row the filter
+	// finds points at by its shelf (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Stocks *StockFilter
 	// ReferencedByStockShelf filters on the presence or absence of a
 	// Stock whose shelf points at this row.
 	ReferencedByStockShelf *ReferencedByFilter
@@ -1082,6 +1086,16 @@ func (f *ShelfFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				conditions = append(conditions, `shelf._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Stocks != nil {
+		before := len(*args)
+		through := f.Stocks.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`shelf.id IN (SELECT stock.shelf_id FROM stock%s)`, where))
 	}
 	if f.ReferencedByStockShelf != nil {
 		probe := `SELECT 1 FROM stock WHERE stock.shelf_id = shelf.id`

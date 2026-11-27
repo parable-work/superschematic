@@ -14,8 +14,8 @@ import (
 // TestAccessRecordsExampleLoads: examples/access-records's schemas load
 // (D156): its database's @audience tables hold the audience columns, its
 // @accessGrants and @accessLog classes their fields, and its API's views
-// read the columns, its row rule follows a path through three relations
-// and its view reveals behind a permission.
+// read the columns and the two classes' fields, its row rule follows a
+// path through three relations and its view reveals behind a permission.
 func TestAccessRecordsExampleLoads(t *testing.T) {
 	services := filepath.Join("..", "..", "..", "examples", "access-records", "schemas", "services")
 	reg := registry.New(naming.Default())
@@ -54,6 +54,11 @@ func TestAccessRecordsExampleLoads(t *testing.T) {
 	}
 	if !slices.Contains(by, "site.agreement.members.member") {
 		t.Errorf("records-api's row rules are %v", by)
+	}
+	for view, source := range map[string]string{"GrantView": "records-db.Grant", "AccessEntryView": "records-db.AccessEntry"} {
+		if td := api.Types[view]; td == nil || td.Source == nil || td.Source.Target != source {
+			t.Errorf("records-api's %s is no view of %s: %+v", view, source, td)
+		}
 	}
 	if view := api.Types["AgreementView"]; view == nil || !slices.ContainsFunc(view.Fields, func(f *ir.FieldDef) bool {
 		return f.Name == "terms" && f.Decrypted && f.RevealPermission == "agreements.reveal"

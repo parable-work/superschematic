@@ -691,6 +691,10 @@ type BankAccountFilter struct {
 	Id   *UUIDFilter
 	Code *StringFilter
 	Name *StringFilter
+	// LineItems keeps the rows that some live LineItem row the filter
+	// finds points at by its account (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LineItems *LineItemFilter
 	// ReferencedByLineItemAccount filters on the presence or absence of a
 	// LineItem whose account points at this row.
 	ReferencedByLineItemAccount *ReferencedByFilter
@@ -889,6 +893,17 @@ func (f *BankAccountFilter) conditions(args *[]interface{}, paramOffset int) []s
 				conditions = append(conditions, `bank_account."name" IS NOT NULL`)
 			}
 		}
+	}
+	if f.LineItems != nil {
+		before := len(*args)
+		through := f.LineItems.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		through = append(through, `line_item.deleted_at IS NULL`)
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`bank_account.id IN (SELECT line_item.account_id FROM line_item%s)`, where))
 	}
 	if f.ReferencedByLineItemAccount != nil {
 		probe := `SELECT 1 FROM line_item WHERE line_item.account_id = bank_account.id`

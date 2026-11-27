@@ -242,6 +242,7 @@ CREATE TABLE recipe_published_queue (
   id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
   root UUID NOT NULL,
   "commit" UUID NOT NULL,
+  "sequence" BIGINT,
   state TEXT DEFAULT 'ready' NOT NULL,
   attempts INTEGER DEFAULT 0 NOT NULL,
   due_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
@@ -1122,7 +1123,7 @@ BEGIN
   IF TG_OP = 'UPDATE' AND NOT (OLD.commit_id IS DISTINCT FROM NEW.commit_id) THEN
     RETURN NULL;
   END IF;
-  INSERT INTO recipe_published_queue (root, "commit") VALUES (NEW.root_id, NEW.commit_id);
+  INSERT INTO recipe_published_queue (root, "commit", "sequence") VALUES (NEW.root_id, NEW.commit_id, (SELECT "sequence" FROM recipe_commit WHERE id = NEW.commit_id));
   RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

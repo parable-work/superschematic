@@ -1056,12 +1056,12 @@ pool of the API's database:
 | --- | --- | --- |
 | Go | `Config.IdempotencyStore`, an `idempotency.Store`: `idempotency.NewSQLStore(db, idempotency.Postgres, api.IdempotencyTable)`, over a `*sql.DB`; `idempotency.SQLite` for SQLite | `IdempotencyTable` in the API package |
 | TypeScript | `RouterOptions.idempotencyStore`, an `IdempotencyStore`: `postgresIdempotencyStore(pool, idempotencyTable)`, `sqliteIdempotencyStore(db, idempotencyTable)` for SQLite and D1, or `memoryIdempotencyStore()` in a test | `idempotencyTable` in the API package |
-| Rust | none yet: the build refuses to generate a Rust router for an API with an `@idempotent` operation | |
+| Rust | `Implementations.idempotency_store`, an `Arc<dyn idempotency::Store>`, which `Implementations::new` builds over `Deps.db`: `idempotency::PostgresStore::new(pool, &IDEMPOTENCY_TABLE)` with the runtime's `postgres` feature, `idempotency::SqliteStore::new(db, &IDEMPOTENCY_TABLE)` with its `sqlite` feature, or `idempotency::MemoryStore::new()` in a test | `IDEMPOTENCY_TABLE` in the API crate |
 
-The Go and TypeScript routers name a row and hash a request alike, and
-answer each case of the table above alike
-(`runtime/http/testdata/idempotency_parity.json`), so a Go server and a
-TypeScript server over one database share their keys.
+The Go, TypeScript and Rust routers name a row and hash a request alike,
+and answer each case of the table above alike
+(`runtime/http/testdata/idempotency_parity.json`), so servers in any of
+the three over one database share their keys.
 
 What the decorator is refused on, at `check`, each for the reason a
 repeat could not be answered as the first call was:
@@ -1083,9 +1083,10 @@ required where the operation requires it, the 409 and the 422, and the
 status. A generated SDK's method sends a
 key for each call
 ([Client SDKs](/superschematic/guides/client-sdks/#an-idempotency-key)).
-On the TypeScript server's MCP endpoint a tool call has no headers, so the
-tool of an `@idempotent` operation takes the key as an argument,
-`idempotencyKey`, which the endpoint sends to the route as the header
+On the MCP endpoint of a TypeScript or a Rust server a tool call has no
+headers, so the tool of an `@idempotent` operation takes the key as an
+argument, `idempotencyKey`, which the endpoint sends to the route as the
+header
 ([MCP tools](/superschematic/reference/mcp-tools/#a-key-for-a-call-that-runs-once)).
 
 ## Webhooks
@@ -2021,6 +2022,35 @@ their paths. A table no path reaches has no rows for it. A row it creates
 must be one it reaches: a create under another target is the 403
 `forbidden`, and the transaction keeps nothing.
 
+An API's `@source` view of the grants class holds the fields the build
+fills, as a view of any table holds its columns, so a settings page's list
+of the grants is a `@tableOperation`. It lists every grant, the ended and
+the revoked among them; leave `tokenHash` out of the view. A view of the
+access log lists it the same way.
+
+```ts
+@source(Grant)
+export abstract class GrantView {
+  id: Identity.UUID;
+  holder: Identity.UUID;
+  role: string;
+  targetType: string;
+  targetId: Identity.UUID;
+  endsAt: Nullable<Temporal.DateTime>;
+  revokedAt: Nullable<Temporal.DateTime>;
+}
+
+export class Access extends Authenticated {
+  @rest(HttpMethod.GET, "access/grants")
+  @requirePermission(["access.admin"])
+  @paginated()
+  @tableOperation()
+  listGrants(): GrantView[] {
+    throw new Error("schema declaration only");
+  }
+}
+```
+
 ### Reveal
 
 An `Encrypted<T>` field reads masked, `[secret]`, unless a view marks it
@@ -2065,6 +2095,51 @@ buildRouter(implementations, {
   accessLog: accessLogOf(orm),
 });
 ```
+
+### In Go
+
+The Go server and ORM serve the same access. The auth provider's
+`callerPrincipal` hook names the caller whole, a `session.Caller`: its id,
+its kind, whom it acts for, its grants and its credential. An auth step
+puts one on the request with `session.ContextWithCaller`; a step that puts
+only an id, as the identity runtime does, names a user. Each route binds
+the caller to the ORM with `orm.WithPrincipal`, so the repositories hold
+every read and write of the operation to it, as the TypeScript ones do.
+`orm.AsSystem(ctx)`, and a context outside any operation, read every row.
+
+```go
+router.Use(session.GrantAuthenticator(db, identityMiddleware, nil))
+api.RegisterRoutes(router, api.Config{DB: db, Logger: logger})
+```
+
+`session.GrantAuthenticator` runs a request with a `grant_` token as the
+grant's holder; the ORM of a database with an `@accessGrants` table is the
+authority it reads the grant from on every call. The grants are the ORM's:
+
+| Function | Does |
+| --- | --- |
+| `orm.IssueGrant(ctx, db, access.IssueGrantInput{...})` | writes a grant and answers its token |
+| `orm.RevokeGrant(ctx, db, id, at)` | revokes it |
+| `orm.ActiveGrants(ctx, db, access.ActiveGrantsFilter{...})` | lists the grants active now |
+| `orm.AccessConditions(ctx, table, &args, offset, write)` | the conditions a read across tables applies as a repository does |
+
+A row rule's path (`by: ["unit.contract.parties.party"]`) is one filter of
+the row through the relations; the Go filters reach through a one-to-many
+relation by its name (`Parties`). A view's field under
+`@decrypted({ permission })` is masked for a caller without it, and each
+value opened for one with it is recorded in the access log in the
+operation's transaction. A route of an API whose database has an
+`@accessLog` table records its call itself, before the permission check:
+there is no option to pass. A revealed field holds text, and the database
+needs an `@accessLog` table, or the build is refused.
+
+A Go server refuses at build time the platform features it does not
+serve yet, on its database's tables and its own: `@calendarSource` and
+Recurrence, `@event`, `@notifier` and `@channelIdentities`, `@references`
+and `@attachments`, `@searchable`, `@party`, `@conversations` and
+`@runRequests`, `@agents`, provider slots and `@autonomy`. Serve such an
+API in TypeScript (`outputs.api.language: "TYPESCRIPT"`). A database keeps
+its Go types, which its Go ORM, always generated, needs.
 
 ### In the Rust server
 
@@ -2114,11 +2189,11 @@ first is refused Recurrence and a calendar source.
 | --- | --- |
 | the Go and Rust repositories' audience on SQLite | a service that lists `sqlite` and declares an audience builds TypeScript's types alone |
 | a generated TypeScript server whose database lists `sqlite` first serving table operations | pass `orm: createOrm(db)` of the database's `./orm/sqlite` entry in the router's options |
-| the Go server's and repositories' audience, grants, reveal and access log | the TypeScript and Rust servers serve them |
-| grants and the access log on the Rust server's SQLite | the Rust server serves them on Postgres |
+| grants and the access log on the Go and Rust servers' SQLite | the Go and Rust servers serve them on Postgres |
+| a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
-| a generated route that lists active grants, and a declared query of them | `activeGrants` in the TypeScript runtime |
-| a generated server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options |
+| a generated route that lists only the active grants, and a declared query of them | `activeGrants` in the TypeScript runtime, or a `@tableOperation` over a view of every grant |
+| a generated TypeScript server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options; the Go server records its calls itself |
 | a GIN index on `effective_audience` | add one with `@rawSql` for a large table |
 
 ## A table's behavior operations
@@ -3302,16 +3377,37 @@ buildRouter(implementations, {
 
 `RecipeGraph` is the facade the database's types package exports from
 `./versiongraph`, and `pgPool` is `@superschematic/versiongraph/postgres`'s.
-The database lists Postgres first: the facade runs on Postgres alone. A
-generated image does not build the version-graph core's WebAssembly
-module yet, so a stack's build writes this server no Dockerfile and says
-so; run it from the checkout or build its image from a Dockerfile of your
-own.
+The database lists Postgres first: the facade runs on Postgres alone. No
+published package ships the version-graph core's WebAssembly module yet,
+so the server's generated image builds it: a stage builds the module for
+`wasm32-unknown-unknown` from the core's crate beside the package the
+naming file's `[paths] versiongraph_typescript` names, and the build
+stage emits the package's `dist/` with the module in it. Without that
+key a stack's build writes this server no Dockerfile and says so.
 
-The Go and the Rust servers do not serve the set yet. Each operation
-stays a method of your implementation's interface, with the same route and
-types, to write over the graph's facade, and the build warns once for the
-set.
+The Go server serves the set too, from the module's `graphs.go`, through
+the graph's facade in the database's ORM. Its `Config` takes the ORM, which
+reads the root, its refs and its commits, and the facades, which
+`GraphsOf` builds from it. The generated server passes both:
+
+```go
+fixturegraphapi.RegisterRoutes(router, fixturegraphapi.Config{
+	DB:              db,
+	Graphs:          fixturegraphapi.GraphsOf(db),
+	Logger:          logger,
+	Implementations: implementations,
+})
+```
+
+The Rust server serves it from the crate's `src/graphs.rs`, through the
+graph's facade in the database's Rust types, over the pool
+`Implementations::new` takes. Each operation takes a connection of the
+pool and runs in one transaction on it, and the root, its refs and its
+commits are read through the database's repositories. The database's
+Rust types are generated, and it lists Postgres first.
+
+On every server the interface of your implementation has no method for a
+graph operation, and each answers the same problems.
 
 Each operation is an MCP tool, `recipe_branch`, `recipe_save` and the rest,
 with the title and the description the build gives it; a set whose

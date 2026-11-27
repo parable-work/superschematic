@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/testpaths"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 const versionGraphFixture = "fixture-version-graph-db"
@@ -51,12 +52,18 @@ func generateORMModule(t *testing.T, fixture string) string {
 // sets.
 func generateORMModuleAt(t *testing.T, serviceDir, fixture string, configure ...func(*Options)) string {
 	t.Helper()
-	paths := testpaths.Local(t)
-
 	schema, err := loader.LoadService(serviceDir)
 	if err != nil {
 		t.Fatalf("load %s: %v", fixture, err)
 	}
+	return generateORMModuleOf(t, schema, fixture, configure...)
+}
+
+// generateORMModuleOf is generateORMModule for schema, the loaded service
+// named fixture, which a test may have changed.
+func generateORMModuleOf(t *testing.T, schema *ir.Schema, fixture string, configure ...func(*Options)) string {
+	t.Helper()
+	paths := testpaths.Local(t)
 	fixedClock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
 	typesModule := "example.com/schemas/types/go/" + fixture
 	tempRoot := t.TempDir()

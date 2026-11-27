@@ -606,6 +606,7 @@ fn a_zero_option_is_its_default() {
         grace: Duration::ZERO,
         idle: Duration::ZERO,
         prune_every: Duration::ZERO,
+        drain: None,
     }
     .or_defaults();
     assert_eq!(options, Options::default());
@@ -614,8 +615,22 @@ fn a_zero_option_is_its_default() {
         grace: Duration::from_secs(2),
         idle: Duration::from_millis(10),
         prune_every: Duration::from_secs(60),
+        drain: Some(Drain {
+            idle: Duration::from_secs(45),
+            slots: 3,
+            horizon: Duration::from_secs(60),
+        }),
     };
     assert_eq!(set.or_defaults(), set);
+    let zero = Options {
+        drain: Some(Drain {
+            idle: Duration::ZERO,
+            slots: 0,
+            horizon: Duration::ZERO,
+        }),
+        ..Options::default()
+    };
+    assert_eq!(zero.or_defaults().drain, Some(Drain::default()));
 }
 
 #[test]
@@ -692,4 +707,487 @@ async fn a_self_completing_queue_hands_each_handler_its_claim_and_completes_noth
     assert_eq!(failed, ["m2"]);
     shutdown.cancel();
     run.await.unwrap().unwrap();
+}
+
+// Drain mode (D145).
+
+impl Memory {
+    /// Adds a message, due at once.
+    fn push(&self, id: &str, message: u32) {
+        self.state
+            .lock()
+            .unwrap()
+            .ready
+            .push_back((id.to_string(), message));
+    }
+}
+
+/// The locks of one queue, as a database keeps them: a slot takes one of
+/// as many as it is asked for, and none when all are held.
+#[derive(Default)]
+struct Locks {
+    held: AtomicUsize,
+    asked: Mutex<Vec<usize>>,
+    broken: AtomicBool,
+}
+
+/// A held lock of [`Locks`], given back as it drops.
+struct Lock(Arc<Locks>);
+
+impl Drop for Lock {
+    fn drop(&mut self) {
+        self.0.held.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+impl Locks {
+    fn holds(&self) -> usize {
+        self.held.load(Ordering::SeqCst)
+    }
+
+    fn asked(&self) -> Vec<usize> {
+        self.asked.lock().unwrap().clone()
+    }
+}
+
+/// When the next message of a [`Drained`] queue falls due.
+type NextDue = Arc<dyn Fn() -> Result<Option<Duration>, QueueError> + Send + Sync>;
+
+/// A queue in memory with slots and a next due time, which a worker in
+/// drain mode reads.
+#[derive(Clone)]
+struct Drained {
+    memory: Memory,
+    locks: Arc<Locks>,
+    next: Option<NextDue>,
+    /// Before this time since the start, a claim finds nothing.
+    due_from: Duration,
+}
+
+impl Drained {
+    fn new(memory: &Memory, locks: &Arc<Locks>) -> Self {
+        Drained {
+            memory: memory.clone(),
+            locks: Arc::clone(locks),
+            next: None,
+            due_from: Duration::ZERO,
+        }
+    }
+}
+
+#[async_trait]
+impl WorkerQueue for Drained {
+    type Message = u32;
+
+    fn name(&self) -> &str {
+        "Memory"
+    }
+
+    fn lease(&self) -> Duration {
+        self.memory.lease
+    }
+
+    async fn claim(&self, n: usize, lease: Duration) -> Result<Vec<Claim<u32>>, QueueError> {
+        if self.memory.start.elapsed() < self.due_from {
+            self.memory.record(Call::Claim(n));
+            return Ok(Vec::new());
+        }
+        self.memory.claim(n, lease).await
+    }
+
+    async fn extend(&self, id: &str, token: &str, lease: Duration) -> Result<(), QueueError> {
+        self.memory.extend(id, token, lease).await
+    }
+
+    async fn complete(&self, id: &str, token: &str) -> Result<(), QueueError> {
+        self.memory.complete(id, token).await
+    }
+
+    async fn fail(&self, id: &str, token: &str, cause: &str) -> Result<bool, QueueError> {
+        self.memory.fail(id, token, cause).await
+    }
+
+    async fn release(&self, id: &str, token: &str) -> Result<(), QueueError> {
+        self.memory.release(id, token).await
+    }
+
+    async fn slot(&self, slots: usize) -> Result<Option<Slot>, QueueError> {
+        self.locks.asked.lock().unwrap().push(slots);
+        if self.locks.broken.load(Ordering::SeqCst) {
+            return Err(QueueError::Failed("the database is down".into()));
+        }
+        let taken = self
+            .locks
+            .held
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |held| {
+                (held < slots).then_some(held + 1)
+            });
+        Ok(taken
+            .is_ok()
+            .then(|| Slot::holding(Lock(Arc::clone(&self.locks)))))
+    }
+
+    async fn next_due(&self) -> Result<Option<Duration>, QueueError> {
+        match &self.next {
+            Some(next) => next(),
+            None => Ok(None),
+        }
+    }
+}
+
+fn drain(idle: f64) -> Options {
+    Options {
+        drain: Some(Drain {
+            idle: Duration::from_secs_f64(idle),
+            ..Drain::default()
+        }),
+        ..Options::default()
+    }
+}
+
+fn run_drained<H, F>(
+    queue: Drained,
+    handler: H,
+    options: Options,
+) -> tokio::task::JoinHandle<Result<(), QueueError>>
+where
+    H: Fn(u32) -> F + Send + Sync + 'static,
+    F: Future<Output = Result<(), BoxError>> + Send + 'static,
+{
+    tokio::spawn(run_worker(queue, handler, options, Shutdown::new()))
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_drain_worker_returns_once_its_queue_is_idle_and_holds_its_slot_until_then() {
+    let memory = Memory::new(LEASE, 2);
+    let locks = Arc::new(Locks::default());
+    // The first message's handler holds it for 100 s, past the idle time.
+    let run = run_drained(
+        Drained::new(&memory, &locks),
+        |message| async move {
+            if message == 1 {
+                wait(100.0).await;
+            }
+            Ok(())
+        },
+        Options {
+            concurrency: 2,
+            ..drain(30.0)
+        },
+    );
+    wait(50.0).await;
+    assert!(
+        !run.is_finished(),
+        "the worker returned while a handler held a message"
+    );
+    assert_eq!(locks.holds(), 1, "the worker holds its slot while it runs");
+    run.await.unwrap().unwrap();
+    let mut done = memory.of(completed);
+    done.sort();
+    assert_eq!(done, ["m1", "m2"]);
+    // The last handler returned at 100 s; the worker waits its idle time
+    // after it, and stops at the claim after that.
+    let claims = memory.times(is_claim);
+    let last = claims.last().copied().unwrap();
+    assert!(
+        (130.0..=131.0).contains(&last),
+        "the last claim at {last} s"
+    );
+    assert_eq!(locks.holds(), 0, "the slot is given back");
+    assert_eq!(locks.asked(), [1]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_drain_worker_keeps_claiming_while_messages_come() {
+    let memory = Memory::new(LEASE, 0);
+    let locks = Arc::new(Locks::default());
+    let run = run_drained(
+        Drained::new(&memory, &locks),
+        |_| async { Ok(()) },
+        drain(30.0),
+    );
+    for (n, id) in ["a", "b", "c"].into_iter().enumerate() {
+        wait(20.0).await;
+        memory.push(id, u32::try_from(n).unwrap());
+    }
+    run.await.unwrap().unwrap();
+    assert_eq!(memory.of(completed), ["a", "b", "c"]);
+    // Three messages twenty seconds apart, and the idle time after the
+    // last, which came at 60 s.
+    let last = memory.times(is_claim).last().copied().unwrap();
+    assert!(last >= 90.0, "the worker stopped at {last} s");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_drain_worker_takes_a_slot_or_returns_at_once() {
+    let locks = Arc::new(Locks::default());
+    let first = Memory::new(LEASE, 1);
+    let held = Arc::new(Notify::new());
+    let gate = Arc::clone(&held);
+    let first_run = run_drained(
+        Drained::new(&first, &locks),
+        move |_| {
+            let gate = Arc::clone(&gate);
+            async move {
+                gate.notified().await;
+                Ok(())
+            }
+        },
+        drain(30.0),
+    );
+    wait(1.0).await;
+    assert_eq!(locks.holds(), 1);
+
+    // A second worker of one slot finds it taken: it claims nothing and
+    // returns at once, whatever its idle time.
+    let second = Memory::new(LEASE, 1);
+    let started = Instant::now();
+    run_worker(
+        Drained::new(&second, &locks),
+        |_| async { Ok(()) },
+        drain(600.0),
+        Shutdown::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(started.elapsed(), Duration::ZERO);
+    assert!(second.calls().is_empty(), "{:?}", second.calls());
+
+    // With two slots, a third runs beside the first.
+    let third = Memory::new(LEASE, 1);
+    let third_run = run_drained(
+        Drained::new(&third, &locks),
+        |_| async { Ok(()) },
+        Options {
+            drain: Some(Drain {
+                idle: Duration::from_secs(30),
+                slots: 2,
+                horizon: DRAIN_HORIZON,
+            }),
+            ..Options::default()
+        },
+    );
+    wait(1.0).await;
+    assert_eq!(third.of(completed), ["m1"]);
+    assert_eq!(locks.holds(), 2, "two workers hold two slots");
+    held.notify_one();
+    first_run.await.unwrap().unwrap();
+    third_run.await.unwrap().unwrap();
+    assert_eq!(locks.holds(), 0, "every slot is given back");
+    assert_eq!(locks.asked(), [1, 1, 2]);
+
+    // A slot that cannot be asked for is the worker's error: it does not
+    // drain unguarded.
+    let broken = Arc::new(Locks::default());
+    broken.broken.store(true, Ordering::SeqCst);
+    let err = run_worker(
+        Drained::new(&Memory::new(LEASE, 1), &broken),
+        |_| async { Ok(()) },
+        drain(30.0),
+        Shutdown::new(),
+    )
+    .await
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "worker: take a slot of queue Memory: the database is down"
+    );
+
+    // A pool's worker takes none.
+    let pool = Arc::new(Locks::default());
+    let shutdown = Shutdown::new();
+    let pooled = tokio::spawn(run_worker(
+        Drained::new(&Memory::new(LEASE, 0), &pool),
+        |_| async { Ok(()) },
+        Options::default(),
+        shutdown.clone(),
+    ));
+    wait(5.0).await;
+    shutdown.cancel();
+    pooled.await.unwrap().unwrap();
+    assert!(pool.asked().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_drain_worker_waits_for_a_message_due_within_its_horizon() {
+    let memory = Memory::new(LEASE, 1);
+    let locks = Arc::new(Locks::default());
+    // The message falls due at 150 s; once it is handled the next is due
+    // in an hour, past the horizon.
+    let handled = Arc::new(AtomicBool::new(false));
+    let read = Arc::clone(&handled);
+    let start = Instant::now();
+    let mut queue = Drained::new(&memory, &locks);
+    queue.due_from = Duration::from_secs(150);
+    queue.next = Some(Arc::new(move || {
+        if read.load(Ordering::SeqCst) {
+            return Ok(Some(Duration::from_secs(3600)));
+        }
+        Ok(Duration::from_secs(150).checked_sub(start.elapsed()))
+    }));
+    let done = Arc::clone(&handled);
+    run_drained(
+        queue,
+        move |_| {
+            done.store(true, Ordering::SeqCst);
+            async { Ok(()) }
+        },
+        drain(20.0),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(memory.of(completed), ["m1"]);
+    let handled_at = memory.times(|call| matches!(call, Call::Complete(_)));
+    assert!(handled_at[0] >= 150.0, "handled at {} s", handled_at[0]);
+
+    // A queue that reads no due time, one past the horizon, or one whose
+    // read fails stops once idle.
+    let nexts: [NextDue; 3] = [
+        Arc::new(|| Ok(None)),
+        Arc::new(|| Ok(Some(Duration::from_secs(600)))),
+        Arc::new(|| Err(QueueError::Failed("the database is down".into()))),
+    ];
+    for next in nexts {
+        let memory = Memory::new(LEASE, 0);
+        let mut queue = Drained::new(&memory, &locks);
+        queue.next = Some(next);
+        run_drained(queue, |_| async { Ok(()) }, drain(20.0))
+            .await
+            .unwrap()
+            .unwrap();
+        let last = memory.times(is_claim).last().copied().unwrap();
+        assert!(last <= 21.0, "the worker stopped at {last} s");
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_drain_worker_whose_claims_fail_stops_with_an_error_and_gives_its_slot_back() {
+    let memory = Memory::new(LEASE, 0);
+    memory.script([ClaimDoes::Fail; 64]);
+    let locks = Arc::new(Locks::default());
+    let err = run_drained(
+        Drained::new(&memory, &locks),
+        |_| async { Ok(()) },
+        drain(60.0),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "worker: every claim of queue Memory failed for 60s, so the worker in drain mode stops: the database is down"
+    );
+    assert_eq!(locks.holds(), 0);
+
+    // Claims that fail and recover within the idle time keep it draining.
+    let recovering = Memory::new(LEASE, 1);
+    recovering.script([ClaimDoes::Fail; 2]);
+    run_drained(
+        Drained::new(&recovering, &locks),
+        |_| async { Ok(()) },
+        drain(60.0),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert_eq!(recovering.of(completed), ["m1"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_groups_queues_drain_together_under_one_slot() {
+    let (quiet, busy) = (Memory::new(LEASE, 0), Memory::new(LEASE, 1));
+    let locks = Arc::new(Locks::default());
+    let gate = Arc::new(Notify::new());
+    let held = Arc::clone(&gate);
+    let shutdown = Shutdown::new();
+    let (quiet_queue, busy_queue) = (Drained::new(&quiet, &locks), Drained::new(&busy, &locks));
+    let run = tokio::spawn(async move {
+        let group = Group::new(&shutdown);
+        assert!(group.take_slot(&quiet_queue, drain(30.0)).await?);
+        let ran = tokio::join!(
+            group.run(quiet_queue, |_| async { Ok(()) }, drain(30.0)),
+            group.run(
+                busy_queue,
+                move |_| {
+                    let held = Arc::clone(&held);
+                    async move {
+                        held.notified().await;
+                        Ok(())
+                    }
+                },
+                drain(30.0)
+            ),
+        );
+        ran.0?;
+        ran.1
+    });
+    wait(90.0).await;
+    // The empty queue is still claimed from while the other's handler
+    // runs: a message for it is handled.
+    assert_eq!(locks.holds(), 1, "one slot for the group");
+    quiet.push("late", 7);
+    wait(2.0).await;
+    assert_eq!(quiet.of(completed), ["late"]);
+    gate.notify_one();
+    run.await.unwrap().unwrap();
+    assert_eq!(locks.holds(), 0);
+    assert_eq!(
+        locks.asked(),
+        [1],
+        "the group took one slot, of its first queue"
+    );
+
+    // A second group finds the slot taken and runs nothing.
+    let other = Shutdown::new();
+    let group = Group::new(&other);
+    let first = Drained::new(&Memory::new(LEASE, 0), &locks);
+    let _held = first.slot(1).await.unwrap().unwrap();
+    assert!(!group.take_slot(&first, drain(30.0)).await.unwrap());
+}
+
+#[test]
+fn the_drain_is_the_environments() {
+    let vars = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+        pairs
+            .iter()
+            .map(|(name, value)| ((*name).to_string(), (*value).to_string()))
+            .collect()
+    };
+    for mode in ["", MODE_POOL] {
+        assert_eq!(drain_from(&vars(&[(MODE_VARIABLE, mode)])), Ok(None));
+    }
+    assert_eq!(drain_from(&HashMap::new()), Ok(None));
+    assert_eq!(
+        drain_from(&vars(&[(MODE_VARIABLE, MODE_DRAIN)])),
+        Ok(Some(Drain::default()))
+    );
+    assert_eq!(
+        drain_from(&vars(&[
+            (MODE_VARIABLE, MODE_DRAIN),
+            (IDLE_SECONDS_VARIABLE, "45"),
+            (SLOTS_VARIABLE, "3")
+        ])),
+        Ok(Some(Drain {
+            idle: Duration::from_secs(45),
+            slots: 3,
+            horizon: DRAIN_HORIZON,
+        }))
+    );
+    for (name, value) in [(IDLE_SECONDS_VARIABLE, "soon"), (SLOTS_VARIABLE, "0")] {
+        let err = drain_from(&vars(&[(MODE_VARIABLE, MODE_DRAIN), (name, value)])).unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            format!(
+                "{name} is {}; it is a whole number, one or more",
+                serde_json::to_string(value).unwrap()
+            )
+        );
+    }
+    assert_eq!(
+        drain_from(&vars(&[(MODE_VARIABLE, "burst")]))
+            .unwrap_err()
+            .to_string(),
+        r#"WORKER_MODE is "burst"; it is "pool" or "drain""#
+    );
 }

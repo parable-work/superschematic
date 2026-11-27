@@ -26,7 +26,7 @@ import pg from 'pg';
 import { Hono } from 'hono';
 import type { Principal, RequestContext } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
-import { runWorker, type WorkerQueue } from '@superschematic/http-runtime/worker';
+import { runWorker, runWorkers, type WorkerQueue } from '@superschematic/http-runtime/worker';
 import { createOrm } from '@schemas/fixture-reactions-db-types/orm';
 
 const apiDir = process.env.API_DIR;
@@ -35,6 +35,11 @@ const createSQL = process.env.CREATE_SQL;
 const dsn = process.env.SUPERSCHEMATIC_RULES_TEST_DATABASE_URL;
 if (!apiDir || !sdkDir || !createSQL || !dsn) throw new Error('API_DIR, SDK_DIR, CREATE_SQL and SUPERSCHEMATIC_RULES_TEST_DATABASE_URL are required');
 const { buildRouter, projectReactionsQueues, taskReactionsQueues } = await import(`${apiDir}/index.ts`);
+// The process's queue waker of the runtime the generated repositories
+// import, which bun may hold apart from the one this file imports.
+const { setProcessQueueWaker } = (await import(
+  Bun.resolveSync('@superschematic/http-runtime/postgres', Bun.resolveSync('@schemas/fixture-reactions-db-types/orm', apiDir))
+)) as typeof import('@superschematic/http-runtime/postgres');
 const { FixtureReactionsApiSDK } = await import(`${sdkDir}/index.ts`);
 
 // The caller: sam may write projects and tasks.
@@ -246,5 +251,62 @@ describe('Reactions on fixture-reactions-api', () => {
     expect((await orm.task.getOne(t)).status).toBe('done');
     expect(await messages()).toBe(0);
     expect(logged).toEqual([]);
+  });
+
+  test('in drain mode each worker takes a slot, drains what a raw write left, and stops of itself, and a command wakes the change queue of each row it writes', async () => {
+    const woken: string[] = [];
+    setProcessQueueWaker({ enqueued: async queue => void woken.push(queue), settled: async () => {} });
+    const heard = (): string[] => woken.splice(0);
+    try {
+      const p = await project('Tide');
+      await task('Ebb', p);
+      // A create through the core wakes the change queue of the row it
+      // wrote, whose trigger writes the message (D145).
+      expect(heard()).toContain('TaskChange');
+      const key = await column('Ebb');
+      const projectKey = (await pool.query(`SELECT id FROM project WHERE name = $1`, ['Tide'])).rows[0].id;
+      // How many messages of this case's project and task wait.
+      const mine = async (): Promise<number> =>
+        Number(
+          (
+            await pool.query(
+              `SELECT (SELECT count(*) FROM project_change_queue WHERE row_key = $1 AND state IN ('ready', 'claimed')) + (SELECT count(*) FROM task_change_queue WHERE row_key = $2 AND state IN ('ready', 'claimed')) AS n`,
+              [projectKey, key]
+            )
+          ).rows[0].n
+        );
+      await workUntil(async () => (await mine()) === 0);
+      heard();
+      // A raw write wakes nothing: its trigger alone hears it.
+      expect((await pool.query(`UPDATE task SET status = 'doing', status_entered_at = now() WHERE id = $1`, [key])).rowCount).toBe(1);
+      expect(heard()).toEqual([]);
+      const slots = async (): Promise<number> =>
+        Number(
+          (
+            await pool.query(
+              `SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND granted AND classid::int IN (hashtext('superschematic.drain.project_change_queue'), hashtext('superschematic.drain.task_change_queue'))`
+            )
+          ).rows[0].n
+        );
+      const never = new AbortController().signal;
+      const drain = { idleMs: 1_500 };
+      const workers = [projectReactionsQueues(pool, orm, logger as never), taskReactionsQueues(pool, orm, logger as never)].map(queues =>
+        runWorkers(queues, { signal: never, concurrency: 2, idleMs: 50, graceMs: 2000, drain })
+      );
+      let held = 0;
+      for (const deadline = Date.now() + 3_000; held < 2 && Date.now() < deadline; await sleep(20)) held = Math.max(held, await slots());
+      expect(held).toBe(2);
+      const stopped = Promise.all(workers);
+      const timedOut = sleep(20_000).then(() => 'timed out' as const);
+      expect(await Promise.race([stopped.then(() => 'stopped' as const), timedOut])).toBe('stopped');
+      expect(await projectStatus(p)).toBe('active');
+      expect(await mine()).toBe(0);
+      expect(await slots()).toBe(0);
+      // The task's change moved the project through the core, whose write
+      // of the project woke Project's change queue.
+      expect(heard()).toContain('ProjectChange');
+    } finally {
+      setProcessQueueWaker(undefined);
+    }
   });
 });

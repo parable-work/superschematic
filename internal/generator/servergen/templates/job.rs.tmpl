@@ -88,6 +88,10 @@ async fn run() -> Result<(), Failure> {
 {{ rustLetChain "jobs" (printf "%s::create_jobs(%s)" $api.ImplAlias $api.Deps) "await" (printf "map_err(|err| format!(\"jobs of %s: {err}\"))?" $api.Service) }}
 {{ rustMacro "tracing::info" (printf "api = %s" (rustString $api.Service)) (printf "class = %s" (rustString .Job.Name)) (rustString "job started") }}
 {{ .JobRun }}
+{{- if .SettlesWakes }}
+    // The wakes its enqueues sent are answered before the job ends (D145).
+    wake::settled().await;
+{{- end }}
 {{- if .Engines }}
     // The engine closes once the job ends, off the runtime.
 {{- range .Engines }}

@@ -1034,6 +1034,10 @@ type TransferGroupPage struct {
 type AccountFilter struct {
 	Id   *UUIDFilter
 	Name *StringFilter
+	// LineItems keeps the rows that some LineItem row the filter
+	// finds points at by its account (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LineItems *LineItemFilter
 	// ReferencedByLineItemAccount filters on the presence or absence of a
 	// LineItem whose account points at this row.
 	ReferencedByLineItemAccount *ReferencedByFilter
@@ -1186,6 +1190,16 @@ func (f *AccountFilter) conditions(args *[]interface{}, paramOffset int) []strin
 			}
 		}
 	}
+	if f.LineItems != nil {
+		before := len(*args)
+		through := f.LineItems.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`account.id IN (SELECT line_item.account_id FROM line_item%s)`, where))
+	}
 	if f.ReferencedByLineItemAccount != nil {
 		probe := `SELECT 1 FROM line_item WHERE line_item.account_id = account.id`
 		if f.ReferencedByLineItemAccount.Exists {
@@ -1242,6 +1256,14 @@ type CategoryFilter struct {
 	// the filter finds (D90): one condition, the foreign key in the keys of
 	// those rows, so a row whose parent is null is not kept.
 	Parent *CategoryFilter
+	// Categories keeps the rows that some Category row the filter
+	// finds points at by its parent (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Categories *CategoryFilter
+	// LineItems keeps the rows that some LineItem row the filter
+	// finds points at by its category (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LineItems *LineItemFilter
 	// ReferencedByCategoryParent filters on the presence or absence of a
 	// Category whose parent points at this row.
 	ReferencedByCategoryParent *ReferencedByFilter
@@ -1608,6 +1630,26 @@ func (f *CategoryFilter) conditions(args *[]interface{}, paramOffset int) []stri
 			where = " WHERE " + strings.Join(through, " AND ")
 		}
 		conditions = append(conditions, fmt.Sprintf(`category.parent_id IN (SELECT category.id FROM category%s)`, where))
+	}
+	if f.Categories != nil {
+		before := len(*args)
+		through := f.Categories.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`category.id IN (SELECT category.parent_id FROM category%s)`, where))
+	}
+	if f.LineItems != nil {
+		before := len(*args)
+		through := f.LineItems.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`category.id IN (SELECT line_item.category_id FROM line_item%s)`, where))
 	}
 	if f.ReferencedByCategoryParent != nil {
 		probe := `SELECT 1 FROM category WHERE category.parent_id = category.id`
@@ -2182,6 +2224,10 @@ func (f *LineItemFilter) conditions(args *[]interface{}, paramOffset int) []stri
 type TransferGroupFilter struct {
 	Id   *UUIDFilter
 	Note *StringFilter
+	// LineItems keeps the rows that some LineItem row the filter
+	// finds points at by its transferGroup (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	LineItems *LineItemFilter
 	// ReferencedByLineItemTransferGroup filters on the presence or absence of a
 	// LineItem whose transferGroup points at this row.
 	ReferencedByLineItemTransferGroup *ReferencedByFilter
@@ -2342,6 +2388,16 @@ func (f *TransferGroupFilter) conditions(args *[]interface{}, paramOffset int) [
 				conditions = append(conditions, `transfer_group.note IS NOT NULL`)
 			}
 		}
+	}
+	if f.LineItems != nil {
+		before := len(*args)
+		through := f.LineItems.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`transfer_group.id IN (SELECT line_item.transfer_group_id FROM line_item%s)`, where))
 	}
 	if f.ReferencedByLineItemTransferGroup != nil {
 		probe := `SELECT 1 FROM line_item WHERE line_item.transfer_group_id = transfer_group.id`

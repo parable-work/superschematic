@@ -2,7 +2,7 @@ import { Generic, Identity } from "superscalar";
 import { Nullable, Secret } from "@superschematic/schema";
 import { Authenticated, HttpMethod, autonomy, behaviorWorker, requirePermission, rest, worker } from "@superschematic/api";
 import { envVars, providers } from "@superschematic/schema-config";
-import { AgentRunRequest, NoticeWork, RunRequest, Task } from "@schemas/work-db";
+import { AgentRun, AgentRunRequest, NoticeWork, RunRequest, Task } from "@schemas/work-db";
 
 // The API's config (D159). An agent's run needs a sandbox and a model
 // (D158), so an environment that fills no SANDBOX or no MODEL slot is
@@ -27,8 +27,11 @@ export abstract class WorkApiConfig {
   SMS_TOKEN: Nullable<Secret<string>>;
   SMS_SENDER: Nullable<string>;
 
-  // The confirmation key of the agent routes' MCP endpoint is the run's
+  // Where a run's sandbox instance reaches this server's agent routes, its
+  // turns and its MCP endpoint (D158): the server's own URL and the
+  // routes' path. The confirmation key of that MCP endpoint is the run's
   // token: a grant (D156). Nothing else to bind.
+  AGENT_ENDPOINT: Nullable<string>;
 }
 
 export abstract class InvoicePayment {
@@ -72,12 +75,15 @@ export class Work extends Authenticated {
 // mints its token and starts its sandbox instance; watches it until it
 // ends; and makes the follow-up of a question nobody answered. A @worker of
 // a D80 queue, so on Workers it drains at each Cron firing and a request
-// due within the minute wakes it (D92, D151).
+// due within the minute wakes it (D92, D151). Its queue is the
+// orchestration's, so the generated worker hands each message to the
+// dispatcher in the API's Deps, and the implementation has no method for
+// it (D183).
 @worker({ queue: AgentRunRequest, concurrency: 4 })
 export abstract class Dispatch {}
 
 // The run requests a customer's inbound message makes (D157), which the
-// dispatcher takes as they are.
+// generated worker hands the dispatcher as they are (D183).
 @worker({ queue: RunRequest, concurrency: 4 })
 export abstract class InboundRuns {}
 
@@ -89,3 +95,8 @@ export abstract class Notify {}
 // Fires each task's schedules and hands their runs to the notifier.
 @behaviorWorker(Task, { permissions: [] })
 export abstract class TaskDeadlines {}
+
+// Expires a run's lease and ends a run's backoff (D104), so a run whose
+// dispatcher stopped watching it fails, and Retries' next start comes due.
+@behaviorWorker(AgentRun, { permissions: [] })
+export abstract class RunDeadlines {}

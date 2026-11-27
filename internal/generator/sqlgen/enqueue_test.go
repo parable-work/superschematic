@@ -124,3 +124,66 @@ func TestEnqueueTriggerLeavesADefaultedFieldToItsColumn(t *testing.T) {
 		}
 	}
 }
+
+// throughSchema is a table of tasks, each of a project, whose inserts and
+// updates enqueue TaskSeen with the task's id and the value code names,
+// project.code: a value read through the task's relation to its project,
+// as a version graph's release reads its commit's sequence (D138).
+func throughSchema(code string) *ir.Schema {
+	s := ir.NewSchema("tasks-db", ir.SchemaKindDB)
+	s.Types["Project"] = &ir.TypeDef{Name: "Project", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+		{Name: "code", TypeRef: ir.TypeRef{Name: "string"}},
+	}}
+	s.Types["Task"] = &ir.TypeDef{Name: "Task", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{
+		{Name: "title", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+		{Name: "project", TypeRef: ir.TypeRef{Name: "Project"}, Required: true},
+	}, EnqueueOnChange: []*ir.EnqueueOnChange{{
+		Queue:    "TaskSeen",
+		On:       []string{ir.EnqueueOnInsert, ir.EnqueueOnUpdate},
+		Message:  map[string]string{"taskId": "id", "code": code},
+		Backfill: true,
+	}}}
+	s.Types["TaskSeen"] = &ir.TypeDef{Name: "TaskSeen", Role: ir.RoleEmbeddedStruct, Queue: &ir.QueueDef{}, Fields: []*ir.FieldDef{
+		{Name: "taskId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true},
+		{Name: "code", TypeRef: ir.TypeRef{Name: "string"}},
+	}}
+	s.Scalars["Identity.UUID"] = &ir.ScalarDef{Name: "Identity.UUID", LanguagePrimitive: ir.LanguageString, TypeMappings: map[string]string{"sql": "UUID"}}
+	return s
+}
+
+// TestEnqueueTriggerReadsAFieldThroughARelation: a message's value of
+// <relation>.<field> is the related row's column, which the insert reads
+// with a subquery on the row's key column, on Postgres, on SQLite and in
+// the backfill; a path through a field that is no relation to a table,
+// and one to a field the related table has no column of, is refused,
+// naming it.
+func TestEnqueueTriggerReadsAFieldThroughARelation(t *testing.T) {
+	out, err := Generate(throughSchema("project.code"), Options{SchemaName: "tasks-db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.EnqueueTriggers) != 1 {
+		t.Fatalf("EnqueueTriggers = %+v", out.EnqueueTriggers)
+	}
+	e := out.EnqueueTriggers[0]
+	if pg, want := e.FunctionSQL(), "INSERT INTO task_seen_queue (task_id, code) VALUES (NEW.id, (SELECT code FROM project WHERE id = NEW.project_id));"; !strings.Contains(pg, want) {
+		t.Errorf("the function lacks\n%s\nin\n%s", want, pg)
+	}
+	quote := func(s string) string { return `"` + s + `"` }
+	sqlite := e.SQLiteTriggers(quote)
+	if want := `INSERT INTO "task_seen_queue" ("task_id", "code") VALUES (NEW."id", (SELECT "code" FROM "project" WHERE "id" = NEW."project_id"));`; len(sqlite) != 2 || !strings.Contains(sqlite[0].Definition, want) {
+		t.Errorf("the SQLite triggers lack\n%s\nin\n%+v", want, sqlite)
+	}
+	if backfill, want := e.BackfillSQL(), "SELECT src.id, (SELECT code FROM project WHERE id = src.project_id)\nFROM task AS src"; !strings.Contains(backfill, want) {
+		t.Errorf("the backfill lacks\n%s\nin\n%s", want, backfill)
+	}
+
+	for path, want := range map[string]string{
+		"title.code":   "the message reads title.code, and title is no to-one relation of Task to a table",
+		"project.name": "the message reads project.name, and Project has no column of field name",
+	} {
+		if _, err := Generate(throughSchema(path), Options{SchemaName: "tasks-db"}); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("Generate with %s = %v, want %q", path, err, want)
+		}
+	}
+}

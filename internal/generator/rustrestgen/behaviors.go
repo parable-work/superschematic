@@ -308,7 +308,9 @@ func (o *APIOutput) RulesLayout() string {
 // operations name, and what its behavior workers name.
 func (o *APIOutput) BehaviorUses() []string {
 	adapter := []string{"postgres", "Caller", "Core", "Host", "Layout"}
-	var runtime, types []string
+	// The host's wake of the behavior workers' queues (D145, D151).
+	runtime := []string{"wake"}
+	var types []string
 	if o.HasBehaviorOperations() {
 		adapter = append(adapter, "Error", "Refusal")
 		runtime = append(runtime, "ApiError", "RequestContext")

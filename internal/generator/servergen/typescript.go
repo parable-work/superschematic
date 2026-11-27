@@ -384,6 +384,15 @@ type TypeScriptWorker struct {
 	// then.
 	Behavior   *apigen.BehaviorWorkerInfo
 	QueuesFunc string
+
+	// Dispatcher is set for a @worker of the agent dispatcher's queues
+	// (D158, D183), the database's @agents("requests") queue or its
+	// @runRequests queue (D157): the entrypoint hands each message to
+	// Deps.agents.handle and calls no createWorkers. Transcripts is set
+	// for the requests queue, whose prune also deletes the transcripts
+	// past their retention (agents.prune).
+	Dispatcher  bool
+	Transcripts bool
 }
 
 // Messages names what a behavior worker's messages carry, for its main's
@@ -519,6 +528,19 @@ type TypeScriptAPI struct {
 
 	// Database is the pool Deps.db holds, nil without one.
 	Database *TypeScriptDatabase
+
+	// Agents is true when Deps holds the agent dispatcher (D158, D183):
+	// the entrypoint builds Deps but its dispatcher as AgentsBase, asks the
+	// implementation's createAgentOptions for the dispatcher's options and
+	// builds Deps with withAgents. A server mounts the agent routes a
+	// run's sandbox instance calls (AgentRoutes) and holds its MCP
+	// endpoint's calls to a run's autonomy (agents.mcpGate).
+	Agents      bool
+	AgentsBase  string
+	AgentRoutes string
+
+	// MCP is true when the server serves the API's MCP endpoint (D81).
+	MCP bool
 
 	// ORM is whether Deps.orm holds the repositories of Database (D79),
 	// which the entrypoint builds over its pool with Database.ORM.
@@ -736,6 +758,11 @@ type TypeScriptDocker struct {
 	// repositories of no database whose fields are behaviors (D103).
 	Rules *tsRulesDocker
 
+	// VersionGraph is where the versiongraph stage builds the
+	// version-graph core's WebAssembly module from, nil when the server
+	// serves no version graph's operations (D138).
+	VersionGraph *tsVersionGraphDocker
+
 	// Runtime are the directories the image copies from the build stage:
 	// the workspace's root, then every package the server reaches outside
 	// it, each with the node_modules the install linked into it.
@@ -768,6 +795,22 @@ const RulesModule = "superschematic_rules_wasm.wasm"
 
 // Module is RulesModule, for the template.
 func (d *tsRulesDocker) Module() string { return RulesModule }
+
+// tsVersionGraphDocker is the version-graph runtime's npm package (D138),
+// TypeScript, whose dist/ the build stage emits with the WebAssembly
+// module the versiongraph stage builds in it, from the version-graph
+// core's crate beside the package, Crate, which reaches no crate by path.
+type tsVersionGraphDocker struct {
+	TypeScript string
+	Crate      string
+}
+
+// VersionGraphModule is the WebAssembly module of the version-graph core,
+// which the package's index.js loads from its dist/.
+const VersionGraphModule = "superschematic_versiongraph.wasm"
+
+// Module is VersionGraphModule, for the template.
+func (d *tsVersionGraphDocker) Module() string { return VersionGraphModule }
 
 // tsReserved are the names main.ts declares or imports beside the served
 // APIs' own: an API, database or client never takes one.
@@ -864,6 +907,12 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			Definition:   tsgen.QueueConst(w.Queue),
 			Module:       o.Deps.DatabaseTypesPackage + tsgen.QueuesEntry,
 			Package:      o.Deps.DatabaseTypesPackage,
+		}
+		if w.Dispatcher {
+			// The agent dispatcher's queue: Deps.agents.handle takes each
+			// message (D183).
+			s.Worker.Dispatcher = true
+			s.Worker.Transcripts = o.Deps.Agents != nil && w.Queue == o.Deps.Agents.Requests
 		}
 		if w.Behavior != nil {
 			// A behavior worker runs its table's deadlines and changes
@@ -989,6 +1038,16 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			// A job or a worker serves no request, so it turns no client
 			// away (D143).
 			api.MinClientVersions = api.Config + "." + ir.MinClientVersionsSetting
+		}
+		api.MCP = o.MCP != nil && !background
+		if o.HasAgents() {
+			// Deps holds the agent dispatcher, which the implementation's
+			// createAgentOptions gives its options (D183).
+			api.Agents = true
+			api.AgentsBase = taken.take(stem + "DepsBase")
+			if !background {
+				api.AgentRoutes = taken.take(stem + "AgentRoutes")
+			}
 		}
 		if o.MCP != nil && len(o.MCP.Confirming) > 0 && !background {
 			// The MCP endpoint signs the confirmations of its tools that
@@ -1291,9 +1350,18 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 		// the store is unavailable (D75).
 		out = append(out, fmt.Sprintf("rateLimit: { store: memoryStoreRateLimitStore(%s, %s) }", a.RateLimitStore.Var, tsQuote(a.Service)))
 	}
+	var mcp []string
 	if a.MCPConfirmationKey != "" {
 		// Its MCP endpoint signs confirmations with the secret (D93).
-		out = append(out, "mcp: { confirmationKey: "+a.MCPConfirmationKey+" }")
+		mcp = append(mcp, "confirmationKey: "+a.MCPConfirmationKey)
+	}
+	if a.Agents && a.MCP {
+		// A call an agent run makes with its token is held to the run's
+		// autonomy, by the tool's @autonomy (D158, D183).
+		mcp = append(mcp, "callGate: "+a.Deps+".agents.mcpGate")
+	}
+	if len(mcp) > 0 {
+		out = append(out, "mcp: { "+strings.Join(mcp, ", ")+" }")
 	}
 	if a.MinClientVersions != "" {
 		// Its routes turn away a client under its minimum (D143).
@@ -1669,11 +1737,11 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	if in.Paths.HTTPRuntimeTypeScript == "" {
 		return nil, "the naming file's [paths] http_runtime_typescript is unset, and the image builds the HTTP runtime's package from a checkout, since none is published yet; set it to a superschematic checkout's runtime/http/typescript", nil
 	}
-	if s.servesGraphs() {
+	if s.servesGraphs() && in.Paths.VersionGraphTypeScript == "" {
 		// A graph's facade loads the version-graph core's WebAssembly module,
-		// which no published package ships and no stage of the image
-		// builds yet.
-		return nil, fmt.Sprintf("the %s serves a version graph's operations (D138) through the version-graph package, %s, whose WebAssembly module no published package ships and the generated image does not build yet; run it from the checkout, or build its image from a Dockerfile of the project's own", s.Kind, s.Naming.VersionGraphNpmPackage), nil
+		// which no published package ships: the image builds it from the
+		// checkout the package lies in.
+		return nil, fmt.Sprintf("the %s serves a version graph's operations (D138) through the version-graph package, %s, whose WebAssembly module no published package ships, and the naming file's [paths] versiongraph_typescript, the package the image builds it beside, is unset; set it to a superschematic checkout's runtime/versiongraph/typescript", s.Kind, s.Naming.VersionGraphNpmPackage), nil
 	}
 	root, err := filepath.Abs(in.RepositoryRoot)
 	if err != nil {
@@ -1760,12 +1828,26 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 		d.ScalarWorkspace+"/Cargo.toml", d.ScalarWorkspace+"/Cargo.lock", d.ScalarWorkspace+"/crates")
 	if versionGraph := in.Paths.VersionGraphTypeScript; versionGraph != "" {
 		// The workspace's root overrides the version-graph runtime too, so
-		// an install reads its manifest, though no server imports it.
+		// an install reads its manifest, though the server may not import
+		// it.
 		vg, ok := rel(versionGraph)
 		if !ok {
 			return nil, outside("the version-graph runtime's TypeScript package", versionGraph), nil
 		}
-		d.Include = append(d.Include, vg+"/package.json")
+		if !s.servesGraphs() {
+			d.Include = append(d.Include, vg+"/package.json")
+		} else {
+			// The versiongraph stage builds the core's WebAssembly module
+			// from its crate beside the package, as the package's build does,
+			// and the build stage emits the package's dist/ with it, which
+			// the workspace's root overrides the package with (D138).
+			crate, ok := rel(filepath.Join(filepath.Dir(versionGraph), "rust"))
+			if !ok {
+				return nil, outside("the version-graph core's crate beside", versionGraph), nil
+			}
+			d.VersionGraph = &tsVersionGraphDocker{TypeScript: vg, Crate: crate}
+			d.Include = append(d.Include, vg, crate)
+		}
 	}
 	if rules := in.Paths.RulesTypeScript; rules != "" && !s.Rules {
 		// And the behaviors' core (D103), whose package the server does
@@ -1824,6 +1906,9 @@ func planTypeScriptDocker(in TypeScriptInput, s *TypeScriptServer, dir string) (
 	}
 	if d.Rules != nil {
 		d.Exclude = append(d.Exclude, d.Rules.TypeScript+"/dist")
+	}
+	if d.VersionGraph != nil {
+		d.Exclude = append(d.Exclude, d.VersionGraph.TypeScript+"/dist", d.VersionGraph.TypeScript+"/prebuilt")
 	}
 	return d, "", nil
 }

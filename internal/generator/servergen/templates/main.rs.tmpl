@@ -277,7 +277,7 @@ async fn run() -> Result<(), Failure> {
         {{ .Field }}: {{ .Client.Var }}.clone(),
 {{- end }}
 {{- range .Buckets }}
-        {{ .Field }}: Arc::clone(&{{ .Bucket.Var }}),
+{{ .Init "        " true }}
 {{- end }}
 {{- range .MemoryStores }}
         {{ .Field }}: Arc::clone(&{{ .Store.Var }}),

@@ -276,15 +276,12 @@ func (r *resolver) runWorkers() {
 				r.fail(CodeInvalidSettings, "worker %s runs in drain mode (%s set it) and sets maxInstances (%s set it); a worker in drain mode runs when its queue has messages and exits when it has none, and instances is how many of it may run at once, so leave maxInstances out (D145)",
 					name, s.workerFrom["mode"], s.workerFrom["maxInstances"])
 			}
-			if d.worker.BehaviorWorker != nil {
-				// Its queues are filled by triggers and by the core, and
-				// its deadlines fall due by the clock: no enqueue of a
-				// queue client wakes it, and its claim loops take no slot,
-				// so a tick would start one beside another for as long as
-				// its queues are busy.
-				r.fail(CodeInvalidSettings, "worker %s is a behavior worker and runs in drain mode (%s set it); a behavior worker's queues are filled by triggers and fall due by the clock, which no enqueue's wake hears, and drain mode is not built for one: leave its mode out, so its instances keep running (D145)",
-					name, s.workerFrom["mode"])
-			}
+			// A behavior worker drains too (D145): its loops take one slot
+			// for them all and stop together, the behaviors' core wakes
+			// it for the events, the deadlines due soon and the row writes
+			// of each command, and wakeWorkers wakes it for each of its
+			// queues. A write past the core, a raw SQL one, and a deadline
+			// due later wait for its tick.
 		case s.idle != "":
 			r.fail(CodeInvalidSettings, "worker %s sets idle (%s set it) and does not run in drain mode; only a worker with mode %q exits when it is idle (D145)", name, s.workerFrom["idle"], ir.WorkerModeDrain)
 		}
@@ -311,7 +308,9 @@ func (r *resolver) runWorkers() {
 // (registry.PlatformSpec.WakesWorkers: a Cron Trigger's on Cloudflare) is
 // woken whatever its mode (D151): a message due before the next firing,
 // an urgent deadline or an event, starts a run that waits for it. A
-// behavior worker is woken for each of its queues.
+// behavior worker is woken for each of its queues, in drain mode too: its
+// deadline queue, its change queue, whose trigger the behaviors' core
+// wakes for, and its event queue.
 func (r *resolver) wakeWorkers() {
 	for _, name := range sortedKeys(r.deployables) {
 		w := r.deployables[name]
@@ -319,10 +318,7 @@ func (r *resolver) wakeWorkers() {
 		if w.res.Kind != ir.DeployableWorker || (!run.Drains() && !w.platform.WakesWorkers) || run.Instances == 0 || run.Database == "" {
 			continue
 		}
-		queues := []string{run.Queue}
-		if w.platform.WakesWorkers {
-			queues = run.AllQueues()
-		}
+		queues := run.AllQueues()
 		for _, id := range sortedKeys(r.edges) {
 			e := r.edges[id]
 			if e.res.Kind != ir.EdgeSQL || e.res.Service.Name != run.Database || e.from == w {

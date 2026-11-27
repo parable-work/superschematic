@@ -121,8 +121,9 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 //
 // A task that outlives drainTaskSeconds is stopped as any instance is, with
 // SIGTERM and the worker's grace, and the next wake or tick starts
-// another. A Rust worker's entrypoint does not drain yet, so one is
-// refused here rather than left to run until that limit.
+// another. A worker of every language drains, a behavior worker among
+// them, whose loops take one slot for them all and whose deployables'
+// wakes name each of its queues.
 
 // drainTaskSeconds is the longest one task of a drain worker runs: a day,
 // which a queue that never empties reaches.
@@ -175,9 +176,6 @@ func lowerDrainWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	env := ctx.Environment
 	v := valuesOf(env)
 	run := d.Worker
-	if d.Language == registry.APILanguageRust {
-		return registry.Lowered{}, fmt.Errorf("worker %s runs in drain mode and is written in Rust, whose worker entrypoint does not exit when its queue is empty yet: as a Cloud Run job it would run until its task's time limit; leave its mode out, so it runs as a worker pool (D145)", d.Name)
-	}
 	if run.GraceSeconds >= workerShutdownSeconds {
 		return registry.Lowered{}, fmt.Errorf("worker %s lets its handlers finish for %ds when it stops, and Cloud Run stops a job's task %ds after SIGTERM; give its @worker a grace under %ds", d.Name, run.GraceSeconds, workerShutdownSeconds, workerShutdownSeconds)
 	}

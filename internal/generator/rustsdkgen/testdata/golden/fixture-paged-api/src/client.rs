@@ -293,7 +293,28 @@ impl HttpClient {
         T: DeserializeOwned,
     {
         let response = self
-            .send_json_with_refresh(method, path, query, body, request_options)
+            .send_json_with_refresh(method, path, query, body, request_options, None)
+            .await?;
+        self.decode_response(response)
+    }
+
+    /// `request_json` for a call to an @idempotent operation (D140): every
+    /// send of the call, a retry after a refreshed credential among them,
+    /// carries `Idempotency-Key: <idempotency_key>`.
+    pub async fn request_json_idempotent<T>(
+        &self,
+        method: &str,
+        path: &str,
+        query: &[(String, String)],
+        body: Option<Value>,
+        request_options: Option<&RequestOptions>,
+        idempotency_key: &str,
+    ) -> Result<T, SDKError>
+    where
+        T: DeserializeOwned,
+    {
+        let response = self
+            .send_json_with_refresh(method, path, query, body, request_options, Some(idempotency_key))
             .await?;
         self.decode_response(response)
     }
@@ -374,6 +395,7 @@ impl HttpClient {
         query: &[(String, String)],
         body: Option<Value>,
         request_options: Option<&RequestOptions>,
+        idempotency_key: Option<&str>,
     ) -> Result<ResponseText, SDKError> {
         let mut retries = Retries::default();
         loop {
@@ -385,6 +407,7 @@ impl HttpClient {
                     body.clone(),
                     request_options,
                     retries.fresh_service_token,
+                    idempotency_key,
                 )
                 .await?;
             let response = ResponseText::read(response).await?;
@@ -394,6 +417,7 @@ impl HttpClient {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn send_json_once(
         &self,
         method: &str,
@@ -402,10 +426,19 @@ impl HttpClient {
         body: Option<Value>,
         request_options: Option<&RequestOptions>,
         fresh_service_token: bool,
+        idempotency_key: Option<&str>,
     ) -> Result<reqwest::Response, SDKError> {
         let mut request = self
             .build_request(method, path, query, request_options, fresh_service_token)
             .await?;
+        if let Some(key) = idempotency_key {
+            // A call to an @idempotent operation: each send carries the
+            // call's one key (D140).
+            let key = HeaderValue::from_str(key).map_err(|_| {
+                SDKError::config("idempotency_key is 1 to 255 printable ASCII characters")
+            })?;
+            request = request.header("idempotency-key", key);
+        }
         if let Some(payload) = body {
             request = request.json(&payload);
         }

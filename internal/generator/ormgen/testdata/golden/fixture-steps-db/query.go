@@ -653,6 +653,10 @@ type BatchFilter struct {
 	Status          *StringFilter
 	StatusEnteredAt *DateTimeFilter
 	Version         *Int64Filter
+	// Steps keeps the rows that some Step row the filter
+	// finds points at by its batch (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	Steps *StepFilter
 	// ReferencedByStepBatch filters on the presence or absence of a
 	// Step whose batch points at this row.
 	ReferencedByStepBatch *ReferencedByFilter
@@ -976,6 +980,16 @@ func (f *BatchFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				conditions = append(conditions, `batch._version IS NOT NULL`)
 			}
 		}
+	}
+	if f.Steps != nil {
+		before := len(*args)
+		through := f.Steps.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`batch.id IN (SELECT step.batch_id FROM step%s)`, where))
 	}
 	if f.ReferencedByStepBatch != nil {
 		probe := `SELECT 1 FROM step WHERE step.batch_id = batch.id`

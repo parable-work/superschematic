@@ -148,7 +148,8 @@ func readPackageProvider(dir string) (*ir.RuntimeProvider, error) {
 // [package.metadata.superschematic.provider] (D185), or nil for a
 // directory with no Cargo.toml.
 func readCrateProvider(dir string) (*ir.RuntimeProvider, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "Cargo.toml"))
+	path := filepath.Join(dir, "Cargo.toml")
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -167,7 +168,7 @@ func readCrateProvider(dir string) (*ir.RuntimeProvider, error) {
 	}
 	meta, err := toml.Decode(string(data), &manifest)
 	if err != nil {
-		return nil, fmt.Errorf("Cargo.toml: %w", err)
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	name := manifest.Package.Name
 	if manifest.Package.Metadata.Superschematic.Provider == nil {

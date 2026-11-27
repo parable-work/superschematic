@@ -12,10 +12,13 @@
 {{- if .HasManualRoutes }} Each manual
 // route answers 501 until you implement its handler.
 {{- end }}
+{{- if .HasDerivers }} Each deriver
+// fails every field until you implement it.
+{{- end }}
 package {{ toPackageName .SchemaName }}
 
 import (
-{{- if or .Namespaces .HasEncryptedEndpoints .HasJobs .HasWorkers }}
+{{- if or .Namespaces .HasEncryptedEndpoints .HasJobs .HasWorkers .HasDerivers }}
 	"context"
 {{- end }}
 {{- if .HasEncryptedEndpoints }}
@@ -32,6 +35,9 @@ import (
 {{- if .HasPagedEndpoints }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/paging"
 {{- end }}
+{{- if .HasDerivers }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/deriver"
+{{- end }}
 
 	api "{{ .ModulePath }}"
 {{- if .HasWorkerEvents }}
@@ -40,7 +46,7 @@ import (
 {{- if or .NeedsTypesImport .HasWorkerEvents }}
 	types "{{ .TypesModule }}"
 {{- end }}
-{{- if .HasOrdinaryWorkers }}
+{{- if or .HasOrdinaryWorkers .DeriversNameDatabaseTypes }}
 	{{ .Deps.DatabaseTypesAlias }} "{{ .Deps.DatabaseTypes }}"
 {{- end }}
 )
@@ -137,6 +143,38 @@ func (w *workers) {{ .Method }}(ctx context.Context, msg {{ $.Deps.DatabaseTypes
 func (w *workers) {{ .Method }}(ctx context.Context, tx orm.TxInterface, event types.{{ .Event }}) error {
 	return api.NotImplementedError("event handler {{ .Method }}")
 }
+{{- end }}
+{{- end }}
+{{- if .HasDerivers }}
+
+// NewDerivers builds the derivers of {{ .SchemaName }} from the API's
+// dependencies. Its signature is the generated one, api.DeriversConstructor.
+// A deriver's entrypoint calls the method of each stale derived field,
+// which asks a model; a value settles the field, and a failure or an error
+// counts an attempt.
+func NewDerivers(deps api.Deps) (api.Derivers, error) {
+	return api.Derivers{
+{{- range .GoDerivers }}
+		{{ .Field }}: &{{ .Struct }}{deps: deps},
+{{- end }}
+	}, nil
+}
+
+var _ api.DeriversConstructor = NewDerivers
+{{- range .GoDerivers }}
+{{- $d := . }}
+
+// {{ .Struct }} implements api.{{ .Interface }}.
+type {{ .Struct }} struct {
+	deps api.Deps
+}
+{{- range .Methods }}
+
+// {{ .Method }} derives {{ .Schema }}.{{ .Field }} from {{ .FromList }}.
+func (d *{{ $d.Struct }}) {{ .Method }}(ctx context.Context, item deriver.DerivedItem[api.{{ .Inputs }}]) (deriver.DerivedAnswer[{{ .Value }}], error) {
+	return deriver.DerivedAnswer[{{ .Value }}]{}, api.NotImplementedError("deriver {{ $d.Name }}, {{ .Key }}")
+}
+{{- end }}
 {{- end }}
 {{- end }}
 {{- if and .IsPublic (not .Auth.Identity) }}
