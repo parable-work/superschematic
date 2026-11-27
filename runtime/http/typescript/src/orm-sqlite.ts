@@ -118,6 +118,19 @@ class Turns {
 /** The turns of each connection. */
 const turnsOf = new WeakMap<SqlDatabase, Turns>();
 
+/**
+ * Runs fn in db's turn (D189): after the statement or the transaction the
+ * repositories run on db now, or at once within it. A queue's claims over
+ * db (queue-orm.ts's claimsOver) take their turns so, so a claim, a
+ * completion or a failure never runs inside a transaction a handler holds
+ * open on the same connection, where its rollback would undo it.
+ */
+export function inSqliteTurn<T>(db: SqlDatabase, fn: () => Promise<T>): Promise<T> {
+  const turns = turnsOf.get(db) ?? new Turns();
+  turnsOf.set(db, turns);
+  return turns.run(fn);
+}
+
 /** Runs a statement on db: its rows, and how many rows it changed, or for a read, read. */
 async function statementOn(db: SqlDatabase, text: string, values: readonly unknown[]): Promise<{ rows: unknown[]; rowCount: number }> {
   const result = await db
