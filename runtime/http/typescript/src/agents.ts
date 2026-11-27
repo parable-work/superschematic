@@ -1,6 +1,7 @@
 import type { Authenticator, GrantReach, Principal } from './auth.js';
 import { covers } from './auth.js';
 import { activeGrants, grantAuthenticator, grantAuthenticatorAdmittingRuns, issueGrant, reachesOf, revokeGrant } from './access.js';
+import { principalCaller } from './behavior-routes.js';
 import type { BucketBody } from './bucket.js';
 import { withCaller } from './caller.js';
 import { createLogger, type Logger } from './logger.js';
@@ -14,12 +15,13 @@ import type { ModelCompletion, ModelMessage, ModelTool, ModelUsage } from './pro
 import type { Providers } from './providers/registry.js';
 import type { SandboxCost, SandboxProvider } from './providers/sandbox.js';
 import type { RowRef } from './rowfeatures.js';
-import { enqueue, postgresQueue, type QueueDefinition, type QueuePool } from './queue.js';
+import type { QueueDefinition } from './queue-core.js';
+import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-orm.js';
 import type { CoreCaller } from './rules.js';
 import { callSearchTool, searchMcpTool, type SearchOptions } from './search-tables.js';
 import { SecretValue } from './secret.js';
 import { sha256 } from './sha256.js';
-import type { WorkerMessage, WorkerQueue } from './worker.js';
+import type { WorkerQueue } from './worker.js';
 
 /*
 Agent orchestration (D158, D77's dispatcher): agents are rows, each run gets
@@ -325,8 +327,8 @@ export interface Agents {
   request(tx: any, input: AgentRunRequest, options?: { readonly delaySeconds?: number }): Promise<void>;
   /** Handles one message of the request queue: the dispatcher's worker handler. */
   handle(message: AgentRunRequest): Promise<void>;
-  /** The request queue as a worker runs it. */
-  workerQueue(pool: QueuePool): WorkerQueue;
+  /** The request queue as a worker runs it, over a pg pool, a SqlDatabase (D189) or the queue's claims already made. */
+  workerQueue(source: QueueSource): WorkerQueue;
   /** The authenticator of a run's token: kind agent, acting for whom the run acts for, its permissions narrowed and its grants the run's; inner establishes every other caller. */
   authenticator(inner?: Authenticator): Authenticator;
   /** The principal a request's run token resolves to, or null. */
@@ -445,6 +447,60 @@ export function narrowReaches(role: Readonly<Record<string, readonly string[]>>,
   return out;
 }
 
+/**
+ * The agent's permissions narrowed to those whom it acts for holds (D158):
+ * each of the agent's that one of the actor's covers, then each of the
+ * actor's that one of the agent's covers, the narrower of a pair, each once.
+ */
+export function narrowPermissions(agent: readonly string[], actor: readonly string[]): string[] {
+  const out = new Set<string>();
+  for (const p of agent) if (actor.some(q => covers(q, p))) out.add(p);
+  for (const q of actor) if (agent.some(p => covers(p, q))) out.add(q);
+  return [...out];
+}
+
+/** An autonomy policy row as bestPolicy reads it. */
+export interface PolicyRowShape {
+  readonly agent?: unknown;
+  readonly operation?: unknown;
+  readonly operationClass?: unknown;
+}
+
+/**
+ * The most specific of rows, the policies of an agent and of every agent,
+ * for operation of class cls (D158): one of the agent's over one of every
+ * agent's, one naming the operation over one naming its class, the first
+ * of equals in the order given; undefined when no row names either.
+ */
+export function bestPolicy<T extends PolicyRowShape>(rows: readonly T[], operation: string, cls: OperationClass): T | undefined {
+  const score = (row: T): number => (row.agent ? 4 : 0) + (row.operation === operation ? 2 : row.operation ? -100 : row.operationClass === cls ? 1 : -100);
+  return rows.filter(r => score(r) >= 0).sort((a, b) => score(b) - score(a))[0];
+}
+
+/**
+ * What a use that took a budget's meter from before to after crossed of a
+ * budget of limit (undefined for none) that warns at warnAt percent (D158):
+ * a warning as it crosses the threshold, once, and the cap at the limit.
+ */
+export function budgetCrossing(before: number, after: number, limit: number | undefined, warnAt: number): { readonly warns: boolean; readonly capped: boolean } {
+  return {
+    warns: limit !== undefined && limit > 0 && before * 100 < warnAt * limit && after * 100 >= warnAt * limit,
+    capped: limit !== undefined && after >= limit,
+  };
+}
+
+/**
+ * text redacted as a transcript entry is (D158): each of secrets taken out
+ * where it appears, then every grant's token and every bearer credential,
+ * then each of extra's patterns, each replaced by [redacted].
+ */
+export function redactTokens(text: string, secrets: readonly string[] = [], extra: readonly RegExp[] = []): string {
+  let out = text;
+  for (const secret of secrets) if (secret) out = out.split(secret).join('[redacted]');
+  for (const pattern of [...TOKEN_PATTERNS, ...extra]) out = out.replace(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g'), '[redacted]');
+  return out;
+}
+
 /** The SHA-256, in hex, of an operation and its parameters as canonical JSON: what an approval is bound to. */
 export function paramsHash(operation: string, params: unknown): string {
   return hex(sha256(new TextEncoder().encode(canonicalJson({ operation, params }))));
@@ -531,12 +587,7 @@ export function createAgents(options: AgentsOptions): Agents {
 
   // ---- redaction and the transcript ----
 
-  const redactText = (text: string, secrets: readonly string[] = []): string => {
-    let out = text;
-    for (const secret of secrets) if (secret) out = out.split(secret).join('[redacted]');
-    for (const pattern of [...TOKEN_PATTERNS, ...(options.redact ?? [])]) out = out.replace(new RegExp(pattern.source, pattern.flags.includes('g') ? pattern.flags : pattern.flags + 'g'), '[redacted]');
-    return out;
-  };
+  const redactText = (text: string, secrets: readonly string[] = []): string => redactTokens(text, secrets, options.redact ?? []);
   const redact = <T>(value: T, secrets: readonly string[] = []): T => {
     if (typeof value === 'string') return redactText(value, secrets) as T;
     if (value === null || value === undefined || typeof value !== 'object') return value;
@@ -624,11 +675,12 @@ export function createAgents(options: AgentsOptions): Agents {
     const after = Number(used?.used ?? 0);
     const before = after - amount;
     const warnAt = Number(own.warnAt ?? 80);
-    if (limit !== undefined && limit > 0 && before * 100 < warnAt * limit && after * 100 >= warnAt * limit) {
+    const crossing = budgetCrossing(before, after, limit, warnAt);
+    if (crossing.warns) {
       await orm.transaction((tx: any) => raise(tx, controlsDef.name, String(own.id), 'agent.budgetWarning', { used: after, limit, warnAt }));
     }
     const overruns = (used?.overruns as { schema: string; id: string }[] | undefined) ?? [];
-    if (overruns.some(o => o.schema === controlsDef.name && String(o.id) === String(own.id)) || (limit !== undefined && after >= limit)) {
+    if (overruns.some(o => o.schema === controlsDef.name && String(o.id) === String(own.id)) || crossing.capped) {
       await setPaused(agent, true, 'budget', 'budget');
     }
   };
@@ -987,22 +1039,8 @@ export function createAgents(options: AgentsOptions): Agents {
     }
   };
 
-  const workerQueue = (pool: QueuePool): WorkerQueue => {
-    const queue = postgresQueue(pool, options.requests);
-    return {
-      name: queue.name,
-      leaseSeconds: queue.leaseSeconds,
-      claim: async (n, leaseSeconds) =>
-        (await queue.claim(n, leaseSeconds)).map((claim): WorkerMessage => ({ id: claim.id, token: claim.token, attempt: claim.attempt, handle: () => handle(claim.message as AgentRunRequest) })),
-      extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
-      complete: (id, token) => queue.complete(id, token),
-      fail: (id, token, cause) => queue.fail(id, token, cause),
-      release: (id, token) => queue.release(id, token),
-      prune: async limit => (await queue.prune(limit)) + (await prune(limit)),
-      slot: slots => queue.slot(slots),
-      nextDue: () => queue.nextDue(),
-    };
-  };
+  const workerQueue = (source: QueueSource): WorkerQueue => workerQueueOf(claimsOver(source, options.requests), message => handle(message as AgentRunRequest), limit => prune(limit));
+
 
   const request = async (tx: any, input: AgentRunRequest, enqueueOptions?: { readonly delaySeconds?: number }): Promise<void> => {
     if (input.requestedBy?.kind === 'agent') {
@@ -1040,12 +1078,7 @@ export function createAgents(options: AgentsOptions): Agents {
   };
 
   /** The agent's permissions narrowed to those whom it acts for holds: each the two share, the narrower of a pair. */
-  const narrow = (agent: readonly string[], actor: readonly string[]): string[] => {
-    const out = new Set<string>();
-    for (const p of agent) if (actor.some(q => covers(q, p))) out.add(p);
-    for (const q of actor) if (agent.some(p => covers(p, q))) out.add(q);
-    return [...out];
-  };
+  const narrow = narrowPermissions;
 
   // A token that is no running run's is any other grant's, which refuses a
   // run's; principalOf alone reads a run's token as its grant's holder,
@@ -1127,7 +1160,9 @@ export function createAgents(options: AgentsOptions): Agents {
     if (!run) throw new AgentsError(401, 'unauthorized', 'no such run');
     return run;
   };
-  const callerOf = (principal: Principal): CoreCaller => ({ subject: principal.subject, permissions: principal.permissions });
+  // A run's tool calls reach the core as the run: its Agent and whom it
+  // acts for, which an Approvals requirement counts it by (D200).
+  const callerOf = (principal: Principal): CoreCaller => principalCaller(principal);
 
   // ---- autonomy ----
 
@@ -1137,8 +1172,7 @@ export function createAgents(options: AgentsOptions): Agents {
       ...(await policies.findMany({ agent: { eq: agent } }, { limit: 500, count: false })).rows,
       ...(await policies.findMany({ agent: { isNull: true } }, { limit: 500, count: false })).rows,
     ];
-    const score = (row: Values): number => (row.agent ? 4 : 0) + (row.operation === operation ? 2 : row.operation ? -100 : row.operationClass === cls ? 1 : -100);
-    const best = rows.filter(r => score(r) >= 0).sort((a, b) => score(b) - score(a))[0];
+    const best = bestPolicy(rows, operation, cls);
     return best ? { mode: best.mode as Autonomy, ...(best.permission ? { permission: String(best.permission) } : {}) } : {};
   };
 

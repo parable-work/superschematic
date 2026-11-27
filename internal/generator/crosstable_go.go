@@ -10,9 +10,11 @@ import (
 
 // goServerSQLiteErr refuses, in the Go server of r's API, the features of
 // schema, its database db, that a Go server serves on Postgres alone
-// (D152, D187), when db's config lists sqlite first: Recurrence and a
-// calendar source, as rustrestgen refuses them in a Rust server (D188).
-// A database whose config the build has not read is left unchecked.
+// (D152, D155, D187), when db's config lists sqlite first: Recurrence, a
+// calendar source and a @searchable table, Recurrence and the calendar as
+// rustrestgen refuses them in a Rust server (D188). goDeps calls it for
+// every Go server over a database, whatever its tables declare; a
+// database whose config the build has not read is left unchecked.
 func (r run) goServerSQLiteErr(db string, schema *ir.Schema) error {
 	if r.Options.DependencyConfig == nil {
 		return nil

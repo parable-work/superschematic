@@ -283,6 +283,12 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[m.Field] = m.Service
 	}
+	if deps.Agents != nil && deps.Dialect == SQLiteDialect {
+		// The dispatcher runs on SQLite and D1 (D189); the generated
+		// agents.ts builds it from the ./postgres entry, and its workers
+		// claim through the Postgres queue client.
+		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), and %s lists sqlite first: the generated server builds it from the runtime's ./postgres entry and claims its queues through the Postgres queue client. On SQLite and D1 an app builds createAgents of the runtime's ./d1 entry over the ./orm/sqlite entry's repositories and claims its queues over the SqlDatabase (D189)", o.SchemaName, deps.Database)
+	}
 	if deps.Agents != nil && !depsORM(deps) {
 		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), which runs over the repositories %s's TypeScript types export for Postgres, and holds none", o.SchemaName, deps.Database)
 	}
@@ -697,7 +703,7 @@ func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
 	}
 	w := workers[0]
 	if deps.Database != "" && deps.Dialect == SQLiteDialect {
-		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: a TypeScript behavior worker claims its queues on Postgres alone, and one on a SQLite file or D1 is not built (D103, D116)", w.Name, w.Behavior.Runs(), deps.Database)
+		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: a TypeScript behavior worker claims its queues on Postgres alone, and one on a SQLite file or D1 is not built (D103, D116); on SQLite an app's worker runs the ./orm/sqlite entry's runDeadline and runChange over sqliteQueue's claims (D186)", w.Name, w.Behavior.Runs(), deps.Database)
 	}
 	if depsORM(deps) {
 		return nil

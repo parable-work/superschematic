@@ -252,8 +252,9 @@ func (r *TagRepository) corePatch(update *TagUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and TagUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and TagUpdate holds none.
 func (r *TagRepository) updateColumns(ctx context.Context, update *TagUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	return columns, nil

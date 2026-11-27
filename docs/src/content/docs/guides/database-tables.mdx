@@ -35,7 +35,10 @@ quoted: the `Order` class is the `"order"` table.
 - A class that other tables extend, like `Auditable`, is not a table: its
   fields become columns of each table that extends it. `createdAt` and
   `updatedAt` are audit timestamps: a required one defaults to
-  `CURRENT_TIMESTAMP`, and the ORM's `UpdateOne` sets `updatedAt`.
+  `CURRENT_TIMESTAMP`, and every update sets `updatedAt` from the
+  database's clock too (`statement_timestamp()` on Postgres, `'now'` on
+  SQLite), so a row's times never mix the database's clock with the
+  server's.
 - `@unique` on a field adds a unique constraint on its column.
 - The class comment becomes `COMMENT ON TABLE`.
 
@@ -655,9 +658,43 @@ found, err := crosstable.SearchTables(ctx, db.CrossTables(), crosstable.Caller{P
 `crosstable.SearchRoutes` serves `GET /api/search` as an `http.Handler`,
 and `SearchMCPTool` with `CallSearchTool` the MCP tool; an app mounts the
 handler on its router. `ReindexSearch` builds every row's index row again.
+A Go server whose database lists `sqlite` first is refused a `@searchable`
+table, since `crosstable` ranks by Postgres statements alone.
 
-Search across tables is Postgres alone: the build refuses `@searchable` in
-a service that lists `sqlite`.
+### On SQLite and D1
+
+A database that lists `sqlite` keeps the same `search_index`, its audience
+a JSON array of ids, and its words in an FTS5 table beside it,
+`search_index_fts`, which triggers on the index keep in the statement that
+writes an index row (D186). The `@searchable` tables' triggers are row
+triggers, one after each insert, update and delete, which delete, copy and
+enqueue as Postgres's do. `searchTables`, `indexSearch`, `reindexSearch`,
+`searchRoutes` and `callSearchTool` take the `./orm/sqlite` entry's ORM and
+come from the runtime's `./d1` entry, which a Worker bundles:
+
+```ts
+import { indexSearch, searchTables } from "@superschematic/http-runtime/d1";
+import { createOrm } from "@acme/work-db-types/orm/sqlite";
+
+const orm = createOrm(env.DB, { rules: initSync(rulesWasm) });
+await indexSearch(orm, message);
+const { items, total } = await searchTables(orm, principal, { q: "walnut desk" });
+```
+
+| On SQLite and D1 | Why |
+| --- | --- |
+| each word is a phrase of the words FTS5's `unicode61` tokenizer finds in it, folded to lower case, with no diacritic removed and none stemmed; a row holds every word | the words Postgres's `simple` configuration reads |
+| hits rank by `bm25`, the title weighed 1, the body 0.4, the conversation 0.2 and the files 0.1, then table and key | Postgres's four weight classes, in FTS5's ranking; the two rank alike in order, not in score |
+| access is checked inside the query: the audience through `json_each` over the index row's copy, a grant's reach by an `EXISTS` back to each table | the same exact totals and pages as on Postgres |
+| `indexSearch` writes an index row with the row's access columns read by the write itself | D1 holds no transaction open, so an audience change between its reads and its write is still copied as it stands |
+| embeddings are refused: a search with `vector` is a 400, and `embeddings` in the options throws | vectors are stored and compared on Postgres alone |
+| the FTS5 table is a piece of the model's SQL of its own, after every object | the migration model has no form of a virtual table; a plan that adds the index runs it, and a table made `@searchable` with rows needs `reindexSearch` once |
+
+The triggers keep a row's index row whichever ORM writes it, so a
+service's Go types are built beside it. Go's search (D187) and Rust's
+(D188) run on Postgres alone: a Go server is refused search over a
+database that lists `sqlite` first, and a service that lists `sqlite` and
+declares `@searchable` takes no Rust types.
 
 ## Pages
 
@@ -2425,8 +2462,6 @@ text, so its `eq`, `ne`, `in` and `notIn` compare the nodes `json_tree`
 reads of each value, a number written `2` or `2.0` the same.
 
 The repositories do not read a `@versioned` table's history yet; the Go
-ORM does. They run on Postgres alone: the Rust repositories run on a
-SQLite file too ([Rust](#rust)).
 ORM does.
 
 ### On SQLite and D1
@@ -2485,7 +2520,7 @@ Postgres refuses to change a row twice in one statement (D89).
 | on D1 a transaction's statements each commit as they run, and a throw rolls none back | D1 runs no interactive transaction; a write the repositories make in one statement, a trigger's work with it, is atomic there as anywhere, and an implementation that needs several so writes a batch |
 | no advisory lock | a transaction on SQLite holds the database's one write lock, and D1 runs each statement alone |
 | `fieldKeys` takes a `FieldKeyring` | reading a key secret needs `node:crypto`, which Bun has (`parseFieldKeys` of `./sqlite`) and a Worker does not, so an `Encrypted<T>` field is Postgres's and Bun's alone so far |
-| a table that composes behaviors writes through the core, over the rules module's SQLite store, and upserts a row at a time: its `upsertMany` is refused | the core's change set is one batch, a savepoint of the file's transaction and D1's atomic unit; the Rust repositories upsert such a table a row at a time too, and the Go ones on SQLite refuse its upserts |
+| a table that composes behaviors writes its rows and runs its operations, deadlines and changes through the core (D186), over the rules module's SQLite store, and upserts a row at a time: its `upsertMany` is refused | the core's change set is one batch, a savepoint of the file's transaction and D1's atomic unit: a row, its sub-table rows, its deadline and event messages and a worker's spent claim land together, and the batch first checks each read made under a lock, so a command a write raced runs again; the Rust repositories upsert such a table a row at a time too, and the Go ones on SQLite refuse its upserts |
 | on D1 a write whose later statement needs an earlier one's answer is refused by name: an upsert that seals an `Encrypted<T>` field, and `runEvent` | D1 runs no interactive transaction, so its statements would commit apart |
 | `mergeInto` is refused | a merge's plan runs on Postgres alone so far |
 | a table SQLite's repositories cannot hold is left out of the entry, with why | the Rust repositories leave out the same tables (`SQLiteTableRefusal`) |
@@ -3020,8 +3055,9 @@ Task <id>'s urgent only turns true: an update may not move it from true to false
   Relation<Authority>`. Its TypeScript types (`FieldOf<T>` from
   `@superschematic/db`) take that name and refuse the relation's, as the
   build does, in Constants' `fields` and `oneWay`, StateRules' `required`,
-  `frozen` and `by`, Approvals' `resetOn`, and the field members of
-  Presence, Lease, Retries, Budget, Seats and Pool. `@enqueueOnChange` and
+  `frozen` and `by`, Approvals' `resetOn`, `pinOn`, `excludeSubjectsIn`,
+  a condition's `field` and `requirementsFrom`'s `in`, and the field
+  members of Presence, Lease, Retries, Budget, Seats and Pool. `@enqueueOnChange` and
   a `link` or `via` name the relation itself.
 
 **StateRules.** `states` gives, by a state of the table's Workflow, its
@@ -3056,7 +3092,11 @@ field the states are of when the table has several.
 permission, from?, excludeCreator?, resetOn?, pinned? }`: a transition
 into the state, from a state `from` lists (every state when absent),
 waits for `count` sign-offs by distinct subjects holding `permission`
-(409 `approvals_missing`, `{ state, required, count }`). Its operations,
+(409 `approvals_missing`, `{ state, required, count }`). A gate is one
+requirement; it may instead read its requirements from rows each instance
+writes (`requirementsFrom`, below), and a requirement may also say who
+counts, what proof a sign-off shows, whom it excludes and when it applies
+(D200). Its operations,
 `approvals.signOff`, `withdrawSignOff` and the read-only `listSignOffs`,
 are served by a `@behaviorOperations` set
 ([A table's sign-offs](/superschematic/guides/api-routes/#a-tables-sign-offs-approvals)).
@@ -3087,6 +3127,75 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
   signs against the version the last sign-off left.
 - A gate whose config a later build removes has its sign-offs consumed
   at the row's next write through the core.
+- **Who counts** (`callers`). `person` is a person calling as themselves;
+  `acting-for-person` an agent run acting for a person, counted as that
+  person, so two runs for one person are one signer; `agent` an agent run,
+  counted as its Agent, so two runs of one Agent are one signer. Without
+  `callers` every caller counts, as its subject. A caller the requirement
+  does not count is 409 `not_counted`.
+- **Proof** (`proof`). `none`, the default; `recent-sign-in`, a sign-in at
+  most `proofWithinMs` before the sign-off; `user-verification`, a passkey
+  with user verification on the sign-off itself. The authenticator reports
+  the caller's `assurance` (`{ signedInAt?, userVerified? }` on the
+  principal); a principal without one proves nothing.
+- **Whom it excludes.** `excludeCreator` as above, by the caller's subject
+  or whom it counts as. `excludeCreatorPerson: true` also refuses the
+  person the creator acted for, the subject the table's own `createdFor`
+  holds. `excludeSubjectsIn` names own fields that list subjects, persons
+  and Agents (`pushers`); a caller is excluded when its subject, the person
+  it acts for or its run's Agent is listed. Each is read again at every
+  guard, so a signer a later write lists stops counting.
+- **The permission again** (`recheckPermission: true`). Each guard reads
+  each signer's permission now, so a signer who lost it stops counting;
+  without it the permission is read at the sign-off.
+- **When it applies** (`when`). A list of conditions on own fields, all of
+  which must hold: `{ field, test, values, negate? }`, `test` one of
+  `every-matches` and `any-matches` (glob patterns: `*` within a path
+  segment, `**` across them), `contains` and `at-most` (one number). A
+  requirement that does not apply asks for nothing. A condition on a field
+  with no value holds, so a fact not yet written never exempts.
+- **Requirements from rows** (`requirementsFrom: { schema, link, in? }`).
+  The gate reads its requirements from the rows of `schema` whose to-one
+  relation `link` points at the row, or with `in`, at one of the keys the
+  row's own list field `in` holds. Each row holds the members above as its
+  own fields, may hold `name`, `resetOn` and `archivedAt`, and is read at
+  each guard and each sign-off, so an edit of a row applies at once; an
+  archived row asks for nothing. A sign-off counts toward every
+  requirement it meets. A row's `resetOn` spends a sign-off for that
+  requirement alone: each sign-off records the values of the fields the
+  rows reset on, and counts only while those fields still hold them. The
+  gate then names no requirement member and names its own `resetOn`, often
+  `[]`, so the writes of the facts its rows read spend nothing. A row that
+  does not parse applies and is never met, and the veto says why;
+  `approvals_missing`'s details then list each requirement still `missing`.
+  The table `schema` names composes a behavior, so the core reads its rows.
+- **Pinned fields** (`pinOn`). `signOff` takes `read`, the value of each
+  field the signer read (`{ "headSha": "..." }`); one that moved is 409
+  `stale`, `{ field, read, current }`. A write to another field makes no
+  signer stale. The generated clients type `read` with the fields the
+  table's gates pin, and a table whose gates pin none has no `read`.
+
+```ts
+// forge-db
+export abstract class Change implements Approvals<Change, {
+  gates: {
+    ready: {
+      from: ["open"];
+      resetOn: [];
+      pinOn: ["headSha"];
+      requirementsFrom: { schema: "MergeRequirement"; link: "rule"; in: "rules" };
+    };
+  };
+}> {
+  // ...
+  headSha: string;
+  patchId?: string;
+  rules?: Identity.UUID[];
+  pushers?: Identity.UUID[];
+  createdBy: Identity.UUID;
+  createdFor?: Identity.UUID;
+}
+```
 
 The three hold every write through the core: the repositories' creates,
 their updates and deletes of one row by its key, the table's behavior
@@ -3907,7 +4016,7 @@ The generated router mounts neither `calendarRoutes` nor the calendar's
 MCP tool: an app wires them itself, as it wires `grantAuthenticator`
 (`examples/recurring-duties`). Recurrence and the calendar are served end
 to end by a TypeScript server, a Rust one and a Go one on Postgres, and
-the calendar has no SQLite or D1 form.
+by a TypeScript one on SQLite and D1 too.
 
 A Rust server serves Recurrence on Postgres as the TypeScript one does
 (D188): the router's `recurrence` routes run the operations through the
@@ -3949,9 +4058,24 @@ router.Mount("/api/calendar", crosstable.CalendarRoutes(crosstable.CalendarRoute
 `CallCalendarTool` answers the MCP tool `CalendarMCPTool` describes, and
 `IssueFeed`, `RotateFeed` and `RevokeFeed` are the feed's operations; the
 ORM's `AuthenticateGrant` refuses a feed's token on every other route. A
-Go server whose database lists `sqlite` first is refused Recurrence and a
-calendar source, and one whose calendar source is titled by an
+Go server whose database lists `sqlite` first is refused Recurrence, a
+calendar source and search, and one whose calendar source is titled by an
 `Encrypted<T>` field is refused it.
+
+On SQLite and D1 the `./orm/sqlite` entry's repositories run Recurrence
+through the core as Postgres's do (D186): the `occurrences` sub-table, its
+times as RFC 3339 text, the four deadlines on the table's deadline queue
+and its events. `readCalendar`, the feed and its routes come from the
+runtime's `./d1` entry too, and hold each row to its audience and the
+caller's grants as on Postgres. On D1, which holds no transaction open,
+each change set is one batch: a plan's occurrences and the deadlines it
+arms land together or not at all, and a deadline's fire spends its
+worker's claim in the batch that writes the occurrence, so a claim another
+worker holds spends and writes nothing. A Worker passes the core's module
+(`createOrm(env.DB, { rules: initSync(rulesWasm) })`); under Bun the rules
+package loads its own. The generated behavior worker claims through the
+Postgres queue client alone so far: over SQLite a worker runs the
+repository's `runDeadline` and `runChange` over `sqliteQueue`'s claims.
 
 ### A pool of members
 

@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"reflect"
 	"strings"
-	"time"
 
 	types "example.com/schemas/types/go/fixture-fenced-db"
 	"github.com/jackc/pgx/v5"
@@ -1554,9 +1553,7 @@ func (r *DeliveryRepository) upsertRow(ctx context.Context, input *types.Deliver
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 		// Set updated_by
 
@@ -1791,8 +1788,7 @@ func (r *DeliveryRepository) upsertBatches(ctx context.Context, inputs []*types.
 			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			assignments = append(assignments, "updated_at = statement_timestamp()")
 			// Each fence the update's columns advance moves on by one
 			// (D119).
 			assignments = append(assignments, fenceBumps(deliveryFences, assignments)...)
@@ -2205,9 +2201,7 @@ func (r *DeliveryRepository) UpdateOne(ctx context.Context, id types.IdentityUUI
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 
@@ -2355,9 +2349,7 @@ func (r *DeliveryRepository) UpdateMany(ctx context.Context, filter *DeliveryFil
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 

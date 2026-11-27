@@ -65,19 +65,15 @@ function sqliteStatementsOf<M>(queue: QueueDefinition<M>): QueueStatements {
 }
 
 /**
- * The statement that writes message into queue on db, which the caller adds
- * to the batch whose writes caused the message, so it commits with them, or
- * runs alone. Each member the message sets writes its column; one it leaves
+ * The text and values of the statement that writes message into queue on
+ * SQLite: each member the message sets writes its column; one it leaves
  * unset takes the column's default, and an enum with a schema default
  * writes that default, as the Go ORM writes them. With options.delaySeconds
- * the message is due that long after the database's clock (D80).
+ * the message is due that long after the database's clock (D80). An
+ * enqueue in an ORM's transaction (queue-orm.ts) runs it on the
+ * transaction's connection; enqueueStatement prepares it on a SqlDatabase.
  */
-export function enqueueStatement<M>(
-  db: SqlDatabase,
-  queue: QueueDefinition<M>,
-  message: M,
-  options?: EnqueueOptions,
-): SqlPreparedStatement {
+export function sqliteEnqueueOf<M>(queue: QueueDefinition<M>, message: M, options?: EnqueueOptions): { readonly text: string; readonly values: SqlValue[]; readonly delay: number } {
   const statements = sqliteStatementsOf(queue);
   const delay = delayOf(queue.table, statements, options);
   const columns: string[] = [];
@@ -111,6 +107,21 @@ export function enqueueStatement<M>(
     columns.length === 0
       ? `${statements.insert} DEFAULT VALUES`
       : `${statements.insert} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})${conflictOf(statements)}`;
+  return { text, values, delay };
+}
+
+/**
+ * The statement that writes message into queue on db, which the caller adds
+ * to the batch whose writes caused the message, so it commits with them, or
+ * runs alone: sqliteEnqueueOf's text and values, prepared on db.
+ */
+export function enqueueStatement<M>(
+  db: SqlDatabase,
+  queue: QueueDefinition<M>,
+  message: M,
+  options?: EnqueueOptions,
+): SqlPreparedStatement {
+  const { text, values } = sqliteEnqueueOf(queue, message, options);
   return db.prepare(text).bind(...values);
 }
 

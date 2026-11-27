@@ -16,6 +16,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/pgtest"
 	"github.com/parable-work/superschematic/internal/registry"
+	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -244,6 +245,72 @@ func TestGeneratedRecurrenceEndToEnd(t *testing.T) {
 	}
 	if testing.Verbose() {
 		t.Logf("behavior_recurrence_runtime.test.ts:\n%s", out)
+	}
+}
+
+// TestGeneratedRecurrenceEndToEndOnSQLite serves fixture-recurrence-api's
+// generated router under bun over fixture-recurrence-db's generated
+// repositories on SQLite (D186): the ./orm/sqlite entry's createOrm on
+// openSqlite's connection to a file its sqlite/create.sql made, whose
+// behaviors run through the core in its transactions, with the behavior
+// worker's handlers over the SQLite queue client. It runs
+// behavior_recurrence_runtime.test.ts with ORM_DIALECT sqlite, every case
+// of recurrenceCases, which needs no database server.
+func TestGeneratedRecurrenceEndToEndOnSQLite(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping the generated TypeScript server's and worker's Recurrence on SQLite in -short mode")
+	}
+	fixture := recurrenceFixture(t)
+	fixture.sqlite = true
+	tree := materializeAPI(t, fixture)
+	tree.typeCheck(t)
+	model, err := sqlmigrate.BuildModel(fixture.deps[recurrenceDB], sqlgen.Options{SchemaName: recurrenceDB}, sqlmigrate.SQLite)
+	if err != nil {
+		t.Fatalf("build %s's SQLite model: %v", recurrenceDB, err)
+	}
+	script, err := sqlmigrate.CreateSQL(model)
+	if err != nil {
+		t.Fatalf("write %s's SQLite create.sql: %v", recurrenceDB, err)
+	}
+	createSQL := filepath.Join(tree.root, "sql", recurrenceDB, "sqlite", "create.sql")
+	if err := os.MkdirAll(filepath.Dir(createSQL), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(createSQL, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	testFile := tree.stage(t, "behavior_recurrence_runtime.test.ts")
+	report := filepath.Join(tree.root, "behavior_recurrence-sqlite.junit.xml")
+	run := exec.Command(tree.bun, "test", testFile, "--timeout=120000", "--reporter=junit", "--reporter-outfile="+report)
+	run.Dir = tree.apiDir
+	run.Env = append(os.Environ(), "API_DIR="+tree.apiDir, "CREATE_SQL="+createSQL, "ORM_DIALECT=sqlite", "SQLITE_FILE="+filepath.Join(tree.root, "recurrence.sqlite"))
+	out, err := run.CombinedOutput()
+	if err != nil {
+		t.Fatalf("behavior_recurrence_runtime.test.ts on SQLite failed: %v\n%s", err, out)
+	}
+	junit, err := os.ReadFile(report)
+	if err != nil {
+		t.Fatalf("read bun's report: %v\n%s", err, out)
+	}
+	cases, err := junitTestcases(junit)
+	if err != nil {
+		t.Fatalf("parse bun's report: %v\n%s", err, junit)
+	}
+	for _, name := range recurrenceCases {
+		tc, ok := cases[name]
+		switch {
+		case !ok:
+			t.Errorf("bun did not run %q:\n%s", name, junit)
+		case tc.Failure != nil || tc.Skipped != nil:
+			t.Errorf("%q did not pass on SQLite:\n%s", name, junit)
+		}
+	}
+	if len(cases) != len(recurrenceCases) {
+		t.Errorf("bun ran %d cases, and recurrenceCases names %d:\n%s", len(cases), len(recurrenceCases), junit)
+	}
+	if testing.Verbose() {
+		t.Logf("behavior_recurrence_runtime.test.ts on SQLite:\n%s", out)
 	}
 }
 

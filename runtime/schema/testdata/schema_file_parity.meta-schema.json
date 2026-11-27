@@ -230,9 +230,34 @@
                   "gates": {
                     "additionalProperties": {
                       "additionalProperties": false,
+                      "else": {
+                        "required": [
+                          "count",
+                          "permission"
+                        ]
+                      },
+                      "if": {
+                        "required": [
+                          "requirementsFrom"
+                        ]
+                      },
                       "properties": {
+                        "callers": {
+                          "description": "Which callers count, and as whom: person, a person calling as themselves; acting-for-person, an agent run acting for a person, counted as that person; agent, an agent run, counted as its Agent. Every caller counts, as its subject, when absent. A table's alone: an engine type refuses it.",
+                          "items": {
+                            "enum": [
+                              "person",
+                              "acting-for-person",
+                              "agent"
+                            ],
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
                         "count": {
-                          "description": "How many distinct principals must sign off before a transition into the state.",
+                          "description": "How many distinct signers must sign off before a transition into the state. Needed unless the gate reads its requirements from rows.",
                           "maximum": 100,
                           "minimum": 1,
                           "type": "integer"
@@ -240,6 +265,20 @@
                         "excludeCreator": {
                           "description": "Whether the principal who created the instance is refused a sign-off; true when absent.",
                           "type": "boolean"
+                        },
+                        "excludeCreatorPerson": {
+                          "description": "Whether the person the creator acted for, the subject the type's own field createdFor holds, is refused a sign-off too; false when absent. A table's alone: an engine type refuses it.",
+                          "type": "boolean"
+                        },
+                        "excludeSubjectsIn": {
+                          "description": "Own fields that list subjects, persons and Agents who may not sign: a caller is excluded when its subject, the person it acts for or its run's Agent is listed. A table's alone: an engine type refuses it.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 64,
+                          "type": "array",
+                          "uniqueItems": true
                         },
                         "from": {
                           "description": "The states of the type's Workflow a transition from is gated; every state when absent.",
@@ -252,13 +291,68 @@
                           "uniqueItems": true
                         },
                         "permission": {
-                          "description": "The permission a caller needs to sign off.",
+                          "description": "The permission a caller needs to sign off. Needed unless the gate reads its requirements from rows.",
                           "minLength": 1,
                           "type": "string"
+                        },
+                        "pinOn": {
+                          "description": "Own fields a sign-off is pinned to: signOff then names in read the value of each as its signer read it, and one that is not the field's value is vetoed stale. Unlike pinned, a write to another field does not make a signer stale. A table's alone: an engine type refuses it.",
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 16,
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
                         },
                         "pinned": {
                           "description": "Whether a sign-off names the row's version its signer read: signOff then needs version, and one that is not the row's version is vetoed stale. A table's alone: an engine type refuses it.",
                           "type": "boolean"
+                        },
+                        "proof": {
+                          "description": "What each sign-off shows, as the host reports the caller's assurance: none; recent-sign-in, a sign-in at most proofWithinMs before it; user-verification, a passkey with user verification on the sign-off itself. none when absent. A table's alone: an engine type refuses it.",
+                          "enum": [
+                            "none",
+                            "recent-sign-in",
+                            "user-verification"
+                          ],
+                          "type": "string"
+                        },
+                        "proofWithinMs": {
+                          "description": "For recent-sign-in, the most milliseconds a sign-in may come before the sign-off. A table's alone: an engine type refuses it.",
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "recheckPermission": {
+                          "description": "Whether each transition the gate guards reads each signer's permission again, so a signer who has lost it stops counting; false when absent, which reads it at the sign-off. A table's alone: an engine type refuses it.",
+                          "type": "boolean"
+                        },
+                        "requirementsFrom": {
+                          "additionalProperties": false,
+                          "description": "Reads the gate's requirements from the rows of a type, so each instance writes its own: the rows of schema whose to-one relation link points at the instance, or, with in, at one of the keys the instance's own list field in holds. A row holds a requirement's members as its own fields (count, permission, callers, proof, proofWithinMs, excludeCreator, excludeCreatorPerson, excludeSubjectsIn, recheckPermission, when) and may hold name, resetOn and archivedAt. An archived row asks for nothing. A row's resetOn spends a sign-off for that requirement alone: a sign-off records the value of each field the rows reset on, and counts for a requirement only while its fields still hold them. The gate then names none of the requirement's members, and names its own resetOn. A table's alone: an engine type refuses it.",
+                          "properties": {
+                            "in": {
+                              "description": "An own list field of the instance that holds the keys link points at; absent, link points at the instance itself.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "link": {
+                              "description": "The to-one relation of schema's rows the rows are found by.",
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "schema": {
+                              "description": "The type whose rows are the requirements.",
+                              "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "schema",
+                            "link"
+                          ],
+                          "type": "object"
                         },
                         "resetOn": {
                           "description": "The own fields whose change, by an update, consumes the gate's sign-offs; [] for none. Absent, the gate follows resetOnChange. A table's alone: an engine type refuses it.",
@@ -269,12 +363,52 @@
                           "maxItems": 64,
                           "type": "array",
                           "uniqueItems": true
+                        },
+                        "when": {
+                          "description": "The conditions on the instance's own fields under which the requirement applies, all of them; it always applies when absent. A requirement that does not apply asks for nothing, and a condition on a field with no value makes it apply. A table's alone: an engine type refuses it.",
+                          "items": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "field": {
+                                "description": "An own field of the instance.",
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "negate": {
+                                "description": "Whether the condition holds when its test fails; false when absent.",
+                                "type": "boolean"
+                              },
+                              "test": {
+                                "description": "every-matches: every value of the field matches one of the glob patterns; any-matches: one value does; contains: the field holds one of the values; at-most: the field's number is at most the one value.",
+                                "enum": [
+                                  "every-matches",
+                                  "any-matches",
+                                  "contains",
+                                  "at-most"
+                                ],
+                                "type": "string"
+                              },
+                              "values": {
+                                "description": "The glob patterns (* within a path segment, ** across segments, ? one character), the values, or the one number.",
+                                "items": {
+                                  "type": "string"
+                                },
+                                "maxItems": 256,
+                                "minItems": 1,
+                                "type": "array"
+                              }
+                            },
+                            "required": [
+                              "field",
+                              "test",
+                              "values"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 32,
+                          "type": "array"
                         }
                       },
-                      "required": [
-                        "count",
-                        "permission"
-                      ],
                       "type": "object"
                     },
                     "description": "The gates, by the state of the type's Workflow each gates.",

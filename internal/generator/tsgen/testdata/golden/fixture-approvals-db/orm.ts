@@ -209,7 +209,7 @@ export const noteTable: TableDefinition = {
     update: "UPDATE note SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\"",
     updateMany: "UPDATE note SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"slug\", \"title\", \"body\", \"author\", \"pinned\", \"views\", \"created_by\", \"deleted_at\", \"status\", \"status_entered_at\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE note SET deleted_at = $1 WHERE id = $2 AND deleted_at IS NULL",
@@ -313,12 +313,13 @@ export interface TaskRelations {
 export interface TaskUses {
   /** The operations of Approvals, which Task implements. */
   readonly approvals: UseOperations<{
-    /** Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
+    /** Signs off on the instance for a gated state, as the caller. Needs the permission of one of the gate's requirements, and is refused unless it counts toward one of them now: for the instance's creator unless the requirement allows it, for a caller the requirement does not count, excludes or whose proof falls short, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
     signOff: {
       params: { note?: string; state: 'done' | 'proving'; version?: number };
       result: {
         at: number;
         count: number;
+        countsToward?: string[];
         note?: string;
         signedBy: string[];
         state: 'done' | 'proving';
@@ -329,6 +330,8 @@ export interface TaskUses {
     withdrawSignOff: {
       params: { state: 'done' | 'proving' };
       result: {
+        actingFor?: string;
+        agent?: string;
         at: number;
         note?: string;
         state: 'done' | 'proving';
@@ -340,6 +343,8 @@ export interface TaskUses {
       params: { cursor?: string; limit?: number; state?: string };
       result: {
         items: Array<{
+          actingFor?: string;
+          agent?: string;
           at: number;
           consumedAt?: number;
           note?: string;
@@ -426,7 +431,7 @@ export const taskTable: TableDefinition = {
     update: "UPDATE task SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"title\", \"owner\", \"reviewer\", \"plan\", \"proof\", \"urgent\", \"attempts\", \"created_by\", \"status\", \"status_entered_at\", \"_version\"",
     updateMany: "UPDATE task SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO task (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"title\", \"owner\", \"reviewer\", \"plan\", \"proof\", \"urgent\", \"attempts\", \"created_by\", \"status\", \"status_entered_at\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",
@@ -743,6 +748,55 @@ export const fixtureApprovalsDbRules: RulesLayout = {
                   "field": "subject",
                   "column": "subject",
                   "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "actingFor",
+                  "field": "actingFor",
+                  "column": "acting_for",
+                  "type": "string"
+                },
+                {
+                  "name": "actingForKind",
+                  "field": "actingForKind",
+                  "column": "acting_for_kind",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "field": "agent",
+                  "column": "agent",
+                  "type": "string"
+                },
+                {
+                  "name": "signedInAt",
+                  "field": "signedInAt",
+                  "column": "signed_in_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "userVerified",
+                  "field": "userVerified",
+                  "column": "user_verified",
+                  "type": "boolean"
+                },
+                {
+                  "name": "held",
+                  "field": "held",
+                  "column": "held",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "values",
+                  "field": "values",
+                  "column": "values",
+                  "type": "Generic.JSON"
                 },
                 {
                   "name": "note",

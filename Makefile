@@ -334,7 +334,8 @@ rust:
 # (runtime/engine/testdata/scenarios, or the directory ENGINE_CORPUS_DIR
 # names) on the same databases, and the HTTP corpus through the engine's
 # routes and its axum router, and fails when a corpus is missing.
-# CI runs the same commands as the engine-rust job, against its Postgres.
+# CI's engine-rust job runs the same lints and the same tests against its
+# Postgres, the tests in shards (scripts/engine_rust_shards.py).
 engine-rust:
 	cd runtime/engine/rust && cargo fmt --all --check \
 		&& cargo clippy --workspace --all-targets --all-features -- -D warnings \

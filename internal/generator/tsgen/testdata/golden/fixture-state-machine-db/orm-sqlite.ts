@@ -19,11 +19,10 @@ from its BEGIN IMMEDIATE; D1 runs no interactive transaction, so there a
 transaction's statements each commit as they run, and a write of several
 statements all known before the first goes as one batch: createMany, an
 upsert's read of its key with the upsert, an upsert of many rows. A table
-that composes behaviors writes through the behaviors' core, over the rules
-module's SQLite store (D103), and upserts as on Postgres, its upsertMany a
-row at a time with upsertOne. On D1 a write whose later statement needs an
-earlier one's answer is refused by name: an upsert that seals an
-Encrypted<T> field, and runEvent.
+that composes behaviors upserts as on Postgres, its upsertMany a row at a
+time with upsertOne. On D1 a write whose later statement needs an earlier
+one's answer is refused by name: an upsert that seals an Encrypted<T>
+field, and runEvent.
 
 The SQLite repositories serve no merges yet (D147).
 createOrm(db, { fieldKeys }) takes a FieldKeyring for the Encrypted<T>
@@ -75,7 +74,7 @@ export const ticketTable: TableDefinition = {
     update: "UPDATE ticket SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\"",
     updateMany: "UPDATE ticket SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO ticket (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"subject\", \"state\", \"review\", \"escalation\", \"account_status\", \"sign_off\", \"updated_at\"",
     softDelete: "",

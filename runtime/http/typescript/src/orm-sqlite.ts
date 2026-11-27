@@ -159,8 +159,11 @@ function turnsFor(db: SqlDatabase): Turns {
 /**
  * Runs fn in a turn of its own on db, as a pool's statement or transaction
  * runs: what runs statements of its own on the connection beside the
- * repositories, the identity store over the file among them (D116), takes
- * its turn with them, so the two never meet in one transaction. A call
+ * repositories takes its turn with them, so the two never meet in one
+ * transaction. The identity store over the file (D116) does, and so do a
+ * queue's claims over db (queue-orm.ts's claimsOver, D189), so a claim, a
+ * completion or a failure never runs inside a transaction a handler holds
+ * open on the same connection, where its rollback would undo it. A call
  * within the running turn runs at once, in it.
  */
 export function inSqliteTurn<T>(db: SqlDatabase, fn: () => Promise<T>): Promise<T> {

@@ -24,6 +24,8 @@
 //! the Go build (`ir.RuntimeContracts`) and the TypeScript runtime hold
 //! too; a test of this module reads it.
 
+#[cfg(feature = "http-client")]
+mod agent_runner;
 mod channel;
 mod contracts;
 mod credentials;
@@ -34,6 +36,11 @@ mod registry;
 mod sandbox;
 mod secret;
 
+#[cfg(feature = "http-client")]
+pub use agent_runner::{
+    run_agent_instance, AgentInstanceOptions, AgentInstanceResult, SandboxToolContext,
+    SandboxToolHandler,
+};
 pub use channel::{
     ChannelAdapter, ChannelHealth, DeliveryState, DeliveryStatus, InboundAttachment,
     InboundAuthentication, InboundMessage, OptOut, OutboundMessage, SendResult, WebhookRequest,

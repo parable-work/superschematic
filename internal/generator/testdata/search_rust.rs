@@ -190,7 +190,7 @@ impl Database {
             Who::System => repos.as_system(),
             Who::User(user) => repos
                 .acting(Some(user.clone()))
-                .with_caller(Caller { subject: user.clone(), permissions: Vec::new(), stands_in: false })
+                .with_caller(Caller { subject: user.clone(), permissions: Vec::new(), stands_in: false, ..Default::default() })
                 .with_access(AccessCaller::of(Some(&Principal::new(user.clone(), Vec::<String>::new())))),
         };
         let out = work(&repos).await;
@@ -434,8 +434,11 @@ async fn search_across_tables_on_postgres() {
         let called = call_search_tool(repos.untyped(), Some(&principal), args.as_object().unwrap(), &none).await.unwrap();
         let called: Vec<String> = called.items.iter().map(|hit| format!("{}:{}", hit.table, hit.key)).collect();
         assert_eq!(sorted(called), sorted(vec![format!("Request:{request_a}"), format!("Unit:{unit_a}")]));
-        // An agent run's token is a grant too (kind agent): its search keeps
-        // to what the grant reaches, as the MCP endpoint answers it.
+        // An agent run's grant (kind agent): its search keeps to what the
+        // grant reaches, as the MCP endpoint answers it. Its token is the
+        // agent dispatcher's to resolve (D193): the plain grant
+        // authenticator refuses it, so the run's principal is built here
+        // as the dispatcher builds it from the grant.
         let run = db
             .tx(&system, async |r| {
                 issue_grant(
@@ -455,8 +458,15 @@ async fn search_across_tables_on_postgres() {
             })
             .await
             .unwrap();
-        let agent = authenticate.authenticate(&parts(&run.token)).await.unwrap().unwrap();
-        assert_eq!(agent.kind, PrincipalKind::Agent);
+        assert!(authenticate.authenticate(&parts(&run.token)).await.is_err());
+        let agent = Principal::new(uuid(0xa9), Vec::<String>::new())
+            .of_kind(PrincipalKind::Agent)
+            .with_grants(vec![runtime::GrantReach {
+                id: run.grant["id"].as_str().unwrap().to_owned(),
+                target_type: "Contract".to_owned(),
+                target_id: contract_a.clone(),
+                reaches: runtime::access::reaches_of(["Unit:contract", "Request:unit.contract"]),
+            }]);
         let args = json!({ "q": "walnut" });
         let called = call_search_tool(repos.untyped(), Some(&agent), args.as_object().unwrap(), &none).await.unwrap();
         let called: Vec<String> = called.items.iter().map(|hit| format!("{}:{}", hit.table, hit.key)).collect();

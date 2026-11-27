@@ -252,6 +252,12 @@ type ORMOutput struct {
 	// go.mod requires the schema runtime, whose notifications package
 	// holds the host.
 	Notifications *NotificationsModel
+
+	// Orchestration is the database's parties, inbound path and agent
+	// dispatcher (D157, D158, D192), nil for a database with none or with
+	// no notifier: it writes orchestration.go, and go.mod requires the
+	// schema runtime, whose orchestration package holds the host.
+	Orchestration *OrchestrationModel
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -1383,6 +1389,12 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 			}
 		}
 	}
+	// The inbound path and the dispatcher run on Postgres alone (D192).
+	if !opts.SQLite {
+		if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
+			return nil, err
+		}
+	}
 
 	return output, nil
 }
@@ -2262,11 +2274,9 @@ func computeImportNeeds(repo *Repository) {
 		if field.IsJSONField && field.IsUnion && (field.IsArray || field.IsMap) {
 			repo.HasJSONUnionCollections = true
 		}
-		// time.Now() stamps updated_at; time.Time() conversions apply to
-		// non-audit, non-PK datetime scalars in the insert/update paths.
-		if field.Name == "updatedAt" && !repo.Released {
-			repo.NeedsTime = true
-		}
+		// time.Time() conversions apply to non-audit, non-PK datetime
+		// scalars in the insert/update paths; updated_at takes the
+		// database's clock.
 		if field.IsDateTimeScalar && !field.IsAuditField && !field.IsPrimaryKey && !repo.Released {
 			repo.NeedsTime = true
 		}

@@ -40,6 +40,56 @@ type NoSuchStatus = Approvals<Task, { gates: { done: { count: 1; permission: "p"
 // @ts-expect-error a gate needs its permission
 type NoPermission = Approvals<Task, { gates: { done: { count: 1 } } }>;
 
+// D200: a gate written in the config names who counts, the proof, whom it
+// excludes and when it applies; a gate that reads its requirements from
+// rows names where, pins named fields and its own resetOn, and no
+// requirement member.
+export abstract class Change implements Approvals<Change, {
+  gates: {
+    ready: {
+      from: ["open"];
+      resetOn: [];
+      pinOn: ["headSha"];
+      requirementsFrom: { schema: "MergeRequirement"; link: "rule"; in: "rules" };
+    };
+    landed: {
+      count: 1;
+      permission: "changes.land";
+      callers: ["person", "acting-for-person"];
+      proof: "recent-sign-in";
+      proofWithinMs: 600000;
+      excludeCreatorPerson: true;
+      excludeSubjectsIn: ["pushers"];
+      recheckPermission: true;
+      when: [{ field: "touchedPaths"; test: "every-matches"; values: ["**/*_test.go"]; negate: true }];
+    };
+  };
+}> {
+  id: string;
+  headSha: string;
+  rules?: string[];
+  pushers?: string[];
+  touchedPaths?: string[];
+  createdBy: string;
+  createdFor?: string;
+  status: Workflow<{ states: ["open", "ready", "landed"]; transitions: [] }>;
+}
+
+const rowsGate: ApprovalsGateOn<Change> = { resetOn: [], requirementsFrom: { schema: "MergeRequirement", link: "rule", in: "rules" } };
+
+// @ts-expect-error a gate that reads rows names no count: each row holds its own
+type RowsWithCount = Approvals<Change, { gates: { ready: { count: 1; resetOn: []; requirementsFrom: { schema: "R"; link: "rule" } } } }>;
+// @ts-expect-error a gate that reads rows names its resetOn
+type RowsWithoutResetOn = Approvals<Change, { gates: { ready: { requirementsFrom: { schema: "R"; link: "rule" } } } }>;
+// @ts-expect-error in names a field of the table
+type NoSuchIn = Approvals<Change, { gates: { ready: { resetOn: []; requirementsFrom: { schema: "R"; link: "rule"; in: "ruleList" } } } }>;
+// @ts-expect-error pinOn names fields of the table
+type NoSuchPin = Approvals<Change, { gates: { ready: { count: 1; permission: "p"; pinOn: ["sha"] } } }>;
+// @ts-expect-error callers are person, acting-for-person and agent
+type NoSuchCaller = Approvals<Change, { gates: { ready: { count: 1; permission: "p"; callers: ["robot"] } } }>;
+// @ts-expect-error a condition names a field of the table
+type NoSuchConditionField = Approvals<Change, { gates: { ready: { count: 1; permission: "p"; when: [{ field: "size"; test: "contains"; values: ["x"] }] } } }>;
+
 // An engine type's @behavior("Approvals", ...) takes @superschematic/schema's
 // config, which has none of resetOn, pinned and status.
 // @ts-expect-error resetOn is a table's Approvals'
@@ -54,5 +104,16 @@ export abstract class EngineDocument {}
 @behavior("Approvals", { gates: { a: { count: 1, permission: "p", excludeCreator: false } }, resetOnChange: false })
 export abstract class EngineMemo {}
 
-export const checked: readonly unknown[] = [reviewGates, pinnedGate];
-export type Refused = OneResetOn | NoSuchResetOn | PinnedYes | NoSuchStatus | NoPermission;
+export const checked: readonly unknown[] = [reviewGates, pinnedGate, rowsGate];
+export type Refused =
+  | OneResetOn
+  | NoSuchResetOn
+  | PinnedYes
+  | NoSuchStatus
+  | NoPermission
+  | RowsWithCount
+  | RowsWithoutResetOn
+  | NoSuchIn
+  | NoSuchPin
+  | NoSuchCaller
+  | NoSuchConditionField;

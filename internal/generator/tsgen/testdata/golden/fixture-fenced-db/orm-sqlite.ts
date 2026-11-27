@@ -19,11 +19,10 @@ from its BEGIN IMMEDIATE; D1 runs no interactive transaction, so there a
 transaction's statements each commit as they run, and a write of several
 statements all known before the first goes as one batch: createMany, an
 upsert's read of its key with the upsert, an upsert of many rows. A table
-that composes behaviors writes through the behaviors' core, over the rules
-module's SQLite store (D103), and upserts as on Postgres, its upsertMany a
-row at a time with upsertOne. On D1 a write whose later statement needs an
-earlier one's answer is refused by name: an upsert that seals an
-Encrypted<T> field, and runEvent.
+that composes behaviors upserts as on Postgres, its upsertMany a row at a
+time with upsertOne. On D1 a write whose later statement needs an earlier
+one's answer is refused by name: an upsert that seals an Encrypted<T>
+field, and runEvent.
 
 The SQLite repositories serve no merges yet (D147).
 createOrm(db, { fieldKeys }) takes a FieldKeyring for the Encrypted<T>
@@ -69,7 +68,7 @@ export const courierTable: TableDefinition = {
     update: "UPDATE courier SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"name\"",
     updateMany: "UPDATE courier SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO courier (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\"",
     softDelete: "",
@@ -130,7 +129,7 @@ export const deliveryTable: TableDefinition = {
     update: "UPDATE delivery SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"address\", \"courier_id\", \"plan_version\", \"attempts\", \"proof\", \"run_version\", \"note\", \"updated_at\"",
     updateMany: "UPDATE delivery SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO delivery (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"address\", \"courier_id\", \"plan_version\", \"attempts\", \"proof\", \"run_version\", \"note\", \"updated_at\"",
     softDelete: "",
@@ -188,7 +187,7 @@ export const depotTable: TableDefinition = {
     update: "UPDATE depot SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"name\", \"capacity\", \"revision\", \"deleted_at\"",
     updateMany: "UPDATE depot SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO depot (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"capacity\", \"revision\", \"deleted_at\"",
     softDelete: "UPDATE depot SET deleted_at = ?1, revision = depot.revision + 1 WHERE id = ?2 AND deleted_at IS NULL",
@@ -243,7 +242,7 @@ export const parcelTable: TableDefinition = {
     update: "UPDATE parcel SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\"",
     updateMany: "UPDATE parcel SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO parcel (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"tracking_code\", \"weight_grams\", \"note\", \"version\"",
     softDelete: "",

@@ -50,6 +50,28 @@ name: ci
 # GitHub retargets it after its parent merges, push or close and reopen it to
 # start the run.
 #
+# gofmt, golangci-lint and the drift checks run in a job of their own,
+# go-lint, so they report in minutes and not behind the go job's tests.
+#
+# The two longest jobs run in shards, a job each: go's five
+# (scripts/go-test-shard.sh) and engine-rust's five
+# (scripts/engine_rust_shards.py). Each script says what its shards run and
+# gives what no shard names to the last, rest, so the shards together run
+# what the one job ran; scripts/test_engine_rust_shards.py holds the
+# matrices below to the scripts' shards. rust and typescript run in two
+# parts each, their steps divided between them in this file, and the
+# engine workspace's lints in engine-rust-lint.
+#
+# A pull request reads the caches the release candidate's run saved on main
+# and saves none of the large ones (the Rust builds, the Go build cache):
+# the repository may keep ten gigabytes, and a copy a pull request pushed
+# main's own out.
+#
+# Every Postgres a job starts runs with fsync, synchronous_commit and
+# full_page_writes off. The container goes with the runner, so nothing in it
+# has to survive a crash, and the tests, which create and drop a schema or a
+# database each, do not wait on the disk.
+#
 # superscalar has no release yet, so every job that links it checks the
 # pinned commit out under third_party/superscalar and builds the static
 # archive from source (scripts/superscalar-dep.sh). The checkout is cached on
@@ -119,20 +141,28 @@ jobs:
         # release-pr.yml refuses to bump a tree whose sites disagree; catch
         # drift (a hand-edited package.json) on the pull request instead.
         run: python3 scripts/bump_version.py check
-      - name: bump_version.py and npm_local_specs.py tests
+      - name: The scripts' tests (bump_version.py, npm_local_specs.py, prebuilt_deps.py, engine_rust_shards.py)
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   go:
-    name: go (build / vet / test / gofmt / lint / catalog / cli smoke)
+    # The eleven modules' build, vet and tests in shards, a job each:
+    # scripts/go-test-shard.sh says what a shard runs, and why. Every shard
+    # sets up the same tools and databases, so a test finds what it found
+    # when one job ran them all.
+    name: go (${{ matrix.shard }})
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    # The quick tier finishes in about fifty minutes. The full tier compiles
-    # and runs every generated module, and its packages queue on one Cargo
-    # target directory, so it needs longer than an hour: at sixty minutes
-    # the release candidate was cancelled in the root module's tests, with
-    # the ten modules after it and every later step not started. The whole
-    # job takes two hours and a quarter there, the root module's tests a
-    # hundred minutes of it.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [sqlmigrate, loader, generators, modules, rest]
+    # As one job the quick tier took about fifty minutes. The full tier
+    # compiles and runs every generated module, and its packages queue on
+    # one Cargo target directory, so it needed longer than an hour: at
+    # sixty minutes the release candidate was cancelled in the root
+    # module's tests. The whole job took two hours and a quarter there, the
+    # root module's tests a hundred minutes of it. The limits are that
+    # job's, and a shard is well inside them.
     timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 200 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -142,9 +172,33 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Setup Go
+        # The build cache is the next step's, not setup-go's. setup-go keys
+        # its cache on go.sum alone, never saves over a key that exists, and
+        # saves from every pull request that misses. Jobs that shared its
+        # default key left an empty cache under it, which every run then
+        # restored; a key to each job had every pull request save more than
+        # a gigabyte of its own, against the ten the repository may keep.
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Restore the Go build cache
+        # One cache for the jobs that compile the root module and the
+        # modules over it: this job's shards, go-lint and engine-rust. The
+        # rest shard saves it, since it builds every module, and only
+        # outside a pull request: on main that is the release candidate's
+        # run, whose caches every pull request reads. A go.sum that moved
+        # starts from the cache before it.
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-
 
       - name: Setup Bun
         # The superscalar TypeScript binding is built alongside the Go
@@ -271,7 +325,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           # Over TCP: the image's first-start server listens only on its
           # socket and restarts once initialised.
           ready=""
@@ -306,7 +361,8 @@ jobs:
           docker run --detach --name superschematic-pgvector \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5433:5432 \
-            "pgvector/pgvector:${PGVECTOR_VERSION}-pg${POSTGRES_VERSION}"
+            "pgvector/pgvector:${PGVECTOR_VERSION}-pg${POSTGRES_VERSION}" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           ready=""
           for _ in $(seq 1 60); do
             if docker exec superschematic-pgvector pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then ready=1; break; fi
@@ -335,7 +391,7 @@ jobs:
         with:
           pulumi-version: ${{ env.PULUMI_VERSION }}
 
-      - name: Build, vet, test every module
+      - name: Build, vet, test (this shard's part of every module)
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
@@ -404,17 +460,103 @@ jobs:
           # internal/generator and internal/sqlmigrate thirty-two to
           # thirty-eight minutes each.
           GO_TEST_TIMEOUT: ${{ github.event_name == 'pull_request' && '30m' || '90m' }}
+          SHARD: ${{ matrix.shard }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/rules-archive.sh --print)"
-          for m in . ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/embedded extensions/pulumi extensions/topcoat cmd/superschematic; do
-            echo "==> $m"
-            (cd "$m" && go build ./... && go vet ./... && go test -count=1 -timeout "$GO_TEST_TIMEOUT" -short="$GO_TEST_SHORT" ./...)
-          done
+          scripts/go-test-shard.sh "$SHARD"
+
+      - name: Save the Go build cache
+        # After a failed test too: what was built is as good a start.
+        if: ${{ !cancelled() && github.event_name != 'pull_request' && matrix.shard == 'rest' && steps.go-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ steps.go-cache.outputs.cache-primary-key }}
+
+      - name: CLI smoke (the core with no extension builds DB, API and General fixtures)
+        if: github.event_name != 'pull_request' && matrix.shard == 'rest'
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          make cli-smoke
+
+      # The docs site's schema migrations page quotes examples/migrations.
+      # This plans its DB service from v1 to v2 for Postgres and SQLite with
+      # the core alone, gates the plans on their hazards, applies them with
+      # superschematic-migrate to a SQLite file and to a database of its own
+      # on the Postgres above, and fails when an output the page quotes
+      # (examples/migrations/testdata/generated/) is stale.
+      - name: examples/migrations (plan, gate and apply a migration on SQLite and Postgres)
+        if: github.event_name != 'pull_request' && matrix.shard == 'rest'
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: examples/migrations/scripts/check.sh
+
+  go-lint:
+    # The lints and the drift checks, apart from the go job: they need no
+    # test to have run, and behind that job's tests a gofmt or lint failure
+    # showed after forty minutes. gofmt runs first, before anything is
+    # built. The drift checks link superscalar's static archive, so the job
+    # stages it as engine-rust does; the checkout is restored and never
+    # saved from here, since this job builds the archive alone and finishes
+    # before the jobs that build the whole dependency.
+    name: go-lint (gofmt / golangci-lint / catalog, schema-file types, provider schemas and behavior declarations drift)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: false
 
       - name: gofmt
         run: |
           out="$(gofmt -l $(git ls-files '*.go'))"
           if [ -n "$out" ]; then echo "gofmt: files need formatting:"; echo "$out"; exit 1; fi
+
+      - name: Restore the Go build cache
+        # The go job's, which its rest shard saves (that job's Setup Go
+        # says why); this job only reads it.
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-
+
+      - name: Restore the superscalar checkout
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Install Rust toolchain
+        # Builds superscalar's static archive when the checkout above was
+        # not restored with it.
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Build the superscalar archive
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: scripts/superscalar-dep.sh --archive >/dev/null
 
       - name: Scalar catalog drift (TypeScript + Python catalogs and the docs' scalar page match the pinned superscalar)
         env:
@@ -462,27 +604,6 @@ jobs:
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           make behaviors-check
-
-      - name: CLI smoke (the core with no extension builds DB, API and General fixtures)
-        if: github.event_name != 'pull_request'
-        env:
-          GOTOOLCHAIN: go${{ env.GO_VERSION }}
-        run: |
-          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
-          make cli-smoke
-
-      # The docs site's schema migrations page quotes examples/migrations.
-      # This plans its DB service from v1 to v2 for Postgres and SQLite with
-      # the core alone, gates the plans on their hazards, applies them with
-      # superschematic-migrate to a SQLite file and to a database of its own
-      # on the Postgres above, and fails when an output the page quotes
-      # (examples/migrations/testdata/generated/) is stale.
-      - name: examples/migrations (plan, gate and apply a migration on SQLite and Postgres)
-        if: github.event_name != 'pull_request'
-        env:
-          GOTOOLCHAIN: go${{ env.GO_VERSION }}
-          SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
-        run: examples/migrations/scripts/check.sh
 
       - name: golangci-lint (root module)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -718,9 +839,20 @@ jobs:
     # Postgres too, through openEngineAsync (ENGINE_TEST_PG_URL), as a
     # TypeScript server opens the engine there. The addon as it ships is
     # built first and checked to lack the bridge.
-    name: typescript (authoring packages + schema and http runtimes + engine and its work-queue package)
+    #
+    # Two parts, a job each: runtimes has the authoring packages, the
+    # schema, rules, rules-handler and http runtimes, and the engine
+    # examples on development mode; engine the addon, the engine and the
+    # packages over it. The engine's package links the http runtime's built
+    # copy, so engine builds that first, without its tests. Both set up the
+    # same tools and services.
+    name: typescript (${{ matrix.part }})
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [runtimes, engine]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -730,9 +862,12 @@ jobs:
 
       - name: Setup Go
         # scripts/superscalar-dep.sh reads go env for the archive directory.
+        # Nothing here compiles Go, so there is no build cache to keep (the
+        # go job's Setup Go says why an empty one must not be saved).
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -764,6 +899,9 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
+          # Outside a pull request alone (engine-rust says why), from the
+          # part that builds the addon.
+          save-if: ${{ github.event_name != 'pull_request' && matrix.part == 'engine' }}
 
       - name: Cache wasm-pack
         id: wasm-pack
@@ -790,7 +928,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -813,6 +952,7 @@ jobs:
           exit 1
 
       - name: packages/ typecheck + test
+        if: matrix.part == 'runtimes'
         working-directory: packages
         run: |
           bun install --frozen-lockfile
@@ -820,6 +960,7 @@ jobs:
           bun test
 
       - name: runtime/schema/typescript typecheck + build + test
+        if: matrix.part == 'runtimes'
         working-directory: runtime/schema/typescript
         run: |
           bun install --frozen-lockfile
@@ -828,6 +969,7 @@ jobs:
           bun run test
 
       - name: runtime/rules/typescript typecheck + build + test (wasm32 build, Bun and Node.js)
+        if: matrix.part == 'runtimes'
         # The behaviors' core built for wasm32 (D103), which the http
         # runtime's adapter tests below load from its dist/.
         working-directory: runtime/rules/typescript
@@ -837,6 +979,7 @@ jobs:
           bun run test
 
       - name: runtime/rules-handler/typescript typecheck + build + test (wasm32 build, Bun and Node.js)
+        if: matrix.part == 'runtimes'
         # Development mode's handler built for wasm32 (D117): every rules
         # transcript and rules-dev's store session replayed over bun:sqlite,
         # the routes and the event stream, and SQLite files read across this
@@ -848,6 +991,7 @@ jobs:
           bun run test
 
       - name: runtime/http/typescript typecheck + build + test
+        if: matrix.part == 'runtimes'
         working-directory: runtime/http/typescript
         env:
           # src/redis.test.ts's tests against a real server, on the Valkey
@@ -864,7 +1008,15 @@ jobs:
           bun run build
           bun run test
 
+      - name: Build the http runtime (the engine's package links its built copy)
+        if: matrix.part == 'engine'
+        working-directory: runtime/http/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run build
+
       - name: Build the engine's Node-API addon, as it ships and the test addon
+        if: matrix.part == 'engine'
         # The addon as it ships first, which must not have the bridge to
         # behaviors written in TypeScript, then the test addon, which the
         # suites run on: their tests define behaviors with defineBehavior.
@@ -876,6 +1028,7 @@ jobs:
           ../../../scripts/engine-napi.sh --js-behaviors
 
       - name: runtime/engine/typescript typecheck + build + test (Node.js and Bun, SQLite and Postgres)
+        if: matrix.part == 'engine'
         # Runs after the http runtime's build, whose dist/ the engine's
         # scripts/link-local-deps.mjs copies into node_modules, and on the
         # test addon. Its corpus check records the curated files again and
@@ -889,6 +1042,7 @@ jobs:
           bun run test
 
       - name: runtime/engine-workqueue/typescript typecheck + build + test (Node.js and Bun)
+        if: matrix.part == 'engine'
         # Runs after the engine's build, which its scripts/link-local-deps.mjs
         # links into node_modules, on the test addon, whose work-queue
         # behaviors are the Rust ones.
@@ -899,6 +1053,7 @@ jobs:
           bun run test
 
       - name: runtime/engine-commerce/typescript typecheck + build + test (Node.js and Bun)
+        if: matrix.part == 'engine'
         # Runs after the engine's build, which its scripts/link-local-deps.mjs
         # links into node_modules, on the test addon, whose commerce
         # behaviors are the Rust ones (D70). Its corpus check holds
@@ -914,10 +1069,10 @@ jobs:
         # runtime and the rules handler rebuilt from the installs above,
         # linked into the example, its test run against a listening server
         # under each runtime, and superschematic-dev's smoke over the file
-        # it wrote. A step of this job rather than a job of its own: it
-        # needs only what this job installs, and takes seconds. End to end,
-        # so the full tier.
-        if: github.event_name != 'pull_request'
+        # it wrote. A step of the runtimes part rather than a job of its
+        # own: it needs only what that part installs, and takes seconds.
+        # End to end, so the full tier.
+        if: github.event_name != 'pull_request' && matrix.part == 'runtimes'
         run: examples/engine-notes/scripts/check.sh
 
       - name: examples/engine-jobs type-check + end to end (Node.js and Bun)
@@ -925,7 +1080,7 @@ jobs:
         # rules handler rebuilt from the installs above, linked into the
         # example, and its test run through the handler's routes under each
         # runtime. End to end, so the full tier, as engine-notes is.
-        if: github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request' && matrix.part == 'runtimes'
         run: examples/engine-jobs/scripts/check.sh
 
   python:
@@ -940,9 +1095,13 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Setup Go
+        # scripts/superscalar-dep.sh reads go env for the archive directory.
+        # Nothing here compiles Go, so there is no build cache to keep (the
+        # go job's Setup Go says why an empty one must not be saved).
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -1012,9 +1171,21 @@ jobs:
           uv run --python 3.9 --isolated pytest -q
 
   rust:
-    name: rust (http and schema runtime crates, and the engine's schema reader)
+    # Two parts, a job each. The http runtime is linted and tested on
+    # every feature combination a server builds it with, thirty-odd cargo
+    # runs that each build the crate again, ten minutes of them in one job
+    # and under one of tests. http runs the runtime alone and with its
+    # client, identity, postgres and logging; stores the combinations with
+    # a bucket, a memory store, trace export and sqlite, and the three
+    # small crates. Each keeps a Rust cache of its own, since each builds
+    # the dependencies with features the other does not.
+    name: rust (${{ matrix.part }})
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [http, stores]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1035,9 +1206,17 @@ jobs:
             runtime/schema/rust
             runtime/schema/rust-ir
             runtime/migrate/rust
+          key: ${{ matrix.part }}
+          # Outside a pull request alone (engine-rust says why).
+          save-if: ${{ github.event_name != 'pull_request' }}
 
-      - name: Cache the superscalar checkout
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the superscalar checkout
+        # Restored and never saved from here: this job checks the sources
+        # out and builds nothing of superscalar, and the jobs that build
+        # all of it (go, typescript, python) save under the same key. A
+        # checkout saved first had each of those build superscalar again on
+        # every run until the pin moved.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             third_party/superscalar
@@ -1079,7 +1258,8 @@ jobs:
       # on the Valkey above, alone and beside a worker's two; and otel, a
       # deployable's trace export, alone and with postgres, as a worker
       # builds it, whose message spans a test reads (D67).
-      - name: fmt / clippy / test
+      - name: fmt / clippy / test (the http runtime alone, and with its client, identity, postgres and logging)
+        if: matrix.part == 'http'
         working-directory: runtime/http/rust
         env:
           SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
@@ -1101,6 +1281,13 @@ jobs:
           cargo test --features logging
           cargo clippy --all-targets --features postgres,logging -- -D warnings
           cargo test --features postgres,logging
+
+      - name: clippy / test (the http runtime with a bucket, a memory store, trace export and sqlite)
+        if: matrix.part == 'stores'
+        working-directory: runtime/http/rust
+        env:
+          SUPERSCHEMATIC_TEST_MEMORY_STORE: redis://127.0.0.1:6379/1
+        run: |
           cargo clippy --all-targets --features gcs -- -D warnings
           cargo test --features gcs
           cargo clippy --all-targets --features gcs,postgres,logging -- -D warnings
@@ -1121,6 +1308,7 @@ jobs:
       # parity tests with the Go runner's binary run under `make rust`,
       # where Go is set up; here they return early.
       - name: migration runner fmt / clippy / test
+        if: matrix.part == 'stores'
         working-directory: runtime/migrate/rust
         run: |
           cargo fmt --check
@@ -1128,6 +1316,7 @@ jobs:
           cargo test
 
       - name: schema runtime fmt / clippy / test
+        if: matrix.part == 'stores'
         working-directory: runtime/schema/rust
         run: |
           cargo fmt --check
@@ -1139,6 +1328,7 @@ jobs:
       # preserve_order on; it runs with its schemafile feature and without,
       # and again with arbitrary_precision.
       - name: engine schema reader fmt / clippy / test (every vector of both corpora)
+        if: matrix.part == 'stores'
         working-directory: runtime/schema/rust-ir
         run: |
           cargo fmt --check
@@ -1155,11 +1345,22 @@ jobs:
     # --workspace builds, lints and tests them too, and the behaviors'
     # core's crates (D103): the core, its behaviors, its reference host, its
     # wasm binding and the Rust adapter (rules-adapter).
-    name: engine-rust (the Rust engine's workspace)
+    #
+    # The tests run in shards, a job each: scripts/engine_rust_shards.py
+    # says what a shard runs, and why. The rest shard also builds the two
+    # binaries rules-runtime's tests run, whose tests are its own, and
+    # saves the Rust cache, since it builds the most. fmt and clippy are
+    # engine-rust-lint's.
+    name: engine-rust (${{ matrix.shard }})
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
-    # The job takes 26 to 29 minutes on most runs, and a slow runner took it
-    # past a thirty-minute limit in its last doc-tests, with no test failing.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [replay, transcript, core, behaviors, rest]
+    # As one job this took 26 to 29 minutes on most runs, and a slow runner
+    # took it past a thirty-minute limit in its last doc-tests, with no
+    # test failing. A shard is well inside the limit.
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1173,12 +1374,22 @@ jobs:
           rustup default "$RUST_VERSION"
 
       - name: Cache Rust dependencies
+        # Saved outside a pull request alone, here and in every job: on
+        # main that is the release candidate's run, whose caches every
+        # pull request reads. A pull request whose lock file is not main's
+        # starts from main's cache and builds what moved; when each saved a
+        # copy of its own instead, some hundreds of megabytes a job, a few
+        # of them pushed main's caches out of the ten gigabytes the
+        # repository may keep, and every run after that started from
+        # nothing.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
+          save-if: ${{ github.event_name != 'pull_request' && matrix.shard == 'rest' }}
 
-      - name: Cache the superscalar checkout
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the superscalar checkout
+        # Restored and never saved from here (the rust job says why).
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             third_party/superscalar
@@ -1201,7 +1412,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -1213,6 +1425,21 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
+
+      - name: Restore the Go build cache
+        # The go job's, which its rest shard saves (that job's Setup Go
+        # says why); this job only reads it, for the two binaries below.
+        if: matrix.shard == 'rest'
+        id: go-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
+          restore-keys: |
+            go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-
 
       # Runtime mode's scenarios (rules-runtime, D117) run the two binaries
       # a runtime environment carries: the compiler's planner, here the
@@ -1220,6 +1447,7 @@ jobs:
       # Go migration runner, which needs no cgo. Without them the scenarios
       # say so and pass.
       - name: Build the planner and the migration runner runtime mode's scenarios run
+        if: matrix.shard == 'rest'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -1227,24 +1455,6 @@ jobs:
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           go build -o "$GITHUB_WORKSPACE/bin/superschematic-core" ./internal/cmd/superschematic-core
           (cd runtime/migrate/go && CGO_ENABLED=0 go build -o "$GITHUB_WORKSPACE/bin/superschematic-migrate" ./cmd/superschematic-migrate)
-
-      # The same commands as `make engine-rust`, inline: the Makefile runs
-      # the superscalar and version-graph scripts when it is parsed. Clippy
-      # runs on every feature combination (each database alone, both, and
-      # neither, and the axum router over one database, as a Rust server
-      # takes it), so a build that takes one database still compiles, with
-      # the test addon's bridge (all features) and without it (the
-      # defaults, as an addon ships).
-      - name: fmt / clippy (every feature combination)
-        working-directory: runtime/engine/rust
-        run: |
-          cargo fmt --all --check
-          cargo clippy --workspace --all-targets --all-features -- -D warnings
-          cargo clippy --workspace --all-targets -- -D warnings
-          cargo clippy --workspace --all-targets --no-default-features -- -D warnings
-          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
-          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
-          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres,superschematic-engine/axum,superschematic-engine-testkit/axum -- -D warnings
 
       # The test kit's replay of the scenario corpus
       # (runtime/engine/testdata/scenarios) runs here too, on both
@@ -1261,22 +1471,82 @@ jobs:
       # Runtime mode publishes through the binaries the step above built,
       # in process and through a job, and holds its lists in SQL to
       # development mode's answers.
-      - name: test (SQLite and Postgres)
-        working-directory: runtime/engine/rust
+      - name: test (this shard, on SQLite and Postgres)
         env:
+          SHARD: ${{ matrix.shard }}
           SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_BIN: ${{ github.workspace }}/bin/superschematic-core
           SUPERSCHEMATIC_MIGRATE_BIN: ${{ github.workspace }}/bin/superschematic-migrate
-        run: cargo test --workspace --all-features
+        run: python3 scripts/engine_rust_shards.py run "$SHARD"
 
       # Schedules' calendar as a project's Cargo graph may build it, jiff's
       # tzdb-zoneinfo turned on by feature unification: a zone is still the
       # bundled database's, never the host's zone files (TZDIR), so every
       # host computes the same runs (D104).
       - name: test (the calendar with jiff's host zone files on)
+        if: matrix.shard == 'rest'
         working-directory: runtime/engine/rust
         run: cargo test -p superschematic-rules-behaviors --features jiff/tzdb-zoneinfo --test calendar_zones
+
+  engine-rust-lint:
+    # The engine workspace's format and lints, apart from its tests
+    # (engine-rust): clippy checks the workspace six times over, which a
+    # test shard need not wait for, and its builds are not the tests', so
+    # this job keeps a Rust cache of its own. It needs the superscalar
+    # sources (the engine reads schemas through runtime/schema/rust-ir)
+    # and no database.
+    name: engine-rust-lint (fmt / clippy on every feature combination)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal --component rustfmt --component clippy
+          rustup default "$RUST_VERSION"
+
+      - name: Cache Rust dependencies
+        # Saved outside a pull request alone (engine-rust says why).
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: runtime/engine/rust
+          save-if: ${{ github.event_name != 'pull_request' }}
+
+      - name: Restore the superscalar checkout
+        # Never saved from here: this job checks the sources out alone.
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Check out the superscalar sources
+        run: scripts/superscalar-dep.sh --checkout
+
+      # The same lints as `make engine-rust`, inline: the Makefile runs
+      # the superscalar and version-graph scripts when it is parsed. Clippy
+      # runs on every feature combination (each database alone, both, and
+      # neither, and the axum router over one database, as a Rust server
+      # takes it), so a build that takes one database still compiles, with
+      # the test addon's bridge (all features) and without it (the
+      # defaults, as an addon ships).
+      - name: fmt / clippy (every feature combination)
+        working-directory: runtime/engine/rust
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets --all-features -- -D warnings
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
+          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres,superschematic-engine/axum,superschematic-engine-testkit/axum -- -D warnings
 
   engine-go:
     name: engine-go (the engine's C ABI, Go binding, corpus replay and link check)
@@ -1311,9 +1581,12 @@ jobs:
           workspaces: |
             runtime/engine/rust
             runtime/versiongraph/rust
+          # Outside a pull request alone (engine-rust says why).
+          save-if: ${{ github.event_name != 'pull_request' }}
 
-      - name: Cache the superscalar checkout
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      - name: Restore the superscalar checkout
+        # Restored and never saved from here (the rust job says why).
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             third_party/superscalar
@@ -1328,7 +1601,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -1409,12 +1683,15 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
+          # Outside a pull request alone (engine-rust says why).
+          save-if: ${{ github.event_name != 'pull_request' }}
 
-      - name: Cache the superscalar checkout
+      - name: Restore the superscalar checkout
         # The archive's crate is a member of the engine's workspace, which
         # cargo loads whole, and the engine reaches superscalar's core by
         # path; scripts/rules-archive.sh checks it out when it is missing.
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        # Restored and never saved from here (the rust job says why).
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             third_party/superscalar
@@ -1430,7 +1707,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -1527,7 +1805,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -1677,11 +1956,13 @@ jobs:
       - dco
       - scrub
       - go
+      - go-lint
       - acme
       - typescript
       - python
       - rust
       - engine-rust
+      - engine-rust-lint
       - engine-go
       - rules-go
       - versiongraph

@@ -188,7 +188,7 @@ async fn runtime_providers_in_the_rust_server() {
         // embeds.
         let model = dev.providers.model("MODEL").unwrap();
         let turn = |content: &str, untrusted: bool| ModelTurn {
-            messages: vec![ModelMessage { role: ModelRole::User, content: content.into(), tool_call_id: None, untrusted }],
+            messages: vec![ModelMessage { role: ModelRole::User, content: content.into(), tool_call_id: None, tool_calls: Vec::new(), provider_state: None, untrusted }],
             tools: vec![ModelTool { name: "lookup".into(), description: "Looks a note up.".into(), input_schema: serde_json::Map::new() }],
             ..ModelTurn::default()
         };

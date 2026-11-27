@@ -291,7 +291,7 @@ a retry of your own in ten minutes and a debounce are each a delay.
 | Language | On Postgres | On SQLite |
 | --- | --- | --- |
 | Go | `orm.Enqueue<Queue>In(ctx, tx, msg, time.Hour)` | `orm.Enqueue<Queue>SQLiteIn(ctx, tx, msg, time.Hour)` |
-| TypeScript | `enqueue(tx, queue, msg, { delaySeconds: 3600 })` | `enqueueStatement(db, queue, msg, { delaySeconds: 3600 })`, and `enqueueSqlite` the same |
+| TypeScript | `enqueue(tx, queue, msg, { delaySeconds: 3600 })` | `enqueue(tx, queue, msg, { delaySeconds: 3600 })` in a transaction of the `./orm/sqlite` entry's ORM, which writes SQLite's statement (D189); `enqueueStatement(db, queue, msg, { delaySeconds: 3600 })` for a batch, and `enqueueSqlite` the same |
 | Rust | `queue::enqueue_in(&tx, &queue, &msg, Duration::from_secs(3600))` | `queue::enqueue_sqlite_in(&connection, &queue, &msg, Duration::from_secs(3600))` |
 
 The delay may hold a fraction of a second. Zero is an enqueue with none,

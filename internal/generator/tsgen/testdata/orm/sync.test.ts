@@ -2,8 +2,9 @@
 // its result and its update only if changed, under a trigger that enqueues
 // on every write; upsertOneResult; findMany without its count; a
 // transaction's isolation, read only and savepoints; a raw query read
-// through a table's definition; and in on a time and a boolean.
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+// through a table's definition; in on a time and a boolean; and a line's
+// times, the database's clock's alone.
+import { afterAll, beforeAll, describe, expect, setSystemTime, test } from 'bun:test';
 import { NotFoundError } from '@superschematic/http-runtime/postgres';
 import { createOrm, lineItemTable, type FixtureSyncDbOrm, type LineItemCreate, type LineItemRow } from './orm';
 import { alice, database, dsn, recording, type TestDatabase } from './harness';
@@ -145,6 +146,30 @@ describe.skipIf(dsn === '')('a bank sync', () => {
     expect(after.row.id).not.toBe(moved.row.id);
     // The primary key holds a deleted line too: an upsert of it fails.
     await expect(sync.lineItem.upsertOneResult({ ...input, id: moved.row.id }, ['id'], update, { onlyIfChanged: true })).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  test("an update stamps updatedAt from the database's clock, as the insert's default stamps createdAt, so a host clock behind it stamps no line earlier than its insert", async () => {
+    // The host's clock an hour behind the database's.
+    setSystemTime(new Date(Date.now() - 60 * 60 * 1000));
+    try {
+      const [line] = lines('skew', 1);
+      const inserted = await orm.lineItem.upsertOneResult(line!, ['plaidTransactionId'], { name: line!.name });
+      expect(inserted.status).toBe('inserted');
+      const created = inserted.row.createdAt.getTime();
+      const upserted = await orm.lineItem.upsertOneResult({ ...line!, name: 'Renamed' }, ['plaidTransactionId'], { name: 'Renamed' });
+      expect(upserted.status).toBe('updated');
+      expect(upserted.row.updatedAt.getTime()).toBeGreaterThanOrEqual(created);
+      const [many] = await orm.lineItem.upsertMany([{ ...line!, name: 'Again' }], ['plaidTransactionId'], ['name']);
+      expect(many!.row.updatedAt.getTime()).toBeGreaterThanOrEqual(upserted.row.updatedAt.getTime());
+      const updated = await orm.lineItem.updateOne(inserted.row.id, { name: 'Updated' });
+      expect(updated.updatedAt.getTime()).toBeGreaterThanOrEqual(many!.row.updatedAt.getTime());
+      expect(await orm.lineItem.updateMany({ id: { eq: inserted.row.id } }, { name: 'Filed' })).toBe(1);
+      const filed = await orm.lineItem.getOne(inserted.row.id);
+      expect(filed.updatedAt.getTime()).toBeGreaterThanOrEqual(updated.updatedAt.getTime());
+      expect(filed.createdAt.getTime()).toBe(created);
+    } finally {
+      setSystemTime();
+    }
   });
 
   test('findMany with count false reads the rows without counting them, and in on a time and a boolean keeps the rows that hold one', async () => {

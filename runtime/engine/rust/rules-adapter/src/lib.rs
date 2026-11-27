@@ -97,7 +97,7 @@ pub use layout::{
     SubTable, Table, Use,
 };
 pub use superschematic_rules::{
-    Action, Caller, ChangeSet, Code, Command, Core, Refusal, Row, SubRow, TypeSpec,
+    Action, Assurance, Caller, ChangeSet, Code, Command, Core, Refusal, Row, SubRow, TypeSpec,
 };
 
 /// How many times a command whose row moved runs before it is refused as
@@ -117,6 +117,14 @@ pub struct ExecuteOptions {
     /// the change set's own fields, in the map's order. `None`: the change
     /// set's own fields, converted by the layout.
     pub own_columns: Option<Map<String, Value>>,
+    /// The columns an update of the command's own row sets to the
+    /// database's clock, after its own columns: the `updatedAt` a server
+    /// stamps, which then comes from the clock its insert's default read,
+    /// whatever the host's says. On Postgres the statement's time, later
+    /// than every earlier statement of its transaction and so than the
+    /// row's insert; on SQLite its `'now'`, the statement's, in the form of
+    /// its default (sqlutil's `StampNow`). Empty for none.
+    pub now_columns: Vec<String>,
     /// The columns a delete of the command's own row sets in place of
     /// deleting it, by column (a soft-deletable table's `deletedAt` and
     /// `deletedBy`), fenced on the version as the delete would be.

@@ -718,7 +718,7 @@ var entrySQLite = &sqliteTable{
 		versionFence:        ` AND _version = ?%d`,
 		returning:           ` RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
 		updateMany:          `UPDATE entry SET %s%s`,
-		updatedAt:           `updated_at = ?%d`,
+		updatedAt:           `updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
 		updatedBy:           `updated_by = ?%d`,
 		upsert:              `INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
 		softDelete:          `UPDATE entry SET deleted_at = ?1, deleted_by = ?2 WHERE id = ?3 AND deleted_at IS NULL`,

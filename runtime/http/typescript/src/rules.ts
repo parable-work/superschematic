@@ -173,6 +173,14 @@ export interface CoreCaller {
   readonly standsIn?: boolean;
   /** The subject the caller acts for (D77), which Provenance records (D73). */
   readonly actingFor?: string;
+  /** What the caller is (D156): user, party, agent or extension; absent reads as user. */
+  readonly kind?: string;
+  /** The kind of the subject it acts for; absent reads as user. */
+  readonly actingForKind?: string;
+  /** The Agent whose run the caller is (D158, D200). */
+  readonly agent?: string;
+  /** How the host verified the caller for this call (D200), which an Approvals requirement's proof reads. */
+  readonly assurance?: { readonly signedInAt?: number; readonly userVerified?: boolean };
 }
 
 /** What a command does, tagged by kind. Open: execute refuses a kind it does not know as internal. */
@@ -779,6 +787,17 @@ async function undo(exec: (text: string) => Promise<unknown>): Promise<void> {
   }
 }
 
+/** What sqliteRulesStore takes beside the database. */
+export interface SqliteRulesStoreOptions {
+  /**
+   * How a value binds, as the store's caller stores it: the SQLite
+   * repositories bind a Date as its RFC 3339 text and a list as its JSON
+   * (sqliteOrmPool, D182). Absent, a value binds as it is, which D1 takes
+   * only of its own types.
+   */
+  readonly bind?: (value: unknown) => SqlValue;
+}
+
 /**
  * A store over SQLite, D1's interface (a D1 binding, or openSqlite under
  * Bun): apply runs one batch, which D1 and openSqlite run atomically, with a
@@ -786,14 +805,19 @@ async function undo(exec: (text: string) => Promise<unknown>): Promise<void> {
  * statement changed other than the rows it expects, and each check a guard
  * that fails it when the check is false. Its reads run outside the batch,
  * so it takes no lock: its locks are 'fenced', the adapter checking in the
- * batch each read made under one.
+ * batch each read made under one. The SQLite repositories run their
+ * behaviors through it, on a file and on D1 (D182, D186), over a database
+ * whose statements bind values as theirs do; a caller over a plain one
+ * binds each value as options.bind says.
  */
-export function sqliteRulesStore(db: SqlDatabase): RulesStore {
+export function sqliteRulesStore(db: SqlDatabase, options: SqliteRulesStoreOptions = {}): RulesStore {
+  const bind = options.bind;
+  const bound = (values: readonly unknown[]): SqlValue[] => (bind === undefined ? (values as SqlValue[]) : values.map(bind));
   return {
     dialect: 'sqlite',
     locks: 'fenced',
     async query(text, values) {
-      return (await db.prepare(text).bind(...(values as SqlValue[])).all()).results;
+      return (await db.prepare(text).bind(...bound(values)).all()).results;
     },
     async apply(statements) {
       if (statements.length === 0) return true;
@@ -801,10 +825,10 @@ export function sqliteRulesStore(db: SqlDatabase): RulesStore {
       for (const statement of statements) {
         if (statement.check) {
           const moved = `?${statement.values.length + 1}`;
-          batch.push(db.prepare(`SELECT CASE WHEN (${statement.text}) THEN 1 ELSE json_extract('{}', ${moved}) END AS fenced`).bind(...(statement.values as SqlValue[]), SQLITE_MOVED));
+          batch.push(db.prepare(`SELECT CASE WHEN (${statement.text}) THEN 1 ELSE json_extract('{}', ${moved}) END AS fenced`).bind(...bound(statement.values), SQLITE_MOVED));
           continue;
         }
-        batch.push(db.prepare(statement.text).bind(...(statement.values as SqlValue[])));
+        batch.push(db.prepare(statement.text).bind(...bound(statement.values)));
         if (statement.expect !== undefined) batch.push(db.prepare(SQLITE_FENCE).bind(statement.expect, SQLITE_MOVED));
       }
       try {
@@ -881,6 +905,13 @@ export interface ExecuteOptions {
    * Absent, the change set's own values bind as they are.
    */
   readonly ownColumns?: Readonly<Record<string, unknown>>;
+  /**
+   * The columns an update of the command's own row sets to the database's
+   * clock (stampNow), beside its own columns: the updatedAt a repository
+   * stamps, which then comes from the clock its insert's default read,
+   * whatever the host's says. Absent for none.
+   */
+  readonly nowColumns?: readonly string[];
   /**
    * The columns a delete of the command's own row sets in place of
    * deleting it, by column, as the store binds them: a soft-deletable
@@ -2039,7 +2070,8 @@ function live(table: RulesTable): string {
  *     row's deletes of its deadlines' messages and its sub-table rows,
  *     each unless a row of the key is back, with no fence. The command's
  *     own row binds its own columns from options.ownColumns when the caller
- *     encoded them;
+ *     encoded them, and an update of it sets options.nowColumns to the
+ *     database's clock;
  *  2. a deadline command's spend of its arming, or a claimed change's of
  *     its message (spend), which must delete one message;
  *  3. each sub-table row write, an insert that must add one row, an update
@@ -2098,6 +2130,7 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
       case 'update': {
         const assigned = [...ownColumns(table, dialect, write.own, mine ? options.ownColumns : undefined), ...ownedColumns(table, dialect, write.owned)];
         const sets = assigned.map(([column, value]) => `${quote(column)} = ${bind(value)}`);
+        if (mine) for (const column of options.nowColumns ?? []) sets.push(`${quote(column)} = ${stampNow(dialect)}`);
         // The version moves on with every write, the core's own: on
         // Postgres @optimistic's trigger sets it to the same value.
         sets.push(`${quote(table.version)} = ${quote(table.version)} + 1`);
@@ -2157,7 +2190,13 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
     const table = tableOf(host.layout, write.row.type);
     statements.push(...subRowStatements(table, subTableOf(table, write.useId, write.table), dialect, key, write));
   }
-  for (const event of changes.events ?? []) {
+  // On SQLite one command's events share the millisecond the table's
+  // default stamps their created_at with, and the queue's claim holds a
+  // row's line by created_at then id: each event takes an id of its own,
+  // in ascending order, so a row's events are claimed as they were written
+  // (D186), as Postgres's clock_timestamp() keeps them.
+  const eventIds = dialect === 'sqlite' ? (changes.events ?? []).map(() => crypto.randomUUID()).sort() : [];
+  for (const [n, event] of (changes.events ?? []).entries()) {
     const key = keyOfRow(event.row);
     const table = tableOf(host.layout, event.row.type);
     if (table.events === undefined) {
@@ -2165,7 +2204,7 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
         `${actionName(command.action)} of ${type} emits ${event.kind} of ${event.useId} on ${event.row.type} ${key}, and ${event.row.type}'s table ${table.table} keeps no event queue in the behaviors' layout: a behavior whose declaration lists its events gives its table one (D104)`
       );
     }
-    statements.push(eventStatement(table, table.events, dialect, key, event, command.now));
+    statements.push(eventStatement(table, table.events, dialect, key, event, command.now, eventIds[n]));
   }
   for (const change of changes.deadlines ?? []) {
     const key = keyOfRow(change.row);
@@ -2239,14 +2278,16 @@ function subRowStatements(table: RulesTable, sub: RulesSubTable, dialect: RulesD
  * defaults stamp them to the millisecond. An insert changes one row
  * whatever else holds the table, so it has no fence.
  */
-function eventStatement(table: RulesTable, q: RulesEvents, dialect: RulesDialect, key: string, event: CoreOutboxEvent, now: number): RulesStatement {
+function eventStatement(table: RulesTable, q: RulesEvents, dialect: RulesDialect, key: string, event: CoreOutboxEvent, now: number, id?: string): RulesStatement {
   const payload = event.payload === null || event.payload === undefined ? null : JSON.stringify(event.payload);
   const columns = [q.rowKey, q.use, q.kind, q.at, q.payload].map(quote);
-  const text =
-    dialect === 'postgres'
-      ? `INSERT INTO ${quote(q.table)} (${[...columns, '"due_at"', '"created_at"'].join(', ')}) VALUES ($1, $2, $3, $4, $5::jsonb, clock_timestamp(), clock_timestamp())`
-      : `INSERT INTO ${quote(q.table)} (${columns.join(', ')}) VALUES (?1, ?2, ?3, ?4, ?5)`;
-  return { text, values: [keyValue(table, key), event.useId, event.kind, now, payload] };
+  const values = [keyValue(table, key), event.useId, event.kind, now, payload];
+  if (dialect === 'postgres') {
+    return { text: `INSERT INTO ${quote(q.table)} (${[...columns, '"due_at"', '"created_at"'].join(', ')}) VALUES ($1, $2, $3, $4, $5::jsonb, clock_timestamp(), clock_timestamp())`, values };
+  }
+  // On SQLite, the message's id in the command's order of its events (D186).
+  if (id === undefined) return { text: `INSERT INTO ${quote(q.table)} (${columns.join(', ')}) VALUES (?1, ?2, ?3, ?4, ?5)`, values };
+  return { text: `INSERT INTO ${quote(q.table)} (${[...columns, '"id"'].join(', ')}) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`, values: [...values, id] };
 }
 
 /**
@@ -2316,6 +2357,16 @@ function ownedColumns(table: RulesTable, dialect: RulesDialect, owned: Readonly<
     }
   }
   return out;
+}
+
+/**
+ * The database's clock as an update stamps a row with it, sqlutil's
+ * StampNow: on Postgres the statement's time, later than every earlier
+ * statement of its transaction and so than the row's insert; on SQLite
+ * its 'now', the statement's, in the form of its default.
+ */
+function stampNow(dialect: RulesDialect): string {
+  return dialect === 'postgres' ? 'statement_timestamp()' : "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 }
 
 /** An identifier quoted as Postgres and SQLite both read one. */

@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"strings"
-	"time"
 
 	types "example.com/schemas/types/go/fixture-merge-db"
 	"github.com/jackc/pgx/v5"
@@ -1286,9 +1285,7 @@ func (r *LabelNoteRepository) upsertRow(ctx context.Context, input *types.LabelN
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 		// Set updated_by
 		if update.UpdatedBy != nil {
@@ -1498,8 +1495,7 @@ func (r *LabelNoteRepository) upsertBatches(ctx context.Context, inputs []*types
 			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			assignments = append(assignments, "updated_at = statement_timestamp()")
 			if HasUserID(ctx) {
 				values = append(values, GetUserID(ctx))
 				assignments = append(assignments, fmt.Sprintf("updated_by = $%d", len(values)))
@@ -1847,9 +1843,7 @@ func (r *LabelNoteRepository) UpdateOne(ctx context.Context, id types.IdentityUU
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 	if update.UpdatedBy != nil {
@@ -1954,9 +1948,7 @@ func (r *LabelNoteRepository) UpdateMany(ctx context.Context, filter *LabelNoteF
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 	if update.UpdatedBy != nil {
