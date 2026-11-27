@@ -257,6 +257,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-commerce-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-commerce-api', options);
@@ -277,9 +284,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<CheckoutHoldsListHoldsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.holdsListHolds,
-      rateLimitPerMinute: options.rateLimits?.holdsListHolds,
-      timeoutSeconds: options.timeouts?.holdsListHolds,
+      bodyLimitBytes: bodyLimits.holdsListHolds,
+      rateLimitPerMinute: rateLimits.holdsListHolds,
+      timeoutSeconds: timeouts.holdsListHolds,
     }
   );
   // Checkout's Holds retakeHolds, a Holds (D103): the
@@ -299,9 +306,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<CheckoutHoldsRetakeHoldsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.holdsRetakeHolds,
-      rateLimitPerMinute: options.rateLimits?.holdsRetakeHolds,
-      timeoutSeconds: options.timeouts?.holdsRetakeHolds,
+      bodyLimitBytes: bodyLimits.holdsRetakeHolds,
+      rateLimitPerMinute: rateLimits.holdsRetakeHolds,
+      timeoutSeconds: timeouts.holdsRetakeHolds,
     }
   );
   // Checkout's status transition, a Workflow (D103): the
@@ -323,9 +330,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<CheckoutStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.statusTransition,
-      rateLimitPerMinute: options.rateLimits?.statusTransition,
-      timeoutSeconds: options.timeouts?.statusTransition,
+      bodyLimitBytes: bodyLimits.statusTransition,
+      rateLimitPerMinute: rateLimits.statusTransition,
+      timeoutSeconds: timeouts.statusTransition,
     }
   );
   // Inventory's Stock adjustStock, a Stock (D103): the
@@ -346,9 +353,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<InventoryStockAdjustStockResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.stockAdjustStock,
-      rateLimitPerMinute: options.rateLimits?.stockAdjustStock,
-      timeoutSeconds: options.timeouts?.stockAdjustStock,
+      bodyLimitBytes: bodyLimits.stockAdjustStock,
+      rateLimitPerMinute: rateLimits.stockAdjustStock,
+      timeoutSeconds: timeouts.stockAdjustStock,
     }
   );
   // Inventory's Stock checkHold, a Stock (D103): the
@@ -370,9 +377,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<InventoryStockCheckHoldResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.stockCheckHold,
-      rateLimitPerMinute: options.rateLimits?.stockCheckHold,
-      timeoutSeconds: options.timeouts?.stockCheckHold,
+      bodyLimitBytes: bodyLimits.stockCheckHold,
+      rateLimitPerMinute: rateLimits.stockCheckHold,
+      timeoutSeconds: timeouts.stockCheckHold,
     }
   );
   // Inventory's Stock commitFor, a Stock (D103): the
@@ -393,9 +400,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<InventoryStockCommitForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.stockCommitFor,
-      rateLimitPerMinute: options.rateLimits?.stockCommitFor,
-      timeoutSeconds: options.timeouts?.stockCommitFor,
+      bodyLimitBytes: bodyLimits.stockCommitFor,
+      rateLimitPerMinute: rateLimits.stockCommitFor,
+      timeoutSeconds: timeouts.stockCommitFor,
     }
   );
   // Inventory's Stock countStock, a Stock (D103): the
@@ -416,9 +423,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<InventoryStockCountStockResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.stockCountStock,
-      rateLimitPerMinute: options.rateLimits?.stockCountStock,
-      timeoutSeconds: options.timeouts?.stockCountStock,
+      bodyLimitBytes: bodyLimits.stockCountStock,
+      rateLimitPerMinute: rateLimits.stockCountStock,
+      timeoutSeconds: timeouts.stockCountStock,
     }
   );
   // Inventory's Stock holdFor, a Stock (D103): the
@@ -439,9 +446,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<InventoryStockHoldForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.stockHoldFor,
-      rateLimitPerMinute: options.rateLimits?.stockHoldFor,
-      timeoutSeconds: options.timeouts?.stockHoldFor,
+      bodyLimitBytes: bodyLimits.stockHoldFor,
+      rateLimitPerMinute: rateLimits.stockHoldFor,
+      timeoutSeconds: timeouts.stockHoldFor,
     }
   );
   // Inventory's Stock listStockMovements, a Stock (D103): the
@@ -463,9 +470,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<InventoryStockListStockMovementsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.stockListStockMovements,
-      rateLimitPerMinute: options.rateLimits?.stockListStockMovements,
-      timeoutSeconds: options.timeouts?.stockListStockMovements,
+      bodyLimitBytes: bodyLimits.stockListStockMovements,
+      rateLimitPerMinute: rateLimits.stockListStockMovements,
+      timeoutSeconds: timeouts.stockListStockMovements,
     }
   );
   // Inventory's Stock receiveStock, a Stock (D103): the
@@ -487,9 +494,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<InventoryStockReceiveStockResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.stockReceiveStock,
-      rateLimitPerMinute: options.rateLimits?.stockReceiveStock,
-      timeoutSeconds: options.timeouts?.stockReceiveStock,
+      bodyLimitBytes: bodyLimits.stockReceiveStock,
+      rateLimitPerMinute: rateLimits.stockReceiveStock,
+      timeoutSeconds: timeouts.stockReceiveStock,
     }
   );
   // Inventory's Stock releaseFor, a Stock (D103): the
@@ -510,9 +517,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<InventoryStockReleaseForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.stockReleaseFor,
-      rateLimitPerMinute: options.rateLimits?.stockReleaseFor,
-      timeoutSeconds: options.timeouts?.stockReleaseFor,
+      bodyLimitBytes: bodyLimits.stockReleaseFor,
+      rateLimitPerMinute: rateLimits.stockReleaseFor,
+      timeoutSeconds: timeouts.stockReleaseFor,
     }
   );
   // Inventory's Stock returnFor, a Stock (D103): the
@@ -533,9 +540,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<InventoryStockReturnForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.stockReturnFor,
-      rateLimitPerMinute: options.rateLimits?.stockReturnFor,
-      timeoutSeconds: options.timeouts?.stockReturnFor,
+      bodyLimitBytes: bodyLimits.stockReturnFor,
+      rateLimitPerMinute: rateLimits.stockReturnFor,
+      timeoutSeconds: timeouts.stockReturnFor,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at
