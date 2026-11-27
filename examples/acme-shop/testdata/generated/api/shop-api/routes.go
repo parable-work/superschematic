@@ -35,6 +35,7 @@ const (
 // Pass this to RegisterRoutes() to wire up your business logic.
 type Config struct {
 	// DB is the database connection for middleware operations (auth, request context, etc.)
+	// The behavior operations run through it too (D103).
 	DB orm.DatabaseInterface
 
 	// Logger is the base logger for request-scoped logging
@@ -82,7 +83,7 @@ type Config struct {
 // Returns an error if any required field is nil.
 func (c *Config) Validate() error {
 	if c.DB == nil {
-		return fmt.Errorf("Config.DB is required")
+		return fmt.Errorf("Config.DB is required: it runs the behavior operations of shop-api (D103)")
 	}
 	if c.Logger == nil {
 		return fmt.Errorf("Config.Logger is required")
@@ -393,6 +394,123 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimesession.RequirePermissions("products.write"),
 			},
 		},
+		// Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded.
+		{
+			Method:  "POST",
+			Path:    "/refund/payments/list-payment-actions",
+			Handler: createRefundPaymentsListPaymentActionsHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/approvals/list-sign-offs",
+			Handler: createRefundApprovalsListSignOffsHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/approvals/sign-off",
+			Handler: createRefundApprovalsSignOffHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Withdraws the caller's sign-off for a gated state, one not yet consumed.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/approvals/withdraw-sign-off",
+			Handler: createRefundApprovalsWithdrawSignOffHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/number/assign-number",
+			Handler: createRefundNumberAssignNumberHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/payments/capture-payment",
+			Handler: createRefundPaymentsCapturePaymentHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/payments/open-payment",
+			Handler: createRefundPaymentsOpenPaymentHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/payments/record-payment-event",
+			Handler: createRefundPaymentsRecordPaymentEventHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/payments/refund-for",
+			Handler: createRefundPaymentsRefundForHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/payments/refund-payment",
+			Handler: createRefundPaymentsRefundPaymentHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/payments/settle-refund-for",
+			Handler: createRefundPaymentsSettleRefundForHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/payments/void-payment",
+			Handler: createRefundPaymentsVoidPaymentHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
+		// Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.
+		{
+			Method:  "POST",
+			Path:    "/refund/{id}/status/transition",
+			Handler: createRefundStatusTransitionHandler(cfg.DB),
+			Middlewares: []runtimerouting.Middleware{
+				runtimesession.RequirePermissions("refunds.approve"),
+			},
+		},
 	}
 }
 
@@ -401,6 +519,8 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 // =============================================================================
 // Each handler factory creates a handler that calls the corresponding
 // implementation method. This allows for dependency injection and testing.
+// The factory of a behavior operation calls the ORM's operation instead
+// (D103).
 
 // createProductListProductsHandler creates a handler for GET /api/products
 //
@@ -649,6 +769,802 @@ func createProductCreateProductImageUploadHandler(impl ProductImplementation) go
 		}
 
 		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundPaymentsListPaymentActionsHandler creates a handler for POST /api/refund/payments/list-payment-actions
+//
+// Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded.
+//
+// It runs Refund's Payments listPaymentActions, a Payments (D103), an operation of the
+// table as a whole (D104), through the ORM of shop-db, which runs it
+// through the behaviors' core as a command without a row in a transaction:
+// no implementation method serves it.
+func createRefundPaymentsListPaymentActionsHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundPaymentsListPaymentActionsInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundPaymentsListPaymentActionsResult
+		if err := runTableBehaviorOperation(r.Context(), db.GetRefundRepository().Payments().ListPaymentActions, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundApprovalsListSignOffsHandler creates a handler for POST /api/refund/{id}/approvals/list-sign-offs
+//
+// Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it.
+//
+// It runs Refund's Approvals listSignOffs, an Approvals (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundApprovalsListSignOffsHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundApprovalsListSignOffsInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundApprovalsListSignOffsResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Approvals().ListSignOffs, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundApprovalsSignOffHandler creates a handler for POST /api/refund/{id}/approvals/sign-off
+//
+// Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed.
+//
+// It runs Refund's Approvals signOff, an Approvals (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundApprovalsSignOffHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundApprovalsSignOffInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundApprovalsSignOffResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Approvals().SignOff, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundApprovalsWithdrawSignOffHandler creates a handler for POST /api/refund/{id}/approvals/withdraw-sign-off
+//
+// Withdraws the caller's sign-off for a gated state, one not yet consumed.
+//
+// It runs Refund's Approvals withdrawSignOff, an Approvals (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundApprovalsWithdrawSignOffHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundApprovalsWithdrawSignOffInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundApprovalsWithdrawSignOffResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Approvals().WithdrawSignOff, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundNumberAssignNumberHandler creates a handler for POST /api/refund/{id}/number/assign-number
+//
+// Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order.
+//
+// It runs Refund's number assignNumber, a Numbering (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundNumberAssignNumberHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundNumberAssignNumberResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Number().AssignNumber, Id, nil, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundPaymentsCapturePaymentHandler creates a handler for POST /api/refund/{id}/payments/capture-payment
+//
+// Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter.
+//
+// It runs Refund's Payments capturePayment, a Payments (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundPaymentsCapturePaymentHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundPaymentsCapturePaymentInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundPaymentsCapturePaymentResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Payments().CapturePayment, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundPaymentsOpenPaymentHandler creates a handler for POST /api/refund/{id}/payments/open-payment
+//
+// Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change.
+//
+// It runs Refund's Payments openPayment, a Payments (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundPaymentsOpenPaymentHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundPaymentsOpenPaymentInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundPaymentsOpenPaymentResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Payments().OpenPayment, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundPaymentsRecordPaymentEventHandler creates a handler for POST /api/refund/{id}/payments/record-payment-event
+//
+// Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing.
+//
+// It runs Refund's Payments recordPaymentEvent, a Payments (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundPaymentsRecordPaymentEventHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundPaymentsRecordPaymentEventInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundPaymentsRecordPaymentEventResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Payments().RecordPaymentEvent, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundPaymentsRefundForHandler creates a handler for POST /api/refund/{id}/payments/refund-for
+//
+// Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund.
+//
+// It runs Refund's Payments refundFor, a Payments (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundPaymentsRefundForHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundPaymentsRefundForInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundPaymentsRefundForResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Payments().RefundFor, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundPaymentsRefundPaymentHandler creates a handler for POST /api/refund/{id}/payments/refund-payment
+//
+// Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund.
+//
+// It runs Refund's Payments refundPayment, a Payments (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundPaymentsRefundPaymentHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundPaymentsRefundPaymentInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundPaymentsRefundPaymentResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Payments().RefundPayment, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundPaymentsSettleRefundForHandler creates a handler for POST /api/refund/{id}/payments/settle-refund-for
+//
+// Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund.
+//
+// It runs Refund's Payments settleRefundFor, a Payments (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundPaymentsSettleRefundForHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundPaymentsSettleRefundForInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundPaymentsSettleRefundForResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Payments().SettleRefundFor, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundPaymentsVoidPaymentHandler creates a handler for POST /api/refund/{id}/payments/void-payment
+//
+// Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter.
+//
+// It runs Refund's Payments voidPayment, a Payments (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundPaymentsVoidPaymentHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundPaymentsVoidPaymentInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundPaymentsVoidPaymentResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Payments().VoidPayment, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createRefundStatusTransitionHandler creates a handler for POST /api/refund/{id}/status/transition
+//
+// Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it.
+//
+// It runs Refund's status transition, a Workflow (D103), through the
+// ORM of shop-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createRefundStatusTransitionHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.RefundStatusTransitionInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.RefundStatusTransitionResult
+		if err := runBehaviorOperation(r.Context(), db.GetRefundRepository().Status().Transition, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
 		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
 	}
 }
