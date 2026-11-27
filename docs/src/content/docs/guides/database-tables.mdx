@@ -2828,7 +2828,8 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
 - **Pinned fields** (`pinOn`). `signOff` takes `read`, the value of each
   field the signer read (`{ "headSha": "..." }`); one that moved is 409
   `stale`, `{ field, read, current }`. A write to another field makes no
-  signer stale.
+  signer stale. The generated clients type `read` with the fields the
+  table's gates pin, and a table whose gates pin none has no `read`.
 
 ```ts
 // forge-db
