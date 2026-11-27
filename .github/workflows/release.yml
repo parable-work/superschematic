@@ -139,6 +139,10 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
+    # Said, not left to the input's default: ci.yml runs its quick tier for
+    # anything else, and a release must not pass on that.
+    with:
+      tier: full
 
   build-archives:
     name: build archives ${{ matrix.name }}
