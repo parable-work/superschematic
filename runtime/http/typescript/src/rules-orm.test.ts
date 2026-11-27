@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, setSystemTime, test } from 'bun:test';
 import pg from 'pg';
 import { ormOf } from './orm-postgres';
 import { NotFoundError, type Clauses, type Orm, type OrmDefinition, type TableDefinition, type WriteOptions } from './orm';
@@ -95,7 +95,7 @@ const orderTable: TableDefinition = {
     update: 'UPDATE "order" SET %s WHERE id = $%d',
     returning: ` RETURNING ${columnList}`,
     updateMany: '',
-    updatedAt: 'updated_at = $%d',
+    updatedAt: 'updated_at = statement_timestamp()',
     updatedBy: 'updated_by = $%d',
     upsert: `INSERT INTO "order" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING ${columnList}, (xmax = 0) AS _inserted`,
     softDelete: '',
@@ -293,6 +293,22 @@ describe.skipIf(rulesCore === undefined || rulesDsn === '')('a repository of a t
     expect(paid.updatedAt.getTime()).toBeGreaterThanOrEqual(before.updatedAt.getTime());
     await expect(orm.order.status.transition(id, { to: 'shipped' })).rejects.toMatchObject({ code: 'forbidden', status: 403 });
     expect(await orm.order.status.transition(id, { to: 'shipped' }, { caller: { subject: 'sam', permissions: ['orders.ship'] } })).toEqual({ from: 'paid', to: 'shipped' });
+  });
+
+  test("the core's update and operation stamp updatedAt from the database's clock, as the insert's default does, so a host clock behind it stamps no row earlier than its insert", async () => {
+    // The host's clock an hour behind the database's.
+    setSystemTime(new Date(Date.now() - 60 * 60 * 1000));
+    try {
+      const created = await orm.order.createOne({ title: 'Stool' });
+      const updated = await orm.order.updateOne(created.id, { title: 'Bar stool' });
+      expect(updated.updatedAt.getTime()).toBeGreaterThanOrEqual(created.updatedAt.getTime());
+      expect(await orm.order.status.transition(created.id, { to: 'paid' })).toEqual({ from: 'draft', to: 'paid' });
+      const paid = await orm.order.getOne(created.id);
+      expect(paid._version).toBe(3);
+      expect(paid.updatedAt.getTime()).toBeGreaterThanOrEqual(updated.updatedAt.getTime());
+    } finally {
+      setSystemTime();
+    }
   });
 
   test("withBehaviorCaller runs the commands as its caller, kept by withUser's copy and a transaction, a call's caller still first, and null unsets it", async () => {

@@ -83,9 +83,14 @@ type TaskApprovalsSignOffParams struct {
 type TaskApprovalsSignOffResult struct {
 	// At is when, in epoch milliseconds.
 	At int64 `json:"at"`
-	// Count is how many the gate needs.
-	Count int64   `json:"count"`
-	Note  *string `json:"note,omitempty"`
+	// Count is how many the gate needs: its count, or for a gate that reads its
+	// requirements from rows, the count of the first requirement the sign-off
+	// counts toward.
+	Count int64 `json:"count"`
+	// CountsToward is for a gate that reads its requirements from rows, the name
+	// of each requirement the sign-off counts toward now.
+	CountsToward []string `json:"countsToward,omitempty"`
+	Note         *string  `json:"note,omitempty"`
 	// SignedBy is every subject whose sign-off for the state is not yet
 	// consumed, in the order they signed.
 	SignedBy []string `json:"signedBy"`
@@ -105,6 +110,10 @@ type TaskApprovalsWithdrawSignOffParams struct {
 // TaskApprovalsWithdrawSignOffResult is what approvals's withdrawSignOff
 // returns.
 type TaskApprovalsWithdrawSignOffResult struct {
+	// ActingFor is the subject the caller acted for.
+	ActingFor *string `json:"actingFor,omitempty"`
+	// Agent is the Agent whose run the caller was.
+	Agent *string `json:"agent,omitempty"`
 	// At is when it was signed, in epoch milliseconds.
 	At   int64   `json:"at"`
 	Note *string `json:"note,omitempty"`
@@ -135,6 +144,10 @@ type TaskApprovalsListSignOffsResult struct {
 // TaskApprovalsListSignOffsResultItemsItem types an item of
 // TaskApprovalsListSignOffsResultItems.
 type TaskApprovalsListSignOffsResultItemsItem struct {
+	// ActingFor is the subject the caller acted for.
+	ActingFor *string `json:"actingFor,omitempty"`
+	// Agent is the Agent whose run the caller was.
+	Agent *string `json:"agent,omitempty"`
 	// At is when, in epoch milliseconds.
 	At int64 `json:"at"`
 	// ConsumedAt is when a change of the own fields, entering the state or a new
@@ -152,9 +165,11 @@ type TaskApprovalsListSignOffsResultItemsItem struct {
 // it takes, in a transaction.
 type TaskApprovalsOperations interface {
 	// SignOff signs off on the instance for a gated state, as the caller. Needs
-	// the gate's permission; refused for the instance's creator unless the gate
-	// allows it, while the instance is in the state, and for a caller whose
-	// sign-off for the state is not yet consumed.
+	// the permission of one of the gate's requirements, and is refused unless it
+	// counts toward one of them now: for the instance's creator unless the
+	// requirement allows it, for a caller the requirement does not count,
+	// excludes or whose proof falls short, while the instance is in the state,
+	// and for a caller whose sign-off for the state is not yet consumed.
 	SignOff(ctx context.Context, id types.IdentityUUID, params TaskApprovalsSignOffParams) (*TaskApprovalsSignOffResult, error)
 	// WithdrawSignOff withdraws the caller's sign-off for a gated state, one not
 	// yet consumed.
@@ -385,8 +400,9 @@ func (r *TaskRepository) corePatch(update *TaskUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and TaskUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and TaskUpdate holds none.
 func (r *TaskRepository) updateColumns(ctx context.Context, update *TaskUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Title != nil {

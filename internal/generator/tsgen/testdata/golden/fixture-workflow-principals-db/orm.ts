@@ -207,7 +207,7 @@ export const questionTable: TableDefinition = {
     update: "UPDATE question SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"prompt\", \"asked_of\", \"created_by\", \"status\", \"status_entered_at\", \"review\", \"review_entered_at\", \"_version\"",
     updateMany: "UPDATE question SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO question (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"prompt\", \"asked_of\", \"created_by\", \"status\", \"status_entered_at\", \"review\", \"review_entered_at\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",

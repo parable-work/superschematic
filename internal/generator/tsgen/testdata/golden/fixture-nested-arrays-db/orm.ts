@@ -139,7 +139,7 @@ export const boardTable: TableDefinition = {
     update: "UPDATE board SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"labels\", \"states\", \"walls\", \"scores\"",
     updateMany: "UPDATE board SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO board (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"labels\", \"states\", \"walls\", \"scores\", (xmax = 0) AS _inserted",
     softDelete: "",

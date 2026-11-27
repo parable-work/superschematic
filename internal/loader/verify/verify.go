@@ -323,6 +323,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkNotifications(schema, in, r)
 	checkAgents(schema, in, r)
 	checkParties(schema, in, r)
+	checkSQLiteVersioned(schema, in, r)
 	checkGoFeatures(schema, in, r)
 	checkRustFeatures(schema, in, r)
 	checkWorkers(schema, r)

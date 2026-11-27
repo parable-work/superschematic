@@ -2336,7 +2336,6 @@ Left:
 - The SDK types narrowed by the config (`behaviortypes`: the anchors).
 - A calendar source's permission in the schema, beside the route's option;
   weekend days per holiday calendar; a recurrence set at create.
-- The calendar on SQLite and D1.
 - `examples/deploy-smoke` with a Recurrence table, and the live
   `smoke.sh Cloudflare` run, which is the maintainer's.
 
@@ -2416,7 +2415,7 @@ Left:
   the repository's: search holds audience, grants and per-table
   permissions, as the calendar does.
 - `unaccent`, prefixes and a query syntax; a search by vector alone.
-- SQLite and D1.
+- Embeddings on SQLite and D1, which D186 refuses there.
 - A wake for the indexing queue (D151's change-queue wake).
 - A search across the databases of an environment.
 - `examples/deploy-smoke` with a `@searchable` table, and the live
@@ -2516,8 +2515,8 @@ is refused `done`; and password reset sends through the email adapter.
 
 Left:
 
-- SQLite and D1 in every language (Go's notifier on Postgres is D190's,
-  Rust's D191's).
+- Go and Rust on SQLite and D1, which TypeScript runs them on (D189);
+  Go's notifier on Postgres is D190's, Rust's D191's.
 - Comments raising its mentions and replies into the inbox, and the core's
   Comments `inbox` operation retired.
 - A generated server that builds the notifier into its `Deps` (with D159's
@@ -2623,8 +2622,9 @@ approval policy and STOP.
 
 Left:
 
-- Go and Rust: the inbound path, party principals and sends, and SQLite
-  and D1.
+- Go and Rust on SQLite and D1, which run the inbound path, party
+  principals and sends in TypeScript alone (D189). Go and Rust serve them
+  on Postgres (D192, D193).
 - Comments' `via` on a table: the rules core's caller carries no channel,
   so a message posted into a row's Comments for a text's sender records
   its `for` and not its channel. The core's `Caller` gains a channel, the
@@ -2724,8 +2724,9 @@ its Lease; and administration is permissions.
 
 Left:
 
-- Go and Rust: the dispatcher, the run's authenticator, autonomy and the
-  runner; SQLite and D1.
+- Go and Rust on SQLite and D1, which run the dispatcher, the run's
+  authenticator, autonomy and the runner in TypeScript alone (D189). Go
+  and Rust serve them on Postgres (D192, D193).
 - A real container platform's sandbox provider and one model API's
   provider (D159's left), and the live Workers run (`smoke.sh
   Cloudflare`), which is the maintainer's. The dispatcher's module reaches
@@ -2791,9 +2792,6 @@ Left:
   TypeScript's does; a generated table operation runs in one.
 - TypeScript's `accessConditions` keeps the values of the branches before
   a `*` path bound.
-- The Go server's parties and agents, which later Go workstreams port.
-  References, attachments and provider slots are D184's, Recurrence, the
-  calendar and search D187's, and the notifier D190's.
 - Per-record access in the Go repositories on SQLite: an audience, grants
   and the access log, whose calls they refuse there with
   `ErrSQLiteUnsupported` until then.
@@ -2861,9 +2859,10 @@ Left:
   itself; an app wraps the authenticator its `Handlers` take.
 - The typed filters' one-to-many members; a path filter is the
   untyped repositories' and the table operations' so far.
-- The D152 to D159 features the refusals name, which the later Rust
-  entries port: D185 ports D154 and D159, D188 D152 and D155, and D191
-  D153.
+- The D152 to D159 features the refusals named, which the later Rust
+  entries port: D185 ports D154 and D159, D188 D152 and D155, D191 D153,
+  and D193 D157 and D158. The refusals left are Rust on SQLite's and a
+  provider of no crate.
 
 ## D182. The TypeScript repositories run on SQLite and D1, an audience there is a JSON array of ids a trigger keeps and a read reaches through json_each, references and files are row triggers, and no trigger counts on another firing (D79, D116, D154, D156 amended)
 
@@ -2989,8 +2988,9 @@ Left:
   table deriver on SQLite and D1.
 - A cleared message that names a holder the same delete statement
   deleted, which a row trigger cannot tell.
-- The calendar, search, the notifier's queues, parties and agents on
-  SQLite and D1 (D186, D189), on these shapes.
+- D186 serves the behaviors' core, Recurrence, the calendar and search on
+  these shapes, and D189 the notifier's queues, parties and agents.
+
 
 ## D183. An entered sender's run asks before every write, a party's run reaches only its grant's paths, a generated MCP tool carries its operation's @autonomy, and a generated TypeScript server builds the dispatcher into its Deps and runs its queues (D157, D158 amended)
 
@@ -3063,8 +3063,13 @@ implementation.
 
 Left:
 
-- Go, Rust and SQLite: the trust, the narrowed paths, the tool records'
-  `@autonomy` read by their gates, and the generated wiring (D158's left).
+- The generated wiring, in every language over a database that lists
+  sqlite first, which waits on `Deps.orm` over a SqlDatabase (D182's
+  left), and in Go and Rust (D158's left). On SQLite the trust and the
+  narrowed paths run in TypeScript as on Postgres (D189). Go serves the
+  trust and the narrowed paths (D192); it serves no MCP endpoint, so a Go
+  server stays refused `@autonomy`. Rust serves all but the generated
+  wiring (D193's left).
 - A run's token on the API's own routes: the generated server accepts it
   only where the implementation's authenticator does
   (`deps.agents.authenticator(inner)`; `grantAuthenticator`, an app's
@@ -3350,10 +3355,6 @@ once. The guides' Go sections.
 Left:
 
 - Go on SQLite, as in every language (D153's).
-- A route to an agent in Go, which is logged and reaches no one, and a
-  party's channel identity that lapsed with its grants (D157's
-  `identityLapsed`), which the Go notifier does not ask: D192's, which
-  ports parties and agents to Go.
 - A generated Go server that builds the notifier into its `Deps`, mounts
   the inbox and the relay routes, and fills a `@worker` of the dispatch
   queue with `Handle`; an app wires them, as in TypeScript (D153's left).
@@ -3400,12 +3401,6 @@ once. The guide's Rust section.
 Left:
 
 - Rust on SQLite, as in every language (D153's).
-- A route to an agent in Rust, which is logged and reaches no one until
-  the Rust runtime serves D158's agent runs; the approvals table itself
-  is D158's.
-- A party's channel identity that lapsed with its grants (D157's
-  `identityLapsed`), which the Rust notifier does not ask until it serves
-  parties.
 - A generated Rust server that builds the notifier into its `Deps`,
   mounts the inbox and the relay routes, and fills a `@worker` of the
   dispatch queue with `handle`; an app wires them, as in TypeScript
@@ -3504,3 +3499,380 @@ Left:
   relations name, the other way.
 - An overlap among an API's own routes, which stays each router's
   precedence.
+
+## D193. The Rust runtime serves D157's parties and inbound path and D158's agent dispatcher on Postgres, with D183's trust, narrowed paths and @autonomy; the agent routes finish their work when an instance's connection closes (D157, D158, D181, D183, D191 amended)
+
+D157 and D158 built parties, the inbound path, conversations and the agent
+dispatcher in the TypeScript runtime, D183 their follow-ups, and D181
+refused `@party`, `@conversations`, `@runRequests`, `@agents` and
+`@autonomy` in the Rust outputs. This entry ports them to Rust, on
+Postgres, with the TypeScript tables, statements, states and refusals. It
+is the fifth of the Rust parity entries.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Postgres definition of a Rust types crate carries each table's `@party` and its title (`Table.party`), its conversations part (`Table.conversations`) and its orchestration part (`Table.agents`), member for member what tsgen writes into orm.ts (`rustgen/notifications.go`). The crate re-exports `orm::parties`, `orm::inbound` and `orm::agents`. | A definition of the parts the app passes, which the loader already settled. |
+| `orm::parties` is `parties.ts` (`party_principal`, `identity_lapsed`, `party_tables_of`, `same_uuid`) and `orm::inbound` is `createInbound` (`Inbound`: `receive`, `inbound`, `send`, `release`, `reject`, `principal_of`, `file`, `triage`, `settle`, `timeline`, `message`, `run_queue`), over the untyped repositories, as the notifier is (D191). A read as the sender or the party opens the repositories for it (`with_access`), since Rust has no ambient caller (D181). | A party module of the access module, which knows no channel identity. |
+| A send's approval policy is a trait (`SendApproval`) the path holds once (`with_approval`, or `set_approval` on a path already shared): the app's, or the dispatcher's `send_approval`. | A closure, which would not name what it decides. |
+| `orm::agents::Agents` is `createAgents`: `request`, `handle` (start, watch, follow-up), `worker_queue`, `principal_of`, `authenticator`, `gate`, `approve`, `deny`, `reply_actions`, `send_policy`, `send_approval`, `mcp_gate`, `routes`, `pause`, `resume`, `set_policy`, `set_budget`, `define`, `cancel`, `transcript` and `prune`. Its Lease, Retries, Workflow and Budget calls are the behaviors' operations through the core (`Repository::operation`), each write of a table that composes behaviors in a transaction of its own. `move_run` writes the outcome, cost and transcript before the status moves. | Generated agents per database, typed by its tables: the parts' fields are the loader's, the same in every database. |
+| The notifier takes the dispatcher's reply actions and its requests queue (`with_agents`), and the inbound path the dispatcher's send approval, so the dispatcher is built first and given the notifier and the inbound path once they are (`set_notifier`, `set_inbound`). The reply actions and the send approval hold the dispatcher weakly, so the three make no cycle. A route's `{ agent }` recipient is a request on that queue in the routing transaction, which closes D191's left; the notifier now also skips a party's address whose identity lapsed (`identity_lapsed`), D191's other left. | A notifier that holds the dispatcher, which holds the notifier. `approval_replies` for the orchestration's approvals, which knows no held message and no run past the budget. |
+| The agent routes are an axum router under the endpoint's path (`routes`), and each call's work runs in a task of its own. A run cancelled while its turn runs (a pause, a budget's cap) has its instance stopped, which closes the instance's connection, and hyper drops a handler whose client left: the work that cancelled the run would stop half done. | Work inline in the handler, which the end-to-end test's budget case found leaving the run running and its agent paused. |
+| The plain grant authenticator (`access::GrantAuthenticator`) refuses an agent run's token with 401, as D192 settled for Go: as its grant's bare holder a run would act with its role's permissions, neither narrowed to whom it acts for nor gated by its autonomy. The dispatcher's `principal_of` and `authenticator(inner)` alone resolve one, through a grant authenticator that admits runs, which the crate keeps to itself. | Accepting it as the holder, which `TestRustSearchEndToEnd` relied on and now builds the run's principal itself. |
+| The MCP tool record carries its operation's `@autonomy` (`RouteTool.autonomy`), and an endpoint's options take a `CallGate` (`EndpointOptions.call_gate`), which the router asks before a call's route runs; `mcp_gate` is the dispatcher's. A Rust server is no longer refused `@autonomy`. | The class in the tool's `_meta`, which D183 turned down. |
+| The sandbox's side is `providers::run_agent_instance` under the `http-client` feature, over reqwest: turns, MCP calls retried while an approval holds them, the sandbox's own tools, credentials resolved in the instance and reported by reference. | A runner binary of the runtime's, which a sandbox provider names as its program. |
+| A key read from a queue's `UUID` column is hyphenated there, and a run request's `message` and `grant` and a dispatcher request's `run` read in base62, as the repositories write a key, so a request names its rows as the outcome that made it does and a transcript's object is `agent-runs/<base62>.json`. | Comparing either form everywhere a key is read. |
+| Redaction is hand-written (`redact_text`): the runtime has no regular expressions, and the two patterns are a grant's token and a bearer credential. The app's own redactions are texts (`with_redacted`). | A regex dependency for two patterns. |
+| The pure parts are shared through `runtime/http/testdata/agents_parity.json`, which TypeScript's `agents-parity.test.ts` writes and checks and Rust reads: `defaultAutonomy`, `trustOf`, `effectiveAutonomy`, `narrowReaches`, `narrowPermissions`, `paramsHash`, `bestPolicy`, `budgetCrossing`, `redactTokens` and `emailAuthenticated`. agents.ts exports the four it held inline, and calls them. | Vectors written by Go, which has no dispatcher. |
+| D157's and D158's tables stay refused for a Rust service that lists sqlite, by the loader (`verify/rust_features.go`, which reads the DB service's dialects), rustgen, and rustrestgen's `checkSQLiteDeps` for a Rust server whose database lists sqlite first. | Lifting the Rust refusal on SQLite with TypeScript's, which D189 carries. |
+
+Settled. The Rust dispatcher's order of writes, states and refusals are
+the TypeScript one's; the cases of `TestAgentRunsEndToEnd` hold the Rust
+runtime to them. The sandbox stand-in of the Rust test runs each instance
+as a task of the test's process, over the agent routes on a local port,
+where the TypeScript test runs a process under Bun; the routes, the token,
+the MCP endpoint and the runner are the same. The Rust types crate fires
+no deadline itself (the Rust server's behavior worker does, D188), so the
+scheduled case hands the notifier the event a schedule's deadline raises.
+
+Built: the definition's `party`, `conversations` and `agents`
+(`internal/generator/rustgen/notifications.go`, goldens
+`fixture-parties-db` and `fixture-agent-runs-db`) and the crate's
+re-exports; `orm::parties`, `orm::inbound` and `orm::agents`
+(`runtime/http/rust/src/orm/`); the notifier's `with_agents` and its check
+of a lapsed identity; the model types' tool calls and provider state
+(`providers/model.rs`); `providers::run_agent_instance`; `RouteTool.autonomy`
+and `CallGate` (`mcp/`); the parity file, TypeScript's exports and test;
+the refusals of D181 lose `@party`, `@conversations`, `@runRequests`,
+`@agents` and `@autonomy` but on SQLite (`verify/rust_features.go`,
+`rustgen`, `rustrestgen/tables.go`). `TestRustPartiesEndToEnd` runs D157's
+seven cases through the Rust inbound path on Postgres over a stand-in SMS
+relay and mail relay and a bucket in memory: a text with a photo from a
+party with a grant becomes a report on the granted job with the photo
+attached, on the job's, the report's and the party's backlinks; a text from
+an unknown number lands in triage; the same text from a party whose grant
+ended reaches nothing until its number is verified again; email failing
+DMARC is unknown and an authenticated reply threads to its party; a party
+with no grant is on its timeline and a user's text is the notifier's
+reply; two parties on one address are told apart by the thread; and
+sending is held to the permission, the rate limit, the approval policy
+and STOP. `TestRustAgentRunsEndToEnd` runs D158's and D183's thirteen
+cases through the Rust dispatcher on Postgres: a route's run reads only
+its target and the rows its role reaches; its MCP search keeps to its
+scope; each turn replays the earlier completions with their tool calls and
+provider state, which a reader gets redacted; an ask waits for an approval
+given by SMS, then runs once; a changed amount asks again and money never
+runs on its own; a budget cap pauses the agent, and every agent's cap
+refuses a scheduled run and asks before a principal's; pausing every agent
+cancels a run in flight and returns its assigned row; the transcript holds
+no credential value; a party's text starts a run that acts for it, narrowed
+to its grant's role, obeys nothing the text says, and its message back
+waits on its approval, given by text; a party's run reaches only its
+grant's paths, and an entered sender's run reads and asks before every
+write; an unanswered question makes a follow-up row; Retries starts a
+failed instance again while the run holds its Lease; and administration is
+permissions. The guides' Rust sections.
+
+Left:
+
+- A generated Rust server that builds the dispatcher into its `Deps`,
+  mounts its routes, passes `mcp_gate` as its MCP endpoint's call gate and
+  hands a `@worker` of the requests queue or the `@runRequests` queue to
+  `handle`, as D183 built for TypeScript; an app wires them now, with
+  `EndpointOptions::with_call_gate` for the gate.
+- Rust on SQLite: parties, the inbound path and the dispatcher (D157's and
+  D158's, with TypeScript's, which D189 carries).
+- A Rust types crate's own deadline worker: a schedule's deadline that
+  starts a run fires in the Rust server's behavior worker alone (D188).
+
+## D192. The Go runtime serves D157's parties and inbound path and D158's agent dispatcher on Postgres, with D183's trust and narrowed paths: the generated ORM hosts both through the notifier's host, a table with behaviors is written through its repository, and the agent routes finish their work when an instance's connection closes (D157, D158, D180, D183, D190 amended)
+
+D157 and D158 built parties, the inbound path, conversations and the agent
+dispatcher in the TypeScript runtime, D183 their follow-ups, and D180
+refused `@party`, `@conversations`, `@runRequests` and `@agents` in a Go
+server. This entry ports them to Go, on Postgres, with the TypeScript
+tables, statements, states and refusals, and keeps to the points the Rust
+port of the same decisions (D193) settled where the languages allow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The inbound path and the dispatcher are the Go HTTP runtime's `inbound` and `agents` packages, since they send through the channel adapters and start the sandboxes an environment configures (D159). What they run through is the schema runtime's `orchestration.Host`, which the generated ORM of a database with parties or agents and the notifier implements in `orchestration.go` (`Database.Orchestration()`): the methods the file adds to the notifier's host (D190), so one host serves the notifier, the path and the dispatcher, and a host a transaction hands on is one too (`orchestration.Of`). The definitions are the conversations' and agents' tables by part with their columns, the `@party` tables, each table's behaviors' uses by member, its relations and versioning, and the two queues. | A second host type, which a reply action's transaction would hand the dispatcher as the notifier's and not its own; methods on `notifications.Host`, which every database with a notifier would implement. |
+| The conversations' tables, the policies and the approvals, which compose no behavior, are read and written by statements over the columns the definitions name, as the notifier's are (D190). The definitions, `@versioned`, and the runs and controls, which compose Lease, Retries, Workflow and Budget, are written through their repository (`Host.Create`, and the notifier's `Host.Update`): the typed create and update read JSON (a member by its field, case aside; a null as the field's `SetNull`), so the core initialises and guards the fields its behaviors own. Every behavior's operation is the core's by its use's id (`Host.Operation`, as a generated repository's own), a Lease's token presented as its precondition (`Host.Presenting`). | Statements for every table, which would write a Workflow's status and a Budget's limit past the core; a dispatcher generated per database, typed by its tables, whose fields are the loader's and the same everywhere. |
+| Go's `access.Principal` holds no permissions, so `orchestration.Principal` carries them beside it (as `crosstable.Caller` does, D187), and `agents.RunPrincipal` the claims TypeScript's principal carries: the run, the agent, the definition's version and the trust. A tool runs in a transaction as the run's principal (`Host.Acting`), and its error's status is its own (`HTTPStatus`), the repositories' 404 or 403 (`Host.ErrorStatus`), or 500. | A permissions member on `access.Principal`, which every reader of it would carry. |
+| `orchestration.PartyPrincipal` and `IdentityLapsed` are in the schema runtime, since the notifier asks the second of every party's address it sends to: through the orchestration host its own host is in a database with parties, which closes D190's left with the agent recipient's. | Lapsing in the inbound package, which the notifier cannot import (the path imports it). |
+| As in Rust: the dispatcher is built first (`agents.New`), the notifier takes its requests (`notify.Options.Agents`, a route's `{ agent }` recipient enqueued in the routing transaction) and its reply actions (`ReplyActions`), the inbound path takes its send approval (`Options.Approve`, the `SendApproval` interface, with `ApprovalFunc` for the app's), and the dispatcher is given both once they are (`SetNotifier`, `SetInbound`; `SetApproval` on a path built first). Redaction is written out (`RedactTokens`), and the app's own redactions are texts. A key a queue's message carries is base62, as the Go types write a UUID, and a statement reads a UUID column in base62. `moveRun` writes the outcome, cost and transcript before the status moves. | A notifier that holds the dispatcher built inside it. |
+| The agent routes are an `http.Handler` under the endpoint's path (`Routes`), and each call's work runs in a context that the caller leaving does not cancel (`context.WithoutCancel`): a run a call cancels (a pause, a budget's cap) has its instance stopped, which closes the instance's connection, and the work that cancelled it would stop half done. This is D193's task of its own, in Go's terms. | A goroutine per call, which the context does without. |
+| The run's MCP endpoint (`<endpoint>/mcp`) is the package's own JSON-RPC: initialize, ping, `tools/list` and `tools/call`, alone or in a batch, each answered as one JSON body, a refused call a tool error whose structured content is its problem, as TypeScript's `serveMcp` answers. The Go runtime serves no MCP endpoint of its own (D81, D116). `providers.RunAgentInstance` is the sandbox's side, and reads a body or a stream's event alike. | An MCP server package in the runtime, which a Go API's endpoint would need first. |
+| A run's token on an app's own routes is the dispatcher's to authenticate (`agents.Authenticator`, TypeScript's `agents.authenticator` and Rust's `Agents::authenticator`): the run's principal, its permissions narrowed to whom it acts for as its one role, its reach narrowed to a party's paths, and each call held to the run's autonomy (`Gate`, the method and the path as its operation unless the app names it), so an entered sender's write asks and an approved one runs once. Every other grant's token is `session.GrantAuthenticator`'s, which now refuses a run's token (401): as its grant's holder a run would act with the agent role's permissions, narrowed and gated by nothing. TypeScript and Rust hold a route to a run's autonomy only where the implementation asks the gate; Go's authenticator holds every route. | Reading a run's token as its grant's holder, which widens what a run may do past D183; leaving the gate to each route, which a route that forgets it would skip. |
+| A Go server stays refused an operation's `@autonomy`, since it holds an agent run's calls of the API's MCP tools and a Go server serves no MCP endpoint; `MCPGate` is the gate for the day it does. A Go server over a database with parties or agents and no `@notifier("dispatch")` queue is refused (the host is the notifier's), and `GoServerSQLiteErr` refuses the parties' and agents' tables, which the loader refuses on SQLite for every language. | Lifting `@autonomy` with nothing to read it, which would ignore it. |
+| The pure parts are read from `runtime/http/testdata/agents_parity.json`, which TypeScript's `agents-parity.test.ts` writes (D193's copy, taken unchanged): `DefaultAutonomy`, `TrustOf`, `EffectiveAutonomy`, `NarrowReaches`, `NarrowPermissions`, `ParamsHash` (over `CanonicalJSON`), `BestPolicy`, `BudgetCrossing`, `RedactTokens` and `inbound.EmailAuthenticated`. | |
+
+Settled. The Go dispatcher's order of writes, states and refusals are the
+TypeScript one's; the cases of `TestAgentRunsEndToEnd` hold the Go runtime
+to them. Where Go differs from Rust: the test's sandbox stand-in runs each
+instance as `RunAgentInstance` in a goroutine of the test's process over
+the agent routes on a local port, cancelled through its context, with a
+stand-in vault and site over HTTP for the vault broker and `http_get`; the
+scheduled case fires the schedule's deadline and its event through the Go
+ORM's `RunDeadline` and `RunEvent`, as TypeScript's does, where the Rust
+types crate fires none; the MCP endpoint is the package's own; and the
+dispatcher holds the notifier and the inbound path plainly, which Go's
+collector does not count as a cycle.
+
+Built: the schema runtime's `orchestration` package (the host, the
+definitions, `PartyPrincipal`, `IdentityLapsed`, `SameUUID` and the
+statements over a part); ormgen's `orchestration.go`
+(`ormgen/orchestration.go`, `templates/orchestration.tmpl`, goldens of
+fixture-parties-db and fixture-agent-runs-db); the HTTP runtime's
+`inbound` package (`New`, `Inbound`, `Receive`, `Send`, `Release`,
+`Reject`, `PrincipalOf`, `File`, `Triage`, `Settle`, `Timeline`, `Message`,
+`RunQueue`, `EmailAuthenticated`, `BucketOf`) and `agents` package (`New`,
+`RequestRun`, `RouteRequest`, `Handle`, `HandleRunRequest`, `WorkerQueue`,
+`PrincipalOf`, `Gate`, `Approve`, `Deny`, `ReplyActions`, `SendPolicy`,
+`ApproveSend`, `MCPGate`, `Authenticator`, `MCPTools`, `Routes`, `Pause`, `Resume`,
+`SetPolicy`, `SetBudget`, `Define`, `Cancel`, `Transcript`, `Prune`, and the
+pure parts with their parity test); `providers.RunAgentInstance`; the
+notifier's `Options.Agents` and its check of a lapsed identity; the
+refusals of D180 lose `@party`, `@conversations`, `@runRequests` and
+`@agents` but with no notifier and on SQLite (`verify/go_features.go`);
+`session.GrantAuthenticator` refusing a run's token;
+TypeScript's four exports and the parity file, as D193 has them.
+`TestGoPartiesEndToEnd` runs D157's seven cases through the Go inbound
+path on Postgres over a stand-in SMS relay and mail relay and a bucket in
+memory: a text with a photo from a party with a grant becomes a report on
+the granted job with the photo attached, on the job's, the report's and
+the party's backlinks; a text from an unknown number lands in triage; the
+same text from a party whose grant ended reaches nothing until its number
+is verified again; email failing DMARC is unknown and an authenticated
+reply threads to its party; a party with no grant is on its timeline and
+a user's text is the notifier's reply; two parties on one address are told
+apart by the thread; and sending is held to the permission, the rate
+limit, the approval policy and STOP. `TestGoAgentRunsEndToEnd` runs D158's
+and D183's thirteen cases and one of D192's through the Go dispatcher on Postgres: a
+schedule's run reads only its target and the rows its role reaches; its
+MCP search keeps to its scope; each turn replays the earlier completions
+with their tool calls and provider state, which a reader gets redacted; an
+ask waits for an approval given by SMS, then runs once; a changed amount
+asks again and money never runs on its own; a budget cap pauses the
+agent, and every agent's cap refuses a scheduled run and asks before a
+principal's; pausing every agent cancels a run in flight and returns its
+assigned row; the transcript holds no credential value; a party's text
+starts a run that acts for it, narrowed to its grant's role, obeys nothing
+the text says, and its message back waits on its approval, given by text;
+a party's run reaches only its grant's paths, and an entered sender's run
+reads and asks before every write; an unanswered question makes a
+follow-up row; Retries starts a failed instance again while the run holds
+its Lease; a run's token on an app's own route acts as the run, reaches no
+row past its narrowed paths, is refused by the grants' own authenticator,
+and its entered sender's write asks and, approved, runs once; and
+administration is permissions. The guides' Go sections.
+
+Left:
+
+- A generated Go server that builds the dispatcher into its `Deps`,
+  mounts its routes and hands a `@worker` of the requests queue or the
+  `@runRequests` queue to `Handle`, as D183 built for TypeScript, and the
+  inbound path and the notifier with it; an app wires them now, as Rust's
+  does (D193's left).
+- `@autonomy` in a Go server, which needs the Go server's MCP endpoint
+  first (D81, D116).
+- Go on SQLite: parties, the inbound path and the dispatcher (D157's and
+  D158's, for every language).
+
+## D200. Approvals takes requirements each instance sets: rows a gate reads, who counts and as whom, the proof, whom it excludes and when it applies, a reset per requirement and pins on named fields; the caller carries its Agent and assurance; and a generated index name past 63 bytes is shortened (D56, D103, D104 amended)
+
+A forge declared in superschematic schemas, which many teams run as
+instances of their own, gates each change's landing on approvals. Each
+team's rules differ, so the gate is a set of options each instance sets,
+not logic the app hard-codes. One team's values: a merge needs passing
+checks and approvals; agents may approve some classes of change alone
+(test fixes, golden updates, build scripts); some changes need an
+engineering or a security lead; a person who instructs an agent counts as
+that person; and a person approves through an MCP tool with no passkey
+each time. Another team may ask for a passkey with user verification on
+each approval. The forge's schema assumed options of the core's Approvals
+that it did not have. This entry builds them as options of the core
+behavior, each with a default that keeps a gate written before it as it
+was.
+
+D103's rule stands: a config is fixed at build time. The config fixes where
+a gate's requirements come from; the requirements themselves are rows,
+data the gate reads at each guard as Rollups reads its linked rows.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A gate is one requirement written in the config (`count`, `permission` and the members below), or reads its requirements from the rows of a type: `requirementsFrom: { schema, link, in? }`, the rows of `schema` whose to-one relation `link` points at the row, or with `in`, at one of the keys the row's own list field `in` holds. Absent, the gate is its own requirement. The rows are read a linked page at a time, as Rollups reads (D149), up to 10,000; a sign-off counts toward every requirement it meets; an archived row (`archivedAt`) asks for nothing. The configSchema needs `count` and `permission` unless `requirementsFrom` is there (`if`/`else`), and a gate that reads rows names none of the requirement's members. | Gates fixed in the schema, which a team changes only by a build. A config that holds the rows' ids, which an instance cannot change. One requirement per gate, which cannot say "a review, and a lead when the lead flag is set". |
+| A requirement's members, with their defaults: `count` (1 on a row), `permission` (needed); `callers`, absent: every caller counts, as its subject; `proof`, `none`; `proofWithinMs`, needed by `recent-sign-in` and taken by nothing else; `excludeCreator`, true; `excludeCreatorPerson`, false; `excludeSubjectsIn`, none; `recheckPermission`, false; `when`, none: it always applies. A row may also hold `name`, how a refusal names it (its key when absent), and `resetOn`. | Defaults that tighten an old gate (callers person only, recheck on), which would change every gate already built. |
+| `callers` lists `person`, a person calling as themselves, counted by its subject; `acting-for-person`, an agent run acting for a person, counted as that person; `agent`, an agent run, counted as its Agent. A caller that fits several counts as the person it acts for, then as its Agent, then as itself, in the order of the classes the requirement lists. So two runs for one person are one signer, and two runs of one Agent are one. A person's approval through an agent they instruct counts as theirs where the requirement lists `acting-for-person`; a requirement that lists `person` alone takes only the person themself. | Counting each run by its subject, which lets one Agent's runs make a count of two. Refusing every agent run a person's approval, which the forge's teams want an option for, not a rule. |
+| `proof` reads the assurance the host reports for the call (`Caller.assurance`: `signedInAt`, `userVerified`): `recent-sign-in` holds for a sign-in at most `proofWithinMs` before the sign-off, or user verification on it; `user-verification` for a passkey assertion with the UV flag over a challenge bound to the call. A caller with no assurance proves nothing. The core trusts the report as it trusts the subject. | The core checking a WebAuthn assertion, which is the authenticator's job and differs per host. |
+| `excludeCreator` refuses the subject `createdBy` holds, by the signer's subject or whom it counts as. `excludeCreatorPerson` also refuses the subject the row's own `createdFor` holds, the person the creator acted for. `excludeSubjectsIn` names own fields that list subjects, persons and Agents (`pushers`, `problemAgents`); a caller is excluded when its subject, the person it acts for or its run's Agent is listed. The guard reads each again, so a signer a later write lists stops counting. | Comparing the subject alone, which cannot exclude "the same Agent", since each run is a principal of its own (D156, D158). Recording the creator's actingFor in the core, which a table's create does not hand the core today. |
+| `recheckPermission` reads each signer's permission at each guard, through a new read, `ReadRequest::Permissions { subjects }` (`View::permissions_of`), for whom the sign-off counts as; a subject the host cannot answer for counts for nothing. Without it a row's requirement counts the permissions the caller held when it signed, which each sign-off records (`held`, every one, so a row whose permission moves later counts a signer who held the new one), and a gate written in the config reads no permission again, as before. | Withdrawing sign-offs when a role changes, which needs every role write to reach every gated row. |
+| `when` is a list of conditions on own fields, all of which hold for the requirement to apply: `{ field, test, values, negate? }`, `test` one of `every-matches` and `any-matches` (glob patterns: `*` within a path segment, `**` across them, `**/` none too, `?` one character), `contains` and `at-most` (one number). A requirement that does not apply asks for nothing, and a gate whose requirements ask for nothing holds. A condition on a field with no value holds, negated or not, so a fact not yet written never exempts. Separate requirements say "or". So an agent approves a class alone where the person's requirement leaves the class out, for example with a negated `every-matches` over the touched paths. | A condition language of its own, which a row would have to parse and a reader to learn. A field with no value making the condition fail, which would exempt a change before its facts are written. |
+| A reset spends a sign-off for one requirement, not for the gate. Each sign-off records the values of every field a row of the gate resets on (`values`), and a requirement counts it only while its own `resetOn` fields still hold the values recorded; a field the sign-off recorded no value of spends it, so a row that starts resetting on a new field asks again. The gate itself resets on what its own `resetOn` names, which a gate that reads rows must name: `[]` there keeps the writes of the facts the rows read from spending any sign-off. | A requirement's `resetOn` consuming sign-offs, which the requirements share, so one requirement's reset would spend another's. A gate without `resetOn` on rows, whose `resetOnChange` would spend every sign-off at every write of a fact. |
+| `pinOn` names own fields a sign-off is pinned to: `signOff` then takes `read`, the value of each as its signer read it, and one that is not the field's value now is `stale`, `{ field, read, current }`, before any other check, as `version` is. A write to another field makes no signer stale. | `pinned` (the row's version), which the evaluator's own writes move, so a signer races them. |
+| A row that does not parse, or names a field the type lacks, is broken: it applies and is never met, and `approvals_missing` names why in `missing[].broken`. A gate whose `in` holds no value yet does not hold and takes no sign-off; one whose `in` is an empty list asks for nothing. `approvals_missing` keeps `{ state, required, count }`, the first unmet requirement's, and adds `missing` for a gate that reads rows. A sign-off that would count toward no requirement whose permission the caller holds is `not_counted`, details by requirement; a caller who holds none of the permissions is forbidden, as before. | Skipping a broken row, which would loosen the gate when a row is written wrongly. |
+| The core's `Caller` carries `kind` and `actingForKind` (D156), `agent`, the run's Agent (D158), and `assurance`. The TypeScript and Rust hosts hand the core the principal's kind, whom it acts for, an agent run's Agent (its `agent` claim) and its authenticator's assurance (`Principal.assurance`, new in both runtimes); neither handed the core `actingFor` before, which Provenance (D73) now records from a route too. The Go contract carries the fields. | A run's Agent read from a row by the core, which would make every guard read the agents table. |
+| A flag's clearing permission stays in the app: the forge's flag row names `setPermission`, `clearPermission` and `clearedBySetter`, and its flag routes check them. A generic option would be a write's permission read from a related row, a rule of Constants or StateRules over another table's row, which no behavior has yet, for one route's check. | A core option now, for one caller. |
+| A role grant's event and a reviewed role edit are designed here and not built: the user model's `UserRoleGrant` table is the loader's, so a schema cannot put `@enqueueOnChange` on it, and its writes are the identity store's, not the core's. Its option is an `@enqueueOnChange` the `UserRole` class declares for its grants, which the loader copies onto `UserRoleGrant` (default none), and a `review: { permission }` on the user model that makes a role's edit, and a grant of a role, a proposal a holder of the permission approves (default none). An app enqueues an event on its own `UserRole` table today. | Building it here, beside the Approvals core it does not touch. |
+| Seeded rows other than roles are designed here and not built: `@seedRows([...])` on any DB table, rows `create.sql` inserts and a migration plan adds when new, never deleting one, as `@seedRoles` does (D88); default none. A row an app writes when a parent row is made, such as a repository's first merge rule, is the app's code, which this does not replace. | |
+| An index an expansion adds to a table (`ir.IndexDef.Origin` set: a behavior's sub-table index among them), which no author can name, is shortened when its default name passes PostgreSQL's 63 bytes: its first bytes, whole characters only, then `_` and the first eight hex digits of the SHA-256 of the whole name (`sqlutil.ShortIdentifier`). Revisions on `MergeRequirement` built `idx_merge_requirement_revisions_proposals_merge_requirement_proposal`, 68 bytes, which the build refused, with a remedy, `@index(..., { name })`, that cannot reach a behavior's index. The author's own indexes are still refused, with that remedy. | Shortening every name, which would take the author's choice of a readable name away. Truncating as PostgreSQL does, which can collapse two names into one. |
+| The core holds the configSchema through its schema walker (`ajv.rs`, which gains `else`), as Stock and Holds do, so the declaration and its check are one text. A gate with neither `count` nor `requirementsFrom` now also reports `must match "else" schema`, in the core and the engine alike. | Hand-written checks of the new members beside the schema, which drift. |
+
+The engine's Approvals, which shares the declaration, refuses each new
+member at define and `read` as a bad parameter, as it refuses `resetOn`,
+`pinned` and `version` (D104), and so does the build on an engine type.
+
+Built: the options in the core (`runtime/engine/rust/rules-behaviors/src/approvals.rs`),
+the permissions read and the caller's fields (`runtime/engine/rust/rules`),
+`else` in `ajv.rs`; the declaration (`internal/registry/behaviors/approvals.behavior.json`);
+the engine's refusals (`runtime/engine/rust/behaviors/src/approvals.rs`);
+the build's checks (`internal/loader/verify/behaviors_approvals.go`: the
+fields each member names, `createdFor`, the requirement table, its
+relation, its `permission` and the types of its members), and the layout
+reading `createdBy` for a gate that reads rows; the TypeScript config
+types (`ApprovalsGateOn<T>`, a requirement gate or a rows gate); the hosts'
+callers (`principalCaller` in TypeScript, `orm::Caller::of` and the
+generated routes in Rust), `Assurance` on both runtimes' `Principal`, and
+the Go and TypeScript contracts; `sqlutil.ShortIdentifier` and
+`GeneratedIndexNameIn`. The tests: `approval_requirements.rs` runs each
+option on the core, among them a requirement row that changes at run time,
+each requirement's reset on recorded values, the pin and a broken row;
+`TestApprovalsRequirementsAreHeldToTheTable` (verify);
+`approvals.typecheck.ts`; the TypeScript and Rust caller tests; and
+`TestABehaviorsLongIndexNameIsShortened`, which runs the loader and the
+SQL generator over a Revisions table named `MergeRequirement`. The forge's
+schema, checked from a copy against this branch, reports no Approvals
+error, and its database's `create.sql` applies to PostgreSQL 17.
+
+Left:
+
+- The permissions read in the production hosts: the Rust, TypeScript and
+  Go adapters refuse it as internal, so a requirement with
+  `recheckPermission` fails closed on them until each answers it from its
+  identity store.
+- An authenticator that reports assurance: the identity runtime's session
+  sign-in time, and a passkey assertion with user verification bound to a
+  call. Until one does, `recent-sign-in` and `user-verification` are never
+  met.
+- The Go server's caller, which hands the core a subject and permissions
+  alone until D180's principals land there.
+- Holding a requirement row to its members at its own write, rather than at
+  the gate's read.
+- The role grant event and the reviewed role edit, and `@seedRows`, as
+  designed above.
+
+## D186. The SQLite repositories run the behaviors' core in their transactions, a change set on D1 is one batch, Recurrence and the calendar run there as on Postgres, and search's words are an FTS5 table its index's triggers keep (D152, D155, D182 amended)
+
+D182 built the TypeScript repositories on SQLite and D1 and refused a write
+of a table that composes behaviors there, and the loader refused
+`@searchable` on the sqlite dialect, so neither Recurrence (D152) nor
+search (D155) ran on SQLite or D1, and the calendar's read of occurrences
+was written in Postgres's words. This entry serves the three, in
+TypeScript, as the second of the SQLite workstreams; the notifier's queues,
+parties and agents follow (D189).
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A table that composes behaviors runs every write, operation, deadline and change through the core on SQLite, in the repository's transaction, as on Postgres. The store is `sqliteRulesStore`'s over the pool's database (`OrmSqlite.db`, whose statements bind values as the repositories bind them), on a file and on D1 alike, as Batch 8 settled for D182: on `openSqlite`'s file a batch made in the transaction is a savepoint of it (`./sqlite-database`). | A store of the transaction's own on the file, whose locks are held already by its `BEGIN IMMEDIATE` and whose change set applies statement by statement in a savepoint, fenced by `changes()`: this branch's first design, which the one store made unneeded once a batch in a transaction became a savepoint. |
+| On D1, and on the file, the core's reads run one by one, and its change set in one batch, which D1 runs atomically. The batch is what keeps a behavior's write consistent with its deadline rows: the row, its sub-table rows, its deadline and event messages and the claim a worker spends land together or not at all, and the batch first checks each read made under a lock (`locks: 'fenced'`), so a command another write raced runs again over it. Writes a repository makes beside a command (a stamp, a read back) are D182's: each its own statement. | Refusing behaviors on D1 until it holds a transaction open. One batch per repository call, which takes no read between its statements. |
+| A command's events on SQLite take ids in ascending order, made by the adapter, so a row's events are claimed in the order written: the table's default stamps their `created_at` to the millisecond they share, and the queue's claim holds a row's line by `created_at` then `id`. Postgres keeps the order with `clock_timestamp()`. | A claim ordered by `rowid` on SQLite, which would change the queue statements every language runs. |
+| The `./orm/sqlite` entry's `createOrm` passes the rules package's core (`withRulesCore`) when the database composes behaviors, made from its bundled module on first use; a Worker passes its own (`{ rules: initSync(wasmModule) }`), as its bundle carries the module. | A core per call. |
+| Merges stay refused on SQLite; upserts are D182's (Batch 8), a table that composes behaviors upserting a row at a time. | |
+| The calendar's read of occurrences writes its statement in the ORM's dialect (`ormDialect`, a symbol each ORM and transaction holds) and reads a due time as a Date, its RFC 3339 text or epoch milliseconds. Everything else of the calendar and its feed already went through the repositories and the grants, which run on SQLite (D182). | A dialect member of the ORM, which a table's member could take. |
+| On SQLite the search index is the same table, its audience a JSON array (D182), and its words an FTS5 table beside it, `search_index_fts` (`title`, `body`, `comments`, `files`, a `ref`, and the row's table and key unindexed), tokenized by `unicode61` with no diacritic removed, as Postgres's `simple` configuration reads words. Three triggers on the index keep it in the statement that writes an index row, finding a row's words by its `ref`, an `r` and the hex of its table and key, one token. The migration model carries the FTS5 table and its triggers as a piece of SQL of its own (`search_index_fts`), after every object; the index's GIN indexes are Postgres's alone. | An external-content FTS5 table keyed by the index's rowid, which a VACUUM may renumber, the index's key being a UUID. A virtual table in the migration model, which has no form of one yet. The words in the index table itself, which an FTS5 table can hold only unindexed beside them. |
+| Each `@searchable` table and sub-table has row triggers under the Postgres triggers' names, one after each insert, update and delete, every statement guarded by its own WHERE: a delete, a soft delete and a change of key delete the index row, an audience change is copied into it, and an insert, a restore or a change of a watched column enqueues the row with the queue's SQLite conflict, as Postgres's function does. | One trigger per write with a WHEN, which would split each step the function holds. |
+| `searchTables` on SQLite matches each word as a quoted FTS5 phrase in the four texts, every one required, and ranks by `bm25` with Postgres's weights (1, 0.4, 0.2, 0.1), then table and key; a hit's `matched` is the first text that holds every word and its snippet FTS5's of that text. Access is checked inside the query as on Postgres: the audience through `json_each` over the index row's copy (`sqlutil.SQLiteAudienceContains`, the definition's `indexAudience`), a grant's reach by an `EXISTS` back to each table with its repository's SQLite conditions, and a table no grant reaches left out. | Ranking parity with `ts_rank_cd`'s scores, which the two engines do not share; their order by weight is the same. |
+| `indexSearch` on SQLite reads the row and its texts and writes the index row with the row's access columns read by the write itself (`INSERT ... SELECT` from the row), so on D1, which holds no transaction open, an audience change between the reads and the write is copied as it stands, and a row deleted between them writes none. | A share lock, which SQLite has no form of. |
+| Embeddings stay a Postgres option: a search on SQLite with a `vector` is refused as a bad request (`TypeError`), and `embeddings` in the options of a search or an indexing throws. | Storing vectors as JSON and comparing them in the runtime, which would read every hit's vector. |
+| The loader serves `@searchable` on the sqlite dialect with the TypeScript and Go types: on SQLite as on Postgres the triggers keep a row's index row whichever ORM writes it, only the TypeScript runtime searches there, and a Go server is refused search over a database that lists sqlite first (D187). Rust's search runs on Postgres alone (D188), so a service that lists sqlite and declares `@searchable` takes no Rust types (`refuseSQLiteReaders`). Recurrence and `@calendarSource` were not refused on SQLite: Recurrence is the core's in every language, and the calendar is a read of the TypeScript runtime, whose Rust types refuse it on every dialect. The generated server over a database that lists sqlite first builds `Deps.orm` from the `./orm/sqlite` entry (D182's Batch 8), and its refusal of a behavior worker there names what is left: the worker's claims, which go through the Postgres queue client, where an app's worker runs `runDeadline` and `runChange` over `sqliteQueue`'s claims. | Lifting that, which is D182's left item of the behavior worker over SQLite. |
+| D1 is proved under the pinned workerd by the fixture `d1-orm`, which now runs three databases' generated `orm-sqlite.ts` and `sqlite/create.sql` (`TestTheWorkerdD1FixtureIsCurrent`): fixture-references-db's, fixture-recurrence-db's and fixture-search-db's, with the rules module embedded. Its stand-in's batch runs in one of the Durable Object's transactions, as D1 runs a batch. workerd's SQLite has FTS5. | A fixture per database. |
+
+Built: the behaviors through the core on SQLite and D1, over the store
+D182's Batch 8 gives the repositories, with `sqliteRulesStore`'s bind
+option in `rules.ts` for a caller over a plain database, and the event ids; `ormDialect`
+and the calendar's read (`calendar.ts`); search on SQLite
+(`search-tables.ts`); the `./d1` entry's exports of the calendar, search,
+grants and `withRulesCore`; `orm_sqlite.tmpl`'s core and the SQLite
+search definition (`tsgen/orm_sqlite.go`); the SQLite triggers and FTS5
+piece (`internal/generator/sqlgen/searchable_sqlite.go`,
+`internal/sqlmigrate/sqlite_model.go`); the loader's check
+(`verify/searchable.go`, `verify/sqlite_features.go`); the guides' SQLite
+sections of search and of recurrence. fixture-search-db lists sqlite. The
+tests: `TestGeneratedRecurrenceEndToEndOnSQLite`, every case of D152's
+end-to-end test on bun:sqlite, the worker's handlers over `sqliteQueue`;
+`TestSearchTablesEndToEndOnSQLite`, D155's cases on bun:sqlite with the
+refusal of embeddings and `reindexSearch`; the references test on SQLite,
+its tickets and posts through the core; `TestSearchTriggersOnSQLite`; the
+SQLite model golden of fixture-search-db and its round trip and
+convergence; and the workerd fixture `d1-orm`, which runs a ticket's
+Comments, a filing's plan, its remind deadline from a claim, a lost claim,
+the calendar, and search with its audience, deletes, conversation and
+scope, over D1's stand-in.
+
+Left:
+
+- Merges in the SQLite repositories (D182's).
+- The generated TypeScript behavior worker over a database that lists
+  sqlite first: the worker's queues over `sqliteQueue` (D182's).
+- A drain of the behavior queues and the indexing queue on Workers over
+  D1, where no worker claims yet (D151's wake on SQLite and D1).
+- Embeddings on SQLite and D1.
+- Go and Rust on SQLite for search and the calendar (D194+).
+
+## D189. The notifier, parties and agent runs run on SQLite and D1, an enqueue writes the statement of its ORM's dialect, a worker claims over a SqlDatabase in its connection's turn, and a @versioned table keeps its history on SQLite by row triggers (D153, D157, D158, D182, D183 amended)
+
+D153, D157 and D158 were Postgres alone: the loader refused `@event`,
+`@notifier`, `@channelIdentities`, `@party`, `@conversations`,
+`@runRequests` and `@agents` on the sqlite dialect, since the notifier, the
+inbound path and the dispatcher enqueued through the Postgres queue client
+and claimed over a pg pool, and the SQLite model refused `@versioned`, which
+the agents' definitions are. This entry serves the three on SQLite and D1,
+in TypeScript, as the third of the SQLite workstreams, on what D182 and
+D186 settled.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| `enqueue(client, queue, message, options)` writes the statement of the client's dialect (`queue-orm.ts`): SQLite's, numbered `?n`, on an ORM or a transaction of sqliteOrm's (`ormDialect`), on the transaction's connection, and Postgres's on anything else. The notifier's `raise`, the inbound path's run request and the dispatcher's requests and watches enqueue through it, so one call runs on both. It sends the queue's wake after the statement, as on Postgres. | A second enqueue per feature for SQLite, which every caller would choose between. `enqueueStatement` in a batch, which takes no read between its statements. |
+| A worker's queue is made over what it is given (`claimsOver`): a `SqlDatabase`, whose claims are `sqliteQueue`'s; a queue's claims already made; or a pg pool, whose claims are `postgresQueue`'s, which `./postgres`'s queue client serves (`servePostgresClaims`) as it loads, since it alone imports pg. `notifier.workerQueue`, `inbound.runWorker` and `agents.workerQueue` take any of them, and `workerQueueOf` makes the worker's queue. So none of the three imports pg, and `./d1` exports them for a Worker. | The three in `./postgres` alone, which a Worker on D1 could not bundle. A queue factory option of each, which every app would pass. |
+| A claim over a `SqlDatabase` takes the connection's turn with the repositories' (`inSqliteTurn`): a file is one connection, and a claim, a completion or a failure made while a handler's transaction is open on it would run inside the transaction and be undone by its rollback. Within the transaction's own turn it runs at once. | A second connection for the claims, which on D1 is the same binding, and on a file a second writer the transaction's lock would make wait anyway. |
+| On D1 each of a feature's writes is its own statement, as D182 settled: a notice, its delivery and the delivery's message are three, and a run request is enqueued once the message and its files are stored. A handler that fails part way is retried by its queue and finds what it wrote (the inbox's one notice per event and recipient, a delivery's state). | A batch per handler, which takes no read between its statements, and every handler reads. |
+| A `@versioned` table on SQLite keeps Postgres's history table, in SQLite's types, and four row triggers under Postgres's names (`sqlmigrate/sqlite_history.go`): the bump, an `@optimistic` table's; a capture of each insert and of each update that moves the version (`_insert`, `_update`), which records the row as stored at its version, so each version a row takes is recorded once, the bump's own update recording what an update that left the version made; and the delete's tombstone at the version and one. An image is a `json_object` of the row as SQLite holds it, JSON as JSON, the excluded columns left out. A plan that makes a table with rows `@versioned` seeds its history, and a file read back carries the history's name. | Refusing `@versioned` on SQLite, which refuses the agents' definitions with it. The definitions `@optimistic` on SQLite, a version no history names. One trigger per update that bumps and captures, which the bump's own update would capture twice. |
+| What SQLite has no form of is refused: a history kept for some days (`retentionDays`), pinned (`pruneKeepReferencedBy`) or partitioned (`partitionBy`), which Postgres prunes with a function and partitions by month. A hard delete's actor is the row's own, since SQLite has no setting the delete names it in. | A prune the runtime runs, which no language's client has. |
+| The loader refuses a `@versioned` table in a service that lists sqlite and enables the Go or the Rust types (`checkSQLiteVersioned`), whose repositories read a history with Postgres's statements alone; the TypeScript repositories read the row's version and no history. The seven decorators of the three features are served on sqlite in TypeScript. Go and Rust serve them on Postgres (D190 to D193) and refuse them on SQLite themselves: Rust's types for a crate that lists sqlite (`rust_features.go`, rustgen), and a Go server over a database that lists sqlite first through `GoServerSQLiteErr`, which names the notifier's marks beside the parties' and agents', since the Go notify, inbound and agents packages read and write by Postgres's statements alone. | Refusing the features on SQLite until Go and Rust serve them there. |
+| The generated server stays refused the dispatcher over a database that lists sqlite first, though it builds `Deps.orm` there (D182's Batch 8), and its message names why: the generated `agents.ts` builds it from the runtime's `./postgres` entry and its workers claim through the Postgres queue client. The app builds `createAgents` of `./d1` over the `./orm/sqlite` entry itself. | Lifting it here, which is the generated server's workers over SQLite, D182's left item. |
+| The features' end-to-end tests run every case on both dialects: `runFeature` (tsgen) builds the package, its create.sql or its SQLite create.sql, and runs one test file with `ORM_DIALECT`, whose harness (`dialect.ts`) opens a schema of its own or a file of its own, and runs the test's own statements in the dialect's words. | A SQLite copy of each test file, which would drift. |
+
+Built: `queue-orm.ts` (`enqueue`, `claimsOver`, `workerQueueOf`,
+`servePostgresClaims`), `sqliteEnqueueOf`, `inSqliteTurn`; the notifier,
+the inbound path and the dispatcher over them, and their exports from
+`./d1` (and the queue helpers from `./sqlite`); the loader's lifted
+refusals and `checkSQLiteVersioned`; the SQLite history
+(`sqlmigrate/sqlite_history.go`, its seed and its read); tsrestgen's
+message; fixture-notifications-db, fixture-parties-db and
+fixture-agent-runs-db listing sqlite, with their SQLite model goldens; the
+guides' "On SQLite and D1" sections and the migrations reference. The
+tests: `TestNotificationsEndToEndOnSQLite`, `TestPartiesEndToEndOnSQLite`
+and `TestAgentRunsEndToEndOnSQLite`, every case of D153's, D157's and
+D158's on bun:sqlite, the agents' now with a definition's history on both
+dialects; the queue client's enqueue in a transaction and claims in turn
+(`queue-sqlite.test.ts`); `TestVersionedOnSQLite`; the SQLite refusals,
+model goldens, round trip and convergence, which now read every fixture
+with a `@versioned` table; and the workerd fixture `d1-orm`, which runs
+fixture-notifications-db's notifier over D1's stand-in: an event routed by
+its worker queue claimed over the binding, a watcher who cannot read the
+ticket skipped, a delayed escalation, a reply that acknowledges, and a
+released claim due again.
+
+Left:
+
+- A drain of the dispatch, run request and agent request queues on Workers
+  over D1: a Worker's Workflow that wakes their worker (D151's design), and
+  `PlatformSpec.NoQueueClaims` lifted for them. A Worker's own handler may
+  claim within an invocation meanwhile.
+- The generated dispatcher and workers over a database that lists sqlite
+  first: `agents.ts` from the `./d1` entry and the workers' claims over
+  the `SqlDatabase`, which lifts tsrestgen's refusal of the dispatcher
+  there (D182's).
+- A `@versioned` history's retention, pins and partitions on SQLite, and
+  the Go and Rust repositories' history on SQLite.
+- A drain worker over a SQLite file (slots and a next due time, D145).
+- Go and Rust on SQLite for the three features (their own decisions).

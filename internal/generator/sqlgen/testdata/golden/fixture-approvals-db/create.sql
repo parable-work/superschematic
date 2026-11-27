@@ -62,12 +62,20 @@ CREATE TABLE task_approvals_sign_offs (
   number TEXT NOT NULL,
   state TEXT,
   subject TEXT,
+  kind TEXT,
+  acting_for TEXT,
+  acting_for_kind TEXT,
+  agent TEXT,
+  signed_in_at TIMESTAMPTZ,
+  user_verified BOOLEAN,
+  held JSONB,
+  "values" JSONB,
   note TEXT,
   at TIMESTAMPTZ,
   consumed_at TIMESTAMPTZ
 );
 
-COMMENT ON TABLE task_approvals_sign_offs IS 'One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the subject who signed, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.';
+COMMENT ON TABLE task_approvals_sign_offs IS 'One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the caller who signed (its subject and kind, whom it acted for and its run''s Agent), the assurance its host reported, the permissions it held and the values of the fields the gate''s requirements reset on, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.';
 
 -- Add foreign key constraints
 

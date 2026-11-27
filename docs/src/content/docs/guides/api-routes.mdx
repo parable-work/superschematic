@@ -2439,7 +2439,7 @@ with behavior operations builds only in a checkout that sets `[paths]
 rules_adapter_rust` and `rules_behaviors_rust`
 ([Naming](/superschematic/reference/naming/#pathsrules_adapter_rust)). The
 TypeScript repositories run a table's behaviors on SQLite and D1 too, over
-the rules module's SQLite store (D182), so a TypeScript server over a
+the rules module's SQLite store (D182, D186), so a TypeScript server over a
 database that lists `sqlite` first serves its behavior operations through
 `Deps.orm`, the repositories of the database's `./orm/sqlite` entry. A
 Rust server there runs them in a transaction of the SQLite file's writing
@@ -2543,9 +2543,9 @@ export abstract class TaskActions {}
 
 | Route | Body | Answer |
 | --- | --- | --- |
-| `POST /api/task/{id}/approvals/sign-off` | `{ "state": "done", "note"?: "...", "version"?: 7 }` | `{ state, subject, note?, at, signedBy, count }`, the gate's subjects that count after it |
-| `POST /api/task/{id}/approvals/withdraw-sign-off` | `{ "state": "done" }` | the sign-off taken back, `{ state, subject, note?, at }` |
-| `POST /api/task/{id}/approvals/list-sign-offs` | `{ "state"?: "done", "limit"?: 50, "cursor"?: "..." }` | `{ items: [{ state, subject, note?, at, consumedAt? }], next }`, oldest first, the consumed ones included; it writes nothing |
+| `POST /api/task/{id}/approvals/sign-off` | `{ "state": "done", "note"?: "...", "version"?: 7, "read"?: { "headSha": "..." } }` | `{ state, subject, note?, at, signedBy, count, countsToward? }`, the gate's subjects that count after it, and for a gate that reads its requirements from rows the requirements this one counts toward |
+| `POST /api/task/{id}/approvals/withdraw-sign-off` | `{ "state": "done" }` | the sign-off taken back, `{ state, subject, actingFor?, agent?, note?, at }` |
+| `POST /api/task/{id}/approvals/list-sign-offs` | `{ "state"?: "done", "limit"?: 50, "cursor"?: "..." }` | `{ items: [{ state, subject, actingFor?, agent?, note?, at, consumedAt? }], next }`, oldest first, the consumed ones included; it writes nothing |
 
 The types are `TaskApprovalsSignOffInput`, whose `state` is
 `TaskApprovalsGate`, the enum of the config's gated states, and the rest
@@ -2553,7 +2553,11 @@ of `TaskApprovals*`; the SDK method is `sdk.task.approvals.signOff(id, {
 state: "done", version })` and the MCP tool `task_approvals_sign_off`. The
 core checks a `signOff`'s caller against the gate's `permission` (403
 `forbidden` without it), so an `@auth` set admits any signed-in caller and
-the config decides who signs. A sign-off is a
+the config decides who signs. The route hands the core the principal's
+kind, whom it acts for, an agent run's Agent and the authenticator's
+assurance, which a requirement's `callers` and `proof` read (D200), so an
+agent run that calls the MCP tool for a person signs as the run, counted as
+that person where the requirement counts `acting-for-person`. A sign-off is a
 write: it moves the row's `_version`. The permission catalog lists each
 gate's permission under the three operations, and Constants' and
 StateRules' `permission` under each operation that updates a row of the
@@ -2567,6 +2571,9 @@ update.
 | `signOff` whose `version` is not the row's, on any gate | 409 `vetoed`, `stale`, `details.vetoDetails` `{ "version": 6, "current": 7 }`: `behavior Approvals vetoes signOff of Task <id>: Task <id> is at version 7, not 6` |
 | `signOff` with the row's `version` | 200 |
 | `signOff` of a state the config does not gate, of the state the row is in, by its creator on a gate that excludes the creator, a second time, or `withdrawSignOff` with no sign-off to take back | 409 `vetoed`: `no_gate`, `in_state`, `creator_cannot_sign`, `already_signed`, `not_signed` |
+| `signOff` by a caller who would count toward none of the gate's requirements whose permission it holds: a kind of caller none counts, an exclusion, a proof that falls short (D200) | 409 `vetoed`, `not_counted`, `details.vetoDetails` `{ "requirements": [{ "name": "lead", "reason": "..." }] }` |
+| `signOff` on a gate that pins fields (`pinOn`) whose `read` names a value that moved | 409 `vetoed`, `stale`, `{ "field": "headSha", "read": "...", "current": "..." }` |
+| a transition into a gate that reads its requirements from rows while one is unmet | 409 `vetoed`, `approvals_missing`, `{ state, required, count, missing: [{ requirement, name, required, count, permission, callers? }] }`; a broken row's entry has `broken`, its reason |
 
 `version` is checked after the parameters (a malformed `version`, or none
 on a pinned gate, is 400 first) and only for a state the config gates (a
@@ -2751,7 +2758,9 @@ one, and nothing that hears them runs until a worker does. An API that serves
 gets a warning; declare one on that API or on another over the same
 database. The worker claims on Postgres, as every worker does. A
 TypeScript one over a database that lists `sqlite` first is refused, as
-a TypeScript behavior worker claims its queues on Postgres alone. On
+a TypeScript behavior worker claims its queues on Postgres alone; there an
+app's worker runs the `./orm/sqlite` entry's `runDeadline` and `runChange`
+over `sqliteQueue`'s claims (D186). On
 Cloudflare Workers a TypeScript one drains its table's queues at each
 firing of a Cron Trigger, and a deadline or an event due before the next
 firing wakes it through its Workflow

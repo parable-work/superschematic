@@ -1,6 +1,8 @@
 package tsgen
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
@@ -85,7 +87,33 @@ func sqliteORMTable(t *sqlutil.TableModel, table ORMTable) (ORMTable, string) {
 		audience.Probe = ""
 		out.Audience = &audience
 	}
+	if table.Searchable != "" {
+		searchable, err := sqliteSearchable(table.Searchable)
+		if err != nil {
+			return ORMTable{}, err.Error()
+		}
+		out.Searchable = searchable
+	}
 	return out, ""
+}
+
+// sqliteSearchable is a @searchable table's definition on SQLite (D186):
+// Postgres's, its words the FTS5 table beside the index in place of the
+// weighed document, and its key's type SQLite's.
+func sqliteSearchable(postgres string) (string, error) {
+	var s ormSearchable
+	if err := json.Unmarshal([]byte(postgres), &s); err != nil {
+		return "", fmt.Errorf("its search definition does not read: %v", err)
+	}
+	s.Document = ""
+	s.FTS = sqlutil.QuoteIdentifier(sqlutil.SearchFTSTable)
+	s.KeyType = "text"
+	s.IndexAudience = &ormSearchIndexAudience{Contains: sqlutil.SQLiteAudienceContains, Placeholder: sqlutil.SQLiteAudiencePlaceholder}
+	data, err := json.Marshal(s)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // AudienceContains and AudiencePlaceholder are the formats of an

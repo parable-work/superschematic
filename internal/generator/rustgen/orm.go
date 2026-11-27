@@ -82,6 +82,13 @@ type ORMInfo struct {
 	// or is one of the notifier's (D153), which the runtime's notify module
 	// reads on Postgres (D191).
 	Notifications bool
+
+	// Parties is whether a table of the database is a @party table or one
+	// of the conversations (D157), and Agents whether one is of the agent
+	// orchestration (D158), which the runtime's parties, inbound and
+	// agents modules read on Postgres (D193).
+	Parties bool
+	Agents  bool
 }
 
 // ORMUse is a use of a behavior on a table that has operations (D103), as
@@ -242,6 +249,14 @@ type ormTable struct {
 	// reads (D191); on Postgres alone.
 	Events   []rustEvent `json:"events,omitempty"`
 	Notifier string      `json:"notifier,omitempty"`
+	// Party marks a @party table (D157) with the field a party is named
+	// by, Conversations what the table is to the conversations, and
+	// Agents what it is to the agent orchestration (D158), which the
+	// runtime's parties, inbound and agents modules read (D193); on
+	// Postgres alone.
+	Party         *rustParty `json:"party,omitempty"`
+	Conversations string     `json:"conversations,omitempty"`
+	Agents        string     `json:"agents,omitempty"`
 }
 
 // ormMerge is what merge_into of a table that implements Mergeable runs
@@ -713,6 +728,9 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		onPostgres.Events = eventsOfTable(schema.Types[t.Type])
 		onPostgres.Notifier = notifierOfTable(schema.Types[t.Type])
 		info.Notifications = info.Notifications || len(onPostgres.Events) > 0 || onPostgres.Notifier != ""
+		onPostgres.Party, onPostgres.Conversations, onPostgres.Agents = partiesOfTable(schema.Types[t.Type])
+		info.Parties = info.Parties || onPostgres.Party != nil || onPostgres.Conversations != ""
+		info.Agents = info.Agents || onPostgres.Agents != ""
 		for _, k := range t.UniqueKeys {
 			onPostgres.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 		}

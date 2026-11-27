@@ -108,6 +108,7 @@ macro_rules! cases {
                 subject: ALICE.to_owned(),
                 permissions: vec!["notes.admin".to_owned()],
                 stands_in: false,
+                ..Default::default()
             });
         let alice = as_alice.note().unwrap();
         let bob = as_bob.note().unwrap();

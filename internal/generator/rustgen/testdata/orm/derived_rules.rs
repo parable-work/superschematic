@@ -29,6 +29,7 @@ fn caller(subject: &str, permissions: &[&str]) -> Caller {
         subject: subject.to_owned(),
         permissions: permissions.iter().map(|p| (*p).to_owned()).collect(),
         stands_in: false,
+        ..Default::default()
     }
 }
 

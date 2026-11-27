@@ -46,7 +46,7 @@ func TestAGoServerOverASQLiteDatabaseRefusesSearch(t *testing.T) {
 		}, reg)
 		_, _, err := r.goDeps(&apigen.APIOutput{SchemaName: "notes-api", Naming: naming.Default()})
 		switch {
-		case tc.refused && (err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Note: @searchable on Postgres alone so far (D152, D155, D187)")):
+		case tc.refused && (err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Note: @searchable on Postgres alone so far (D152, D153, D155, D157, D158, D187, D190, D192)")):
 			t.Errorf("%v: %v, want the refusal of Note's search", tc.dialects, err)
 		case !tc.refused && err != nil:
 			t.Errorf("%v: %v, want none", tc.dialects, err)

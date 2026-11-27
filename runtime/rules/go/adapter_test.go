@@ -207,6 +207,43 @@ func TestOperationReadsItsRowAndWritesItHeldToItsVersion(t *testing.T) {
 	})
 }
 
+// TestAnUpdateOfTheCommandsOwnRowSetsItsNowColumnsToTheDatabasesClock
+// holds NowColumns to the database's clock: the update of the command's own
+// row sets each to the statement's time, which it binds no time of the
+// host's for, as the row's insert's default read its createdAt.
+func TestAnUpdateOfTheCommandsOwnRowSetsItsNowColumnsToTheDatabasesClock(t *testing.T) {
+	rulestest.Each(t, func(t *testing.T, db *rulestest.DB) {
+		createOrders(t, db, "order")
+		insertOrder(t, db, uuidColumn, "Desk", "draft", 1000)
+		layout := orderLayout("Identity.UUID", false)
+		var rec *recorded
+		err := inTx(t, db, coreHost(layout), func(_ *rulestest.Tx, store rules.Store) rules.Store {
+			wrapped, r := record(store)
+			rec = r
+			return wrapped
+		}, func(host rules.Host, _ *rulestest.Tx) error {
+			_, err := rules.Execute(context.Background(), host, "Order", transition(uuidKey, "paid"), &rules.ExecuteOptions{
+				OwnColumns: map[string]any{"created_by": "u1"},
+				NowColumns: []string{"updated_at"},
+			})
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		now := "statement_timestamp()"
+		if db.Dialect == rules.DialectSQLite {
+			now = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')"
+		}
+		p := db.P
+		wantStatements(t, "unit", rec.applied[0], []rules.Statement{{
+			Text:   fmt.Sprintf(`UPDATE "order" SET "created_by" = %s, "status" = %s, "status_entered_at" = %s, "updated_at" = %s, "_version" = "_version" + 1 WHERE "id" = %s AND "_version" = %s`, p(1), p(2), p(3), now, p(4), p(5)),
+			Values: []any{"u1", "paid", at(db, 2000), uuidColumn, int64(1)},
+			Expect: 1,
+		}})
+	})
+}
+
 func TestAMovedRowRunsAgainAndOneThatKeepsMovingIsBusy(t *testing.T) {
 	rulestest.Each(t, func(t *testing.T, db *rulestest.DB) {
 		createOrders(t, db, "order")

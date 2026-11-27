@@ -1,11 +1,9 @@
 package verify
 
 import (
-	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/loader/agents"
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -17,9 +15,10 @@ import (
 // records the version it ran. A schema that declares any part declares
 // them all. A field a class declares under a name its part's fields use
 // keeps the part's scalar, but for the runs' status, which may be the
-// Workflow that Lease and Retries move (D104). The orchestration is built
-// for Postgres alone: its dispatcher enqueues and claims through the
-// Postgres queue client, and its tokens are D156's grants.
+// Workflow that Lease and Retries move (D104). The orchestration runs on
+// Postgres, SQLite and D1 in TypeScript (D189): its dispatcher enqueues in
+// the ORM's dialect and claims over either, and its tokens are D156's
+// grants, which the SQLite repositories serve (D182).
 func checkAgents(schema *ir.Schema, in Input, r *Result) {
 	if !schema.UsesAgents() {
 		return
@@ -34,9 +33,6 @@ func checkAgents(schema *ir.Schema, in Input, r *Result) {
 	if schema.Kind != ir.SchemaKindDB {
 		r.errorf(first.Owner, "%s: the agent orchestration's tables are a DB service's, and %s is a %s service (D158)", first.Name, schema.Name, schema.Kind)
 		return
-	}
-	if slices.Contains(in.Dialects, registry.SQLDialectSQLite) {
-		r.errorf(first.Owner, "%s: %s lists the sqlite dialect, and the agent dispatcher enqueues and claims through the Postgres queue client alone so far; build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]) (D158)", first.Name, schema.Name, schema.Name)
 	}
 	parts := map[string]*ir.TypeDef{}
 	for _, name := range sortedTypeNames(schema.Types) {

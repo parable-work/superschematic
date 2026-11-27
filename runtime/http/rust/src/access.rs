@@ -501,6 +501,7 @@ mod grants {
         tables: Tables,
         inner: Option<Arc<dyn Authenticator>>,
         now: Option<Arc<dyn Fn() -> SystemTime + Send + Sync>>,
+        runs: bool,
     }
 
     impl GrantAuthenticator {
@@ -521,7 +522,16 @@ mod grants {
                 tables,
                 inner: None,
                 now: None,
+                runs: false,
             })
+        }
+
+        /// The authenticator taking an agent run's token too, as its run:
+        /// the agent dispatcher's alone (D158, D193), which narrows the
+        /// run's permissions and paths and holds its calls to its autonomy.
+        pub(crate) fn admitting_runs(mut self) -> Self {
+            self.runs = true;
+            self
         }
 
         /// The authenticator establishing every caller that presents no
@@ -567,6 +577,17 @@ mod grants {
             if target_type == "CalendarFeed" || target_type.starts_with("CalendarFeed;") {
                 return Err(ApiError::unauthorized(
                     "A calendar feed's token reads its feed alone",
+                ));
+            }
+            // An agent run's token is the dispatcher's to resolve
+            // (`Agents::authenticator`), which narrows its permissions to
+            // whom it acts for and its paths to its party's grant, and holds
+            // its calls to its autonomy: as its grant's bare holder it would
+            // run with its role's permissions, neither narrowed nor gated
+            // (D193).
+            if !self.runs && text(grant.get("holderKind")) == Some("agent") {
+                return Err(ApiError::unauthorized(
+                    "An agent run's token is resolved by the agent dispatcher's authenticator alone",
                 ));
             }
             let now = self.now.as_ref().map_or_else(SystemTime::now, |now| now());

@@ -1540,9 +1540,10 @@ impl<'a> Plan<'a> {
         Ok(sets)
     }
 
-    /// The stamps an update writes after its assignments: updatedAt, and
-    /// updatedBy, the update's own when it names one, else the acting
-    /// user.
+    /// The stamps an update writes after its assignments: updatedAt, the
+    /// database's clock, which its insert's default read too, so the
+    /// host's can't stamp a row earlier than its insert; and updatedBy, the
+    /// update's own when it names one, else the acting user.
     fn stamp(
         &self,
         sets: &mut Vec<String>,
@@ -1551,11 +1552,7 @@ impl<'a> Plan<'a> {
     ) -> Result<(), Error> {
         let s = &self.table.statements;
         if self.table.audit("updatedAt").is_some() {
-            args.push(Bound {
-                value: Value::String(self.session.now()),
-                marks: Marks::TIMESTAMP,
-            });
-            sets.push(fill(&s.updated_at, &[&args.len()])?);
+            sets.push(fill(&s.updated_at, &[])?);
         }
         if let Some(updated_by) = self.table.audit("updatedBy") {
             let by = match update
@@ -2372,9 +2369,10 @@ impl<'a> Plan<'a> {
         })
     }
 
-    /// An update of a row through the core: the fields it sets, and its
-    /// own columns as the update binds them, with updatedAt and updatedBy;
-    /// an owned column is left to the core, which refuses it.
+    /// An update of a row through the core: the fields it sets, its own
+    /// columns as the update binds them, with updatedBy, and updatedAt,
+    /// which takes the database's clock; an owned column is left to the
+    /// core, which refuses it.
     pub(crate) fn core_update<'p>(
         &self,
         key: &Value,
@@ -2421,15 +2419,6 @@ impl<'a> Plan<'a> {
                 table.name
             )));
         }
-        if let Some(updated_at) = table.audit("updatedAt") {
-            columns.push((
-                updated_at.unquoted().to_owned(),
-                Some(Bound {
-                    value: Value::String(self.session.now()),
-                    marks: Marks::TIMESTAMP,
-                }),
-            ));
-        }
         if let Some(updated_by) = table.audit("updatedBy") {
             let by = match sealed
                 .get(&updated_by.name)
@@ -2452,6 +2441,7 @@ impl<'a> Plan<'a> {
             key: self.wire_key(key)?,
             fields,
             columns,
+            now: self.now_columns(),
             preconditions: options.preconditions.as_ref(),
             caller: self.session.caller(),
         })
@@ -2524,15 +2514,6 @@ impl<'a> Plan<'a> {
             )));
         }
         let mut columns = Vec::new();
-        if let Some(updated_at) = table.audit("updatedAt") {
-            columns.push((
-                updated_at.unquoted().to_owned(),
-                Some(Bound {
-                    value: Value::String(self.session.now()),
-                    marks: Marks::TIMESTAMP,
-                }),
-            ));
-        }
         if let (Some(updated_by), Some(user)) = (table.audit("updatedBy"), self.user()) {
             columns.push((
                 updated_by.unquoted().to_owned(),
@@ -2549,9 +2530,19 @@ impl<'a> Plan<'a> {
                 params => params.clone(),
             },
             columns,
+            now: self.now_columns(),
             preconditions: options.preconditions.as_ref(),
             caller: self.session.caller(),
         })
+    }
+
+    /// The columns the core's write of a row sets to the database's
+    /// clock, as an update's statement stamps them: `updated_at`.
+    fn now_columns(&self) -> Vec<String> {
+        self.table
+            .audit("updatedAt")
+            .map(|updated_at| vec![updated_at.unquoted().to_owned()])
+            .unwrap_or_default()
     }
 
     /// An operation of one of the table's behaviors on the table as a
@@ -2682,11 +2673,22 @@ mod tests {
         let plan = "plan_version = delivery.plan_version + 1";
         let run = "run_version = delivery.run_version + 1";
         let cases: [(&[Fence], &[&str], &[&str]); 14] = [
-            (&delivery, &["address = ?1", "updated_at = ?2"], &[plan]),
+            (
+                &delivery,
+                &[
+                    "address = ?1",
+                    "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
+                ],
+                &[plan],
+            ),
             (&delivery, &["courier_id = NULL"], &[plan]),
             (&delivery, &["proof = $1", "address = $2"], &[plan, run]),
             (&delivery, &["attempts = $1", "proof = $2"], &[run]),
-            (&delivery, &["note = $1", "updated_at = $2"], &[]),
+            (
+                &delivery,
+                &["note = $1", "updated_at = statement_timestamp()"],
+                &[],
+            ),
             // The caller drives planVersion; runVersion is still advanced.
             (
                 &delivery,

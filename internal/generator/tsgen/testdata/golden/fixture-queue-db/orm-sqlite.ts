@@ -19,11 +19,10 @@ from its BEGIN IMMEDIATE; D1 runs no interactive transaction, so there a
 transaction's statements each commit as they run, and a write of several
 statements all known before the first goes as one batch: createMany, an
 upsert's read of its key with the upsert, an upsert of many rows. A table
-that composes behaviors writes through the behaviors' core, over the rules
-module's SQLite store (D103), and upserts as on Postgres, its upsertMany a
-row at a time with upsertOne. On D1 a write whose later statement needs an
-earlier one's answer is refused by name: an upsert that seals an
-Encrypted<T> field, and runEvent.
+that composes behaviors upserts as on Postgres, its upsertMany a row at a
+time with upsertOne. On D1 a write whose later statement needs an earlier
+one's answer is refused by name: an upsert that seals an Encrypted<T>
+field, and runEvent.
 
 The SQLite repositories serve no merges yet (D147).
 createOrm(db, { fieldKeys }) takes a FieldKeyring for the Encrypted<T>
@@ -69,7 +68,7 @@ export const orderTable: TableDefinition = {
     update: "UPDATE \"order\" SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"placed_at\"",
     updateMany: "UPDATE \"order\" SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO \"order\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"placed_at\"",
     softDelete: "",
@@ -126,7 +125,7 @@ export const orderLineTable: TableDefinition = {
     update: "UPDATE order_line SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
     updateMany: "UPDATE order_line SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO order_line (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"order_id\", \"product_id\", \"quantity\", \"note\"",
     softDelete: "",
@@ -178,7 +177,7 @@ export const productTable: TableDefinition = {
     update: "UPDATE product SET %s WHERE id = ?%d",
     returning: " RETURNING \"id\", \"name\"",
     updateMany: "UPDATE product SET %s%s",
-    updatedAt: "updated_at = ?%d",
+    updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
     upsert: "INSERT INTO product (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\"",
     softDelete: "",

@@ -191,11 +191,11 @@ describe("a table's fences", () => {
 
   test('an update advances each fence that covers a column it sets, once, and none it sets itself', () => {
     const cases: [FenceDefinition[], string[], string[]][] = [
-      [delivery, ['address = $1', 'updated_at = $2'], [plan]],
+      [delivery, ['address = $1', 'updated_at = statement_timestamp()'], [plan]],
       [delivery, ['courier_id = NULL'], [plan]],
       [delivery, ['proof = EXCLUDED.proof', 'address = EXCLUDED.address'], [plan, run]],
       [delivery, ['attempts = $1', 'proof = $2'], [run]],
-      [delivery, ['note = $1', 'updated_at = $2'], []],
+      [delivery, ['note = $1', 'updated_at = statement_timestamp()'], []],
       [delivery, ['address = $1', 'plan_version = $2', 'attempts = $3'], [run]],
       [delivery, ['plan_version = $1'], []],
       [delivery, [], []],

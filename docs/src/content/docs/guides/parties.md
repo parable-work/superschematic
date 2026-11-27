@@ -15,7 +15,7 @@ takes one path, which decides who sent it and what it may reach.
 
 | Built | Not built yet |
 | --- | --- |
-| `@party` on a table; the conversations' tables and the run requests queue, which the build fills | Go and Rust runtimes; SQLite and D1 |
+| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
 | one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a generated server that mounts the path and its workers |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
 | threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
@@ -23,6 +23,8 @@ takes one path, which decides who sent it and what it may reach.
 | a lapsed identity, verified again by a code | |
 | sending as a permission, with a rate limit, an approval policy and opt-outs | |
 | a message's trust narrowing the agent run that takes its request: a sender entered by hand asks before every write ([agent runs](/superschematic/guides/agent-runs/)) | |
+| the Go runtime's `inbound` package, on Postgres | |
+| the Rust runtime's `orm::parties` and `orm::inbound`, on Postgres | |
 
 D157 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
 records the design and what is left. `examples/parties` is the worked
@@ -139,3 +141,103 @@ An email carries a `Message-ID` and asks for its reply at the inbound
 address, so the answer threads. A text of STOP is the adapter's to read:
 the core records it on every identity of the address and sends nothing to
 it until START.
+
+## On SQLite and D1
+
+A database that lists `sqlite` keeps the parties, the conversations and
+the run requests queue as Postgres does (D189). `createInbound` comes from
+the runtime's `./d1` entry too, over the `./orm/sqlite` entry's
+repositories, and `inbound.runWorker(db, handle)` claims the run requests
+over a `SqlDatabase`, a D1 binding or `openSqlite`'s file, as over a pg
+pool. A message, its files and its run request are written as the
+repositories write them, each statement its own on D1, which holds no
+transaction open: a run request is enqueued once the message and its
+files are stored.
+
+## In Go
+
+The Go HTTP runtime's `inbound` package is the same path, on Postgres
+(D192). The generated Go ORM of a database with a `@party` table, the
+conversations or a `@runRequests` queue, and the notifier, writes
+`orchestration.go`: the conversations' tables by part with their columns,
+the `@party` tables, the run requests queue, and
+`Database.Orchestration()`, the notifier's host with what the inbound path
+adds. `inbound.New` finds the conversations, the messages and the channel
+identities from it:
+
+```go
+host := db.Orchestration()
+notifier, err := notify.New(host, notify.Options{Providers: deps.Providers})
+in, err := inbound.New(host, inbound.Options{
+	Notifier:       notifier,
+	Providers:      deps.Providers,
+	Bucket:         inbound.BucketOf(files),
+	InboundAddress: "inbox@example.test",
+})
+
+// A relay's @webhook route.
+outcomes, err := in.Inbound(ctx, "SMS", request)
+// The run requests queue's worker: each request to a handler, the agent
+// dispatcher's or the app's own.
+queue, err := in.RunQueue(dispatcher.HandleRunRequest)
+err = worker.Run(ctx, queue, options)
+// A send, held to the permission, the identity, the rate limit and the
+// approval policy.
+sent, err := in.Send(ctx, inbound.SendInput{As: principal, Party: orchestration.PartyRef{Table: "Contact", Key: key}, Channel: "sms", Body: "Booked for Monday."})
+```
+
+`PrincipalOf` is `orchestration.PartyPrincipal`, a party with its grants'
+reach and their roles' permissions; Go's `access.Principal` holds no
+permissions, so `orchestration.Principal` carries them beside it, and a
+handler reads and writes as the party with `orm.WithPrincipal`.
+`orchestration.IdentityLapsed` decides a lapsed identity from the rows,
+which the notifier now asks too before it sends to a party's address. The
+conversations' tables are read and written by statements over the columns
+the definitions name, as the notifier's are; a party's row and a row a
+message is filed onto are read through their repository as the caller.
+The approval policy is a `SendApproval`: the app's (`ApprovalFunc`), or
+the agent dispatcher, which is built before the path and given it
+(`SetInbound`). A run request's message and grant are in base62, as the
+repositories write a key. A Go server over a database that lists `sqlite`
+first is refused the parties' tables, which run on SQLite and D1 in
+TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+
+## In Rust
+
+The Rust HTTP runtime's `orm::parties` and `orm::inbound` are the same
+path, on Postgres (D193). The Postgres definition of a generated Rust
+types crate carries each table's `@party` and its conversations part, so
+`Inbound::new` finds the conversations, the messages and the channel
+identities by itself, and the crate re-exports both modules. It takes the
+database's `Tables`, the notifier (D191) and the `@runRequests` queue's
+descriptor:
+
+```rust
+use superschematic_http_runtime::orm::inbound::{Inbound, SendInput};
+use superschematic_http_runtime::orm::parties::PartyRef;
+
+let inbound = Inbound::new(orm::postgres::tables(pool.clone()), notifier.clone(), QueueDefinition::parse(queues::RUN_REQUEST_QUEUE)?)?
+    .with_providers(deps.providers.clone())
+    .with_bucket(deps.files.clone())
+    .with_inbound_address("inbox@example.test");
+
+// A relay's @webhook route.
+let outcomes = inbound.inbound("SMS", &request).await?;
+// The run requests queue's worker: each request to a handler, the agent
+// dispatcher's or the app's own.
+run_worker(inbound.run_queue(), move |request| { let agents = agents.clone(); async move { Ok(agents.handle(request.into()).await?) } }, options, shutdown).await?;
+// A send, held to the permission, the identity, the rate limit and the
+// approval policy.
+inbound.send(SendInput::new(principal, PartyRef::new("Contact", key), "sms", "Booked for Monday.")).await?;
+```
+
+`principal_of` is `party_principal`, a party with its grants' reach and
+their roles' permissions, and `identity_lapsed` decides a lapsed identity
+from the rows, which the notifier now asks too before it sends to a
+party's address. Rust has no ambient caller, so a read as the sender or
+the party opens the repositories for it (`with_access`). The approval
+policy is a `SendApproval`: the app's, or the agent dispatcher's
+`send_approval`. A run request's message and grant are in base62, as the
+repositories write a key. A Rust types crate that lists `sqlite` is
+refused `@party`, the conversations and the run requests, which run on
+SQLite and D1 in TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).

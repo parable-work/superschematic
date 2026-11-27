@@ -1,10 +1,8 @@
 package verify
 
 import (
-	"slices"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -17,8 +15,9 @@ import (
 // class and every other on a table, and a @channelIdentities class once,
 // a table. Each declares no fields, which the expansion fills. A schema
 // that declares any of them declares the parts routing and sending write
-// (ir.NotifierRequiredParts). The notifier is built for Postgres alone:
-// its worker enqueues and claims through the Postgres queue client.
+// (ir.NotifierRequiredParts). The notifier runs on Postgres, SQLite and D1
+// in TypeScript (D189), and the Go and Rust outputs refuse it on every
+// dialect (go_features.go, rust_features.go).
 func checkNotifications(schema *ir.Schema, in Input, r *Result) {
 	if !schema.UsesNotifications() {
 		return
@@ -39,9 +38,6 @@ func checkNotifications(schema *ir.Schema, in Input, r *Result) {
 	if schema.Kind != ir.SchemaKindDB {
 		r.errorf(first.Owner, "%s: events, the notifier's tables and channel identities are a DB service's, and %s is a %s service (D153)", first.Name, schema.Name, schema.Kind)
 		return
-	}
-	if slices.Contains(in.Dialects, registry.SQLDialectSQLite) {
-		r.errorf(first.Owner, "%s: %s lists the sqlite dialect, and the notifier's worker enqueues and claims through the Postgres queue client alone so far; build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]) (D153)", first.Name, schema.Name, schema.Name)
 	}
 	parts := map[string]*ir.TypeDef{}
 	var identities *ir.TypeDef

@@ -11,6 +11,6 @@ export default defineConfig({
     types: {
       [TargetLanguage.TypeScript]: { enabled: true }
     },
-    sql: { dialects: ["postgres"] }
+    sql: { dialects: ["postgres", "sqlite"] }
   }
 });

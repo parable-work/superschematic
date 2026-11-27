@@ -48,6 +48,7 @@ func TestGrantAuthenticatorRunsATokenAsItsHolderAndLeavesTheRestToInner(t *testi
 	holder := access.Principal{Subject: "p1", Kind: access.KindParty, Grants: []access.GrantReach{{ID: "g1"}}, Credential: &access.Credential{Kind: access.CredentialGrant, ID: "g1"}}
 	auth := GrantAuthenticator(authority{tokens: map[string]access.GrantAuthentication{
 		"grant_good": {Principal: holder, Role: "tenant", Permissions: []string{"requests.read"}},
+		"grant_run":  {Principal: access.Principal{Subject: "r1", Kind: access.KindAgent}, Role: "worker-agent", Permissions: []string{"requests.read"}},
 	}}, func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if token, ok := BearerToken(r.Header); ok {
@@ -73,7 +74,10 @@ func TestGrantAuthenticatorRunsATokenAsItsHolderAndLeavesTheRestToInner(t *testi
 	if code := call("grant_good"); code != http.StatusOK || seen.Subject != "p1" || seen.Kind != access.KindParty || len(roles) != 1 || roles[0].Permissions[0] != "requests.read" {
 		t.Fatalf("a good grant: %d, %+v, %+v", code, seen, roles)
 	}
-	for _, token := range []string{"grant_ended", "grant_unknown"} {
+	// An agent run's token is the dispatcher's to resolve, narrowed to
+	// whom the run acts for and held to its autonomy (D192): not as its
+	// grant's holder.
+	for _, token := range []string{"grant_ended", "grant_unknown", "grant_run"} {
 		if code := call(token); code != http.StatusUnauthorized {
 			t.Fatalf("%s: %d, want 401", token, code)
 		}

@@ -247,7 +247,7 @@ export interface StateRuleOn<T> {
  */
 export type StateRules<T, C extends StateRulesOn<T>> = NonNullable<unknown>;
 
-/** Approvals' config on a table (D103, D104): its gates' resetOn and pinned, and the Workflow it reads (status). */
+/** Approvals' config on a table (D103, D104, D200): its gates, each a requirement or the rows it reads its requirements from, and the Workflow it reads (status). */
 export interface ApprovalsOn<T> {
   readonly gates: Readonly<Record<string, ApprovalsGateOn<T>>>;
   /** Whether an update consumes every gate's sign-offs that names no resetOn; true when absent. */
@@ -256,22 +256,91 @@ export interface ApprovalsOn<T> {
   readonly status?: Extract<keyof T, string>;
 }
 
-/** One gate of ApprovalsOn<T>: @superschematic/schema's ApprovalsGate, the fields whose change consumes its sign-offs, and whether a sign-off names the version its signer read. */
-export interface ApprovalsGateOn<T> extends ApprovalsGate {
+/** Which callers a requirement counts, and as whom (D200): a person calling as themselves; an agent run acting for a person, counted as that person; an agent run, counted as its Agent. */
+export type ApprovalsCaller = "person" | "acting-for-person" | "agent";
+
+/** What each sign-off of a requirement shows, from the assurance its host reports (D200). */
+export type ApprovalsProof = "none" | "recent-sign-in" | "user-verification";
+
+/** One condition on a table's own field under which a requirement applies (D200). */
+export interface ApprovalsConditionOn<T> {
+  readonly field: FieldOf<T>;
+  /** every-matches and any-matches test glob patterns, contains the values, at-most the one number. */
+  readonly test: "every-matches" | "any-matches" | "contains" | "at-most";
+  readonly values: readonly string[];
+  /** Whether the condition holds when its test fails. */
+  readonly negate?: boolean;
+}
+
+/** What every gate of ApprovalsOn<T> takes: the states it gates from, the fields whose change consumes its sign-offs, and what a sign-off pins. */
+export interface ApprovalsGateBaseOn<T> {
+  /** The states of the Workflow a transition from is gated; every state when absent. */
+  readonly from?: readonly string[];
   /** The own fields whose change, by an update, consumes the gate's sign-offs; [] for none; absent, resetOnChange decides. */
   readonly resetOn?: readonly FieldOf<T>[];
   /** signOff names the row's version its signer read, and a stale one is vetoed. */
   readonly pinned?: boolean;
+  /** signOff names in read the value of each of these own fields as its signer read it, and a stale one is vetoed (D200). */
+  readonly pinOn?: readonly FieldOf<T>[];
 }
 
+/** A gate whose one requirement the config writes: @superschematic/schema's ApprovalsGate and D200's requirement members. */
+export interface ApprovalsRequirementGateOn<T> extends ApprovalsGateBaseOn<T>, ApprovalsGate {
+  /** The callers it counts; every caller, as its subject, when absent. */
+  readonly callers?: readonly ApprovalsCaller[];
+  /** none when absent. */
+  readonly proof?: ApprovalsProof;
+  /** For recent-sign-in, the most milliseconds a sign-in may come before the sign-off. */
+  readonly proofWithinMs?: number;
+  /** Whether the person the creator acted for, the table's createdFor, is refused a sign-off too; false when absent. */
+  readonly excludeCreatorPerson?: boolean;
+  /** Own fields that list subjects, persons and Agents who may not sign. */
+  readonly excludeSubjectsIn?: readonly FieldOf<T>[];
+  /** Whether each guard reads each signer's permission again; false when absent. */
+  readonly recheckPermission?: boolean;
+  /** The conditions under which it applies, all of them; it always applies when absent. */
+  readonly when?: readonly ApprovalsConditionOn<T>[];
+  readonly requirementsFrom?: never;
+}
+
+/** Where a gate reads its requirements from (D200): the rows of schema whose to-one relation link points at the row, or with in, at one of the keys the row's own list field holds. */
+export interface ApprovalsRequirementsFromOn<T> {
+  readonly schema: string;
+  readonly link: string;
+  readonly in?: FieldOf<T>;
+}
+
+/** A gate that reads its requirements from rows each instance writes (D200). It names its own resetOn, and no requirement member: each row holds its own. */
+export interface ApprovalsRowsGateOn<T> extends ApprovalsGateBaseOn<T> {
+  readonly requirementsFrom: ApprovalsRequirementsFromOn<T>;
+  readonly resetOn: readonly FieldOf<T>[];
+  readonly count?: never;
+  readonly permission?: never;
+  readonly excludeCreator?: never;
+  readonly callers?: never;
+  readonly proof?: never;
+  readonly proofWithinMs?: never;
+  readonly excludeCreatorPerson?: never;
+  readonly excludeSubjectsIn?: never;
+  readonly recheckPermission?: never;
+  readonly when?: never;
+}
+
+/** One gate of ApprovalsOn<T>: a requirement the config writes, or the rows it reads its requirements from (D200). */
+export type ApprovalsGateOn<T> = ApprovalsRequirementGateOn<T> | ApprovalsRowsGateOn<T>;
+
 /**
- * Sign-offs that gate the states of a table's Workflow (D103, D104):
+ * Sign-offs that gate the states of a table's Workflow (D103, D104, D200):
  * `export abstract class Task implements Approvals<Task, { gates: { ... } }>`.
  * The type stays a table. Approvals keeps its sign-offs in a sub-table of the
  * row (task_approvals_sign_offs); its operations (approvals.signOff,
  * withdrawSignOff, listSignOffs) change and read them. A gate that excludes
- * the creator reads the table's createdBy. Like Timers, it resolves to the
- * empty object type; the first type argument is the table itself.
+ * the creator reads the table's createdBy. A gate may read its requirements
+ * from the rows of another table that each instance writes
+ * (requirementsFrom), and a requirement may name which callers it counts,
+ * the proof each sign-off shows, whom it excludes and when it applies. Like
+ * Timers, it resolves to the empty object type; the first type argument is
+ * the table itself.
  */
 export type Approvals<T, C extends ApprovalsOn<T>> = NonNullable<unknown>;
 
