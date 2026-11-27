@@ -14,15 +14,6 @@ func TestBind(t *testing.T) {
 	}
 }
 
-// TestQuote: a name is quoted with each double quote doubled.
-func TestQuote(t *testing.T) {
-	for name, want := range map[string]string{"user": `"user"`, `my "user"`: `"my ""user"""`, "a?b c": `"a?b c"`} {
-		if got := quote(name); got != want {
-			t.Errorf("quote(%q) = %s, want %s", name, got, want)
-		}
-	}
-}
-
 // TestKeyCodec: a UUID key is base62 on the wire and hyphenated in the
 // database, either form names it, and any other key is its text.
 func TestKeyCodec(t *testing.T) {

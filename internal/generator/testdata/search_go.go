@@ -602,7 +602,50 @@ func TestSearch(t *testing.T) {
 		if _, err := crosstable.SearchTables(ctx, host, user(bob), crosstable.SearchRequest{Q: "walnut", Vector: []float64{1, 0}}, none); !errors.As(err, &bad) {
 			t.Errorf("a vector with no embeddings: %v", err)
 		}
+
+		// A reindex embeds a page of rows in one model call: with every
+		// embedding cleared, each table's rows are embedded again in one
+		// call, and its index rows are what indexing each row wrote.
+		written := indexRows(t, pool)
+		if _, err := pool.Exec(ctx, `UPDATE search_index SET embedding = NULL, embedding_model = NULL`); err != nil {
+			t.Fatal(err)
+		}
+		var modelCalls atomic.Int64
+		textsBefore := calls.Load()
+		perPage := crosstable.SearchOptions{Embeddings: &crosstable.Embeddings{Model: embeddings.Model, MaxChars: embeddings.MaxChars, Embedder: crosstable.EmbedderFunc(func(ctx context.Context, texts []string) ([][]float64, error) {
+			modelCalls.Add(1)
+			return embeddings.Embedder.Embed(ctx, texts)
+		})}}
+		n := must(crosstable.ReindexSearch(ctx, host, crosstable.ReindexOptions{SearchOptions: perPage}))
+		if n != len(written)+1 || modelCalls.Load() != 6 || calls.Load()-textsBefore != int64(len(written)) {
+			t.Errorf("reindexed %d rows in %d model calls of %d texts, want the index rows and the soft-deleted note, one call a table for its %d index rows", n, modelCalls.Load(), calls.Load()-textsBefore, len(written))
+		}
+		equal(t, "the index rows reindexed", indexRows(t, pool), written)
 	})
+}
+
+// indexRows are the index's rows, every column but when each was written,
+// in order.
+func indexRows(t *testing.T, pool *pgxpool.Pool) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `SELECT format('%s %s %L %L %L %L %L %L %L %s %L %L', source_table, source_key, title, body, comments, files, scope, audience::text, agents::text, text_hash, embedding::text, embedding_model)
+		FROM search_index ORDER BY source_table, source_key`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var row string
+		if err := rows.Scan(&row); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // first is a FindMany's rows, its count dropped.

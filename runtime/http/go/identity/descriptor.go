@@ -171,10 +171,3 @@ func ParseDescriptor(data []byte) (Descriptor, error) {
 	}
 	return d, nil
 }
-
-// quote quotes an identifier as every dialect the store speaks reads it: a
-// double quote, the name with each double quote doubled, and a double
-// quote.
-func quote(name string) string {
-	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
-}

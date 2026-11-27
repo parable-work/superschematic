@@ -739,18 +739,35 @@ func (h notifierHost) Permissions(ctx context.Context, user string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
+	// The grants' roles, in one read.
+	var roleIDs []types.IdentityUUID
+	for _, grant := range grants {
+		if grant.Role.Id != nil {
+			roleIDs = append(roleIDs, *grant.Role.Id)
+		}
+	}
+	if len(roleIDs) == 0 {
+		return []string{}, nil
+	}
+	roles, _, err := repositories.GetRoleRepository().FindMany(ctx, &RoleFilter{Id: &UUIDFilter{In: roleIDs}}, &RoleFindOptions{Fields: RoleFields{}.All(), Limit: len(roleIDs), SkipCount: true})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[types.IdentityUUID]*types.Role, len(roles))
+	for _, role := range roles {
+		if role.Id != nil {
+			byID[*role.Id] = role
+		}
+	}
 	seen := map[string]bool{}
 	out := []string{}
 	for _, grant := range grants {
 		if grant.Role.Id == nil {
 			continue
 		}
-		role, err := repositories.GetRoleRepository().GetOne(ctx, *grant.Role.Id, nil)
-		if errors.Is(err, ErrNotFound) {
+		role, found := byID[*grant.Role.Id]
+		if !found {
 			continue
-		}
-		if err != nil {
-			return nil, err
 		}
 		for _, permission := range role.Permissions {
 			if !seen[permission] {

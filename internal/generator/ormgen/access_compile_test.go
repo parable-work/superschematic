@@ -91,3 +91,60 @@ func TestHeldRepositoriesCompile(t *testing.T) {
 		})
 	}
 }
+
+// TestGrantedRepositoriesCompile generates the Go ORM of databases with an
+// @accessGrants table and their own access model (D156), the parties and
+// the agent runs, and builds and vets each: the grant reads, the batched
+// read of the grants' targets and the notifier's batched role reads
+// compile where TestGoAccessEndToEnd's fixture has no notifier.
+func TestGrantedRepositoriesCompile(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping compile check in -short mode")
+	}
+	paths := testpaths.Local(t)
+	for _, fixture := range []string{"fixture-parties-db", "fixture-agent-runs-db"} {
+		t.Run(fixture, func(t *testing.T) {
+			reg := registry.New(naming.Default())
+			schema, err := loader.LoadService(filepath.Join(fixturesDir, fixture), loader.WithRegistry(reg))
+			if err != nil {
+				t.Fatalf("load %s: %v", fixture, err)
+			}
+			clock := codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC))
+			typesModule := "example.com/schemas/types/go/" + fixture
+			root := t.TempDir()
+			typesDir := filepath.Join(root, "types", "go", fixture)
+			ormDir := filepath.Join(root, "orm", fixture)
+			typesOutput, err := typegen.Generate(schema, typegen.Options{SchemaName: fixture, ModulePath: typesModule, Clock: clock})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := typegen.SetReplacePaths(typesOutput, paths, typesDir); err != nil {
+				t.Fatal(err)
+			}
+			if err := typegen.WriteTypes(typesOutput, typesDir); err != nil {
+				t.Fatal(err)
+			}
+			output, err := Generate(schema, Options{SchemaName: fixture, ModulePath: "example.com/schemas/orm/" + fixture, TypesModule: typesModule, Registry: reg, Clock: clock})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if output.Access == nil || output.Access.Grants == "" {
+				t.Fatalf("%s has no access grants model", fixture)
+			}
+			if err := SetReplacePaths(output, paths, ormDir); err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteORM(output, ormDir); err != nil {
+				t.Fatal(err)
+			}
+			tidyGeneratedModule(t, ormDir)
+			for _, args := range [][]string{{"build", "./..."}, {"vet", "./..."}} {
+				cmd := exec.Command("go", args...)
+				cmd.Dir = ormDir
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("go %s in the ORM of %s: %v\n%s", strings.Join(args, " "), fixture, err, out)
+				}
+			}
+		})
+	}
+}

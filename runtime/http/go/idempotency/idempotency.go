@@ -35,6 +35,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/parable-work/superschematic/runtime/http/go/internal/sqldialect"
 	"github.com/parable-work/superschematic/runtime/http/go/response"
 	"github.com/parable-work/superschematic/runtime/http/go/serviceauth"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
@@ -197,7 +198,7 @@ type SQLStore struct {
 // NewSQLStore is the store on db, a Postgres or a SQLite database whose
 // schema declares the reserved table names describes.
 func NewSQLStore(db *sql.DB, dialect Dialect, names Table) *SQLStore {
-	quote := func(identifier string) string { return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"` }
+	quote := sqldialect.QuoteIdent
 	c := names.Columns
 	return &SQLStore{db: db, dialect: dialect, table: quote(names.Table), c: Columns{
 		Lookup: quote(c.Lookup), Operation: quote(c.Operation), Principal: quote(c.Principal), Key: quote(c.Key),
@@ -206,22 +207,13 @@ func NewSQLStore(db *sql.DB, dialect Dialect, names Table) *SQLStore {
 	}}
 }
 
-// bind writes a statement's ? placeholders as the dialect numbers them.
+// bind writes a statement's ? placeholders as the dialect numbers them,
+// leaving quoted names and literals alone.
 func (s *SQLStore) bind(query string) string {
 	if s.dialect != Postgres {
 		return query
 	}
-	var out strings.Builder
-	n := 0
-	for i := 0; i < len(query); i++ {
-		if query[i] == '?' {
-			n++
-			out.WriteString("$" + strconv.Itoa(n))
-			continue
-		}
-		out.WriteByte(query[i])
-	}
-	return out.String()
+	return sqldialect.NumberPlaceholders(query)
 }
 
 func (s *SQLStore) exec(ctx context.Context, query string, args ...any) (int64, error) {

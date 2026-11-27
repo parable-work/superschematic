@@ -152,7 +152,9 @@ func TestAFailedWakeIsLoggedAndNothingElse(t *testing.T) {
 	core, logs := observer.New(zap.WarnLevel)
 	n := New(map[string][]Wake{
 		"OrderPlaced": f.list("fulfil"),
-		"StockLow":    {{URL: f.server.URL + "/jobs/reorder:run", Token: &Token{URL: f.server.URL + "/token"}}},
+		// A token URL of its own: the notifier holds a token by its URL, so
+		// one OrderPlaced's wakes fetched first would answer for this one.
+		"StockLow":    {{URL: f.server.URL + "/jobs/reorder:run", Token: &Token{URL: f.server.URL + "/token?unflavored"}}},
 		"Unreachable": {{URL: "http://127.0.0.1:1/jobs/none:run"}},
 	}, zap.New(core))
 	n.Enqueued("OrderPlaced")

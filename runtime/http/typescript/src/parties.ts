@@ -1,5 +1,5 @@
 import type { GrantReach, Principal } from './auth.js';
-import { activeGrants, grantEnded, reachesOf, type GrantRow } from './access.js';
+import { activeGrants, grantEnded, permissionsOf, reachesOf, rolesByName, type GrantRow } from './access.js';
 import { uuidValue } from './uuid.js';
 
 /*
@@ -81,15 +81,16 @@ export async function partyPrincipal(orm: object, party: PartyRef, options: Part
   const db = system(orm);
   const roles = accessMember(db, 'roles');
   const now = options.now ?? new Date();
-  const grants: GrantReach[] = [];
-  const permissions = new Set<string>();
-  for (const grant of await activeGrants(db, { holder: party.key, now })) {
-    if (options.grant !== undefined && !sameUUID(String(grant.id), options.grant)) continue;
-    const role = roles ? await roles.findOne({ name: { eq: grant.role } }) : null;
-    for (const permission of (role?.permissions as string[] | null | undefined) ?? []) permissions.add(permission);
-    grants.push({ id: String(grant.id), targetType: String(grant.targetType), targetId: String(grant.targetId), reaches: reachesOf(role?.reaches as string[] | null | undefined) });
-  }
-  return { subject: party.key, kind: 'party', permissions: [...permissions], grants };
+  const held = (await activeGrants(db, { holder: party.key, now })).filter(grant => options.grant === undefined || sameUUID(String(grant.id), options.grant));
+  const byName = await rolesByName(roles, held.map(grant => grant.role));
+  const grants: GrantReach[] = held.map(grant => ({
+    id: String(grant.id),
+    targetType: String(grant.targetType),
+    targetId: String(grant.targetId),
+    reaches: reachesOf(byName.get(String(grant.role))?.reaches as string[] | null | undefined),
+  }));
+  const permissions = permissionsOf(held.map(grant => byName.get(String(grant.role))));
+  return { subject: party.key, kind: 'party', permissions, grants };
 }
 
 /** A channel identity as lapse reads it. */

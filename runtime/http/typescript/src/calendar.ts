@@ -2,6 +2,7 @@ import type { Principal } from './auth.js';
 import { GRANT_TOKEN_PREFIX, grantEnded, grantTokenHash, issueGrant, revokeGrant, type GrantRow } from './access.js';
 import { sha256 } from './sha256.js';
 import { ormDialect } from './orm.js';
+import { quoteIdentifier as quote } from './sql-text.js';
 import { uuidFromDb } from './uuid.js';
 
 /*
@@ -209,7 +210,6 @@ function timeOf(value: unknown): Date {
 async function occurrencesOf(db: OrmShape, repository: RepositoryShape, source: CalendarSourceDefinition, from: Date, to: Date, limit: number, owned: Values): Promise<{ entries: CalendarEntry[]; more: boolean }> {
   const def = repository.def!;
   const occ = source.occurrences!;
-  const quote = (name: string) => `"${name.replaceAll('"', '""')}"`;
   // On SQLite a time is its RFC 3339 text, which compares in order (D182).
   const [p1, p2] = ormDialect(db) === 'sqlite' ? ['?1', '?2'] : ['$1', '$2'];
   const { rows } = await db.asSystem().query(
