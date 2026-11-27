@@ -512,10 +512,20 @@ def _parse_union_definitions(root: dict[str, Any]) -> dict[str, UnionDef]:
                 resolved = _resolve_ref_name(ref)
                 if resolved:
                     types.append(resolved)
+        # A variant union (D149): x-by names the sibling, x-arms each of its
+        # values' member.
+        arms_raw = union_raw.get("x-arms")
+        arms = (
+            {value: member for value, member in arms_raw.items() if isinstance(member, str)}
+            if _is_object(arms_raw)
+            else {}
+        )
         unions[name] = UnionDef(
             name=name,
             description=_as_string(union_raw.get("description")),
             types=types,
+            by=_as_string(union_raw.get("x-by")),
+            arms=arms,
         )
     return unions
 

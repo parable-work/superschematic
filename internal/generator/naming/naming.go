@@ -256,6 +256,30 @@ type Naming struct {
 	// reads, as TSDoc leaves it out of the published docs: from the tag's
 	// line to the next block tag or the end of the comment.
 	PrivateRemarks string `toml:"private_remarks"`
+
+	// Behaviors is the directory of the project's own behaviors (D103's
+	// step 5), relative to the schemas root: the classes of its
+	// *.behavior.ts files, read by the TypeScript reader through the
+	// tsconfig.json beside them, and the declarations its *.behavior.json
+	// and *.behavior.yaml files hold as data. Each is named <prefix>.<Name>,
+	// and every command registers them before it reads a schema, so a table
+	// implements one as it implements the core's. Empty, the project
+	// declares none.
+	Behaviors string `toml:"behaviors"`
+
+	// dir is the directory the file this naming was read from sits in,
+	// the schemas root, which Behaviors is relative to; empty for the
+	// defaults.
+	dir string
+}
+
+// BehaviorsDir is the absolute directory Behaviors names, or "" when the
+// project names none or the naming was read from no file.
+func (n Naming) BehaviorsDir() string {
+	if n.Behaviors == "" || n.dir == "" {
+		return ""
+	}
+	return filepath.Join(n.dir, filepath.FromSlash(n.Behaviors))
 }
 
 // The values of type_comments and private_remarks.
@@ -1246,6 +1270,14 @@ func (n Naming) RustEngineCrate(schemaName string) string {
 	return n.RustCratePrefix + schemaName + "-engine"
 }
 
+// RustRulesCrate returns the crate name of a DB schema's rules crate
+// (D103's step 5): the behaviors' core with the behaviors its tables
+// compose that the core's crate does not ship (internal/generator/
+// rulescore).
+func (n Naming) RustRulesCrate(schemaName string) string {
+	return n.RustCratePrefix + schemaName + "-rules"
+}
+
 // RustImplementationCrate returns the crate name the scaffold gives an API
 // service's Rust implementation (D57), which the engineer may rename.
 func (n Naming) RustImplementationCrate(schemaName string) string {
@@ -1375,7 +1407,16 @@ func LoadFile(path string) (Naming, error) {
 	if err != nil {
 		return Naming{}, fmt.Errorf("naming: read %s: %w", path, err)
 	}
-	return Parse(data, path)
+	n, err := Parse(data, path)
+	if err != nil || n.Behaviors == "" {
+		return n, err
+	}
+	abs, err := filepath.Abs(filepath.Dir(path))
+	if err != nil {
+		return Naming{}, fmt.Errorf("naming: resolve %s: %w", path, err)
+	}
+	n.dir = abs
+	return n, nil
 }
 
 // Parse decodes TOML bytes over Default(). name labels errors.
@@ -1430,6 +1471,9 @@ func Parse(data []byte, name string) (Naming, error) {
 	}
 	if n.PrivateRemarks != PrivateRemarksKeep && n.PrivateRemarks != PrivateRemarksDrop {
 		return Naming{}, fmt.Errorf("naming: %s: private_remarks is %q: use %q or %q", name, n.PrivateRemarks, PrivateRemarksKeep, PrivateRemarksDrop)
+	}
+	if b := n.Behaviors; b != "" && (filepath.IsAbs(b) || strings.Contains(b, `\`) || filepath.ToSlash(filepath.Clean(b)) != b) {
+		return Naming{}, fmt.Errorf("naming: %s: behaviors is %q: a clean slash-separated directory relative to the schemas root", name, b)
 	}
 	n = n.OrDefault()
 	if !historyActorSettingRE.MatchString(n.HistoryActorSetting) {

@@ -9,7 +9,9 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/rulescore"
 	"github.com/parable-work/superschematic/internal/generator/rustrestgen"
+	"github.com/parable-work/superschematic/internal/generator/servergen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -96,6 +98,31 @@ func (r run) rustBehaviorDeps(apiDir string, deps *rustrestgen.DepsInfo) error {
 		return fmt.Errorf("generator: the behaviors' layout of %s: %w", deps.Database, err)
 	}
 	behaviors.Layout = string(encoded)
+	// A database whose tables compose a behavior a class or an extension
+	// declares with its crate runs on the project's rules crate the build
+	// writes for it (D103's step 5), whose core the API's is.
+	dir := RulesDir(r.Options.OutputRoot, LangRust, deps.Database)
+	crate, why, err := rulescore.Build(db, rulescore.Options{
+		SchemaName:     deps.Database,
+		Registry:       r.Registry,
+		Naming:         r.Options.Naming,
+		RepositoryRoot: r.Options.RepositoryRoot,
+		Paths:          r.Options.Paths,
+		Dir:            dir,
+		RustVersion:    servergen.RustVersion,
+	})
+	if err != nil {
+		return fmt.Errorf("generator: the rules crate of %s, for %s: %w", deps.Database, r.Config.Name, err)
+	}
+	if why != "" {
+		return fmt.Errorf("generator: the Rust server of %s runs %s (D103), and %s", r.Config.Name, served, why)
+	}
+	if crate != nil {
+		behaviors.ProjectCrate = crate.Name
+		if behaviors.ProjectCratePath, err = naming.RelPath(apiDir, dir); err != nil {
+			return fmt.Errorf("generator: %s from %s: %w", crate.Name, r.Config.Name, err)
+		}
+	}
 	deps.Behaviors = behaviors
 	return nil
 }

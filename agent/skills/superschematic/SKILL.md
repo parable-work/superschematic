@@ -274,7 +274,16 @@ path for when the store is unavailable.
   row a unique key would then refuse, and deletes `from` (D147). Don't
   write the repointing against the relations you remember: the build
   enumerates them. It copies no field of `from`, so update `into` first
-  with what to keep.
+  with what to keep. The Rust repositories merge on Postgres and SQLite
+  (`merge_into(&from, &into)`), in the caller's transaction.
+- **A name people know a row by, with its old names, is an Aliased
+  field.** Type it `name: Aliased<string>` (or `Aliased<string, {
+  normalize: "slug" }>`), not a `@unique` column and an aliases table of
+  your own (D147). A create gives the name; change it with
+  `name.rename`, which keeps the old one as an alias, and keep the rest
+  with `name.addAlias` and `name.removeAlias`; find a row by any of them
+  with `name.resolve({ name })`. A name another row holds is refused with
+  that row's key (`name_taken`), and a merge moves the aliases.
 - **A link to a row of any table, or a file, is a declaration.** Put
   `@references<T>({ tables?, cleared? })` or `@attachments<T>({ released })`
   on the table and use `orm.references` (`add`, `of`, `referencedBy`) and
@@ -456,6 +465,18 @@ Most are load errors; knowing them saves a build round-trip:
   that still counts as finished, a done task that may be reopened, goes
   in `finished: { done: "success" }` beside `{ from: "done"; to: "todo" }`
   (D113), a table's alone; `outcomes` keeps the states nothing leaves.
+- A field whose shape another field picks (a step's result by its kind)
+  is a variant union, from `@superschematic/schema` (D149), declared as an
+  exported alias and given to the field: `export type StepResult =
+  Variant<"kind", { verify: VerifyResult; review: ReviewResult }>`, then
+  `result?: StepResult` beside `kind: StepKind`. Each key is a value of
+  the sibling, a member of its enum, and names a `@jsonField` class (an
+  object type outside a DB schema). Every validator refuses a value while
+  the sibling names no member with the rule `variant`, and every decoder
+  reads the member the sibling names; a table's column gets a `CHECK`.
+  The build refuses the union as a list, a map, an argument or a result,
+  and a type that holds the field without the sibling. Not
+  `@behavior("Variants", ...)`, the engine's form, for a table or a view.
 - A field typed as a behavior (`status: Workflow<{ ... }>`) keeps its
   table a table (D103): the behavior's fields are columns
   (`status`, `status_entered_at`) that the generated repositories read
@@ -465,6 +486,26 @@ Most are load errors; knowing them saves a build round-trip:
   SQL write of one is not refused, so an operator can repair a row, but
   it skips the behavior's rules: do not write one to move a state, in a
   migration, a seed or a handler.
+- A pattern the core's behaviors do not cover can be the project's own
+  behavior (D103's step 5): an abstract class marked `@declaresBehavior`
+  from `@superschematic/db`, in the directory `behaviors` names in
+  `superschematic.toml`, named `<prefix>.<Name>`, with the Rust crate
+  that runs it on the core (`crate`) or its declarative `rules` (below).
+  A table implements it with
+  `implements Behavior<typeof Rating, Movie, { ... }>`, and the build
+  writes the project's rules crate (`rules/rust/<schema>`), whose archive
+  a Go server links in the stock one's place. Write the class's bodies as
+  abstract signatures: a class declares and never implements. The
+  extension guide's "A behavior declared by a class" lists its form.
+- An extension's behavior whose rules are a count or an average over a
+  sub-table, a guard over the row and the caller, a counter, a move or a
+  field kept or frozen needs no Rust: state them in its class's
+  `@declaresBehavior({ rules })`, or its declaration's `rules` (D103's
+  step 5), which the behaviors' core interprets, as acme.Rating's class
+  `examples/acme-schematic/ext/rating.behavior.ts` does. Reach for a
+  crate only for what the vocabulary has no rule for (loops, expressions,
+  deadlines, events, contracts); the reference page "Declarative
+  behaviors" lists it.
 - A status no writer may move out of order, and that needs no permission
   (a ledger entry, a payment, a run), is an enum field with a
   `@stateMachine` on its class, from `@superschematic/schema` (D118), not
@@ -763,6 +804,26 @@ Most are load errors; knowing them saves a build round-trip:
   `{ from: "review"; to: "done"; by: ["seat:accountable"] }`. Calls are
   `seats.takeSeat({ seat, subject? })`, `leaveSeat` and the read
   `listSeats`; a repeat answers `unchanged: true`.
+- When a table repeats one of the core's bundles, implement the bundle
+  rather than wiring its parts by hand (D103, step 5): `implements
+  Reservation<Booking, { resource: "room"; interval: { start: "startsAt";
+  end: "endsAt" }; amount: "priceCents"; currency: "GBP" }>` for a booking
+  that holds a Calendar's time and waits for its payment; `Barrier<Rollout,
+  { rows: "Agent"; link: "rollout"; timeoutMs: 300000; releasePermission:
+  "rollouts.release" }>` for a row that waits for its related rows to
+  finish; `Mailbox<Message, { ttlMs: 30000; takePermission: "messages.take"
+  }>` for a message a taker leases, the table declaring `createdBy`; and
+  `Assignment<Problem, { take: "problems.take"; assign: "problems.assign"
+  }>` for one assignee, named `seat:assignee` in a `by`. In the data forms
+  write `"bundles": [{ "name": "Reservation", "settings": { ... } }]`. The
+  loader expands a bundle into its parts, each named as the use it is
+  (`status`, `holds_state`, the `holds` and `payments` operations), so do
+  not also write a part, or declare the field a part is anchored on (the
+  build refuses both). A Barrier is released once every row is ready,
+  at its timeout, or by a go-ahead from a caller who holds
+  `releasePermission`: its gate exempts those two (Rollups'
+  `exemptions`).
+  `superschematic format` writes the bundle, not its parts.
 - When a row's status should follow what an outside system reports (a
   sandbox at its provider, a deployment at its platform, a payment at its
   processor), type a field as a Reconcile beside the Workflow field rather
@@ -888,6 +949,17 @@ Most are load errors; knowing them saves a build round-trip:
   write of the `<table>_dependencies_blockers` sub-table is never refused
   but runs none of its checks: add and remove edges through the
   operations.
+- When a row's create should make a fixed set of child rows (a batch's
+  steps, a release's checks), implement Blueprint on the table rather than
+  creating them in app code (D149): `implements Blueprint<Batch, { schema:
+  "Job"; parentLink: "batch"; keyField: "step"; steps: { fetch: {}; index:
+  { after: ["fetch"] } }; copyFields: ["topic"] }>`. The child table has a
+  `batch: Relation<Batch>`, a string `step`, Constants over `step` and the
+  copied fields, and Dependencies when a step has `after`. The create
+  stamps every child in its own write, blocked after its steps; a `when`
+  (`{ field, equals }` or `{ field, includes }`) leaves a step out. Steps
+  are inline (`from` is an engine type's alone). `children` is computed at
+  a read and no column holds it; the table has no upserts.
 - When a row needs a number a person reads (an invoice's INV-2026-0042,
   a ticket's T-17), type a field as a Numbering rather than a counter
   column of your own or a database sequence: `number: Numbering<{ format:

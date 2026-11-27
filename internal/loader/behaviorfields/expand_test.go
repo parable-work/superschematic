@@ -177,7 +177,7 @@ func projects() *ir.Schema {
 func TestExpandChangeQueues(t *testing.T) {
 	reg := registry.New(naming.Default())
 	schema := projects()
-	if heard := HeardBy(schema); len(heard) != 1 || strings.Join(heard["Task"], ",") != "Project" {
+	if heard := HeardBy(schema, reg); len(heard) != 1 || strings.Join(heard["Task"], ",") != "Project" {
 		t.Errorf("HeardBy = %v, want Task heard by Project", heard)
 	}
 	if hearing := Hearing(schema.Types["Project"], reg); strings.Join(hearing, ",") != "Reactions" {

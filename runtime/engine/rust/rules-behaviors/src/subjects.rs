@@ -96,6 +96,13 @@ pub fn canonical_subject(subject: &str) -> String {
     }
 }
 
+/// A UUID's value in its wire form, base62: what a behavior that makes the
+/// key of a row of a table keyed by a UUID writes it in (Blueprint's
+/// children, D149).
+pub(crate) fn uuid_wire(n: u128) -> String {
+    base62(n)
+}
+
 // base62 is a UUID's value in base62, its fewest digits.
 fn base62(mut n: u128) -> String {
     let mut digits = Vec::new();

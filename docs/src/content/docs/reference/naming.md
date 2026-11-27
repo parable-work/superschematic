@@ -374,6 +374,21 @@ comment, and the empty lines it leaves at the end go with it. `keep`
 reads the section as the rest of the comment. Any other value fails the
 load.
 
+### `behaviors`
+
+Default: unset
+
+The directory of the project's own behaviors, relative to the schemas
+root, as `behaviors = "behaviors"`. It holds the classes of its
+`*.behavior.ts` files, which the TypeScript reader reads through the
+`tsconfig.json` beside them, and the declarations its `*.behavior.json`
+and `*.behavior.yaml` files hold as data. Every command registers them
+before it reads a schema, so a table implements one as it implements a
+behavior of the core. Each is named `<prefix>.<Name>`. The
+[extension guide](/superschematic/extending/write-an-extension/#a-behavior-declared-by-a-class)
+says how to write one. Unset, the project declares none. An absolute path,
+or one that is not clean, fails the load.
+
 ### `auth_provider`
 
 Default: `session`

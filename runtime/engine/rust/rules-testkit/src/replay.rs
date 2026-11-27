@@ -292,17 +292,72 @@ const ANOTHER_TABLE_WORDS: [&str; 8] = [
     "reads the terminal states of ",
 ];
 
-// reads_another_table reports whether the engine refused a Rollups config
-// for what another schema lacks.
+/// The words of the engine's refusals of a Blueprint config for what the
+/// child schema lacks (`check_child`), or the definition's (`check_source`):
+/// a live version, the link to this schema, Dependencies for an after,
+/// Constants over the stamped fields, no Blueprint of its own, the fields a
+/// key sets, and whether a when's includes reads a list, which a type's
+/// spec does not say (D149).
+const BLUEPRINT_ANOTHER_TABLE_WORDS: [&str; 10] = [
+    "has no live version; publish it first",
+    " has no link ",
+    "'s link ",
+    " does not compose ",
+    " composes Blueprint",
+    "'s Dependencies takes blockers of ",
+    "'s Constants does not list ",
+    "keyField ",
+    " as a list, and ",
+    "from: ",
+];
+
+// reads_another_table reports whether the engine refused a Rollups or a
+// Blueprint config for what another schema lacks. A field of the child's
+// that a Blueprint copy or a step's data names is one the refusal names
+// with no list of the type's own fields, which a check of this type's
+// fields gives.
 fn reads_another_table(error: &Value) -> bool {
     let message = error
         .get("message")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    message.contains("behavior Rollups config: rollup ")
+    let rollups = message.contains("behavior Rollups config: rollup ")
         && ANOTHER_TABLE_WORDS
             .iter()
+            .any(|words| message.contains(words));
+    let blueprint = message.contains("behavior Blueprint config: ")
+        && (BLUEPRINT_ANOTHER_TABLE_WORDS
+            .iter()
             .any(|words| message.contains(words))
+            || (message.contains(" is not a field of ") && !message.contains("(its fields: ")));
+    rollups || blueprint
+}
+
+/// Why a define the engine refused for removing Blueprint from a type with
+/// instances is not compared.
+const BLUEPRINT_REMOVED: &str = "the engine kept a record of what each instance stamped, which would stay behind; a table's Blueprint holds no state once its rows exist (D149), so it leaves a table with rows";
+
+// removes_blueprint reports whether the engine refused a new version for
+// removing Blueprint from a type with instances.
+fn removes_blueprint(error: &Value) -> bool {
+    error.get("class").and_then(Value::as_str) == Some("IncompatibleChangeError")
+        && error
+            .get("message")
+            .and_then(Value::as_str)
+            .is_some_and(|message| {
+                message.contains("behavior Blueprint cannot be removed from type ")
+            })
+}
+
+// vetoed_by_links reports whether a recorded refusal is a veto of the
+// engine's Links, a required link's target delete among them, which a
+// relation's foreign key holds on a table.
+fn vetoed_by_links(error: &Value) -> bool {
+    error
+        .get("details")
+        .and_then(|details| details.get("behavior"))
+        .and_then(Value::as_str)
+        == Some(shape::LINKS)
 }
 
 /// How the engine's refusal of a member that is a table's behavior's alone
@@ -546,7 +601,56 @@ pub fn scenario_path(name: &str) -> PathBuf {
 /// Reads a scenario file (its shared values resolved) and replays it on
 /// cores `make_core` builds, one for each engine a scenario opens.
 pub fn replay_path(path: &Path, make_core: &dyn Fn() -> Core) -> Result<Report, String> {
-    Ok(replay(&load(path)?, make_core))
+    let file = load(path)?;
+    let declarations = declarations_of(path)?;
+    if declarations.is_empty() {
+        return Ok(replay(&file, make_core));
+    }
+    // A file whose scenarios compose declarative behaviors (D103's step 5)
+    // replays on the core with each of them added.
+    let declared = superschematic_rules_behaviors::declaratives(&declarations)?;
+    let declaring = || {
+        let mut core = make_core();
+        for behavior in &declared {
+            core.push(behavior.clone());
+        }
+        core
+    };
+    Ok(replay(&file, &declaring))
+}
+
+/// The declaration files of the declarative behaviors (D103's step 5) a
+/// hand-written scenario file's scenarios compose: its `declarations`, each
+/// a path from the file's directory, read whole, in order. None for a file
+/// that lists none.
+pub fn declarations_of(path: &Path) -> Result<Vec<Value>, String> {
+    let text =
+        std::fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let file: Value =
+        serde_json::from_str(&text).map_err(|error| format!("{}: {error}", path.display()))?;
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut out = Vec::new();
+    for listed in file
+        .get("declarations")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let Some(relative) = listed.as_str() else {
+            return Err(format!(
+                "{}: declarations lists paths of declaration files",
+                path.display()
+            ));
+        };
+        let declaration = dir.join(relative);
+        let text = std::fs::read_to_string(&declaration)
+            .map_err(|error| format!("{}: {error}", declaration.display()))?;
+        out.push(
+            serde_json::from_str(&text)
+                .map_err(|error| format!("{}: {error}", declaration.display()))?,
+        );
+    }
+    Ok(out)
 }
 
 /// Replays every scenario of a file on cores `make_core` builds, one for
@@ -1154,7 +1258,7 @@ impl<'r> Run<'r> {
                 .and_then(Value::as_str)
                 .and_then(|type_name| self.engines[at].host.store().live(type_name))
                 .is_some_and(|spec| spec.fields.iter().any(|field| field.relation.is_some()));
-            if linked && names_links(error) {
+            if (linked || vetoed_by_links(error)) && names_links(error) {
                 return Done::Skipped(LINKS_REFUSAL.to_owned());
             }
             // A veto refuses with no write, so passing over one whose
@@ -1678,6 +1782,9 @@ impl<'r> Run<'r> {
             if reads_another_table(error) {
                 return Done::Skipped(ANOTHER_TABLE_DEFINE.to_owned());
             }
+            if removes_blueprint(error) {
+                return Done::Skipped(BLUEPRINT_REMOVED.to_owned());
+            }
             if self.recording
                 && (message.contains("releaseLeases: schema ")
                     || message.contains("does not compose Lease, so it holds no lease to expire"))
@@ -1928,6 +2035,29 @@ impl<'r> Run<'r> {
         if let Some(done) = self.store_refuses(cx, type_name, data, true) {
             return done;
         }
+        // A row of another type the create's behaviors create in its change
+        // set is held to its own fields by the store too: a Blueprint's
+        // child (D149). The refusal names that type first.
+        let of_another = match cx.expected {
+            Expected::Error(error) => {
+                error
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .is_some_and(|message| {
+                        !message.starts_with(&format!("{type_name} "))
+                            && !message.starts_with(&format!("{type_name}:"))
+                    })
+            }
+            _ => false,
+        };
+        if of_another {
+            if let Some(reason) = store_validates(
+                cx.expected,
+                "a row of another type the create's behaviors create",
+            ) {
+                return Done::Skipped(reason);
+            }
+        }
         let mut own = self.stored(cx.at, type_name, data);
         // The creator the engine kept beside an instance, in the field the
         // replay gave its type.
@@ -2100,8 +2230,28 @@ impl<'r> Run<'r> {
         let Expected::Error(_) = cx.expected else {
             return None;
         };
-        let fields = self.engines[cx.at].fields.get(type_name)?;
-        let problems = shape::own_field_problems(type_name, fields, data, create);
+        let engine = &self.engines[cx.at];
+        let fields = engine.fields.get(type_name)?;
+        // A create's member of a field anchor whose behavior takes its value
+        // from a create is that use's value, no own field (D147).
+        let mut data = data.clone();
+        if create {
+            if let Some(spec) = engine.host.store().live(type_name) {
+                for entry in &spec.uses {
+                    let given = entry.field().filter(|_| {
+                        engine
+                            .host
+                            .core()
+                            .declaration(&entry.behavior)
+                            .is_some_and(|declared| declared.value_from_create)
+                    });
+                    if let Some(field) = given {
+                        data.remove(field);
+                    }
+                }
+            }
+        }
+        let problems = shape::own_field_problems(type_name, fields, &data, create);
         (!problems.is_empty()).then(|| {
             Done::Skipped(format!(
                 "own-field validation is the store's, and it refuses this write: {}",
@@ -2284,7 +2434,10 @@ impl<'r> Run<'r> {
         if let Some(reason) = unported {
             return Done::Skipped(reason.to_owned());
         }
-        if let Some(reason) = store_validates(cx.expected) {
+        if let Some(reason) = store_validates(
+            cx.expected,
+            "the patch this operation holds to an update's validation",
+        ) {
             return Done::Skipped(reason);
         }
         let outcome = match uses.as_slice() {
@@ -2918,9 +3071,11 @@ const STORE_RULES: [&str; 9] = [
 // engine refused it for its own-field validation alone (`invalid_instance`
 // with only the store's rules), which a patch the operation held to an
 // update's validation met, Revisions' propose's and an update() of a
-// test's fixture. Own-field validation is the store's, not the core's: on
-// a table the request's types and the database hold it.
-fn store_validates(expected: &Expected<'_>) -> Option<String> {
+// test's fixture; or why a create's is not, which a row its behaviors
+// create met (`refused` names it), a Blueprint's child (D149). Own-field
+// validation is the store's, not the core's: on a table the request's
+// types and the database hold it.
+fn store_validates(expected: &Expected<'_>, refused: &str) -> Option<String> {
     let Expected::Error(error) = expected else {
         return None;
     };
@@ -2941,7 +3096,7 @@ fn store_validates(expected: &Expected<'_>) -> Option<String> {
             .filter_map(|issue| issue.get("message").and_then(Value::as_str))
             .collect();
         format!(
-            "own-field validation is the store's, and it refuses the patch this operation holds to an update's validation: {}",
+            "own-field validation is the store's, and it refuses {refused}: {}",
             messages.join("; ")
         )
     })

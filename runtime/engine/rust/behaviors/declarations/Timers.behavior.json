@@ -158,6 +158,22 @@
     ],
     "type": "object"
   },
+  "references": [
+    {
+      "path": "deadlines.*.start.enters",
+      "kind": "state"
+    },
+    {
+      "path": "deadlines.*.start.field",
+      "kind": "field",
+      "type": "Temporal.DateTime",
+      "reason": "a deadline starts from the time a value holds"
+    },
+    {
+      "path": "status",
+      "kind": "workflow"
+    }
+  ],
   "fields": [
     {
       "name": "deadlines",
@@ -282,7 +298,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "permission"
+      ]
     },
     {
       "name": "snoozeTimer",
@@ -320,7 +339,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "permission"
+      ]
     }
   ],
   "vetoes": [

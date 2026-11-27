@@ -13,9 +13,7 @@
       "name": "tasks.review",
       "identity": false,
       "operations": [
-        "TaskApprovalsListSignOffsHandler",
-        "TaskApprovalsSignOffHandler",
-        "TaskApprovalsWithdrawSignOffHandler"
+        "TaskApprovalsSignOffHandler"
       ]
     }
   ]

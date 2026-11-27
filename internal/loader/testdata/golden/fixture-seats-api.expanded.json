@@ -773,9 +773,7 @@
             "writes": true,
             "permissions": [
               "problems.assign",
-              "problems.own",
-              "problems.release",
-              "problems.work"
+              "problems.release"
             ]
           },
           "httpMethod": "POST",
@@ -827,13 +825,7 @@
             "key": "id",
             "use": "Seats",
             "behavior": "Seats",
-            "operation": "listSeats",
-            "permissions": [
-              "problems.assign",
-              "problems.own",
-              "problems.release",
-              "problems.work"
-            ]
+            "operation": "listSeats"
           },
           "httpMethod": "POST",
           "restPath": "problem/{id}/seats/list-seats",

@@ -933,19 +933,8 @@
       "kind": "opened",
       "description": "An occurrence opened: it is due to be done from now on, and the notifier (D153) raises it as the use's member and opened. Delivery is at least once, so a handler is idempotent by the row's key and the occurrence's key.",
       "payloadSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "key",
-          "due",
-          "dueAt",
-          "overdueAt"
-        ],
         "properties": {
-          "key": {
-            "description": "The occurrence's key: its nominal wall date-time, 2026-10-31T09:00.",
-            "type": "string"
-          },
           "due": {
             "description": "The wall date-time it falls due at, after the adjustment.",
             "type": "string"
@@ -954,30 +943,30 @@
             "description": "When it falls due, in epoch milliseconds.",
             "type": "integer"
           },
+          "key": {
+            "description": "The occurrence's key: its nominal wall date-time, 2026-10-31T09:00.",
+            "type": "string"
+          },
           "overdueAt": {
             "description": "When it is missed if not done, in epoch milliseconds.",
             "type": "integer"
           }
-        }
+        },
+        "required": [
+          "key",
+          "due",
+          "dueAt",
+          "overdueAt"
+        ],
+        "type": "object"
       }
     },
     {
       "kind": "reminded",
       "description": "An occurrence's reminder fell due while it was not done: its remindBefore before its due.",
       "payloadSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "key",
-          "due",
-          "dueAt",
-          "overdueAt"
-        ],
         "properties": {
-          "key": {
-            "description": "The occurrence's key: its nominal wall date-time, 2026-10-31T09:00.",
-            "type": "string"
-          },
           "due": {
             "description": "The wall date-time it falls due at, after the adjustment.",
             "type": "string"
@@ -986,30 +975,30 @@
             "description": "When it falls due, in epoch milliseconds.",
             "type": "integer"
           },
+          "key": {
+            "description": "The occurrence's key: its nominal wall date-time, 2026-10-31T09:00.",
+            "type": "string"
+          },
           "overdueAt": {
             "description": "When it is missed if not done, in epoch milliseconds.",
             "type": "integer"
           }
-        }
+        },
+        "required": [
+          "key",
+          "due",
+          "dueAt",
+          "overdueAt"
+        ],
+        "type": "object"
       }
     },
     {
       "kind": "missed",
       "description": "An occurrence passed its overdue time open, which its overdue deadline fires at, and is missed; it may still be completed late.",
       "payloadSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "key",
-          "due",
-          "dueAt",
-          "overdueAt"
-        ],
         "properties": {
-          "key": {
-            "description": "The occurrence's key: its nominal wall date-time, 2026-10-31T09:00.",
-            "type": "string"
-          },
           "due": {
             "description": "The wall date-time it falls due at, after the adjustment.",
             "type": "string"
@@ -1018,11 +1007,22 @@
             "description": "When it falls due, in epoch milliseconds.",
             "type": "integer"
           },
+          "key": {
+            "description": "The occurrence's key: its nominal wall date-time, 2026-10-31T09:00.",
+            "type": "string"
+          },
           "overdueAt": {
             "description": "When it is missed if not done, in epoch milliseconds.",
             "type": "integer"
           }
-        }
+        },
+        "required": [
+          "key",
+          "due",
+          "dueAt",
+          "overdueAt"
+        ],
+        "type": "object"
       }
     }
   ],

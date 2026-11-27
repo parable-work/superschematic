@@ -12,10 +12,10 @@ import (
 // TypeScriptDeclarations returns the TypeScript types of the schema-file
 // data form: the root union, the Document and every IR node type under
 // $defs of the core registry's JSON Schema (Definition), written from that
-// schema. A registry closes six parts of it, which the types leave open so
-// a document any registry accepts type-checks: the extensions slots, the
-// documents, the schema kinds, the MCP invocation policy key, and a
-// behavior's name and config.
+// schema. A registry closes seven parts of it, which the types leave open
+// so a document any registry accepts type-checks: the extensions slots,
+// the documents, the schema kinds, the MCP invocation policy key, a
+// behavior's name and config, and a bundle's name and settings.
 //
 // The emitter reads the subset of JSON Schema the reflection produces,
 // and the value constraints a registered schema adds to it (@display's
@@ -43,9 +43,10 @@ const declarationsHeader = `// @generated; do not edit
 // multi-definition Document or one definition in its file form. They are
 // written from the JSON Schema ` + "`superschematic json-schema`" + ` emits for the
 // core registry (schema-file.json in this package), which is reflected from
-// the Go IR structs. A registry closes six parts of that schema, which
+// the Go IR structs. A registry closes seven parts of that schema, which
 // these types leave open: the extensions slots, the documents, the schema
-// kinds, the MCP invocation policy key, and a behavior's name and config.
+// kinds, the MCP invocation policy key, a behavior's name and config, and a
+// bundle's name and settings.
 // Regenerate with:
 //   go run ./internal/tools/schemafiletypes
 
@@ -80,6 +81,7 @@ type declarations struct {
 	// schema that lost one fails instead of writing a closed type.
 	sawKind, sawDocuments, sawPolicy                    bool
 	sawBehaviorList, sawBehaviorName, sawBehaviorConfig bool
+	sawBundleName, sawBundleSettings                    bool
 	sawExtensions                                       map[string]bool
 }
 
@@ -122,6 +124,9 @@ func renderDeclarations(root map[string]any, kinds []string, policyKey string, b
 	}
 	if !d.sawBehaviorName || !d.sawBehaviorConfig {
 		return nil, fmt.Errorf("$defs/BehaviorRef has no name or no config property")
+	}
+	if !d.sawBundleName || !d.sawBundleSettings {
+		return nil, fmt.Errorf("$defs/BundleRef has no name or no settings property")
 	}
 	for _, slot := range extensionSlots {
 		if !d.sawExtensions[slot.def] {
@@ -166,6 +171,14 @@ func (d *declarations) writeDef(name string, schema any) error {
 		// config; the types leave the config open.
 		keys = append(keys, "allOf")
 		if err := d.behaviorBranches(node["allOf"], at+"/allOf"); err != nil {
+			return err
+		}
+	}
+	if name == "BundleRef" {
+		// allOf holds one branch per registered bundle, closing its
+		// settings (D103, step 5); the types leave the settings open.
+		keys = append(keys, "allOf")
+		if err := bundleBranches(node["allOf"], at+"/allOf"); err != nil {
 			return err
 		}
 	}
@@ -250,6 +263,17 @@ func (d *declarations) writeDef(name string, schema any) error {
 				return err
 			}
 			d.writeComment("  ", "True for a use a DB table implements (D103), `implements Timers<Ticket, Config>`: anchored on the type, on a table that stays a table. A use on the whole type without it is @behavior's, which makes the type an engine type.")
+		case name == "BundleRef" && key == "name":
+			d.sawBundleName = true
+			d.writeComment("  ", "The bundle's registered name (D103, step 5). A registry admits the bundles it declares: the core's Reservation, Barrier, Mailbox and Assignment.")
+			typ = "string"
+		case name == "BundleRef" && key == "settings":
+			if err := d.behaviorConfig(props[key], propAt); err != nil {
+				return err
+			}
+			d.sawBundleSettings = true
+			d.writeComment("  ", "The values the table gives the bundle's settings, which the registry holds to the bundle's settings schema and the loader substitutes into its parts' configs. Settings of {} are stored as none.")
+			typ = "unknown"
 		case name == "BehaviorRef" && key == "config":
 			if err := d.behaviorConfig(props[key], propAt); err != nil {
 				return err
@@ -482,6 +506,34 @@ func (d *declarations) behaviorBranches(schema any, at string) error {
 		thenProps, _ := then["properties"].(map[string]any)
 		if len(cond) != 1 || len(props) != 1 || len(name) != 1 || name["const"] != d.behaviors[i] || len(thenProps) != 1 || thenProps["config"] == nil {
 			return fmt.Errorf("%s: expected the branch that holds the config of behavior %s", branchAt, d.behaviors[i])
+		}
+	}
+	return nil
+}
+
+// bundleBranches checks that BundleRef.allOf is what closeBundles writes:
+// if/then branches, each holding the settings of the bundle its if names.
+func bundleBranches(schema any, at string) error {
+	if schema == nil {
+		return nil
+	}
+	branches, ok := schema.([]any)
+	if !ok {
+		return fmt.Errorf("%s: expected one branch per registered bundle", at)
+	}
+	for i, branch := range branches {
+		branchAt := fmt.Sprintf("%s/%d", at, i)
+		node, _ := branch.(map[string]any)
+		if err := onlyKeys(node, branchAt, "if", "then"); err != nil {
+			return err
+		}
+		cond, _ := node["if"].(map[string]any)
+		props, _ := cond["properties"].(map[string]any)
+		name, _ := props["name"].(map[string]any)
+		then, _ := node["then"].(map[string]any)
+		thenProps, _ := then["properties"].(map[string]any)
+		if _, named := name["const"].(string); len(cond) != 1 || len(props) != 1 || !named || len(thenProps) != 1 || thenProps["settings"] == nil {
+			return fmt.Errorf("%s: expected the branch that holds a bundle's settings", branchAt)
 		}
 	}
 	return nil

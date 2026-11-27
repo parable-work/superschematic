@@ -731,6 +731,15 @@ impl Store {
                 }
                 row.version += 1;
             }
+            // A delete held to its version (D147): a row a writer moved, or
+            // deleted first, runs the command again.
+            SharedRowChange::Delete { expected_version } => {
+                match self.shared_rows.get(&at) {
+                    Some(row) if row.version == *expected_version => {}
+                    _ => return Err(ApplyError::Moved),
+                }
+                self.shared_rows.remove(&at);
+            }
             other => return Err(ApplyError::Refused(unknown("shared-table write", other))),
         }
         Ok(())

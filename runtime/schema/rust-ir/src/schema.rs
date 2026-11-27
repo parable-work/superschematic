@@ -213,6 +213,11 @@ pub struct UnionDef {
     pub name: String,
     pub description: String,
     pub types: Vec<String>,
+    /// A variant union (D149): the sibling field that names the member,
+    /// empty for a union picked by its payload's shape.
+    pub by: String,
+    /// The member each value of `by` names.
+    pub arms: BTreeMap<String, String>,
 }
 
 /// The JSON a structured scalar holds (see [`structured_json_type`]).

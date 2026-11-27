@@ -69,7 +69,14 @@ is the behavior's value (Workflow's `status`), which its declaration names
 (`Declaration::value`); the core refuses a field anchor on a behavior that
 names none, and refuses a create or an update whose own fields name a field
 anchor's field, to set it or to clear it, since only the behavior's
-operations change it (`invalid_instance`, rule `owned`). A type anchor's
+operations change it (`invalid_instance`, rule `owned`). A behavior whose
+value a create gives (`Declaration::value_from_create`, a declaration
+file's `"fromCreate": true` on its value field, D147: Aliased's name) is
+the one exception, at a create alone: the create's own member of the
+anchor's name is the use's value, which the core sets on the new row
+before validation, so the use's hooks read it as theirs (`View::get`), and
+which the change set carries as an owned field, not an own one. An update
+still names it as no own field. A type anchor's
 fields sit apart from the own fields, which may take any name.
 
 A type may list its own fields too (`fields`, each a `FieldSpec`: its name,
@@ -172,6 +179,8 @@ with a fallback arm.
   declaration takes create parameters; an entry for any other use is
   refused (`behavior Workflow takes no create parameters`), `{}` included.
   An own field that names a field anchor's field is refused.
+  A member that names a field anchor whose behavior takes its value from a
+  create (D147) is that use's value, not an own field.
 - `Update { key, patch }`: a merge patch (RFC 7396, `merge_patch`) of own
   fields. A member that names a field anchor's field is refused, null
   included.
@@ -659,6 +668,20 @@ and the hooks it needs, each with a default:
 `GuardRequest`, `Change`, `Heard` and `ValidationRequest` are open, so a hook matches
 the cases it handles with a fallback arm.
 
+A behavior may be declared with no Rust of its own (D103's step 5): its
+declaration file's `rules` state its rules in a fixed vocabulary, and
+`superschematic_rules_behaviors::Declarative` is one `Behavior` that
+interprets them, one value per declaration
+(`Declarative::from_document(&file)`, checked against the file). A host
+hands its core the files whole (`core_declaring(&files)`, the bindings'
+`declare`). The vocabulary's conditions, field rules, guards, effects,
+reactions and derived fields are the reference page's
+(`docs/src/content/docs/reference/declarative-behaviors.md`). Its
+Constants and StateRules rules are each behavior's own hooks, handed the
+part of the use's config each reads through `View::with_config` and
+`Cx::with_config`, which a view or a context of one use makes for another
+config the use's own holds.
+
 Every hook returns `Hook<T>`, a `Result<T, Stop>`, and passes on with `?`
 every `Stop` it does not make itself. A hook runs on one row, the command's
 or one a call reached. A `View` (guards, validation) reads: `config()`,
@@ -1073,7 +1096,12 @@ reaches through applyDerived, an update attributed to Derived
 `core-holds-timers` to 14, the hand-written `core-commerce` to 66,
 `core-calendar` to 47, `core-bookings` to 83, `core-refunds` to 52 and
 `core-payments` to 73, each take of a claim a call of its supply's
-operation on the supply's row under the supply row's lock. Every transcript's `behaviors` lists the
+operation on the supply's row under the supply row's lock; and, of
+Blueprint (D149), `core-blueprint` (the engine's `workqueue-blueprint.json`)
+to 151 steps, 101 checks and 50 commands, each create of a row whose
+template stamps children a change set that creates every child in the
+child's table (`Cx::create_row`), keyed by a UUID drawn from the command's
+request id, its blockers Dependencies' create parameters. Every transcript's `behaviors` lists the
 behaviors the core runs, in its order (`superschematic_rules_behaviors::NAMES`). A hand-written file's transcript holds
 each command's row version after the step (`expect.version`), which an
 adapter compares with the version it reads back, so a repeat is held to
@@ -1213,6 +1241,14 @@ none, and a write's image (`ImageColumns`) leaves it out, so no hearing
 rule hears it. `behaviorlayout.AuditFields` is the Go form. A relation, a
 list or another audit field (`updatedBy`, `deletedBy`, the audit times) is
 not in it.
+
+A layout whose tables compose a declarative behavior (D103's step 5)
+holds each one's declaration file whole, once, by name, in `declarations`
+beside `types`. An adapter hands them to its core before it checks the
+layout's specs: TypeScript's through `RulesCore.declare`, Go's through a
+core that is a `rules.Declarer` (Native's), and a Rust host builds its
+core with `core_declaring(&layout.declarations)`. A layout whose uses name
+none has no `declarations`.
 
 A layout of a table with neither is as it was. A sub-table's `row` is the
 column holding the row's key, which binds as the row table's key binds; its

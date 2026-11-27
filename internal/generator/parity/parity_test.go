@@ -157,6 +157,21 @@ const schemaConfigJSON = `{
 // holds. A value the scalar refuses is the scalar's to report, and the
 // digit rules do not count it.
 //
+// VariantMatrix holds variant fields (D149), whose member a sibling field
+// names by value: payload is a VariantPayload, whose member its optional
+// enum sibling kind names (alpha an AlphaArm, beta a BetaArm, and neither
+// no member), and reqPayload a required TaggedPayload, whose member its
+// string sibling tag names (a and also-a an AlphaArm, b a BetaArm). A
+// value is checked as the member its sibling names, not the one its shape
+// would pick: its rules, its required fields and its JSON kinds, its
+// errors under the field's path, and any other JSON value than an object
+// is "type". A value while the sibling names no member (another value,
+// none, or a value of another JSON type) is "variant"; an absent or null
+// optional one passes, and an absent required one is "required". Go
+// decodes the member its sibling names, and Validate holds the member to
+// it; a payload Go's member decoder refuses is a decode refusal, as for
+// an object field.
+//
 // PatternMatrix holds field patterns that match one character at a time
 // (".", "\W", a negated class with a count), on a builtin string, a list,
 // a list of lists and a string scalar. A pattern matches code points in
@@ -230,6 +245,28 @@ const parityMatrixSchemaJSON = `{
         { "name": "Light", "serializedAs": "light" },
         { "name": "Dark", "serializedAs": "dark" }
       ]
+    },
+    "VariantKind": {
+      "name": "VariantKind",
+      "values": [
+        { "name": "Alpha", "serializedAs": "alpha" },
+        { "name": "Beta", "serializedAs": "beta" },
+        { "name": "Neither", "serializedAs": "neither" }
+      ]
+    }
+  },
+  "unions": {
+    "VariantPayload": {
+      "name": "VariantPayload",
+      "types": ["AlphaArm", "BetaArm"],
+      "by": "kind",
+      "arms": { "alpha": "AlphaArm", "beta": "BetaArm" }
+    },
+    "TaggedPayload": {
+      "name": "TaggedPayload",
+      "types": ["AlphaArm", "BetaArm"],
+      "by": "tag",
+      "arms": { "a": "AlphaArm", "also-a": "AlphaArm", "b": "BetaArm" }
     }
   },
   "types": {
@@ -634,6 +671,68 @@ const parityMatrixSchemaJSON = `{
           "validatePattern": "^[^a-z]{2}$"
         }
       ]
+    },
+    "AlphaArm": {
+      "name": "AlphaArm",
+      "role": "EmbeddedStruct",
+      "jsonField": true,
+      "fields": [
+        {
+          "name": "level",
+          "typeRef": { "name": "ParityShade" },
+          "required": true
+        },
+        {
+          "name": "count",
+          "typeRef": { "name": "number" },
+          "validateMin": 0
+        },
+        {
+          "name": "label",
+          "typeRef": { "name": "string" },
+          "validateMaxLength": 3
+        }
+      ]
+    },
+    "BetaArm": {
+      "name": "BetaArm",
+      "role": "EmbeddedStruct",
+      "jsonField": true,
+      "fields": [
+        {
+          "name": "flag",
+          "typeRef": { "name": "boolean" },
+          "required": true
+        },
+        {
+          "name": "shade",
+          "typeRef": { "name": "ParityShade" }
+        }
+      ]
+    },
+    "VariantMatrix": {
+      "name": "VariantMatrix",
+      "role": "EmbeddedStruct",
+      "jsonField": true,
+      "fields": [
+        {
+          "name": "kind",
+          "typeRef": { "name": "VariantKind" }
+        },
+        {
+          "name": "payload",
+          "typeRef": { "name": "VariantPayload" }
+        },
+        {
+          "name": "tag",
+          "typeRef": { "name": "string" }
+        },
+        {
+          "name": "reqPayload",
+          "typeRef": { "name": "TaggedPayload" },
+          "required": true
+        }
+      ]
     }
   }
 }`
@@ -715,6 +814,25 @@ func scalarRuleMatrix(fields string) string {
 		panic(fmt.Sprintf("scalarRuleMatrix(%q): %v", fields, err))
 	}
 	for key, value := range map[string]string{"reqAmount": `0`, "reqRanks": `[]`} {
+		if _, ok := payload[key]; !ok {
+			payload[key] = json.RawMessage(value)
+		}
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		panic(err)
+	}
+	return string(encoded)
+}
+
+// variantMatrix builds a VariantMatrix payload: tag "a" and reqPayload
+// {"level": "light"} unless fields sets them, plus the given fields.
+func variantMatrix(fields string) string {
+	var payload map[string]json.RawMessage
+	if err := json.Unmarshal([]byte("{"+fields+"}"), &payload); err != nil {
+		panic(fmt.Sprintf("variantMatrix(%q): %v", fields, err))
+	}
+	for key, value := range map[string]string{"tag": `"a"`, "reqPayload": `{"level": "light"}`} {
 		if _, ok := payload[key]; !ok {
 			payload[key] = json.RawMessage(value)
 		}
@@ -1895,6 +2013,133 @@ var vectors = []parityVector{
 		want:          map[string][]string{"reqLoc": {"required"}},
 		decodeRejects: []string{"go"},
 	},
+
+	// Variant fields (D149): each value is the member its sibling names.
+	{
+		name:     "variant_alpha",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"kind": "alpha", "payload": {"level": "dark", "count": 2, "label": "abc"}`),
+		want:     map[string][]string{},
+	},
+	{
+		name:     "variant_beta",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"kind": "beta", "payload": {"flag": false, "shade": "dark"}`),
+		want:     map[string][]string{},
+	},
+	{
+		// Members tolerate keys they do not declare, as a union's do.
+		name:     "variant_unknown_key",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"kind": "alpha", "payload": {"level": "dark", "flag": true}`),
+		want:     map[string][]string{},
+	},
+	{
+		name:     "variant_absent_and_null",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"kind": "beta", "payload": null`),
+		want:     map[string][]string{},
+	},
+	{
+		// No member while the sibling names none, and none is needed.
+		name:     "variant_unnamed_absent",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"kind": "neither"`),
+		want:     map[string][]string{},
+	},
+	{
+		name:     "variant_unnamed_value",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"kind": "neither", "payload": {"level": "dark"}`),
+		want:     map[string][]string{"payload": {"variant"}},
+	},
+	{
+		name:     "variant_sibling_absent",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"payload": {"flag": true}`),
+		want:     map[string][]string{"payload": {"variant"}},
+	},
+	{
+		// The sibling, not the shape, picks the member: the payload reads
+		// as a BetaArm, and kind names an AlphaArm.
+		name:     "variant_sibling_picks_the_member",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"kind": "alpha", "payload": {"flag": true}`),
+		want:     map[string][]string{"payload.level": {"required"}},
+	},
+	{
+		name:     "variant_member_rules",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"kind": "alpha", "payload": {"level": "light", "count": -1, "label": "toolong"}`),
+		want:     map[string][]string{"payload.count": {"min"}, "payload.label": {"maxLength"}},
+	},
+	{
+		name:          "variant_member_wrong_type",
+		typeName:      "VariantMatrix",
+		payload:       variantMatrix(`"kind": "beta", "payload": {"flag": "yes"}`),
+		want:          map[string][]string{"payload.flag": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "variant_member_bad_enum",
+		typeName:      "VariantMatrix",
+		payload:       variantMatrix(`"kind": "beta", "payload": {"flag": true, "shade": "purple"}`),
+		want:          map[string][]string{"payload.shade": {"enum"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:          "variant_not_an_object",
+		typeName:      "VariantMatrix",
+		payload:       variantMatrix(`"kind": "alpha", "payload": 5`),
+		want:          map[string][]string{"payload": {"type"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// A sibling's value its enum lacks names no member.
+		name:          "variant_sibling_bad_enum",
+		typeName:      "VariantMatrix",
+		payload:       variantMatrix(`"kind": "Alpha", "payload": {"level": "dark"}`),
+		want:          map[string][]string{"kind": {"enum"}, "payload": {"variant"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		// A string sibling: several values may name one member.
+		name:     "variant_string_sibling",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"tag": "also-a", "reqPayload": {"level": "dark", "count": 0}`),
+		want:     map[string][]string{},
+	},
+	{
+		name:     "variant_string_sibling_beta",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"tag": "b", "reqPayload": {"flag": true}`),
+		want:     map[string][]string{},
+	},
+	{
+		name:     "variant_string_sibling_unnamed",
+		typeName: "VariantMatrix",
+		payload:  variantMatrix(`"tag": "c", "reqPayload": {"level": "dark"}`),
+		want:     map[string][]string{"reqPayload": {"variant"}},
+	},
+	{
+		name:          "variant_string_sibling_wrong_type",
+		typeName:      "VariantMatrix",
+		payload:       variantMatrix(`"tag": 5, "reqPayload": {"level": "dark"}`),
+		want:          map[string][]string{"tag": {"type"}, "reqPayload": {"variant"}},
+		decodeRejects: []string{"go", "python"},
+	},
+	{
+		name:     "variant_required_absent",
+		typeName: "VariantMatrix",
+		payload:  `{"tag": "a"}`,
+		want:     map[string][]string{"reqPayload": {"required"}},
+	},
+	{
+		name:     "variant_required_null",
+		typeName: "VariantMatrix",
+		payload:  `{"tag": "c", "reqPayload": null}`,
+		want:     map[string][]string{"reqPayload": {"required"}},
+	},
 }
 
 // knownDivergences pins where a language's generated validator disagrees with
@@ -2111,6 +2356,8 @@ func newParityValue(typeName string) parityValidatable {
 		return &DigitMatrix{}
 	case "PatternMatrix":
 		return &PatternMatrix{}
+	case "VariantMatrix":
+		return &VariantMatrix{}
 	}
 	return nil
 }
@@ -2186,6 +2433,7 @@ import {
   validatePatternMatrix,
   validateScalarRuleMatrix,
   validateStructuredMatrix,
+  validateVariantMatrix,
 } from './validators/types';
 
 type Errors = { [key: string]: { validator: string }[] | Errors };
@@ -2211,6 +2459,7 @@ const validators: Record<string, (value: never) => true | Errors> = {
   ScalarRuleMatrix: validateScalarRuleMatrix as never,
   PatternMatrix: validatePatternMatrix as never,
   DigitMatrix: validateDigitMatrix as never,
+  VariantMatrix: validateVariantMatrix as never,
 };
 const vectors = JSON.parse(readFileSync(process.env.PARITY_VECTORS as string, 'utf8'));
 const results: Record<string, Record<string, string[]>> = {};
@@ -2268,6 +2517,7 @@ fn check(type_name: &str, payload: Value) -> Verdicts {
         "ScalarRuleMatrix" => verdicts(validators::parse_scalar_rule_matrix(payload, Allow)),
         "PatternMatrix" => verdicts(validators::parse_pattern_matrix(payload, Allow)),
         "DigitMatrix" => verdicts(validators::parse_digit_matrix(payload, Allow)),
+        "VariantMatrix" => verdicts(validators::parse_variant_matrix(payload, Allow)),
         other => panic!("unknown type {other}"),
     }
 }

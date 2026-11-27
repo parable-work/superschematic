@@ -153,7 +153,7 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 		}
 	}
 	if len(uses) > 0 {
-		checkTableUses(schema, td, bases, uses, r)
+		checkTableUses(schema, td, bases, uses, reg, r)
 		// A table's Holds is held to the tables its holds name, whose
 		// behaviors' declarations say which implements Supply (D103's
 		// step 4), so it reads the registry.
@@ -214,10 +214,13 @@ func configNames(config json.RawMessage, key string) bool {
 }
 
 // implementable reports whether a table may implement behavior (D103): one
-// the behaviors' core runs (registry.RulesBehaviors), naming no value
-// field, which a field anchors instead. It reports why not on td.
+// a core runs (registry.Behavior.RunsOnTheCore: the stock core's, one a
+// class or an extension declares with the Rust crate that runs it on a
+// project's core, or a declarative one whose declaration states its rules,
+// which the core interprets, D103's step 5), naming no value field, which
+// a field anchors instead. It reports why not on td.
 func implementable(behavior registry.Behavior, reg *registry.Registry, td *ir.TypeDef, r *Result) bool {
-	if !registry.RunsOnTheCore(behavior.Name) {
+	if !behavior.RunsOnTheCore() {
 		var names []string
 		for _, name := range registry.RulesBehaviors {
 			if b, ok := reg.Behavior(name); ok && b.Value == "" {
@@ -267,12 +270,14 @@ var fieldName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 // table's Workflow (checkSchedulesConfig, D104), a Pool use's order to
 // the table's fields (checkPoolConfig, D104), and a Rollups or
 // Dependencies use's tables, relations and fields to its database
-// (checkRollupsConfig, checkDependenciesConfig, D104's step 4), and a
+// (checkRollupsConfig, checkDependenciesConfig, D104's step 4), a
+// Blueprint use's child table, relation, fields and template to its
+// database (checkBlueprintConfig, D149), and a
 // Comments use's members to what the behaviors' core runs
 // (checkCommentsConfig, D103's step 4), and a Derived or Provenance use's
 // fields, inputs, sources, states and gates to the table and its Workflow
 // (checkDerivedConfig, checkProvenanceConfig, D73 on D103's step 4).
-func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, r *Result) {
+func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, uses map[string]registry.Behavior, reg *registry.Registry, r *Result) {
 	if schema.Kind != ir.SchemaKindDB || !hasTable(td, bases) {
 		if implemented := td.ImplementsBehaviors(); len(implemented) > 0 {
 			r.errorf(td.Owner, "type %s implements %s, and a type implements a behavior on a DB table, which %s is not (D103)", td.Name, implemented[0].Name, td.Name)
@@ -357,9 +362,21 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 		} else {
 			where = fmt.Sprintf("type %s: implements %s", td.Name, ref.Name)
 			adder = "implements " + ref.Name + "'s"
-			switch ref.Name {
+			// What the declaration states of the config, its references
+			// (D103's step 5), holds first; a behavior's own check of what
+			// no declaration states runs once they do.
+			name := ref.Name
+			if !configReferencesHold(schema, td, ref, behavior, r) {
+				name = ""
+			}
+			switch name {
+			case aliasedBehavior:
+				// A create gives a field's value, which a type anchor has
+				// none of (D147).
+				r.errorf(td.Owner, "type %s implements %s, which a field carries, its name the field's value a create gives: write name: %s<string> (D147)", td.Name, ref.Name, ref.Name)
+				continue
 			case timersBehavior:
-				checkTimersConfig(schema, td, ref, r)
+				checkTimersConfig(td, ref, r)
 			case reactionsBehavior:
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkReactionsConfig(schema, td, ref, r)
@@ -371,6 +388,10 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			case dependenciesBehavior:
 				if behavior.ValidateConfig(ref.Config) == nil {
 					checkDependenciesConfig(schema, td, ref, r)
+				}
+			case blueprintBehavior:
+				if behavior.ValidateConfig(ref.Config) == nil {
+					checkBlueprintConfig(schema, td, ref, r)
 				}
 			case commentsBehavior:
 				if behavior.ValidateConfig(ref.Config) == nil {
@@ -445,7 +466,7 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 			addedColumns[column] = adds
 		}
 	}
-	checkTableStorage(schema, td, uses, r)
+	checkTableStorage(schema, td, uses, reg, r)
 }
 
 // checkTableStorage holds what td's uses keep beside the table (D103):
@@ -457,7 +478,7 @@ func checkTableUses(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool, us
 // the row by its key, so td has one key field, and the types the loader
 // adds for them take no name of a type or a table the schema declares. A
 // type the loader added, as an IR read back holds it, is the one it adds.
-func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]registry.Behavior, r *Result) {
+func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]registry.Behavior, reg *registry.Registry, r *Result) {
 	var keeping, arming, emitting, hearing []string
 	for _, ref := range td.TableBehaviors() {
 		behavior, ok := uses[ref.UseID()]
@@ -477,7 +498,7 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 			hearing = append(hearing, ref.Name)
 		}
 	}
-	for _, table := range behaviorfields.HeardBy(schema)[td.Name] {
+	for _, table := range behaviorfields.HeardBy(schema, reg)[td.Name] {
 		hearing = append(hearing, table+"'s Reactions")
 	}
 	if len(keeping) == 0 && len(arming) == 0 && len(emitting) == 0 && len(hearing) == 0 {

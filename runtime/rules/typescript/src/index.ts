@@ -100,6 +100,18 @@ export interface RulesCore {
    * invalid_input whose message, after `expand: `, says why.
    */
   expand(input: ExpandInput): Expansion;
+  /**
+   * Hands the core the declaration files of declarative behaviors (D103's
+   * step 5), each whole: behaviors whose declarations state their rules
+   * (`rules`), which no Rust implements. The core runs them from then on,
+   * after its own, and declarations lists their files after its own. It
+   * returns the name of every declarative behavior the core runs. A file
+   * the vocabulary does not read, one that names a behavior the core
+   * implements, and a second file of a declared name that differs throw a
+   * RulesError of code invalid_input; a file declared again is one
+   * behavior.
+   */
+  declare(declarations: readonly BehaviorDeclaration[]): string[];
 }
 
 /**
@@ -147,12 +159,13 @@ interface Exports {
   rules_declarations: Export;
   rules_check: Export;
   rules_expand: Export;
+  rules_declare: Export;
 }
 
-const EXPORTS = ['memory', 'rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check', 'rules_expand'] as const;
+const EXPORTS = ['memory', 'rules_alloc', 'rules_dealloc', 'rules_free', 'rules_run', 'rules_declarations', 'rules_check', 'rules_expand', 'rules_declare'] as const;
 
 /** An operation of the C ABI (runtime/engine/rust/rules-wasm/src/ffi.rs). */
-type Operation = 'run' | 'declarations' | 'check' | 'expand';
+type Operation = 'run' | 'declarations' | 'check' | 'expand' | 'declare';
 
 // The return codes of the C ABI.
 const RULES_OK = 0;
@@ -229,6 +242,9 @@ class Core implements RulesCore {
   #exports: Exports;
   readonly #parse: (text: string) => unknown;
   readonly #stringify: (value: unknown) => string;
+  // The declaration files declared so far, which a fresh instance is handed
+  // again after a trap.
+  #declared: BehaviorDeclaration[] = [];
 
   constructor(module: WebAssembly.Module, exports: Exports, options: InitOptions) {
     this.#module = module;
@@ -256,6 +272,15 @@ class Core implements RulesCore {
     return this.#typed('expand', input) as Expansion;
   }
 
+  declare(declarations: readonly BehaviorDeclaration[]): string[] {
+    const { declared } = this.#typed('declare', { declarations }) as { declared: string[] };
+    for (const declaration of declarations) {
+      const text = JSON.stringify(declaration);
+      if (!this.#declared.some(known => JSON.stringify(known) === text)) this.#declared.push(declaration);
+    }
+    return declared;
+  }
+
   #typed(operation: Operation, input: unknown): unknown {
     return this.#parse(this.#run(operation, this.#stringify(input)));
   }
@@ -281,6 +306,8 @@ class Core implements RulesCore {
       // call is refused as the core's own failure.
       if (error instanceof WebAssembly.RuntimeError) {
         this.#exports = exportsOf(new WebAssembly.Instance(this.#module, {}));
+        // The fresh instance runs the declarative behaviors this one did.
+        if (this.#declared.length > 0) this.#copy('declare', encoder.encode(this.#stringify({ declarations: this.#declared })));
         throw new RulesError('internal', `rules: the core trapped while it ran ${operation} (${error.message}); it runs on a fresh instance from the next call`);
       }
       throw error;
@@ -289,7 +316,14 @@ class Core implements RulesCore {
 
   #copy(operation: Operation, bytes: Uint8Array): { code: number; output: string } {
     const core = this.#exports;
-    const call = operation === 'run' ? core.rules_run : operation === 'check' ? core.rules_check : operation === 'expand' ? core.rules_expand : core.rules_declarations;
+    const calls: Record<Operation, Export> = {
+      run: core.rules_run,
+      declarations: core.rules_declarations,
+      check: core.rules_check,
+      expand: core.rules_expand,
+      declare: core.rules_declare,
+    };
+    const call = calls[operation];
     const inPtr = core.rules_alloc(bytes.length);
     // Two 32-bit slots the core writes the output pointer and length into.
     const slots = core.rules_alloc(8);

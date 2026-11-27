@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -177,62 +176,10 @@ func checkBehaviorFiles(cmd *cobra.Command, flags *behaviorsFlags, want, have ma
 	return fmt.Errorf("behaviors: %s: %s; run: %s", flags.out, strings.Join(problems, "; "), rerun)
 }
 
-// behaviorDeclarationFile is the canonical copy of a declaration: its keys
-// in BehaviorDeclaration's order, each JSON Schema's object keys sorted and
-// number literals as written, two-space indents, no HTML escaping and a
-// final newline.
+// behaviorDeclarationFile is the canonical copy of a declaration
+// (registry.CanonicalDeclaration).
 func behaviorDeclarationFile(declaration registry.BehaviorDeclaration) ([]byte, error) {
-	var err error
-	if declaration.ConfigSchema, err = canonicalSchema(declaration.ConfigSchema); err != nil {
-		return nil, fmt.Errorf("configSchema: %w", err)
-	}
-	if declaration.CreateParamsSchema, err = canonicalSchema(declaration.CreateParamsSchema); err != nil {
-		return nil, fmt.Errorf("createParamsSchema: %w", err)
-	}
-	operations := make([]registry.BehaviorOperation, len(declaration.Operations))
-	for i, operation := range declaration.Operations {
-		if operation.ParamsSchema, err = canonicalSchema(operation.ParamsSchema); err != nil {
-			return nil, fmt.Errorf("operation %s paramsSchema: %w", operation.Name, err)
-		}
-		if operation.ResultSchema, err = canonicalSchema(operation.ResultSchema); err != nil {
-			return nil, fmt.Errorf("operation %s resultSchema: %w", operation.Name, err)
-		}
-		operations[i] = operation
-	}
-	declaration.Operations = operations
-	if declaration.PreconditionSchema, err = canonicalSchema(declaration.PreconditionSchema); err != nil {
-		return nil, fmt.Errorf("preconditionSchema: %w", err)
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(declaration); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-// canonicalSchema re-encodes a JSON Schema with its object keys sorted and
-// its number literals kept, without HTML escaping. An absent schema stays
-// absent.
-func canonicalSchema(raw json.RawMessage) (json.RawMessage, error) {
-	if len(raw) == 0 {
-		return raw, nil
-	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.UseNumber()
-	var value any
-	if err := dec.Decode(&value); err != nil {
-		return nil, err
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(value); err != nil {
-		return nil, err
-	}
-	return bytes.TrimRight(buf.Bytes(), "\n"), nil
+	return registry.CanonicalDeclaration(declaration)
 }
 
 // behaviorFiles reads every *.behavior.json in dir; a missing dir holds none.

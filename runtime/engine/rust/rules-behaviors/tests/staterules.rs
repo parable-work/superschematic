@@ -17,8 +17,8 @@
 mod support;
 
 use serde_json::{json, Value};
-use superschematic_rules::{Behavior, Declaration, FieldSpec, TypeSpec, UseSpec};
-use superschematic_rules_behaviors::{core, staterules, StateRules};
+use superschematic_rules::{Declaration, FieldSpec, TypeSpec, UseSpec};
+use superschematic_rules_behaviors::{core, staterules};
 use support::{
     caller, changed, define, refused, result, rule, shape, undescribed, veto_of, Host, START,
 };
@@ -114,14 +114,24 @@ fn status(host: &Host) -> Value {
 
 // ---- the declaration and its schema ----
 
+/// The core runs StateRules from its registered declaration, whose rules
+/// the vocabulary interprets (D103's step 5), and declares it as the file
+/// does.
 #[test]
 fn the_declaration_is_the_files() {
     assert_eq!(
-        StateRules.declaration(),
-        Declaration::new("StateRules")
-            .veto("missing_fields")
-            .veto("frozen_fields")
-            .veto("required_fields")
+        core().declaration("StateRules"),
+        Some(
+            &Declaration::new("StateRules")
+                .veto("missing_fields")
+                .veto("frozen_fields")
+                .veto("required_fields")
+        )
+    );
+    let file: Value = serde_json::from_str(staterules::DECLARATION).unwrap();
+    assert_eq!(
+        file["rules"],
+        json!({"permission": {"config": "permission"}, "states": {"config": "states"}, "status": {"config": "status"}})
     );
 }
 

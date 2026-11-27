@@ -11,7 +11,7 @@ import {
 import { createDefaultScalarValidatorRegistry } from './registry';
 import { parseSchema, parseSchemaJson } from '../json/reader';
 import { isAnyJSONScalar, jsonShapeOf, structuredJSONType } from './types';
-import type { FieldDef, SchemaInput, ScalarDef, Schema, TypeDef, ValidationOptions } from './types';
+import type { FieldDef, SchemaInput, ScalarDef, Schema, TypeDef, UnionDef, ValidationOptions } from './types';
 
 const builtinScalars = new Set(['String', 'Int', 'Float', 'Boolean', 'ID']);
 let defaultScalarRegistry: ReturnType<typeof createDefaultScalarValidatorRegistry> | null = null;
@@ -718,8 +718,45 @@ function validateObjectValue(
   }
 }
 
+/**
+ * Validates the value of a field of a variant union (D149) at key as the
+ * member its sibling names, as every generated validator does: "variant"
+ * while the sibling, union.by's field of typeDef, holds no string the
+ * union's arms map, "type" for a value that is no object, and otherwise
+ * the member's errors under key.
+ */
+function validateVariantValue(
+  schema: Schema,
+  typeDef: TypeDef,
+  union: UnionDef,
+  key: string,
+  data: Record<string, unknown>,
+  value: unknown,
+  errors: ValidationErrors,
+  options?: ValidationOptions
+): void {
+  const sibling = typeDef.fields.find((candidate) => candidate.name === union.by);
+  const byKey = sibling ? sibling.jsonKey || sibling.name : (union.by as string);
+  const by = data[byKey];
+  const arms = union.arms || {};
+  const member = typeof by === 'string' && Object.prototype.hasOwnProperty.call(arms, by) ? arms[by] : undefined;
+  if (member === undefined) {
+    addFieldError(errors, key, 'variant', `holds a value its ${byKey} names no member for`);
+    return;
+  }
+  if (!isObject(value)) {
+    addFieldError(errors, key, 'type', 'expected an object');
+    return;
+  }
+  const nested = schema.types ? schema.types[member] : undefined;
+  if (nested) {
+    addNestedErrors(errors, key, validateTypeDef(schema, nested, value, options));
+  }
+}
+
 function validateField(
   schema: Schema,
+  typeDef: TypeDef,
   field: FieldDef,
   data: Record<string, unknown>,
   errors: ValidationErrors,
@@ -733,6 +770,12 @@ function validateField(
     if (field.required) {
       addFieldError(errors, key, 'required', `${field.name} is required.`);
     }
+    return;
+  }
+
+  const union = schema.unions ? schema.unions[field.typeRef.name] : undefined;
+  if (union && union.by && !field.typeRef.isArray) {
+    validateVariantValue(schema, typeDef, union, key, data, value, errors, options);
     return;
   }
 
@@ -776,7 +819,7 @@ function validateTypeDef(
 ): ValidationErrors {
   const errors = newValidationErrors();
   for (const field of typeDef.fields) {
-    validateField(schema, field, data, errors, options);
+    validateField(schema, typeDef, field, data, errors, options);
   }
   return errors;
 }

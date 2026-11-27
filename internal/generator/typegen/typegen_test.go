@@ -46,6 +46,12 @@ func TestWriteTypesGolden(t *testing.T) {
 		{service: "fixture-fenced-db"},
 		// Types that compose behaviors: behaviors.go (D58).
 		{service: behaviortypestest.Service},
+		// A variant field (D149): StepResultWrapper's UnmarshalVariantJSON
+		// and HoldsArm, which Step's UnmarshalJSON and Validate read its
+		// result with, by its kind; and the API's views, which read the
+		// database's wrapper.
+		{service: "fixture-variant-field-db"},
+		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
 	}
 
 	for _, tc := range cases {

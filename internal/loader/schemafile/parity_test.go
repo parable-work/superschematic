@@ -210,6 +210,20 @@ var parityInputs = []struct{ name, registry, input string }{
 	{"a behavior worker", "core", `{"kind": "API", "name": "tickets-api", "imports": [{"package": "@schemas/tickets-db", "types": ["Ticket"]}],
 		"workers": [{"name": "TicketTimers", "behaviorWorker": {"type": "Ticket", "permissions": ["tickets.escalate"]}, "concurrency": 2}]}`},
 	{"a worker with neither a queue nor a table", "core", `{"kind": "API", "name": "tickets-api", "workers": [{"name": "TicketTimers"}]}`},
+	// A bundle a table implements (D103, step 5): its name and its
+	// settings, held to the bundle's settings schema, which the loader
+	// expands into its parts; settings of {} are stored as none, and a
+	// use names no bundle, which only the loader marks.
+	{"a bundle a table implements", "core", `{"name": "Booking", "role": "DBTable", "bundles": [
+		{"name": "Reservation", "settings": {"resource": "room", "interval": {"start": "startsAt", "end": "endsAt"}, "amount": "priceCents", "currency": "GBP"}}]}`},
+	{"a bundle's settings of {} are stored as none", "core", `{"name": "Chore", "role": "DBTable", "bundles": [{"name": "Assignment", "settings": {}}]}`},
+	{"an unregistered bundle", "core", `{"name": "Booking", "role": "DBTable", "bundles": [{"name": "Rental"}]}`},
+	{"a bundle's missing required settings", "core", `{"name": "Booking", "role": "DBTable", "bundles": [{"name": "Reservation"}]}`},
+	{"a bundle's settings its schema rejects", "core", `{"name": "Booking", "role": "DBTable", "bundles": [
+		{"name": "Reservation", "settings": {"resource": "room", "interval": {"start": "startsAt", "end": "endsAt"}, "amount": "priceCents", "currency": "pounds"}}]}`},
+	{"a bundle's setting its schema lacks", "core", `{"name": "Chore", "role": "DBTable", "bundles": [{"name": "Assignment", "settings": {"seat": "owner"}}]}`},
+	{"a use that names a bundle", "core", `{"name": "Chore", "role": "DBTable", "behaviors": [
+		{"name": "Seats", "implements": true, "bundle": "Assignment", "config": {"seats": {"assignee": {"max": 1}}}}]}`},
 
 	// The invocation policy.
 	{"visible tool without a policy gets the default", "core", `{"kind": "OperationSet", "name": "Ops", "operations": [

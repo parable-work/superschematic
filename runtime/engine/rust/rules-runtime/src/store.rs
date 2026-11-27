@@ -910,6 +910,14 @@ impl RuntimeStore {
                             &held,
                         )?)?;
                     }
+                    // A delete held to its version (D147): one a writer moved
+                    // or deleted first deletes nothing, and the command runs
+                    // again.
+                    SharedRowChange::Delete { expected_version } => {
+                        let mut held = at.to_vec();
+                        held.push((shared.version.as_str(), Value::from(*expected_version)));
+                        Self::one(delete_rows(&mut self.db, &shared.table, &held)?)?;
+                    }
                     other => {
                         return Err(Stop::Refused(internal(format!(
                             "the runtime store takes no shared-table change of this kind: {other:?}"

@@ -1,0 +1,10 @@
+[package]
+name = "test-counter-rules"
+description = "A behavior a project's class declares, test.Counter, whose hooks this crate implements over the core's API (D103's step 5): rulescore's test builds a project's rules crate over it"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
+superschematic-rules = { path = "../../../../../runtime/engine/rust/rules" }

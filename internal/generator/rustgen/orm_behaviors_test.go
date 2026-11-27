@@ -86,6 +86,46 @@ func TestRepositoriesTypeEachBehaviorOperation(t *testing.T) {
 	runBehaviorRepositories(t, "fixture-pool-db", "pool_rules", poolRulesTest)
 }
 
+//go:embed testdata/orm/aliased_rules.rs
+var aliasedRulesTest string
+
+// TestRepositoriesMergeAnAliasedTable runs fixture-aliased-db's Company,
+// whose name is an Aliased field and which implements Mergeable (D147), on
+// both dialects: a name another company holds, as a name or an alias, is
+// refused with that company's key; a rename keeps the old name as an
+// alias, which resolve finds; a removed alias and a deleted company's
+// names are freed; and merge_into, on SQLite and on Postgres, moves the
+// aliases of the company merged away, its name among them, its names and
+// its contacts to the one that stays, deletes it through the core, and
+// refuses a merge of a company into itself and one of a company gone.
+//
+// It needs cargo, which it skips without, and runs outside -short. Without
+// the database the Postgres half is skipped, and the test says so.
+func TestRepositoriesMergeAnAliasedTable(t *testing.T) {
+	runBehaviorRepositories(t, "fixture-aliased-db", "aliased_rules", aliasedRulesTest)
+}
+
+//go:embed testdata/orm/merge_rules.rs
+var mergeRulesTest string
+
+// TestRepositoriesMergeOnSQLiteAndPostgres runs merge_into of
+// fixture-merge-sqlite-db's Label and Customer (D147) on both dialects, the
+// tables of fixture-merge-db but LabelSlot, whose index makes nulls
+// collide, which SQLite cannot hold: a row a
+// unique index would refuse once repointed is deleted, softly where the
+// index holds live rows alone, one an index over an expression would
+// refuse among them, the rest repointed with who changed them; the row
+// merged away is deleted softly, or through the core for a Customer, whose
+// status is a Workflow; and a merge into itself, into a row under it and
+// of a row gone is refused and writes nothing, and a table that does not
+// implement Mergeable has none.
+//
+// It needs cargo, which it skips without, and runs outside -short. Without
+// the database the Postgres half is skipped, and the test says so.
+func TestRepositoriesMergeOnSQLiteAndPostgres(t *testing.T) {
+	runBehaviorRepositoriesWith(t, "fixture-merge-sqlite-db", "merge_rules", mergeRulesTest, true)
+}
+
 // runBehaviorRepositories generates fixture's Rust types with both
 // dialects' repositories and the core bound, holds the types crate to
 // cargo clippy, and runs source, the test crate's tests/<name>.rs, over the
@@ -212,7 +252,9 @@ func runBehaviorRepositoriesWith(t *testing.T, fixture, name, source string, run
 }
 
 // ormBehaviorsManifest is the test crate's Cargo.toml, given the types
-// crate's name and its directory.
+// crate's name, its directory and its dependency on the HTTP runtime
+// (runtimeDependency), which a case that runs the runtime's loops or opens
+// the repositories for an access caller (D156) needs.
 const ormBehaviorsManifest = `# The repositories of a database whose tables compose behaviors (D103,
 # D116), over its generated Rust types, on both dialects.
 [package]

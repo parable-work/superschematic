@@ -17,6 +17,26 @@
         "sql": "CITEXT"
       }
     },
+    "AlphaArm": {
+      "properties": {
+        "count": {
+          "$ref": "#/definitions/number",
+          "x-validateMin": 0
+        },
+        "label": {
+          "$ref": "#/definitions/string",
+          "x-validateMaxLength": 3
+        },
+        "level": {
+          "$ref": "#/definitions/ParityShade"
+        }
+      },
+      "required": [
+        "level"
+      ],
+      "type": "object",
+      "x-kind": "type"
+    },
     "Auth_JWT": {
       "description": "JSON Web Token string",
       "pattern": "^[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+\\.[A-Za-z0-9-_]+$",
@@ -39,6 +59,21 @@
         "json_schema": "string",
         "sql": "VARCHAR(128)"
       }
+    },
+    "BetaArm": {
+      "properties": {
+        "flag": {
+          "$ref": "#/definitions/boolean"
+        },
+        "shade": {
+          "$ref": "#/definitions/ParityShade"
+        }
+      },
+      "required": [
+        "flag"
+      ],
+      "type": "object",
+      "x-kind": "type"
     },
     "Contact_Email": {
       "description": "An email address",
@@ -1225,6 +1260,48 @@
         "sql": "TEXT"
       }
     },
+    "VariantKind": {
+      "enum": [
+        "Alpha",
+        "Beta",
+        "Neither"
+      ],
+      "type": "string",
+      "x-enumValues": {
+        "Alpha": {
+          "serializedAs": "alpha"
+        },
+        "Beta": {
+          "serializedAs": "beta"
+        },
+        "Neither": {
+          "serializedAs": "neither"
+        }
+      },
+      "x-kind": "enum",
+      "x-owner": "parity-fixture"
+    },
+    "VariantMatrix": {
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/VariantKind"
+        },
+        "payload": {
+          "$ref": "#/definitions/VariantPayload"
+        },
+        "reqPayload": {
+          "$ref": "#/definitions/TaggedPayload"
+        },
+        "tag": {
+          "$ref": "#/definitions/string"
+        }
+      },
+      "required": [
+        "reqPayload"
+      ],
+      "type": "object",
+      "x-kind": "type"
+    },
     "Version_SemVer": {
       "description": "Canonical Semantic Versioning 2.0.0 value",
       "maxLength": 255,
@@ -1241,5 +1318,38 @@
     }
   },
   "title": "parity-fixture",
-  "x-kind": "General"
+  "x-kind": "General",
+  "x-unions": {
+    "TaggedPayload": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AlphaArm"
+        },
+        {
+          "$ref": "#/definitions/BetaArm"
+        }
+      ],
+      "x-arms": {
+        "a": "AlphaArm",
+        "also-a": "AlphaArm",
+        "b": "BetaArm"
+      },
+      "x-by": "tag"
+    },
+    "VariantPayload": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AlphaArm"
+        },
+        {
+          "$ref": "#/definitions/BetaArm"
+        }
+      ],
+      "x-arms": {
+        "alpha": "AlphaArm",
+        "beta": "BetaArm"
+      },
+      "x-by": "kind"
+    }
+  }
 }
