@@ -24,7 +24,10 @@ import (
 //     `peerDependencies` and `optionalDependencies`;
 //   - the workspace root's package.json, its lockfiles and its package
 //     manager's configuration;
-//   - each tsconfig its tsconfig files extend.
+//   - each tsconfig its tsconfig files extend, and each project they
+//     reference: a referenced directory that holds a package.json is
+//     taken as a package, with what it depends on, and any other with
+//     the files under it.
 //
 // The workspace is the nearest package.json at or above the package that
 // has `workspaces`, or the nearest pnpm-workspace.yaml. Its members are
@@ -34,10 +37,18 @@ import (
 // generated. A workspace often lists a directory a build writes, such as
 // the generated packages of an output root, whose members the commit
 // does not hold. A dependency whose version is `workspace:` or `*`, and
-// whose name no tracked member has, may be one of those: the directory
-// of each member pattern that names no tracked package is then reported
-// as generated. Any other dependency is the registry's, which the
-// lockfile holds to what was installed.
+// whose name no tracked member has, may be one of those, and the
+// workspace's lockfile says which. The lockfile is read when the commit
+// holds one the resolver reads: `bun.lock`, `package-lock.json`,
+// `npm-shrinkwrap.json` or `pnpm-lock.yaml`. A name it resolves to a
+// directory of the workspace is that directory, taken as a package when
+// the commit holds it and reported as generated when it does not. A
+// name it resolves to a version of the registry is the registry's. A
+// name it does not resolve, or a workspace with no lockfile the resolver
+// reads, falls back to the wider rule: the directory of each member
+// pattern that names no tracked package is reported as generated. Any
+// other dependency is the registry's, which the lockfile holds to what
+// was installed.
 func resolveJSPackage(req registry.TaskResolveRequest) (registry.TaskResolution, error) {
 	var spec unitSpec
 	if err := json.Unmarshal(req.Spec, &spec); err != nil {
@@ -73,6 +84,10 @@ type jsResolution struct {
 	names     map[string]string
 	members   []string
 	unmatched []string
+	// lock is what the workspace's lockfile says of the names it
+	// resolved, read once.
+	lock     *lockfile
+	lockRead bool
 }
 
 // packageJSON is what the resolver reads of a package.json.
@@ -188,15 +203,7 @@ func (j *jsResolution) pkg(dir, from string) error {
 	if err != nil {
 		return err
 	}
-	// The members nested in the package are their own. Any other
-	// directory with a package.json, a fixture's say, is the package's.
-	var inner []string
-	for _, member := range j.members {
-		if member != dir && within(member, []string{dir}) || dir == "" && member != "" {
-			inner = append(inner, member)
-		}
-	}
-	j.addUnder(dir, inner)
+	j.addUnder(dir, j.inner(dir))
 	if err := j.tsconfigs(dir); err != nil {
 		return err
 	}
@@ -235,15 +242,228 @@ func (j *jsResolution) pkg(dir, from string) error {
 			continue
 		}
 		// A name no tracked member has. With a version that only a
-		// workspace answers, it is a member the commit does not hold.
+		// workspace answers, it is a member the commit does not hold, and
+		// the lockfile says where.
 		if strings.HasPrefix(spec, "workspace:") || spec == "*" {
+			switch entry := j.locked(dir, dep); {
+			case entry.member:
+				if err := j.pkg(entry.dir, entry.from); err != nil {
+					return err
+				}
+				continue
+			case entry.registry && spec == "*":
+				continue
+			}
 			for _, pattern := range j.unmatched {
 				if prefix := literalPrefix(pattern); prefix != "" && prefix != j.wsDir {
 					j.generate(prefix, j.wsFrom)
 				}
 			}
+			if strings.HasPrefix(spec, "workspace:") && !j.hasWorkspace {
+				// The package's workspace is one a build writes: its
+				// root is no tracked file, so nothing here says where
+				// its members are.
+				return fmt.Errorf("%s depends on %s by %q, and the commit holds no workspace above it: no tracked package.json with `workspaces` and no pnpm-workspace.yaml. A workspace whose root a build writes is not the commit's; name the package's files with a path input, and use the output of the task that writes the workspace", name, dep, spec)
+			}
 			if strings.HasPrefix(spec, "workspace:") && len(j.unmatched) == 0 {
 				return fmt.Errorf("%s depends on %s by %q, and no package of the workspace at %s has that name", name, dep, spec, show(j.wsDir))
+			}
+		}
+	}
+	return nil
+}
+
+// inner returns the workspace's members nested in dir, which are their
+// own. Any other directory with a package.json, a fixture's say, is
+// dir's.
+func (j *jsResolution) inner(dir string) []string {
+	var inner []string
+	for _, member := range j.members {
+		if member != dir && within(member, []string{dir}) || dir == "" && member != "" {
+			inner = append(inner, member)
+		}
+	}
+	return inner
+}
+
+// lockEntry is what a lockfile says of one name: a member of the
+// workspace at a directory, or a package of the registry. The zero value
+// is a name the lockfile does not resolve.
+type lockEntry struct {
+	member, registry bool
+	dir, from        string
+}
+
+// lockfile is what a workspace's lockfile resolved: each name for the
+// whole workspace, and for pnpm each name per importing package.
+type lockfile struct {
+	names     map[string]lockEntry
+	importers map[string]map[string]lockEntry
+}
+
+// locked returns what the workspace's lockfile says of a dependency of
+// the package at dir.
+func (j *jsResolution) locked(dir, dep string) lockEntry {
+	if !j.lockRead {
+		j.lockRead = true
+		j.lock = j.readLock()
+	}
+	if j.lock == nil {
+		return lockEntry{}
+	}
+	if entry, ok := j.lock.importers[dir][dep]; ok {
+		return entry
+	}
+	return j.lock.names[dep]
+}
+
+// readLock reads the first lockfile of the workspace root the resolver
+// reads. A lockfile it cannot parse says nothing, and the wider rule
+// then holds; a path one names outside the repository is dropped the
+// same way.
+func (j *jsResolution) readLock() *lockfile {
+	if !j.hasWorkspace {
+		return nil
+	}
+	readers := []struct {
+		name string
+		read func(from string, data []byte, lock *lockfile) error
+	}{
+		{"bun.lock", j.readBunLock},
+		{"package-lock.json", j.readNpmLock},
+		{"npm-shrinkwrap.json", j.readNpmLock},
+		{"pnpm-lock.yaml", j.readPnpmLock},
+	}
+	for _, reader := range readers {
+		from := file(j.wsDir, reader.name)
+		if !has(j.tree, from) {
+			continue
+		}
+		data, err := j.tree.Read(from)
+		if err != nil {
+			return nil
+		}
+		lock := &lockfile{names: map[string]lockEntry{}, importers: map[string]map[string]lockEntry{}}
+		if err := reader.read(from, data, lock); err != nil {
+			return nil
+		}
+		return lock
+	}
+	return nil
+}
+
+// readBunLock reads bun's text lockfile: `workspaces` maps each member's
+// directory to its name, and `packages` each resolved name to
+// `<name>@<version>` or `<name>@workspace:<directory>`.
+func (j *jsResolution) readBunLock(from string, data []byte, lock *lockfile) error {
+	var parsed struct {
+		Workspaces map[string]struct {
+			Name string `json:"name"`
+		} `json:"workspaces"`
+		Packages map[string][]json.RawMessage `json:"packages"`
+	}
+	if err := json.Unmarshal(stripJSONC(data), &parsed); err != nil {
+		return err
+	}
+	for name, resolved := range parsed.Packages {
+		var first string
+		if len(resolved) == 0 || json.Unmarshal(resolved[0], &first) != nil {
+			continue
+		}
+		if rel, ok := strings.CutPrefix(first, name+"@workspace:"); ok {
+			if dir, err := joinDir(j.wsDir, rel, from); err == nil {
+				lock.names[name] = lockEntry{member: true, dir: dir, from: from}
+			}
+			continue
+		}
+		lock.names[name] = lockEntry{registry: true, from: from}
+	}
+	for rel, member := range parsed.Workspaces {
+		if member.Name == "" || rel == "" {
+			continue
+		}
+		if dir, err := joinDir(j.wsDir, rel, from); err == nil {
+			lock.names[member.Name] = lockEntry{member: true, dir: dir, from: from}
+		}
+	}
+	return nil
+}
+
+// readNpmLock reads npm's lockfile: `packages` maps `node_modules/<name>`
+// to a link to a member's directory, or to a version of the registry.
+func (j *jsResolution) readNpmLock(from string, data []byte, lock *lockfile) error {
+	var parsed struct {
+		Packages map[string]struct {
+			Link     bool   `json:"link"`
+			Resolved string `json:"resolved"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	for key, resolved := range parsed.Packages {
+		name, ok := strings.CutPrefix(key, "node_modules/")
+		if !ok || strings.Contains(name, "node_modules/") {
+			continue
+		}
+		if !resolved.Link {
+			lock.names[name] = lockEntry{registry: true, from: from}
+			continue
+		}
+		if dir, err := joinDir(j.wsDir, resolved.Resolved, from); err == nil {
+			lock.names[name] = lockEntry{member: true, dir: dir, from: from}
+		}
+	}
+	return nil
+}
+
+// readPnpmLock reads pnpm's lockfile: `importers` maps each member's
+// directory to its dependencies, each resolved to `link:<directory>`,
+// from the member, or to a version of the registry.
+func (j *jsResolution) readPnpmLock(from string, data []byte, lock *lockfile) error {
+	var parsed struct {
+		Importers map[string]map[string]yaml.Node `yaml:"importers"`
+	}
+	if err := yaml.Unmarshal(data, &parsed); err != nil {
+		return err
+	}
+	for rel, tables := range parsed.Importers {
+		importer, err := joinDir(j.wsDir, rel, from)
+		if err != nil {
+			continue
+		}
+		for table, node := range tables {
+			switch table {
+			case "dependencies", "devDependencies", "optionalDependencies":
+			default:
+				continue
+			}
+			// A dependency's value is its version, or a mapping that
+			// holds it.
+			var plain map[string]string
+			var nested map[string]struct {
+				Version string `yaml:"version"`
+			}
+			versions := map[string]string{}
+			if node.Decode(&plain) == nil {
+				versions = plain
+			} else if node.Decode(&nested) == nil {
+				for dep, entry := range nested {
+					versions[dep] = entry.Version
+				}
+			}
+			for dep, version := range versions {
+				if lock.importers[importer] == nil {
+					lock.importers[importer] = map[string]lockEntry{}
+				}
+				target, linked := strings.CutPrefix(version, "link:")
+				if !linked {
+					lock.importers[importer][dep] = lockEntry{registry: true, from: from}
+					continue
+				}
+				if dir, err := joinDir(importer, target, from); err == nil {
+					lock.importers[importer][dep] = lockEntry{member: true, dir: dir, from: from}
+				}
 			}
 		}
 	}
@@ -285,10 +505,45 @@ func (j *jsResolution) tsconfigs(dir string) error {
 			return err
 		}
 		var config struct {
-			Extends json.RawMessage `json:"extends"`
+			Extends    json.RawMessage `json:"extends"`
+			References []struct {
+				Path string `json:"path"`
+			} `json:"references"`
 		}
 		if err := json.Unmarshal(stripJSONC(data), &config); err != nil {
 			return fmt.Errorf("%s: %w", name, err)
+		}
+		for _, reference := range config.References {
+			if reference.Path == "" {
+				continue
+			}
+			target, err := joinDir(parentOf(name), reference.Path, name)
+			if err != nil {
+				return err
+			}
+			// A reference names a project's directory, or its tsconfig.
+			project, tsconfig := target, file(target, "tsconfig.json")
+			if strings.HasSuffix(target, ".json") {
+				project, tsconfig = parentOf(target), target
+			}
+			switch {
+			case has(j.tree, file(project, "package.json")):
+				// A package: its files, and what it depends on.
+				if err := j.pkg(project, name); err != nil {
+					return err
+				}
+				if has(j.tree, tsconfig) {
+					pending = append(pending, tsconfig)
+				}
+			case has(j.tree, tsconfig):
+				// A project that is no package: the files under it.
+				if j.visit("project:" + project) {
+					j.addUnder(project, j.inner(project))
+				}
+				pending = append(pending, tsconfig)
+			default:
+				j.generate(target, name)
+			}
 		}
 		var bases []string
 		var one string

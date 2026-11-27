@@ -1298,8 +1298,10 @@ the core registers the local target), and one CI renderer, `github`
   or listed twice. Its `Tools` are the command-line tools it runs, which
   a generated CI job installs (section 11.3).
 - `RegisterCIRenderer(CIRendererSpec)` refuses a malformed or repeated
-  name, a missing `Render`, and an install directory that is not a
-  relative path inside the repository.
+  name, a renderer with neither a `Render` nor a `RenderTasks`, and an
+  install directory that is not a relative path inside the repository.
+  `Render` writes a stack's workflow; `RenderTasks` writes a Tasks
+  service's (`docs/extension-model.md`, section 3.18).
 
 A name is lowercase words joined by dots or hyphens (`gcp.cloudrun`).
 `Finalize` checks that each connector but a generic one joins registered

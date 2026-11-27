@@ -3,12 +3,15 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -63,6 +66,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <service-dir>/../../superschematic.toml)")
 	cmd.AddCommand(newTasksPlanCmd(a))
 	cmd.AddCommand(newTasksInputsCmd(a))
+	cmd.AddCommand(newTasksReachCmd(a))
 	return cmd
 }
 
@@ -140,42 +144,54 @@ func runTasksFile(cmd *cobra.Command, a *app, flags *tasksFlags, servicePath str
 	}
 	defer opened.version.close()
 	name := opened.service.Name
+	rendered, err := tasksgen.Render(opened.version.reg, opened.schema, name, opened.options)
+	if err != nil {
+		return fmt.Errorf("tasks: %s: %w", name, err)
+	}
+	var installs []tasksgen.Artifact
+	for _, artifact := range rendered {
+		if artifact.Install != "" {
+			installs = append(installs, artifact)
+		}
+	}
 	switch {
-	case opened.options.Install == "":
+	case len(installs) == 0:
 		return fmt.Errorf("tasks: %s names no outputs.tasks.install, the path its task file is committed at; without one a build writes the file under the output root alone", name)
 	case opened.gitRoot == "":
 		return fmt.Errorf("tasks: no git repository holds %s, so its task file has no place to be committed at", opened.service.Dir)
 	}
-	data, err := inttasks.RenderBytes(opened.schema)
-	if err != nil {
-		return fmt.Errorf("tasks: %s: %w", name, err)
-	}
-	target := filepath.Join(opened.gitRoot, filepath.FromSlash(opened.options.Install))
 	out := cmd.OutOrStdout()
-	if !flags.check {
-		changed, err := tasksgen.Install(target, data)
+	for _, artifact := range installs {
+		target := filepath.Join(opened.gitRoot, filepath.FromSlash(artifact.Install))
+		if !flags.check {
+			changed, err := tasksgen.Install(target, artifact)
+			if err != nil {
+				return fmt.Errorf("tasks: %s: %w", name, err)
+			}
+			state := "is current"
+			if changed {
+				state = "written"
+			}
+			if _, err := fmt.Fprintf(out, "%s: %s %s\n", name, target, state); err != nil {
+				return err
+			}
+			continue
+		}
+		have, err := os.ReadFile(target)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("tasks --check: %s is missing; run `tasks %s` and commit it", artifact.Install, servicePath)
+		}
 		if err != nil {
-			return fmt.Errorf("tasks: %s: %w", name, err)
+			return err
 		}
-		state := "is current"
-		if changed {
-			state = "written"
+		if !bytes.Equal(have, artifact.Data) {
+			return fmt.Errorf("tasks --check: %s is not what %s gives (%s); run `tasks %s` and commit it", artifact.Install, name, firstDifference(have, artifact.Data), servicePath)
 		}
-		_, err = fmt.Fprintf(out, "%s: %s %s\n", name, target, state)
-		return err
+		if _, err := fmt.Fprintf(out, "%s: %s is current\n", name, artifact.Install); err != nil {
+			return err
+		}
 	}
-	have, err := os.ReadFile(target)
-	if os.IsNotExist(err) {
-		return fmt.Errorf("tasks --check: %s is missing; run `tasks %s` and commit it", opened.options.Install, servicePath)
-	}
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(have, data) {
-		return fmt.Errorf("tasks --check: %s is not what %s gives (%s); run `tasks %s` and commit it", opened.options.Install, name, firstDifference(have, data), servicePath)
-	}
-	_, err = fmt.Fprintf(out, "%s: %s is current\n", name, opened.options.Install)
-	return err
+	return nil
 }
 
 // firstDifference names the first line at which two files differ.
@@ -202,6 +218,8 @@ type tasksPlanFlags struct {
 	base       string
 	repo       string
 	namingPath string
+	sandbox    bool
+	profile    bool
 }
 
 func newTasksPlanCmd(a *app) *cobra.Command {
@@ -232,9 +250,24 @@ the task it replaced. Those keys differ from the keys of the same tree
 planned with no base: after the change lands, that task and each task
 that uses it runs once more.
 
+--sandbox holds the process to a resolver's rules while it resolves: it
+starts no program, opens no socket, and opens, makes or removes no file.
+A resolver that reads the working tree, runs a build tool or fetches then
+fails with "operation not permitted", and the plan fails with it. It
+needs Linux on amd64 or arm64 and is refused elsewhere. The filter cannot
+be taken off, so the flag is for a process whose whole job is the plan,
+as a forge's plan step is. It holds a resolver that slips to its rules;
+it is no defence against a binary built to break them.
+
+--profile writes what the plan cost to standard error: the time to read
+the commit, and for each resolver kind the inputs the tasks name, how
+many of those differ, the tracked files they resolve to and the time.
+Tasks that name one unit share one resolution.
+
 Examples:
   superschematic tasks plan HEAD --file ci/tasks.json
-  superschematic tasks plan "$MERGE_COMMIT" --base origin/main --file ci/tasks.json`,
+  superschematic tasks plan "$MERGE_COMMIT" --base origin/main --file ci/tasks.json
+  superschematic tasks plan HEAD --file ci/tasks.json --sandbox --profile`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runTasksPlan(cmd, a, flags, args[0])
@@ -244,6 +277,8 @@ Examples:
 	cmd.Flags().StringVar(&flags.base, "base", "", "the commit the plan's commit lands on")
 	cmd.Flags().StringVar(&flags.repo, "repo", ".", "a directory of the repository")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: the defaults)")
+	cmd.Flags().BoolVar(&flags.sandbox, "sandbox", false, "hold the process to a resolver's rules while it resolves: no program, no socket, no file (Linux on amd64 or arm64)")
+	cmd.Flags().BoolVar(&flags.profile, "profile", false, "write what the plan cost, by resolver kind, to standard error")
 	return cmd
 }
 
@@ -266,13 +301,21 @@ func runTasksPlan(cmd *cobra.Command, a *app, flags *tasksPlanFlags, revision st
 	if err != nil {
 		return err
 	}
+	started := time.Now()
 	repo, err := inttasks.OpenRepository(flags.repo)
 	if err != nil {
 		return fmt.Errorf("tasks plan: %w", err)
 	}
 	defer func() { _ = repo.Close() }()
+	// Units of one workspace read the same manifests: a go.work and each
+	// module it uses, a workspace's package.json files. Each is read from
+	// git once for the plan.
+	repo.CacheBlobs()
 
 	in := inttasks.PlanInput{Registry: reg, Format: repo.Format()}
+	if flags.profile {
+		in.Timings = &inttasks.Timings{}
+	}
 	if in.Commit, err = repo.Commit(revision); err != nil {
 		return fmt.Errorf("tasks plan: %w", err)
 	}
@@ -290,9 +333,28 @@ func runTasksPlan(cmd *cobra.Command, a *app, flags *tasksPlanFlags, revision st
 			return fmt.Errorf("tasks plan: --base: %w", err)
 		}
 	}
+	read := time.Since(started)
+	if flags.sandbox {
+		// The sandbox starts no process, so the one that reads blobs
+		// starts first. From here on the process resolves, and writes
+		// the plan.
+		if err := repo.Start(); err != nil {
+			return fmt.Errorf("tasks plan: %w", err)
+		}
+		if err := inttasks.Sandbox(); err != nil {
+			return fmt.Errorf("tasks plan: --sandbox: %w", err)
+		}
+	}
+	resolving := time.Now()
 	plan, err := inttasks.Plan(in)
 	if err != nil {
+		if flags.sandbox && errors.Is(err, os.ErrPermission) {
+			return fmt.Errorf("tasks plan: %w\nThe sandbox refused it: a resolver reads tracked files through the commit's tree, starts no process and uses no network", err)
+		}
 		return fmt.Errorf("tasks plan: %w", err)
+	}
+	if flags.profile {
+		writePlanProfile(cmd.ErrOrStderr(), plan, in, read, time.Since(resolving), flags.sandbox)
 	}
 	data, err := plan.Encode()
 	if err != nil {
@@ -300,6 +362,27 @@ func runTasksPlan(cmd *cobra.Command, a *app, flags *tasksPlanFlags, revision st
 	}
 	_, err = cmd.OutOrStdout().Write(data)
 	return err
+}
+
+// writePlanProfile writes what a plan cost.
+func writePlanProfile(w io.Writer, plan *tasks.Plan, in inttasks.PlanInput, read, resolved time.Duration, sandboxed bool) {
+	round := func(d time.Duration) time.Duration { return d.Round(100 * time.Microsecond) }
+	suffix := ""
+	if sandboxed {
+		suffix = ", in the sandbox"
+	}
+	_, _ = fmt.Fprintf(w, "tasks plan: %d tasks over %d tracked files%s\n", len(plan.Tasks), len(in.Tree.Entries()), suffix)
+	_, _ = fmt.Fprintf(w, "  %-34s %10s\n", "read the task file and the tree", round(read))
+	_, _ = fmt.Fprintf(w, "  %-34s %10s\n", "resolve the inputs and key", round(resolved))
+	kinds := make([]string, 0, len(in.Timings.Kinds))
+	for kind := range in.Timings.Kinds {
+		kinds = append(kinds, kind)
+	}
+	sort.Strings(kinds)
+	for _, kind := range kinds {
+		t := in.Timings.Kinds[kind]
+		_, _ = fmt.Fprintf(w, "    %-12s %5d inputs, %5d resolved, %8d files %10s\n", kind, t.Inputs, t.Resolved, t.Files, round(t.Duration))
+	}
 }
 
 // readTaskFile reads and decodes the task file a commit holds at path.
@@ -562,4 +645,139 @@ func (r schemaReads) outside(set inttasks.SchemaSet, root inttasks.SchemaRoot) [
 		}
 	}
 	return out
+}
+
+// tasksReachFlags holds one tasks reach command's flag values.
+type tasksReachFlags struct {
+	commits int
+	rev     string
+	json    bool
+}
+
+func newTasksReachCmd(_ *app) *cobra.Command {
+	flags := &tasksReachFlags{}
+	cmd := &cobra.Command{
+		Use:   "reach <schemas-root>",
+		Short: "Measure how many schema inputs each commit of a schemas root's history changes",
+		Long: `reach measures how narrow a schema input is, on the repository's own
+history. A schema input resolves to a set that is wider than what one
+build of its service reads: the service, each service it names, and the
+schemas root's shared files. A set that every edit changes keys every task
+that reads schemas on every schema commit, and a forge then reuses none of
+them.
+
+It walks the commits that changed the schemas root, back from --rev along
+first parents, and measures each against its parent: of the services the
+root holds, how many the commit edited, and how many schema inputs'
+digests it changed. It prints how many commits changed every schema
+input, some of them and none. A commit that changes a file of the root
+that belongs to no service, as the naming file or a lockfile, changes
+every one.
+
+It reads commits through git and nothing of the working tree, loads no
+schema and runs no build.
+
+Examples:
+  superschematic tasks reach ./schemas
+  superschematic tasks reach ./schemas --commits 500 --json`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runTasksReach(cmd, flags, args[0])
+		},
+	}
+	cmd.Flags().IntVar(&flags.commits, "commits", 100, "the most commits to measure")
+	cmd.Flags().StringVar(&flags.rev, "rev", "HEAD", "the commit to walk back from")
+	cmd.Flags().BoolVar(&flags.json, "json", false, "write every measured commit as one JSON document")
+	return cmd
+}
+
+func runTasksReach(cmd *cobra.Command, flags *tasksReachFlags, schemasRoot string) error {
+	abs, err := filepath.Abs(schemasRoot)
+	if err != nil {
+		return err
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+		return fmt.Errorf("tasks reach: schemas root not found: %s", schemasRoot)
+	}
+	if flags.commits < 1 {
+		return fmt.Errorf("tasks reach: --commits is %d; it is the most commits to measure, one or more", flags.commits)
+	}
+	repo, err := inttasks.OpenRepository(abs)
+	if err != nil {
+		return fmt.Errorf("tasks reach: %w", err)
+	}
+	defer func() { _ = repo.Close() }()
+	top, err := repo.Root()
+	if err != nil {
+		return fmt.Errorf("tasks reach: %w", err)
+	}
+	if resolved, err := filepath.EvalSymlinks(top); err == nil {
+		top = resolved
+	}
+	rel, err := filepath.Rel(top, abs)
+	if err != nil {
+		return err
+	}
+	dir := filepath.ToSlash(rel)
+	if dir == "." {
+		dir = ""
+	}
+	reach, err := inttasks.SchemaReach(repo, dir, flags.rev, flags.commits)
+	if err != nil {
+		return fmt.Errorf("tasks reach: %w", err)
+	}
+	out := cmd.OutOrStdout()
+	if flags.json {
+		data, err := json.MarshalIndent(reach, "", "  ")
+		if err != nil {
+			return err
+		}
+		_, err = out.Write(append(data, '\n'))
+		return err
+	}
+	measured := len(reach.Commits)
+	shown := dir
+	if shown == "" {
+		shown = "."
+	}
+	if measured == 0 {
+		_, err = fmt.Fprintf(out, "%s: no commit back from %s changed it and has a parent that holds it\n", shown, flags.rev)
+		return err
+	}
+	share := func(n int) string { return fmt.Sprintf("%4d  %3.0f%%", n, 100*float64(n)/float64(measured)) }
+	var edited, changed, services []int
+	shared := 0
+	for _, c := range reach.Commits {
+		edited, changed, services = append(edited, c.Edited), append(changed, c.Changed), append(services, c.Services)
+		if c.Shared {
+			shared++
+		}
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "%s: %d commits that changed it, back from %s", shown, measured, flags.rev)
+	if reach.Skipped > 0 {
+		fmt.Fprintf(&b, " (%d more left out: no parent, or the root begins there)", reach.Skipped)
+	}
+	b.WriteString("\n")
+	fmt.Fprintf(&b, "  %-42s %s\n", "changed every schema input's digest", share(reach.All()))
+	fmt.Fprintf(&b, "  %-42s %s\n", "changed some", share(reach.Some()))
+	fmt.Fprintf(&b, "  %-42s %s\n", "changed none", share(reach.None()))
+	fmt.Fprintf(&b, "  %-42s %s\n", "changed a file that belongs to no service", share(shared))
+	fmt.Fprintf(&b, "  %-42s %4d of %d\n", "median services edited", median(edited), median(services))
+	fmt.Fprintf(&b, "  %-42s %4d of %d\n", "median schema inputs changed", median(changed), median(services))
+	_, err = io.WriteString(out, b.String())
+	return err
+}
+
+// median is the middle value of a list, the lower of two.
+func median(values []int) int {
+	if len(values) == 0 {
+		return 0
+	}
+	sorted := append([]int(nil), values...)
+	sort.Ints(sorted)
+	return sorted[(len(sorted)-1)/2]
 }

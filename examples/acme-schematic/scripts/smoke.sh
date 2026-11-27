@@ -264,12 +264,15 @@ cp "$DIST/acme/inventory.json" "$OUT/inventory.json"
 # and builds none; the hook must still run and see the same manifests.
 "$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" >/dev/null
 rm -rf "$DIST"
-# The core's own hook installs shop-tasks' task file (D203). With the
-# committed file gone, the all-restored build, which runs no generator,
-# must put it back byte for byte.
+# The core's own hook installs shop-tasks' task file and the workflow the
+# github renderer writes from it (D203). With the committed files gone,
+# the all-restored build, which runs no generator, must put each back
+# byte for byte.
 TASK_FILE="$EXAMPLE_DIR/ci/tasks.json"
+TASK_WORKFLOW="$EXAMPLE_DIR/ci/workflows/shop-tasks.yml"
 cp "$TASK_FILE" "$OUT/tasks.json"
-rm "$TASK_FILE"
+cp "$TASK_WORKFLOW" "$OUT/shop-tasks.yml"
+rm "$TASK_FILE" "$TASK_WORKFLOW"
 "$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" | tee "$OUT/restored.log"
 test "$(grep -c '(restored from cache)' "$OUT/restored.log")" -eq 6
 if grep -q '(built' "$OUT/restored.log"; then
@@ -278,8 +281,9 @@ if grep -q '(built' "$OUT/restored.log"; then
 fi
 cmp "$OUT/inventory.json" "$DIST/acme/inventory.json"
 cmp "$OUT/tasks.json" "$TASK_FILE"
+cmp "$OUT/shop-tasks.yml" "$TASK_WORKFLOW"
 
-echo "==> the task file is what shop-tasks gives, its schema inputs hold what the build read, and a commit plans"
+echo "==> the task file and the workflow are what shop-tasks gives, its schema inputs hold what the build read, and a commit plans"
 "$OUT/acme-schematic" tasks "$SCHEMAS/services/shop-tasks" --check
 # Each schema input's static set, found from tracked text at HEAD, holds
 # the services and the files the build above recorded reading.
