@@ -2265,11 +2265,9 @@ func computeImportNeeds(repo *Repository) {
 		if field.IsJSONField && field.IsUnion && (field.IsArray || field.IsMap) {
 			repo.HasJSONUnionCollections = true
 		}
-		// time.Now() stamps updated_at; time.Time() conversions apply to
-		// non-audit, non-PK datetime scalars in the insert/update paths.
-		if field.Name == "updatedAt" && !repo.Released {
-			repo.NeedsTime = true
-		}
+		// time.Time() conversions apply to non-audit, non-PK datetime
+		// scalars in the insert/update paths; updated_at takes the
+		// database's clock.
 		if field.IsDateTimeScalar && !field.IsAuditField && !field.IsPrimaryKey && !repo.Released {
 			repo.NeedsTime = true
 		}

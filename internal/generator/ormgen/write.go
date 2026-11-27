@@ -9,6 +9,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	"github.com/parable-work/superschematic/internal/profile"
 )
 
@@ -402,6 +403,7 @@ func templateFuncs() template.FuncMap {
 		},
 		"goRawString": goRawString,
 		"docComment":  docComment,
+		"filled":      sqlutil.Filled,
 	}
 }
 

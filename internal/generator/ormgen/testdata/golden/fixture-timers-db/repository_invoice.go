@@ -398,8 +398,9 @@ func (r *InvoiceRepository) corePatch(update *InvoiceUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and InvoiceUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and InvoiceUpdate holds none.
 func (r *InvoiceRepository) updateColumns(ctx context.Context, update *InvoiceUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Number != nil {

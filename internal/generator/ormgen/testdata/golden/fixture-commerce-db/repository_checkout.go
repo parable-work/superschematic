@@ -352,8 +352,9 @@ func (r *CheckoutRepository) corePatch(update *CheckoutUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and CheckoutUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and CheckoutUpdate holds none.
 func (r *CheckoutRepository) updateColumns(ctx context.Context, update *CheckoutUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Title != nil {

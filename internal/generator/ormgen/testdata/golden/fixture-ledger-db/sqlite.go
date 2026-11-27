@@ -380,7 +380,8 @@ type sqliteColumn struct {
 	references, probe string
 }
 
-// sqliteStatements are a table's statements on SQLite (sqlutil).
+// sqliteStatements are a table's statements on SQLite (sqlutil). updatedAt
+// is filled already: the database's clock, it takes no argument.
 type sqliteStatements struct {
 	columns, qualifiedColumns, getOne, getMany, liveWhere, live, liveCondition        string
 	findOne, findMany, count, page, pageAfterKey, pageAfter, pageAfterNulls           string
@@ -1098,12 +1099,13 @@ func (t *sqliteTable) versionMiss(ctx context.Context, q sqliteQuerier, key any)
 	return ErrNotFound
 }
 
-// stamps are the assignments an update adds: updated_at at now, and
-// updated_by the update's own or the acting user's.
+// stamps are the assignments an update adds: updated_at at the database's
+// clock, which the row's insert's default read too, so the host's never
+// stamps a row earlier than its insert; and updated_by the update's own or
+// the acting user's.
 func (t *sqliteTable) stamp(sets []string, args []any, updatedBy any) ([]string, []any) {
 	if t.st.updatedAt != "" {
-		args = append(args, sqliteTimeText(time.Now()))
-		sets = append(sets, fmt.Sprintf(t.st.updatedAt, len(args)))
+		sets = append(sets, t.st.updatedAt)
 	}
 	if t.st.updatedBy != "" && updatedBy != nil {
 		args = append(args, updatedBy)

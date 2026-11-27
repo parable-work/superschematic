@@ -349,7 +349,7 @@ export const accountTable: TableDefinition = {
     update: "UPDATE account SET %s WHERE id = $%d",
     returning: " RETURNING \"id\", \"owner\", \"name\", \"vendor\", \"kind\", \"rank\", \"pool_availability\", \"pool_out_until\", \"pool_out_reason\", \"pool_checked_at\", \"_version\"",
     updateMany: "UPDATE account SET %s%s",
-    updatedAt: "updated_at = $%d",
+    updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
     upsert: "INSERT INTO account (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"owner\", \"name\", \"vendor\", \"kind\", \"rank\", \"pool_availability\", \"pool_out_until\", \"pool_out_reason\", \"pool_checked_at\", \"_version\", (xmax = 0) AS _inserted",
     softDelete: "",

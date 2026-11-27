@@ -760,6 +760,41 @@ fn an_operation_reads_its_row_by_its_key_converting_each_column_to_the_core_and_
 }
 
 #[test]
+fn an_update_of_the_commands_own_row_sets_its_now_columns_to_the_databases_clock() {
+    let (core, layout) = (workflow(), layout());
+    let host = Host::new(&core, &layout);
+    let store = MemoryStore::new(Dialect::Postgres, Some(draft_row()));
+    let options = ExecuteOptions {
+        own_columns: Some(own(json!({"updated_by": "u1"}))),
+        now_columns: vec!["updated_at".to_owned()],
+        ..ExecuteOptions::default()
+    };
+    block(run::execute(
+        &host,
+        &store,
+        "Order",
+        transition("paid"),
+        &options,
+    ))
+    .expect("applied");
+    // The stamp binds no time of the server's: the database's clock reads
+    // it, as the row's insert's default read createdAt.
+    assert_eq!(
+        store.applied(),
+        [[write(
+            r#"UPDATE "order" SET "updated_by" = $1, "status" = $2, "status_entered_at" = $3, "updated_at" = statement_timestamp(), "_version" = "_version" + 1 WHERE "id" = $4 AND "_version" = $5"#,
+            vec![
+                text("u1"),
+                text("paid"),
+                iso(2000),
+                text(KEY_COLUMN),
+                Bind::Int(1)
+            ]
+        )]]
+    );
+}
+
+#[test]
 fn a_row_that_moved_runs_the_command_again_from_fresh_state_and_one_that_keeps_moving_is_refused_as_busy(
 ) {
     let (core, layout) = (workflow(), layout());

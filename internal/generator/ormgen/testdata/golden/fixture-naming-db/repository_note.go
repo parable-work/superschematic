@@ -1226,9 +1226,7 @@ func (r *NoteRepository) upsertRow(ctx context.Context, input *types.Note, on No
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("\"updatedAt\" = $%d", paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, "\"updatedAt\" = statement_timestamp()")
 
 		// Set updated_by
 		if update.UpdatedBy != nil {
@@ -1407,8 +1405,7 @@ func (r *NoteRepository) upsertBatches(ctx context.Context, inputs []*types.Note
 			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf("\"updatedAt\" = $%d", len(values)))
+			assignments = append(assignments, "\"updatedAt\" = statement_timestamp()")
 			if HasUserID(ctx) {
 				values = append(values, GetUserID(ctx))
 				assignments = append(assignments, fmt.Sprintf("\"updatedBy\" = $%d", len(values)))
@@ -1746,9 +1743,7 @@ func (r *NoteRepository) updateOne(ctx context.Context, id types.IdentityUUID, u
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("\"updatedAt\" = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "\"updatedAt\" = statement_timestamp()")
 
 	// Set updated_by
 	if update.UpdatedBy != nil {
@@ -1838,9 +1833,7 @@ func (r *NoteRepository) UpdateMany(ctx context.Context, filter *NoteFilter, upd
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("\"updatedAt\" = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "\"updatedAt\" = statement_timestamp()")
 
 	// Set updated_by
 	if update.UpdatedBy != nil {

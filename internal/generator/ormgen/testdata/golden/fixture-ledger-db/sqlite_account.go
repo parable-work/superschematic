@@ -486,7 +486,7 @@ var accountSQLite = &sqliteTable{
 		versionFence:        ` AND _version = ?%d`,
 		returning:           ` RETURNING "id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by"`,
 		updateMany:          `UPDATE account SET %s%s`,
-		updatedAt:           `updated_at = ?%d`,
+		updatedAt:           `updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
 		updatedBy:           `updated_by = ?%d`,
 		upsert:              `INSERT INTO account (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by"`,
 		softDelete:          ``,

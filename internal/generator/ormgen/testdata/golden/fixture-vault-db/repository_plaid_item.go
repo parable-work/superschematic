@@ -1302,9 +1302,7 @@ func (r *PlaidItemRepository) upsertRow(ctx context.Context, input *types.PlaidI
 		setClauses = append(setClauses, key.keep)
 	} else {
 		// Set updated_at
-		paramNum++
-		setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-		values = append(values, time.Now())
+		setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 		// Set updated_by
 
@@ -1510,8 +1508,7 @@ func (r *PlaidItemRepository) upsertBatches(ctx context.Context, inputs []*types
 			// history all, and reads it back below.
 			assignments = append(assignments, key.keep)
 		} else {
-			values = append(values, time.Now())
-			assignments = append(assignments, fmt.Sprintf("updated_at = $%d", len(values)))
+			assignments = append(assignments, "updated_at = statement_timestamp()")
 		}
 		query := fmt.Sprintf(
 			`INSERT INTO plaid_item (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "item_id", "institution", "access_token", "webhook_secret", "created_at", "updated_at", "deleted_at", (xmax = 0) AS _inserted`,
@@ -1928,9 +1925,7 @@ func (r *PlaidItemRepository) UpdateOne(ctx context.Context, id types.IdentityUU
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 
@@ -2046,9 +2041,7 @@ func (r *PlaidItemRepository) UpdateMany(ctx context.Context, filter *PlaidItemF
 	}
 
 	// Set updated_at
-	paramNum++
-	setClauses = append(setClauses, fmt.Sprintf("updated_at = $%d", paramNum))
-	values = append(values, time.Now())
+	setClauses = append(setClauses, "updated_at = statement_timestamp()")
 
 	// Set updated_by
 

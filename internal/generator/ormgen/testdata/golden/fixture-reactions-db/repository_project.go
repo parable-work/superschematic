@@ -177,8 +177,9 @@ func (r *ProjectRepository) corePatch(update *ProjectUpdate) map[string]any {
 }
 
 // updateColumns are the columns UpdateOne sets of update, by column, each
-// bound as its statement binds it, with updatedAt and updatedBy. A column the
-// behaviors own is the core's to refuse, and ProjectUpdate holds none.
+// bound as its statement binds it, with updatedBy; updatedAt takes the
+// database's clock (nowColumns). A column the behaviors own is the core's to
+// refuse, and ProjectUpdate holds none.
 func (r *ProjectRepository) updateColumns(ctx context.Context, update *ProjectUpdate) (map[string]any, error) {
 	columns := map[string]any{}
 	if update.Name != nil {

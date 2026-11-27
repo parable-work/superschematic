@@ -1952,6 +1952,14 @@ async fn statements_of<S: Store>(
                     .chain(owned_columns(table, owned)?)
                     .map(|(column, value)| format!("{} = {}", quote(&column), binder.bind(value)))
                     .collect();
+                if mine {
+                    sets.extend(
+                        options
+                            .now_columns
+                            .iter()
+                            .map(|column| format!("{} = {}", quote(column), stamp_now(dialect))),
+                    );
+                }
                 // The version moves on with every write, the core's own:
                 // on Postgres @optimistic's trigger sets it to the same value.
                 sets.push(next_version(table));
@@ -2849,6 +2857,15 @@ impl Binder {
     fn bind(&mut self, value: Bind) -> String {
         self.values.push(value);
         placeholder(self.dialect, self.values.len())
+    }
+}
+
+/// The database's clock as an update stamps a row with it
+/// ([`crate::ExecuteOptions::now_columns`]).
+fn stamp_now(dialect: Dialect) -> &'static str {
+    match dialect {
+        Dialect::Postgres => "statement_timestamp()",
+        Dialect::Sqlite => "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
     }
 }
 
