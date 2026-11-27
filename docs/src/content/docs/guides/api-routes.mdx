@@ -2141,12 +2141,17 @@ there is no option to pass. A revealed field holds text, and the database
 needs an `@accessLog` table, or the build is refused.
 
 A Go server refuses at build time the platform features it does not
-serve yet, on its database's tables and its own: `@calendarSource` and
-Recurrence, `@event`, `@notifier` and `@channelIdentities`, `@references`
-and `@attachments`, `@searchable`, `@party`, `@conversations` and
-`@runRequests`, `@agents`, provider slots and `@autonomy`. Serve such an
-API in TypeScript (`outputs.api.language: "TYPESCRIPT"`). A database keeps
-its Go types, which its Go ORM, always generated, needs.
+serve yet, on its database's tables and its own: `@party`,
+`@conversations` and `@runRequests`, `@agents`, a provider with no Go
+module and `@autonomy`. References, attachments and provider slots are
+served (D184), and so are Recurrence, the calendar and search across
+tables, on Postgres (D187): a Go server whose database lists `sqlite`
+first is refused Recurrence and a calendar source. Events, the notifier's
+tables and the channel identities are served on Postgres too (D190),
+through the HTTP runtime's `notify` package over the ORM's
+`Notifications()`. Serve such an API in TypeScript (`outputs.api.language:
+"TYPESCRIPT"`). A database keeps its Go types, which its Go ORM, always
+generated, needs.
 
 The Go ORM's repositories on SQLite keep to no audience, grants or access
 log yet: they would read every row for a caller with grants, and the

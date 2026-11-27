@@ -240,6 +240,18 @@ type ORMOutput struct {
 	// and no Comments: it writes rowrefs.go, and go.mod requires the
 	// schema runtime, whose rowrefs package runs them.
 	RowFeatures *RowFeaturesModel
+
+	// CrossTables are the database's calendar sources and search index
+	// (D152, D155, D187), nil for a database with neither: it writes
+	// crosstable.go, and go.mod requires the schema runtime, whose
+	// crosstable package reads them.
+	CrossTables *CrossTablesModel
+
+	// Notifications is the database's notifier (D153, D190), nil for a
+	// database that does not use it: it writes notifications.go, and
+	// go.mod requires the schema runtime, whose notifications package
+	// holds the host.
+	Notifications *NotificationsModel
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -1189,6 +1201,14 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	crossTables, err := crossTablesOf(schema, tables)
+	if err != nil {
+		return nil, err
+	}
+	notifier, err := notificationsOf(schema, tables, repositories)
+	if err != nil {
+		return nil, err
+	}
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
@@ -1335,6 +1355,8 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Rules:                    rules,
 		Access:                   access,
 		RowFeatures:              rowFeatures,
+		CrossTables:              crossTables,
+		Notifications:            notifier,
 		SQLite:                   opts.SQLite,
 	}
 	if opts.SQLite {

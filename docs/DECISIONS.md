@@ -2170,9 +2170,10 @@ Left:
   the row plans again on its own write, at a fire, or at `setRecurrence`.
 - The generated router mounting `calendarRoutes` and the calendar MCP
   tool; an app wires them, as it wires `grantAuthenticator` (D156).
-- The Go server: Recurrence's operations through its adapter end to end,
-  and the calendar read and feed. D188 serves them in Rust, on Postgres;
-  a Rust server on SQLite is refused them.
+- A Go or a Rust server whose database lists sqlite first, which is
+  refused Recurrence and a calendar source: D187 serves Recurrence's
+  operations and the calendar read and feed in Go, and D188 in Rust, on
+  Postgres alone.
 - A hand-written scenario of Recurrence that every adapter replays.
 - The SDK types narrowed by the config (`behaviortypes`: the anchors).
 - A calendar source's permission in the schema, beside the route's option;
@@ -2248,8 +2249,9 @@ kept while the text holds and fall back to the text order.
 
 Left:
 
-- The Go repositories and servers, and Python's. D188 serves search in
-  the Rust repositories and runtime, on Postgres.
+- Python's repositories and servers. D187 serves search in the Go
+  repositories and the Go schema runtime, and D188 in the Rust
+  repositories and runtime, on Postgres.
 - The generated router mounting `searchRoutes` and the MCP tool, and a
   generated handler for the indexing queue; an app wires them.
 - A list operation's row rule (`by`), which is its operation's and not
@@ -2356,9 +2358,8 @@ is refused `done`; and password reset sends through the email adapter.
 
 Left:
 
-- Go: the notifier, `@event` raising, the reply entry point and password
-  reset; and SQLite and D1 in every language (Rust's on Postgres is
-  D191's).
+- SQLite and D1 in every language (Go's notifier on Postgres is D190's,
+  Rust's D191's).
 - Comments raising its mentions and replies into the inbox, and the core's
   Comments `inbox` operation retired.
 - A generated server that builds the notifier into its `Deps` (with D159's
@@ -2613,9 +2614,9 @@ Left:
   TypeScript's does; a generated table operation runs in one.
 - TypeScript's `accessConditions` keeps the values of the branches before
   a `*` path bound.
-- The Go server's calendar, search, notifier, parties and agents, which
-  later Go workstreams port. References, attachments and provider slots
-  are D184's.
+- The Go server's parties and agents, which later Go workstreams port.
+  References, attachments and provider slots are D184's, Recurrence, the
+  calendar and search D187's, and the notifier D190's.
 - A held table that composes behaviors, through the Go behaviors' core:
   its create fills neither default of `audience` and `agentAccess`, so a
   create that names neither fails their checks, and its reads of the
@@ -3050,6 +3051,115 @@ Left:
   TypeScript (D152's and D155's left).
 - A generated handler for a `@searchable` declaration's queue, which an
   app's `@worker` writes, calling `index_search`.
+
+## D187. The Go server serves D152's Recurrence and calendar and D155's search across tables on Postgres, through a schema runtime package the generated ORM hosts, a read across tables takes its caller, and a stop never strands a claim (D152, D155, D180 amended)
+
+D152 and D155 built Recurrence's routes and worker, the calendar and its
+feed, and search across tables in the TypeScript runtime; D180 refused
+them in a Go server. This entry ports them to Go, on Postgres, with the
+TypeScript tables, statements, ranking, states and refusals. The Rust
+chain ports the same two in D188, and Go keeps to it where the languages
+allow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| A Go server serves a table that composes Recurrence through the adapter it serves every behavior through: its `recurrence` routes run `setRecurrence`, `complete`, `skip`, `moveOne` and `listOccurrences` through the core, and the behavior worker's generated queues fire the `open`, `remind`, `overdue` and `plan` deadlines, hear a raw write on the change queue, and hand `opened`, `reminded` and `missed` to the Workers methods. The refusal was lifted; what was missing was the ORM of a table the core writes for another's behavior with no use, deadline, change or event of its own (a relative anchor's target), which imported `encoding/json` for nothing and so never compiled: it keeps the import in use (`Repository.BehaviorsWithoutJSON`). | A Recurrence module of the Go runtime, a second runner beside the adapter's. |
+| The calendar and search are one package of the Go schema runtime, `crosstable`: `ReadCalendar`, the feed (`IssueFeed`, `RotateFeed`, `RevokeFeed`, `FeedOf`), `CalendarICS`, `CalendarRoutes` and the MCP tool; `SearchTables`, `IndexSearch`, `ReindexSearch`, `SearchRoutes`, `SearchMCPTool` and `CallSearchTool`. ormgen writes `crosstable.go` for a database with a calendar source or a `@searchable` table: the definitions, and `Database.CrossTables()`, the `crosstable.Host` over its pool, its access predicate and its grants. Routes are `http.Handler`s and take an `Authenticate` of the request. | The HTTP runtime, which the ORM cannot import (D184 kept `rowrefs` in the schema runtime for the same reason); two packages, which would repeat the host and the caller. |
+| A Go read across tables reads a table's rows by one statement held to the caller by the predicate the table's repository applies (`AccessConditions`, D180) and its live condition, where TypeScript and Rust read them through the repository by its fields: a Go repository is typed per table and has no filter by a field's name. So the calendar's definition holds the columns, quoted, its title, field, end and owner are of, and the search's is tsgen's, member for member. A calendar source titled by an `Encrypted<T>` field, whose column holds it sealed, is refused in a Go server. | A generated read per table and source, which would repeat the repository; reading the rows' titles back through `GetManyByIDs`, a second read per source. |
+| A read across tables takes its `Caller`, a principal and the permissions it holds, and binds the principal itself (`Host.As`, `orm.WithPrincipal`), as Rust's takes its principal (D188): a feed's fetch reads as the feed's holder, not the request's caller. Go's `access.Principal` holds no permissions, which a source's or a table's permission is checked against, so the caller carries them beside it. | Reading the ambient caller of the context, which a feed's route would have to rebind; a permissions member on `access.Principal`, which every other reader of it would carry. |
+| Search's audience is checked on the index row's copied columns by the package's own condition, the generated `audienceCondition`'s over `si.audience` and `si.agents`, since the ORM's predicate names a table's own columns; a caller with grants is held by an `EXISTS` back to each table with `Host.Conditions`. | Copying the grant reach into the index, which D155 turned down. |
+| `IndexSearch` runs in a transaction of its own on the host and embeds after it commits, as `indexSearch` and Rust's `index_search` do. | The caller's transaction, which would hold the share lock across the model's call. |
+| Embeddings re-rank through `providers.SearchEmbeddingsOf`, which refuses at once a model provider that implements no `providers.ModelEmbedder` (D184), telling it by its type, where Rust asks the provider to embed nothing. A search's `Embedder` is an interface, with `EmbedderFunc`, so a test or an app gives its own. | Asking at the first search, which would fail one late. |
+| The Go worker no longer cancels a claim in flight at a stop: it runs the claim to its answer within its own timeout and releases what it claimed, whose handlers never start. Cancelling it could leave messages the database had claimed with no handler until their lease ran out, as D188 found in Rust; a test that stops its worker between fires runs into it. | Starting the claimed handlers at the stop, which the grace then waits for. |
+| A Go server whose database lists `sqlite` first is refused Recurrence and a calendar source (`verify.GoServerSQLiteErr`, which the generator calls with the database's dialects), as rustrestgen refuses a Rust server; `@searchable` on SQLite stays the loader's refusal for every language. | Serving the calendar on SQLite, D152's left for every language. |
+
+Built: the refusals of D180 lose `@calendarSource`, Recurrence and
+`@searchable` (`verify/go_features.go`), and gain the sealed title and
+`GoServerSQLiteErr` (`internal/generator/crosstable_go.go`);
+`runtime/schema/go/crosstable` and its tests; ormgen's `crosstable.go`
+(`ormgen/crosstable.go`, `templates/crosstable.tmpl`, goldens of
+fixture-recurrence-db, fixture-access-go-db and fixture-search-db) and
+`BehaviorsWithoutJSON`; `providers.SearchEmbeddingsOf`; the claim at a
+stop (`worker.go`); fixture-access-go-db's document calendar source.
+`TestGoRecurrenceEndToEnd` runs D152's cases through a generated Go
+server and worker on Postgres: the plan to the horizon off a holiday with
+its deadlines, a rule change that leaves the open occurrence, the remind
+deadline on the worker and its events, `complete` and an afterDone
+recurrence, the refusals, the calendar merging a date and occurrences,
+and a raw write heard. `TestGoAccessEndToEnd` gains the feed's case: a
+feed shows what its principal reads, busy or in full, is no credential
+elsewhere, and is refused once rotated or revoked. `TestGoSearchEndToEnd`
+runs D155's six cases through the Go repositories and `crosstable`, a
+party's and an agent run's grants among them, with embeddings through a
+model provider and `ReindexSearch`.
+`TestAGoServerOnSQLiteRefusesRecurrenceAndTheCalendar` holds the
+refusal. The guides' Go sections.
+
+Left:
+
+- Go on SQLite: Recurrence on a Go server and the calendar (D152's "the
+  calendar on SQLite and D1"), and search (D155's).
+- A generated Go server that mounts `CalendarRoutes` and `SearchRoutes`
+  and serves the two MCP tools; an app mounts them, as in TypeScript
+  (D152's and D155's left).
+- A generated handler for a `@searchable` declaration's queue, which an
+  app's `@worker` writes, calling `IndexSearch`.
+- A calendar source titled by an `Encrypted<T>` field in Go.
+- A parity file of the calendar's reference and iCalendar text, which
+  each language's tests hold to the same algorithm on their own.
+
+## D190. The Go runtime serves D153's notifier on Postgres: the generated ORM hosts it, `notify` raises, routes, delivers, escalates and reads replies as the TypeScript notifier does, and an approval's approve and deny are two reply actions (D153, D180 amended)
+
+D153 built the notifier in the TypeScript runtime, and D180 refused
+`@event`, `@notifier` and `@channelIdentities` in a Go server. This entry
+ports it to Go, on Postgres, with the TypeScript tables, statements,
+states and refusals, and keeps to the points the Rust port of the same
+decision (D191) settled where the languages allow.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The notifier is the Go HTTP runtime's `notify` package, since it sends through the channel adapters an environment configures (D159), which the ORM cannot import. What it runs through is the schema runtime's `notifications.Host`, which the generated ORM of a database that uses the notifier implements in `notifications.go` (`Database.Notifications()`): its pool or a transaction, its dispatch queue, its access predicate and each table's repository, with the definitions it is generated with: the notifier's tables by part and their columns, and every table's key, events and to-one relations (`ormgen/notifications.go`). | One package in the schema runtime, as D187's `crosstable`, which would need the providers and the worker of the HTTP runtime; a generated notifier per database, which would repeat the notifier in every ORM. |
+| The notifier's own tables are the loader's, the same fields in every database, so `notify` reads and writes them by statements over the columns the definitions name, a UUID in base62 as the Go types write one. An application's table it reads through that table's repository (`Host.Record`, `Find`, `Update`): a route's filter, a brief's saved query and an approval's update are JSON in the repositories' syntax, which the ORM reads into the table's typed filter or update, refusing a member it has no field for. | Statements over the application's tables, as `crosstable` reads them, which would leave a soft delete, a sealed field and the audience to the notifier; a filter compiler of the notifier's own beside the ORM's. |
+| Go has an ambient caller, the context. A recipient's read of the record is the repository's read in a context bound to the recipient (`Host.As`, the ORM's `WithPrincipal`): a user by its id, a party or an agent run with its active grants. A reply's action runs in a transaction of the database as the sender (`Host.Acting`: `WithPrincipal`, and `WithBehaviorCaller` with the permissions the channel's trust leaves it), and its `ReplyContext` holds that transaction as the ORM's `TxInterface`. | Repositories opened for the principal, as Rust's are (D191), which Go's typed repositories need no second set of. |
+| `Raise`, `FromBehaviorEvent`, `Cleared` and `ScheduleSubscription` take the caller's transaction as the ORM's `TxInterface` (`Host.In`), so the event commits with the change; nil opens a transaction of its own. `FromBehaviorEvent` takes the event as the Go behaviors adapter hands a project's Workers method: its kind, the row's key and its payload. | A transaction type of the notifier's own, which a Workers method would have to convert to. |
+| As in Rust: the wall time of quiet hours and of a digest's date is read from Postgres (`AT TIME ZONE`), and the pure rule over it (`QuietDelaySeconds`) is shared; a notice's next reference is taken in a savepoint of the routing transaction (the ORM's nested `Transaction`) and tried again when another notice of the recipient took it; a reply action (`notify.ReplyAction`: permission, describe, `Run`, `Undo`) and `ApprovalReplies(table, permission)`, the `approve` and `deny` of `approval.requested`, which decide the approval as the replier within the channel's trust, refuse an agent run and a decided approval, and write D158's `state`, `decidedBy`, `decidedVia` and `decidedAt`. | |
+| Whether an adapter reports statuses or reads inbound messages is its definition's optional operations, which Go reads as the interfaces it implements, `providers.ChannelStatusReader` and `ChannelInboundReader`: `Providers` binds an adapter so it implements exactly the ones its instance does (`CheckInstance`). | A list of operations beside the adapter, which in Go is the interface's own answer. |
+| A trust row's permissions are `nil` for no cap and empty for none (`ReplyAllows`, `NarrowedPermissions`), as Rust's `Option` and TypeScript's `null`. | A pointer to a slice. |
+| The pure parts are read from `runtime/http/testdata/notify_parity.json` (D191's), which TypeScript's `notify-parity.test.ts` writes: `NormaliseAddress`, `ReadReplyText`, `LooksLikeCode`, `QuietDelaySeconds`, `ReplyAllows`, `NarrowedPermissions`, `CodeHash` and `SameID`. | |
+| Password reset is `notify.PasswordReset` over the identity service's new `UserOfLogin` and `ResetPassword`, which ends every session of the user. | |
+
+Built: the refusals of D180 lose `@event`, `@notifier` and
+`@channelIdentities` (`verify/go_features.go`); the schema runtime's
+`notifications` package; ormgen's `notifications.go`
+(`ormgen/notifications.go`, `templates/notifications.tmpl`, golden of
+fixture-notifications-db); the HTTP runtime's `notify` package
+(`runtime/http/go/notify`) and its parity test; `identity.Service`'s
+`UserOfLogin` and `ResetPassword`; fixture-notifications-db's `Approval`
+table, TypeScript's exported pure functions, the parity file and its
+test, as D191 has them. `TestGoNotificationsEndToEnd` runs D153's cases,
+the TypeScript repositories' ten, and the approval case of the Rust ones,
+through the Go repositories and `notify` on Postgres over a stand-in SMS
+relay and mail relay: an urgent event reaches two recipients, skips one
+who cannot read the record, and escalates to email; `ack`, `done 142` and
+`undo` as their sender with the audit; SMS refused `done`, and an address
+entered by hand only acknowledging; a reply by reference; a code
+verifying an address and an unknown sender reaching nothing; a failed
+send falling through and an adapter down alerted once; quiet hours,
+digests and record; statuses, inbound, a cleared reference and a
+behavior's event; password reset by email; and an approval asked of its
+approvers, refused by SMS, approved and denied by email, and decided
+once. The guides' Go sections.
+
+Left:
+
+- Go on SQLite, as in every language (D153's).
+- A route to an agent in Go, which is logged and reaches no one, and a
+  party's channel identity that lapsed with its grants (D157's
+  `identityLapsed`), which the Go notifier does not ask: D192's, which
+  ports parties and agents to Go.
+- A generated Go server that builds the notifier into its `Deps`, mounts
+  the inbox and the relay routes, and fills a `@worker` of the dispatch
+  queue with `Handle`; an app wires them, as in TypeScript (D153's left).
 
 ## D191. The Rust runtime serves D153's notifier on Postgres: the definition carries each table's events and notifier part, `orm::notify` raises, routes, delivers, escalates and reads replies as the TypeScript notifier does, and an approval's approve and deny are two reply actions (D153, D181 amended)
 
