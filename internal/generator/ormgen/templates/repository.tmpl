@@ -5258,7 +5258,7 @@ func (r *{{ $repo.Name }}) RunEvent(ctx context.Context, event types.{{ . }}, cl
 }
 {{- end }}
 
-{{ docComment "" (printf "coreOwn is row's own fields as the behaviors' core reads them (D103), by the layout's field names: each own column's value as encoding/json writes it, a date-time as epoch milliseconds, and a member the insert leaves unset absent.%s" (or (and .EncryptedFields " An encrypted field's envelope is no value of the core's.") "")) }}
+{{ docComment "" (printf "coreOwn is row's own fields as the behaviors' core reads them (D103), by the layout's field names: each own column's value as encoding/json writes it, a date-time as epoch milliseconds, and a member the insert leaves unset absent.%s%s" (or (and .CoreOwnDefaults " A member left \"\" that takes its default, an enum's or an @audience table's audience or agent access (D156), is its default, as createColumns binds it.") "") (or (and .EncryptedFields " An encrypted field's envelope is no value of the core's.") "")) }}
 func (r *{{ .Name }}) coreOwn(row *types.{{ .TypeName }}) map[string]any {
 	own := map[string]any{}
 	{{- range .CoreOwn }}
@@ -5280,6 +5280,12 @@ func (r *{{ .Name }}) coreOwn(row *types.{{ .TypeName }}) map[string]any {
 	}
 	{{- else if .Present "row" }}
 	if {{ .Present "row" }} {
+		own[{{ printf "%q" .Field }}] = {{ .Value "row" }}
+	}
+	{{- else if .EnumDefault }}
+	if {{ .Value "row" }} == "" {
+		own[{{ printf "%q" .Field }}] = {{ .Column.GoType }}({{ printf "%q" .EnumDefault }})
+	} else {
 		own[{{ printf "%q" .Field }}] = {{ .Value "row" }}
 	}
 	{{- else }}

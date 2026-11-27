@@ -14,10 +14,11 @@ import (
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 )
 
-// audienceBehaviorsFixture is the DB service whose @audience table
-// composes behaviors (D156, D103): a Task its owner keeps private or shows
+// audienceBehaviorsFixture is the DB service whose @audience tables
+// compose behaviors (D156, D103): a Task its owner keeps private or shows
 // to the principals it names, whose status is a Workflow and which holds a
-// conversation.
+// conversation, and a Note its author keeps private unless it says
+// otherwise, whose summary a deriver writes (D146).
 const audienceBehaviorsFixture = "fixture-audience-behaviors-db"
 
 // audienceBehaviorsCheck is the file tsc checks the fixture's package
@@ -38,8 +39,10 @@ var audienceBehaviorsCases = []string{
 	"the core reads a private row's audience ids as a list of UUIDs, on bun:sqlite",
 	"a private row's behaviors answer its owner, and are not found for anyone else, on bun:sqlite",
 	"a named row's behaviors answer the principals it names, and are not found for anyone else, on bun:sqlite",
+	"a create that names no audience takes the table's defaults, on bun:sqlite",
 	"a private row's behaviors answer its owner, and are not found for anyone else, on Postgres",
 	"a named row's behaviors answer the principals it names, and are not found for anyone else, on Postgres",
+	"a create that names no audience takes the table's defaults, on Postgres",
 }
 
 // TestAudienceBehaviorsEndToEnd holds behaviors on an @audience table to
@@ -56,7 +59,10 @@ var audienceBehaviorsCases = []string{
 // Comments post and list, an update and a delete of a private row, and of
 // a named one, answer the principals the row is visible to, and are not
 // found for anyone else: the row's audience ids, a uuid[], are no longer
-// refused as no UUID. The Postgres cases skip without the database.
+// refused as no UUID. On each, a create through the core that names
+// neither audience nor agentAccess takes the table's defaults, as Go's
+// repositories do (ormgen's TestHeldBehaviorTablesOnPostgres). The
+// Postgres cases skip without the database.
 func TestAudienceBehaviorsEndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the generated repositories' end-to-end check in -short mode")
