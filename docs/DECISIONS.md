@@ -1907,7 +1907,9 @@ Left:
 - Search across tables, the calendar and its feed, references and
   notifications applying `audienceConditions` (sections 2 to 5), and the
   backlinks an owner sees, designed above.
-- A generated route and declared query that list the active grants.
+- A generated route and declared query that list the active grants. A
+  `@tableOperation` over an API's `@source` view of the grants table
+  lists every grant, the ended and the revoked among them.
 - A generated TypeScript server that wires `accessLogOf` and
   `grantAuthenticator` itself; an app passes them in the router's options
   now. The Go server records its calls in the access log itself (D180);
@@ -1964,12 +1966,13 @@ the example's own on Node.js and Bun.
 
 Left:
 
-- Go and Rust: the five interfaces, `providersFrom` and the injection in
-  each runtime, and the principal kind in Go's auth hooks (D156's
-  `callerPrincipal`).
-- The generated server: a TypeScript API that lists providers gets its
+- Go: the five interfaces, `providersFrom` and the injection, and the
+  principal kind in Go's auth hooks (D156's `callerPrincipal`). Rust
+  has them (D185).
+- The generated TypeScript server: an API that lists providers gets its
   slots from the IR and builds `Providers` into its `Deps`, importing the
-  listed packages; today the project's wiring calls `providersFrom`.
+  listed packages, as the Rust server does (D185); today the project's
+  wiring calls `providersFrom`.
 - A provider package named by its npm name, resolved from the service's
   `node_modules`, beside a directory.
 - Provider packages in build-all's dependency graph (D136) and in its
@@ -2053,8 +2056,9 @@ Left:
 - Generated routes, MCP tools and SDK methods for references and
   attachments; an app writes its routes over `orm.references` and
   `orm.attachments` now (`examples/references-files/server`).
-- The Go and Rust repositories, on Postgres and on SQLite, and Python's.
-  (References and attachments on SQLite and D1, in TypeScript: D182.)
+- The Go repositories, on Postgres and on SQLite, Rust's on SQLite, and
+  Python's. Rust's on Postgres are D185's. (References and attachments
+  on SQLite and D1, in TypeScript: D182.)
 - The file processor (section 9) and its wiring: `pending` and
   `processed` are its seam. Search (section 5) indexes `extractedText`.
 - D142's content-addressed objects once PR 512 merges, and a multipart
@@ -2621,7 +2625,7 @@ Left:
 - The typed filters' one-to-many members; a path filter is the
   untyped repositories' and the table operations' so far.
 - The D152 to D159 features the refusals name, which the later Rust
-  entries port.
+  entries port: D185 ports D154 and D159.
 
 ## D182. The TypeScript repositories run on SQLite and D1, an audience there is a JSON array of ids a trigger keeps and a read reaches through json_each, references and files are row triggers, and no trigger counts on another firing (D79, D116, D154, D156 amended)
 
@@ -2839,3 +2843,60 @@ Left:
 - A test that builds an API with the orchestration for Cloudflare: the
   Workers entrypoints (`fetch.ts`, `drain.ts`) carry the same wiring, and
   the example's stack has a local environment alone.
+
+## D185. The Rust runtime and server serve D159's runtime providers and D154's references and attachments on Postgres, a Rust provider is a crate whose Cargo.toml declares it, and a provider holds its principal in its context (D154, D159, D181 amended)
+
+D159 built the five runtime interfaces in TypeScript alone, and D154 the
+references and attachments of the TypeScript repositories; D181 refused
+both in the Rust outputs. This entry ports them to Rust, on Postgres, with
+the TypeScript tables, statements, locks, checks and refusals. It is the
+second of the Rust parity entries.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The runtime's `providers` module holds the five interfaces as traits (`CredentialProvider`, `ChannelAdapter`, `SandboxProvider`, `ModelProvider`, `FileProcessor`), the contracts (`RUNTIME_CONTRACTS`, held to `runtime_contracts.json` by a test as TypeScript's is), `define_provider`, `ProviderSettings`, `providers_from` and `Providers`, `use_credential` and `ExtensionAuthenticator`. A required operation is a trait method with no default, so the compiler holds a provider to it; an optional one (a channel's `status` and `inbound`) has a default that answers `Unsupported`, and the definition lists the optional ones it implements. A model's `embed` answers `None` by default, as the TypeScript one is left out. | A runtime check of each instance's methods, which TypeScript needs and Rust's types make moot. |
+| A Rust provider is a crate whose Cargo.toml declares it under `[package.metadata.superschematic.provider]`, the keys of a package.json's `superschematic.provider`, and whose root exports `pub fn definition() -> ProviderDefinition`. An API's config lists its directory as it lists a package's; the loader reads either manifest, or both when the directory holds both, which then declare one provider (`RuntimeProvider.Crate`, and `Dir`, which no schema.json holds). A Rust server refuses a listed provider with no crate. | A crate named by its crates.io name, which a provider an app writes for itself has none of; a manifest file of its own, a third form beside package.json and Cargo.toml. |
+| The generated Rust server links the listed crates by path and holds `Arc<Providers>` in its `Deps`, which its entrypoint builds with the API crate's `providers::from_config`: the slots, each crate's `definition()`, and the manifest the build read of each, which `check_provider_manifest` holds the definition to at start, so the crate that runs is the one the build checked. A `Secret<string>` field becomes a `SecretValue`, an empty one unset. The TypeScript server's wiring stays the project's (D159's left). | The project's wiring calling `providers_from`, which a Rust server's generated entrypoint would leave it no place to do. |
+| Rust has no ambient caller (D181), so a provider does not run within its principal: its `ProviderContext` carries it (kind `extension`, subject `extension:<name>`, its role), and a provider that writes through the app's repositories opens them `with_access(AccessCaller::of(Some(&context.principal)))`; `Providers::principal_of(slot)` gives the same to core. `create` is synchronous, and made on first use. | A task-local caller, which D181 turned down. |
+| `Injection`'s fields are private, a provider makes one only from a `SecretValue`, and `apply_injection` takes it by value, so no other type passes for one and the value is gone once applied. Its debug, display and JSON forms show the reference and target alone. | A wrapper the caller unwraps. |
+| The repositories' `references()` and `attachments()` (`orm::rowfeatures`) run the TypeScript runtime's statements over the definition rustgen writes into the Postgres definition (`references`, `attachments`, each keyed by type name, since a Rust repository is opened by its type). A visible row is read through its table's repository, which keeps the caller's audience and grants (D156, D181). A write that takes an advisory lock and more than one statement (`add`, `begin`, `file`, `release`) runs in the caller's transaction, and a client outside one is refused, as a write through the behaviors' core is. A refusal is `Error::Refused` of its code, status 422, as the example server answers TypeScript's `RowFeatureError`. | A savepoint per call, which needs a mutable client the repositories do not hold; `BEGIN` on a pooled connection, which a dropped future would leave open. |
+
+Built: the runtime's `providers` module
+(`runtime/http/rust/src/providers/`) and `orm::rowfeatures`
+(`runtime/http/rust/src/orm/rowfeatures.rs`, with `Definition.references`
+and `.attachments`); rustgen's definitions and the generated
+`references()` and `attachments()` (`internal/generator/rustgen/rowrefs.go`,
+golden `fixture-references-db`); the crate manifest
+(`internal/loader/providers.go`); the API crate's `src/providers.rs`, its
+Cargo dependencies and `Deps.providers` (`internal/generator/rustrestgen/providers.go`),
+and the entrypoint's (`servergen`); the refusals of D181 lose
+`@references`, `@attachments` and `@providers` slots and gain a provider
+with no crate. `examples/runtime-providers/rust` ports a stub of each
+interface: sms-relay-a and sms-relay-b, a vault broker, a local-process
+sandbox, a model stub and the text-preview processor.
+`TestRustReferencesEndToEnd` runs D154's "done when", the TypeScript
+repositories' five cases, through the generated Rust repositories on
+Postgres, over a bucket in memory that checks each PUT against its signed
+URL. `TestRustProvidersEndToEnd` builds a Rust server whose config lists
+the six crates and runs D159's: each provider in the server with no change
+to core and as its own principal, the SMS swap as a config change with the
+deliveries recorded through the repositories and read back through the
+router, a credential that reaches the runner alone, the refusals at start,
+and a provider calling the app with its key and its role alone.
+
+Left:
+
+- Rust on SQLite: TypeScript serves references and attachments there
+  (D182), and the loader refuses a service that lists sqlite and enables
+  Rust types with either (`sqliteReaders`), which this entry holds Rust
+  to now that its outputs no longer refuse them on every dialect.
+- The coverage check (`no-provider`) is the stack's and holds for a Rust
+  API as for any; no Rust feature registers one yet, since notifications,
+  agents and attachments' processing are not served in Rust.
+- The file processor's wiring to `pending` and `processed`, which neither
+  runtime does yet (D154's and D159's left).
+- A generated Rust server that wires `ExtensionAuthenticator` itself, from
+  keys the API's config holds; an app passes it in its `Handlers`.
+- The Rust stubs answer from an outbox in the process, where the
+  TypeScript ones call their service over HTTP: a real adapter crate
+  brings its own client.

@@ -19,6 +19,9 @@ pub mod deps;
 {{ if .Identity -}}
 pub mod identity;
 {{ end -}}
+{{ if .Providers -}}
+pub mod providers;
+{{ end -}}
 pub mod interfaces;
 pub mod openapi;
 pub mod operations;

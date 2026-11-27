@@ -1,0 +1,30 @@
+# A channel adapter for an SMS relay that takes JSON and signs its
+# callbacks with HMAC-SHA256 (D159, D185): the Rust port of
+# providers/sms-relay-a. The build reads the provider below, as it reads
+# the package's package.json.
+[package]
+name = "sms-relay-a"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[package.metadata.superschematic.provider]
+name = "sms-relay-a"
+implements = "channel"
+operations = ["send", "health", "status", "inbound"]
+role = ["messages.relay"]
+
+[package.metadata.superschematic.provider.config]
+URL = { description = "The relay's base URL." }
+TOKEN = { secret = true, description = "The relay's API token, which also signs its callbacks." }
+SENDER = { optional = true, description = "The number messages are sent from; the relay's default when unset." }
+
+[dependencies]
+async-trait = "0.1.89"
+ring = "0.17.14"
+serde_json = "1.0.149"
+superschematic-http-runtime = { path = "../../../../runtime/http/rust" }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

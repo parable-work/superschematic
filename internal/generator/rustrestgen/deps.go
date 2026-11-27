@@ -594,6 +594,9 @@ func (o *APIOutput) DepsUses() []string {
 	if o.Deps != nil && len(o.Deps.MemoryStores) > 0 {
 		runtime = append(runtime, "memorystore::MemoryStore")
 	}
+	if o.Providers != nil {
+		runtime = append(runtime, "providers::Providers")
+	}
 	switch {
 	case o.Deps != nil && o.Deps.Database != "" && o.Deps.SQLite:
 		runtime = append(runtime, "orm::sqlite::Database")

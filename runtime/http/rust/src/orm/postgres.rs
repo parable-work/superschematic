@@ -299,6 +299,20 @@ impl<'a, C: GenericClient + Sync> Repositories<'a, C> {
     }
 }
 
+impl<'a, C: CoreClient> Repositories<'a, C> {
+    /// The references of the database's rows (D154), as the repositories
+    /// read: an [`Error::Invalid`] for a database that keeps none.
+    pub fn references(&self) -> Result<super::rowfeatures::References<'_, 'a, C>, Error> {
+        super::rowfeatures::References::new(self)
+    }
+
+    /// The files of the database's rows (D154), as the repositories read:
+    /// an [`Error::Invalid`] for a database that holds none.
+    pub fn attachments(&self) -> Result<super::rowfeatures::Attachments<'_, 'a, C>, Error> {
+        super::rowfeatures::Attachments::new(self)
+    }
+}
+
 impl<C: GenericClient + Sync> Repositories<'_, C> {
     /// Runs a table operation (D106) on its table's repository, for the
     /// route's caller, and answers the row's view or a page of views. The
@@ -1043,6 +1057,12 @@ impl<'a> FromSql<'a> for Decimal {
 
 /// Column `i` of `row` as its row's member: a UUID in base62, a decimal
 /// as its text, and the rest as a queue's message reads a column.
+/// A column of a row as the JSON value it holds, as a repository reads
+/// one: what the references and attachments read their statements by.
+pub(crate) fn cell_value(row: &Row, i: usize, column: &Column) -> Result<Value, String> {
+    cell(row, i, column)
+}
+
 fn cell(row: &Row, i: usize, column: &Column) -> Result<Value, String> {
     let ty = row
         .columns()

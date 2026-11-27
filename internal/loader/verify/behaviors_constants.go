@@ -159,8 +159,9 @@ func (f *tableFields) unreadFields() []string {
 
 // checkConstantsConfig holds the config of a Constants use a table
 // implements to the table (D104), in the core's words where the core sees
-// the problem (superschematic_rules_behaviors::constants): each of fields
-// names an own field of the table, and each oneWay member one that fields
+// the problem (superschematic_rules_behaviors::constants): fields or oneWay
+// names a field, each of fields names an own field of the table, and each
+// oneWay member one that fields
 // does not list and that holds a boolean, a number or a date-time. What only
 // the IR shows is the build's: a field a behavior owns, which only its
 // operations change; a relation named by its field; an audit field, which
@@ -181,6 +182,13 @@ func checkConstantsConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef,
 	}
 	fail := func(format string, args ...any) {
 		r.errorf(td.Owner, "type %s: behavior %s config: %s", td.Name, ref.Name, fmt.Sprintf(format, args...))
+	}
+	// fields may be left out beside oneWay, a table whose one rule is a
+	// field that only moves forward (a read mark); a config with neither
+	// (a permission alone) keeps nothing.
+	if len(config.Fields) == 0 && len(config.OneWay) == 0 {
+		fail("fields: Constants keeps no field: name one in fields, or in oneWay one that moves one way")
+		return
 	}
 	fields := tableFieldsOf(schema, td, uses)
 	// kept is why name, at the config's place at, is no own field a

@@ -681,9 +681,28 @@ a key such as `{ id }`, which the HTTP runtime's `encodeCursor` and
 
 ## JSON columns
 
-A class marked `@jsonField` (from `@superschematic/schema`) is not a table.
-A field of its type, or of a list of it, is a `JSONB` column, read and
-written with its row, and the ORM marshals it for you. `shop-db`'s
+A class marked `@jsonField` (from `@superschematic/schema` or
+`@superschematic/db`) is not a table. A field of its type, or of a list of
+it, is a `JSONB` column, read and written with its row, and the ORM
+marshals it for you. A class with no `@key`, and nothing else a table
+declares, that only `@jsonField` fields hold, or the fields of other such
+classes, is not a table either, marked or not:
+
+```ts
+export abstract class Line { text: string; }
+export abstract class Shown { lines: Line[]; }
+
+export abstract class Note {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  @jsonField
+  shown: Nullable<Shown>;
+}
+```
+
+A class that any other field holds, or that no field holds, is a table,
+as is a class with a key that a `@jsonField` field holds, which keeps a
+copy of a row. `shop-db`'s
 `ShippingAddress` is one; see
 [Modeling types](/superschematic/guides/modeling-types/#constraints). Maps
 and lists of lists are `JSONB` too. A compiler before D83 made such a
@@ -1193,7 +1212,9 @@ repositories on SQLite read neither sub-table yet, so a service that lists
 
 ### References and backlinks
 
-The repositories hold `references` beside the tables:
+The repositories hold `references` beside the tables, as does each
+transaction the ORM opens, so a behavior worker's `Workers` method reaches
+them on the `tx` it is handed:
 
 ```ts
 await orm.references.add({ from: { table: "Note", key: note }, to: { table: "Issue", key: issue }, role: "blocks" });
@@ -1272,6 +1293,21 @@ Extraction and previews are a file processor's, the `files` interface of
 which attachments do not call yet: `complete` asks a file's extraction and
 `download` its preview, and `pending` and `processed` are what a processor
 reads and records.
+
+In Rust, the generated repositories open the same operations,
+`references()` and `attachments()`, over the same tables and statements,
+on Postgres (D185). A write that takes a lock, `add`, `begin`, `file` and
+`release`, runs in the caller's transaction, and a refusal is the
+`Error::Refused` of its code, with status 422:
+
+```rust
+let mut client = pool.get().await?;
+let tx = client.transaction().await?;
+let orm = Repositories::new(&tx)?.acting(Some(user)).with_access(AccessCaller::of(Some(&principal)));
+let backlinks = orm.references()?.referenced_by(&RowRef::new("Issue", &key), None).await?;
+let (file, upload) = orm.attachments()?.begin(&begin, bucket.as_ref(), None).await?;
+tx.commit().await?;
+```
 
 ## State machines
 
@@ -2843,12 +2879,24 @@ Task <id>'s urgent only turns true: an update may not move it from true to false
   `Generic.Decimal`, which reaches the core as text, a list), one encrypted
   at rest, a relation by its name (name its `<relation>Id`), an audit field
   and a field another behavior owns.
-- `fields` takes at least one field, and the build refuses in it what it
-  refuses in `oneWay` but the type: a field encrypted at rest, or a list or
+- `fields` may be left out beside `oneWay`: a table whose one rule is a
+  field that only moves forward, such as a read mark, implements
+  `Constants<Message, { oneWay: { readAt: "up" } }>`. Given, `fields` lists
+  one field at least, and a config with neither keeps nothing and is
+  refused. The build refuses in `fields` what it refuses in `oneWay` but
+  the type: a field encrypted at rest, or a list or
   a map of date-times, whose values the core never reads (the
   repositories keep an encrypted field's envelope from it, and no adapter
   converts a list of date-times), a relation by its name, an audit field
   and a field another behavior owns.
+- A config that reads a value of the row names a to-one relation by the
+  field that holds its key: `authorityId` for `authority:
+  Relation<Authority>`. Its TypeScript types (`FieldOf<T>` from
+  `@superschematic/db`) take that name and refuse the relation's, as the
+  build does, in Constants' `fields` and `oneWay`, StateRules' `required`,
+  `frozen` and `by`, Approvals' `resetOn`, and the field members of
+  Presence, Lease, Retries, Budget, Seats and Pool. `@enqueueOnChange` and
+  a `link` or `via` name the relation itself.
 
 **StateRules.** `states` gives, by a state of the table's Workflow, its
 rules: `required`, the own fields a row must hold to enter the state and
