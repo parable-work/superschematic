@@ -230,6 +230,18 @@ func implemented(endpoints []EndpointInfo) []EndpointInfo {
 	return out
 }
 
+// BehaviorsHeld reports whether the behavior operations run on a database
+// whose rows keep to a caller (D156, D181), one with an @audience table or
+// grants: each then checks, before the core runs, that the request's caller
+// may write the row, or for an operation that writes nothing see it, through
+// the repositories of the database's Rust types, as their update_one and
+// operation do, and answers a row out of reach as the core's not_found of a
+// row no live row holds. The crate then depends on those types' Postgres
+// repositories (HasDatabaseTypes).
+func (o *APIOutput) BehaviorsHeld() bool {
+	return o.HasBehaviorOperations() && o.heldDatabases[o.BehaviorDatabase()]
+}
+
 // BehaviorDatabase is the DB service the behavior operations and the
 // behavior workers run on, the API's database; empty without one.
 func (o *APIOutput) BehaviorDatabase() string {
@@ -398,11 +410,18 @@ func (o *APIOutput) BehaviorUses() []string {
 			}
 		}
 	}
-	pool := "use " + o.RuntimeCrateIdent + "::postgres::Pool;"
+	postgresItems := []string{"Pool"}
 	if o.EmitsEvents() {
 		// EventRun holds a transaction of the pool (D104).
-		pool = rustutil.UseLine(o.RuntimeCrateIdent+"::postgres", []string{"tokio_postgres", "Pool"})
+		postgresItems = append(postgresItems, "tokio_postgres")
 	}
+	if o.BehaviorsHeld() {
+		// reach opens the database's repositories on the operation's
+		// transaction of the pool (D156, D181).
+		postgresItems = append(postgresItems, "deadpool_postgres")
+		runtime = append(runtime, "orm")
+	}
+	pool := rustutil.UseLine(o.RuntimeCrateIdent+"::postgres", postgresItems)
 	uses := []string{
 		rustutil.UseLine(strings.ReplaceAll(RulesAdapterCrate, "-", "_"), adapter),
 		pool,
@@ -705,6 +724,14 @@ func (o *APIOutput) checkBehaviorDeps(deps *DepsInfo) error {
 	}
 	if deps.Behaviors.Layout == "" || deps.Behaviors.AdapterPath == "" || deps.Behaviors.BehaviorsPath == "" {
 		return fmt.Errorf("rustrestgen: %s %s (D103), and its Deps lacks the layout of %s's tables or the paths of %s and %s", o.SchemaName, o.behaviorWork(), db, RulesAdapterCrate, RulesBehaviorsCrate)
+	}
+	if o.BehaviorsHeld() && deps.DatabaseTypesCrate == "" {
+		// The reach of a row is checked through the database's
+		// repositories, which a crate that names none would leave unchecked.
+		return fmt.Errorf("rustrestgen: %s %s (D103) on rows of %s that keep to a caller (D156), whose reach each operation checks through the repositories of %s's Rust types, and its Deps names no Rust types of %s (D181)", o.SchemaName, o.behaviorWork(), db, db, db)
+	}
+	if o.BehaviorsHeld() && deps.SQLite {
+		return fmt.Errorf("rustrestgen: %s %s (D103) on rows of %s that keep to a caller (D156), which the Rust repositories hold on Postgres alone (D181, D182), and %s is a SQLite file", o.SchemaName, o.behaviorWork(), db, db)
 	}
 	return nil
 }

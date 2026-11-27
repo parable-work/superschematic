@@ -1080,13 +1080,16 @@ see it (D156). The build adds five columns: `audience`, `audienceNamed`
 and `agentAccess`, which a write sets, and `effectiveAudience` and
 `effectiveAgents`, which a trigger resolves before each insert and
 update, through `inheritFrom` from a parent's, whatever writes the row.
-In an operation of a TypeScript server, every read of the table keeps to
-the rows its caller is in the audience of, through the repositories, a
-relation a read includes, a filter through a relation, a projection keyed
-by the table's key and a search, and every write to the same rows. A job,
-a worker and `orm.asSystem()` read every row, and an upsert of an
-`@audience` table in an operation is refused. The audience is Postgres
-alone, and the Go and Rust repositories do not apply it yet.
+In an operation, every read of the table keeps to the rows its caller is
+in the audience of. That covers the repositories, a relation a read
+includes, a filter through a relation, a projection keyed by the table's
+key and a search. Every write keeps to the same rows, and so does a
+behavior's operation on a row: a transition or a Comments post the caller
+may not make is the 404 of a row that is not there. A job, a worker and
+`orm.asSystem()` read every row, and an upsert of an `@audience` table in
+an operation is refused. The TypeScript, Go and Rust repositories apply
+the audience on Postgres. On SQLite and D1 only the TypeScript ones do
+([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)).
 [Per-record access](/superschematic/guides/api-routes/#per-record-access)
 covers the options, the grants a party or an agent run reaches rows
 through, reveal and the access log, and

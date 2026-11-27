@@ -956,7 +956,12 @@ pub const POSTGRES: &str = r#"{
           "recurrenceNextDueAt",
           "recurrenceLastDoneAt"
         ],
-        "noUpsert": true
+        "noUpsert": true,
+        "reads": {
+          "recurrence": [
+            "listOccurrences"
+          ]
+        }
       },
       "calendar": [
         {
@@ -1658,7 +1663,12 @@ pub const SQLITE: &str = r#"{
           "recurrenceNextDueAt",
           "recurrenceLastDoneAt"
         ],
-        "noUpsert": true
+        "noUpsert": true,
+        "reads": {
+          "recurrence": [
+            "listOccurrences"
+          ]
+        }
       }
     },
     {

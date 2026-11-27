@@ -549,6 +549,24 @@ pub struct Behaviors {
     /// insert would leave unwritten, so the table has no upserts.
     #[serde(default)]
     pub no_upsert: bool,
+    /// The operations on a row that write nothing, by the member they sit
+    /// under (`comments`: `listMessages`), as the core declares them: a
+    /// caller who sees the row may run one of them, and every other
+    /// operation needs a caller who may write it (D156).
+    #[serde(default)]
+    pub reads: BTreeMap<String, Vec<String>>,
+}
+
+impl Behaviors {
+    /// Whether `operation` under `member` writes: every operation the
+    /// definition does not name a read, so one written before it named
+    /// them needs a caller who may write the row.
+    pub fn writes(&self, member: &str, operation: &str) -> bool {
+        !self
+            .reads
+            .get(member)
+            .is_some_and(|reads| reads.iter().any(|read| read == operation))
+    }
 }
 
 impl Table {
@@ -1808,6 +1826,21 @@ mod tests {
             .of_kind(PrincipalKind::Party)
             .acting_for(ActingFor::user(owner));
         assert_eq!(AccessCaller::of(Some(&party)).audience_ids(), [user]);
+    }
+
+    #[test]
+    fn a_behavior_operation_writes_unless_the_definition_names_it_a_read() {
+        // A caller who sees a row runs a read; every other operation, and
+        // every one of a definition that names none, needs write reach
+        // (D156).
+        let behaviors: Behaviors =
+            serde_json::from_str(r#"{"owned": [], "reads": {"comments": ["listMessages"]}}"#)
+                .unwrap();
+        assert!(!behaviors.writes("comments", "listMessages"));
+        assert!(behaviors.writes("comments", "post"));
+        assert!(behaviors.writes("status", "listMessages"));
+        let before: Behaviors = serde_json::from_str(r#"{"owned": []}"#).unwrap();
+        assert!(before.writes("comments", "listMessages"));
     }
 
     #[test]

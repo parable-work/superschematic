@@ -5181,8 +5181,14 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }
 }
 {{- else }}
 
-{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result.%s It returns ErrNotFound when no live row holds id, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.Preconditions " It presents the preconditions WithPreconditions names (D104).") "")) }}
+{{ docComment "" (printf "%s runs %s's %s on the row id names, in a transaction, and returns its result.%s It returns ErrNotFound when no live row holds id%s, and any other refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.Preconditions " It presents the preconditions WithPreconditions names (D104).") "") (or (and $repo.HeldByAccess (or (and .Writes ", or the row is one the operation's caller may not write (D156), as UpdateOne's is") ", or the row is one the operation's caller does not see (D156), as GetOne's is")) "")) }}
 func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error) {
+	{{- if $repo.HeldByAccess }}
+	if err := o.r.requireReach(ctx, id{{ if $repo.PrimaryKeyIsUUID }}.ToUUID(){{ end }}, {{ .Writes }}); err != nil {
+		var none {{ .ResultReturn }}
+		return none, behaviorOutOfReach(err, {{ printf "%q" $repo.TypeName }}, {{ $repo.WireKey "id" }}, id)
+	}
+	{{- end }}
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
 	if len(params) == 0 {
