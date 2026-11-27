@@ -54,7 +54,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 
 .PHONY: all setup build cli test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
-        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust acme-engine-rust \
+        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust \
         engine-rust-soak engine-archive engine-go engine-link-check engine-servers rules-archive \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
@@ -398,21 +398,6 @@ engine-servers: versiongraph engine-archive
 # defines its own C functions alone.
 engine-link-check:
 	scripts/engine-link-check.sh
-
-# acme.Rating in the Rust engine (D58): examples/acme-schematic/crates/behaviors
-# is an extension's crate, a workspace of its own beside the engine's, checked
-# as engine-rust checks the engine: fmt, clippy, and its tests on SQLite, and
-# on Postgres too when SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one. The
-# tests read the meta-schema the acme binary writes (ACME_META_SCHEMA). acme's
-# smoke runs the same, and builds the engine crate the binary writes for a
-# schema that composes acme.Rating.
-ACME_CRATE := examples/acme-schematic/crates/behaviors
-acme-engine-rust:
-	@mkdir -p /tmp/superschematic-acme-engine
-	cd examples/acme-schematic && go run ./cmd/acme-schematic json-schema >/tmp/superschematic-acme-engine/acme-schema-file.json
-	cd $(ACME_CRATE) && cargo fmt --check \
-		&& cargo clippy --locked --all-targets -- -D warnings \
-		&& ACME_META_SCHEMA=/tmp/superschematic-acme-engine/acme-schema-file.json cargo test --locked
 
 # The Rust engine's soaks on Postgres (D58), which CI does not run: two
 # engines on one database racing long, with more threads than either pool
