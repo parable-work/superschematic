@@ -130,6 +130,15 @@ def main(argv):
     except ValueError as error:
         print(f"engine_rust_shards: {error}", file=sys.stderr)
         return 1
+    except subprocess.CalledProcessError:
+        # cargo said why above. Without the superscalar checkout it cannot
+        # read the workspace at all.
+        print(
+            "engine_rust_shards: cargo metadata failed; the workspace needs the superscalar sources "
+            "(scripts/superscalar-dep.sh --checkout)",
+            file=sys.stderr,
+        )
+        return 1
     for command in todo:
         print(("+ " if argv[0] == "run" else "") + shlex.join(command), flush=True)
         if argv[0] == "run":
