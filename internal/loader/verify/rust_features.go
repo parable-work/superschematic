@@ -49,9 +49,9 @@ type RustFeature struct {
 
 // RustTableFeatures are the features of schema's tables a Rust types crate
 // does not carry (D181), sorted by type: @party, @conversations and
-// @runRequests (D157), and @agents (D158). A Rust server is refused the same table
-// features (server); none is a server's alone since D188 served
-// Recurrence.
+// @runRequests (D157), and @agents (D158). A Rust server is refused
+// the same table features (server); none is a server's alone since
+// D188 served Recurrence.
 func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
 	_ = server
 	if schema == nil {

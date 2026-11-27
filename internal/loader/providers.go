@@ -54,7 +54,7 @@ func loadProviders(servicePath string, schema *ir.Schema, cfg *schemaconfig.Sche
 		// providers it read then.
 		schema.Providers = nil
 		for _, dir := range cfg.Providers {
-			p, err := ReadRuntimeProvider(filepath.Join(servicePath, filepath.FromSlash(dir)))
+			p, err := readProvider(filepath.Join(servicePath, filepath.FromSlash(dir)))
 			if err != nil {
 				return fmt.Errorf("%s: providers: %s: %w", schema.Name, dir, err)
 			}
