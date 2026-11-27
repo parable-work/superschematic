@@ -1948,6 +1948,18 @@ or the id of whom it acts for is in the audience of, and writes it only
 when its agent access is `followRole`. A route with no caller sees the
 rows everyone may.
 
+A table that composes behaviors ([A table's behavior
+operations](#a-tables-behavior-operations)) holds their operations to the
+same rows. That covers a Workflow transition, a Comments post, edit or
+delete, an Approvals sign-off, an Aliased rename and every other
+operation on a row. One that writes runs only for a caller who may write
+the row. One that writes nothing, such as Comments' `listMessages`, runs
+for a caller who sees it. For any other caller the row is the 404 of one
+that is not there: the call is refused before the behaviors' core reads
+the row, and nothing is written. The TypeScript, Go and Rust repositories
+hold every operation on a row to this, and so do the Go and Rust servers'
+behavior routes.
+
 Outside an operation, a job, a worker and `orm.asSystem()` read every row,
 and so does the database's own role. `orm.as(principal)` and
 `orm.withUser(id)` read as that principal. An upsert of an `@audience`
@@ -2129,6 +2141,11 @@ puts one on the request with `session.ContextWithCaller`; a step that puts
 only an id, as the identity runtime does, names a user. Each route binds
 the caller to the ORM with `orm.WithPrincipal`, so the repositories hold
 every read and write of the operation to it, as the TypeScript ones do.
+A behavior's operation on a row, such as `db.Task.Status().Transition`
+or `db.Task.Comments().Post`, checks the row before the core runs, as
+`UpdateOne` does. A row out of reach is `orm.ErrNotFound`, which wraps the
+core's `not_found` of a row that is not there, so the behavior route
+answers 404 for both.
 `orm.AsSystem(ctx)`, and a context outside any operation, read every row.
 
 ```go
@@ -2199,6 +2216,18 @@ let repositories = Repositories::new(&client)?
 Repositories opened without `with_access`, and `as_system()`, read every
 row, as a job does. `audience_conditions(definition, audience, caller,
 args, write)` in `orm` is the predicate a read across tables applies.
+
+A behavior's operation through the repositories (`operation`, and each
+use's typed methods) checks the row as `update_one` does, and answers a
+row out of reach with `Error::NotFound`. `Repository::reach(key, write)`
+is the same check, for code that runs the core itself. The server's
+behavior routes run the core through the rules adapter. Over a database
+whose rows keep to a caller (an `@audience` table or grants), each route
+opens the database's Rust repositories for the request's caller and checks
+the row before the core runs. A row out of reach gets the core's 404 for
+a row that is not there. So the crate depends on the database's Rust
+types and their Postgres repositories, and the build refuses one whose
+`Deps` names none.
 
 The grants and the access log are in the runtime's `access` module:
 

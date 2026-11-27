@@ -1829,6 +1829,21 @@ mod tests {
     }
 
     #[test]
+    fn a_behavior_operation_writes_unless_the_definition_names_it_a_read() {
+        // A caller who sees a row runs a read; every other operation, and
+        // every one of a definition that names none, needs write reach
+        // (D156).
+        let behaviors: Behaviors =
+            serde_json::from_str(r#"{"owned": [], "reads": {"comments": ["listMessages"]}}"#)
+                .unwrap();
+        assert!(!behaviors.writes("comments", "listMessages"));
+        assert!(behaviors.writes("comments", "post"));
+        assert!(behaviors.writes("status", "listMessages"));
+        let before: Behaviors = serde_json::from_str(r#"{"owned": []}"#).unwrap();
+        assert!(before.writes("comments", "listMessages"));
+    }
+
+    #[test]
     fn a_time_is_rfc_3339_to_the_millisecond() {
         let at = SystemTime::UNIX_EPOCH + Duration::from_millis(1_791_979_200_125);
         assert_eq!(rfc3339_millis(at), "2026-10-14T12:00:00.125Z");
