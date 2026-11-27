@@ -34,6 +34,13 @@
 //! holders and the rows a delete reaches are queries of the type's table,
 //! and a soft-deletable table serves its live rows alone.
 //!
+//! Development mode's General documents publish as the tables `format
+//! --to=ts` writes them as, of the DB service a publish names
+//! (`Publish::service`). [`Runtime::publish_from`] moves a development
+//! store to an empty runtime database, its rows replayed as creates
+//! through each type's rules, and [`development_documents`] reads the
+//! schemas a store's types are live at.
+//!
 //! ```no_run
 //! use serde_json::json;
 //! use superschematic_rules::Caller;
