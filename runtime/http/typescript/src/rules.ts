@@ -845,6 +845,13 @@ export interface RulesHost {
   readonly now?: () => number;
   /** The request id of a command the wrappers build, unique per command; crypto.randomUUID() unless set. */
   readonly request?: () => string;
+  /**
+   * False sends no wake after a command (wakeQueues): the generated
+   * repositories on SQLite and D1 set it, where no drain worker runs and an
+   * enqueue wakes none (D145's left, D182), as the Go SQLite rules host
+   * gives no Wake. Unset, the command wakes as the module says.
+   */
+  readonly wakes?: boolean;
 }
 
 /** What an applied command came to. */
@@ -1092,12 +1099,11 @@ async function perform(host: RulesHost, type: string, command: CoreCommand, opti
  * wakes are sent once the statements have run, before the caller's
  * transaction commits, as an enqueue's are (D145): the run's drain waits a
  * while for what falls due, and the next firing finds what it missed. A
- * host with no waker sends nothing, and a wake never fails the command.
- * A unit on SQLite or D1 wakes nothing: no drain worker runs over a SQLite
- * file, and an enqueue there wakes none either (D145's left, D182).
+ * host with no waker sends nothing, a host whose wakes is false sends none,
+ * and a wake never fails the command.
  */
 function wakeQueues(host: RulesHost, changes: CoreChangeSet): void {
-  if (host.store.dialect === 'sqlite') return;
+  if (host.wakes === false) return;
   for (const event of changes.events ?? []) {
     const queue = host.layout.types[event.row.type]?.events?.queue;
     if (queue !== undefined) wakeAfterEnqueue(queue);

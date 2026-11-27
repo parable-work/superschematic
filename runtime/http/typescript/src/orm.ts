@@ -3284,7 +3284,8 @@ class TableRepository {
     if (this.orm.dialect === 'sqlite') {
       const sqlite = this.runner.sqlite;
       if (sqlite === undefined) throw new Error(`orm: ${this.def.name} composes behaviors (D103), and the repositories on SQLite run over no SqlDatabase; open them with sqliteOrm`);
-      return { core: this.rules, layout: this.orm.rules, store: sqliteRulesStore(sqlite.db) };
+      // No wake on SQLite or D1, where no drain worker runs (D145's left).
+      return { core: this.rules, layout: this.orm.rules, store: sqliteRulesStore(sqlite.db), wakes: false };
     }
     const queryable = this.runner.queryable;
     return {

@@ -326,9 +326,12 @@ describe('the host loop on any core', () => {
       const moving = memoryStore('postgres', draftRow, Array(MAX_ATTEMPTS).fill(false)).store;
       await expect(execute({ core, layout: hearing, store: moving }, 'Order', transition('paid'))).rejects.toMatchObject({ refusal: { code: 'busy' } });
       expect(woken).toEqual([]);
-      // A unit on SQLite or D1 wakes nothing: no drain worker runs there.
-      await execute({ core: scripted([changed({ rows: [update] })]).core, layout: hearing, store: memoryStore('sqlite', draftRow).store }, 'Order', transition('paid'));
+      // A host whose wakes is false, the generated repositories' on SQLite
+      // and D1, wakes nothing; one on a SQLite store that sets none wakes.
+      await execute({ core: scripted([changed({ rows: [update] })]).core, layout: hearing, store: memoryStore('sqlite', draftRow).store, wakes: false }, 'Order', transition('paid'));
       expect(woken).toEqual([]);
+      await execute({ core: scripted([changed({ rows: [update] })]).core, layout: hearing, store: memoryStore('sqlite', draftRow).store }, 'Order', transition('paid'));
+      expect(woken).toEqual([{ queue: 'OrderChange', dueAt: undefined }]);
     } finally {
       setProcessQueueWaker(undefined);
     }
