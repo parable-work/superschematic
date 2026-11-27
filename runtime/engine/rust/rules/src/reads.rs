@@ -140,6 +140,13 @@ pub enum ReadRequest {
     /// not, so a row of a type the caller may not read never reaches the
     /// operation.
     Composing { behavior: String },
+    /// The permissions each subject holds now ([`Answer::Permissions`],
+    /// D200): what a rule that reads a permission again at each guard reads
+    /// of the subjects who signed earlier (Approvals' recheckPermission). A
+    /// person's come from their roles, an Agent's from its role. A subject
+    /// the host cannot answer for is left out of the answer, and the rule
+    /// holds it to none.
+    Permissions { subjects: Vec<String> },
 }
 
 /// One sub-table of a use, as a read across a table names it (D104): the
@@ -180,6 +187,13 @@ pub fn key_of(value: &Value) -> Option<String> {
 }
 
 impl ReadRequest {
+    /// The permissions each of the subjects holds now (D200).
+    pub fn permissions(subjects: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        ReadRequest::Permissions {
+            subjects: subjects.into_iter().map(Into::into).collect(),
+        }
+    }
+
     /// A row of a type by its key.
     pub fn row(type_name: impl Into<String>, key: impl Into<String>) -> Self {
         ReadRequest::Row {
@@ -403,6 +417,9 @@ pub enum Answer {
     /// The live versions a [`ReadRequest::Composing`] asks for, in name
     /// order.
     Specs(Vec<TypeSpec>),
+    /// The permissions a [`ReadRequest::Permissions`] asks for, by subject;
+    /// a subject the host cannot answer for is absent.
+    Permissions(BTreeMap<String, Vec<String>>),
 }
 
 /// One page of the rows of a type whose own field holds a key, whose use's

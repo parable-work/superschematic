@@ -278,14 +278,32 @@ test('declarations are the registered files, each field typed and the value fiel
   const stateRules = byName('StateRules');
   expect([stateRules.tables, stateRules.armsDeadlines, stateRules.hearsChanges, stateRules.operations ?? []]).toEqual([undefined, undefined, undefined, []]);
   // Approvals keeps its sign-offs in a sub-table of the row, keyed by their
-  // number, and neither arms a deadline nor hears a write (D104).
+  // number, and neither arms a deadline nor hears a write (D104). Each
+  // sign-off records whom its caller was, the assurance it showed, the
+  // permissions it held and the values the fields its requirements reset on
+  // held (D200).
   const approvals = byName('Approvals');
   expect([approvals.armsDeadlines, approvals.hearsChanges]).toEqual([undefined, undefined]);
   expect(approvals.tables?.map(t => ({ name: t.name, key: t.key, fields: t.fields.map(f => `${f.name}: ${f.type}`) }))).toEqual([
     {
       name: 'signOffs',
       key: 'number',
-      fields: ['number: string', 'state: string', 'subject: string', 'note: string', 'at: Temporal.DateTime', 'consumedAt: Temporal.DateTime'],
+      fields: [
+        'number: string',
+        'state: string',
+        'subject: string',
+        'kind: string',
+        'actingFor: string',
+        'actingForKind: string',
+        'agent: string',
+        'signedInAt: Temporal.DateTime',
+        'userVerified: boolean',
+        'held: Generic.JSON',
+        'values: Generic.JSON',
+        'note: string',
+        'at: Temporal.DateTime',
+        'consumedAt: Temporal.DateTime',
+      ],
     },
   ]);
   expect(approvals.operations?.map(o => [o.name, o.writes === true])).toEqual([

@@ -1,6 +1,7 @@
 import type { Authenticator, GrantReach, Principal } from './auth.js';
 import { covers } from './auth.js';
 import { activeGrants, grantAuthenticator, grantAuthenticatorAdmittingRuns, issueGrant, reachesOf, revokeGrant } from './access.js';
+import { principalCaller } from './behavior-routes.js';
 import type { BucketBody } from './bucket.js';
 import { withCaller } from './caller.js';
 import { createLogger, type Logger } from './logger.js';
@@ -1159,7 +1160,9 @@ export function createAgents(options: AgentsOptions): Agents {
     if (!run) throw new AgentsError(401, 'unauthorized', 'no such run');
     return run;
   };
-  const callerOf = (principal: Principal): CoreCaller => ({ subject: principal.subject, permissions: principal.permissions });
+  // A run's tool calls reach the core as the run: its Agent and whom it
+  // acts for, which an Approvals requirement counts it by (D200).
+  const callerOf = (principal: Principal): CoreCaller => principalCaller(principal);
 
   // ---- autonomy ----
 

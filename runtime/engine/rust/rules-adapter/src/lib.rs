@@ -97,7 +97,7 @@ pub use layout::{
     SubTable, Table, Use,
 };
 pub use superschematic_rules::{
-    Action, Caller, ChangeSet, Code, Command, Core, Refusal, Row, SubRow, TypeSpec,
+    Action, Assurance, Caller, ChangeSet, Code, Command, Core, Refusal, Row, SubRow, TypeSpec,
 };
 
 /// How many times a command whose row moved runs before it is refused as

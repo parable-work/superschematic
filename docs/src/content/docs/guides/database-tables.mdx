@@ -3060,8 +3060,9 @@ Task <id>'s urgent only turns true: an update may not move it from true to false
   Relation<Authority>`. Its TypeScript types (`FieldOf<T>` from
   `@superschematic/db`) take that name and refuse the relation's, as the
   build does, in Constants' `fields` and `oneWay`, StateRules' `required`,
-  `frozen` and `by`, Approvals' `resetOn`, and the field members of
-  Presence, Lease, Retries, Budget, Seats and Pool. `@enqueueOnChange` and
+  `frozen` and `by`, Approvals' `resetOn`, `pinOn`, `excludeSubjectsIn`,
+  a condition's `field` and `requirementsFrom`'s `in`, and the field
+  members of Presence, Lease, Retries, Budget, Seats and Pool. `@enqueueOnChange` and
   a `link` or `via` name the relation itself.
 
 **StateRules.** `states` gives, by a state of the table's Workflow, its
@@ -3096,7 +3097,11 @@ field the states are of when the table has several.
 permission, from?, excludeCreator?, resetOn?, pinned? }`: a transition
 into the state, from a state `from` lists (every state when absent),
 waits for `count` sign-offs by distinct subjects holding `permission`
-(409 `approvals_missing`, `{ state, required, count }`). Its operations,
+(409 `approvals_missing`, `{ state, required, count }`). A gate is one
+requirement; it may instead read its requirements from rows each instance
+writes (`requirementsFrom`, below), and a requirement may also say who
+counts, what proof a sign-off shows, whom it excludes and when it applies
+(D200). Its operations,
 `approvals.signOff`, `withdrawSignOff` and the read-only `listSignOffs`,
 are served by a `@behaviorOperations` set
 ([A table's sign-offs](/superschematic/guides/api-routes/#a-tables-sign-offs-approvals)).
@@ -3127,6 +3132,75 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
   signs against the version the last sign-off left.
 - A gate whose config a later build removes has its sign-offs consumed
   at the row's next write through the core.
+- **Who counts** (`callers`). `person` is a person calling as themselves;
+  `acting-for-person` an agent run acting for a person, counted as that
+  person, so two runs for one person are one signer; `agent` an agent run,
+  counted as its Agent, so two runs of one Agent are one signer. Without
+  `callers` every caller counts, as its subject. A caller the requirement
+  does not count is 409 `not_counted`.
+- **Proof** (`proof`). `none`, the default; `recent-sign-in`, a sign-in at
+  most `proofWithinMs` before the sign-off; `user-verification`, a passkey
+  with user verification on the sign-off itself. The authenticator reports
+  the caller's `assurance` (`{ signedInAt?, userVerified? }` on the
+  principal); a principal without one proves nothing.
+- **Whom it excludes.** `excludeCreator` as above, by the caller's subject
+  or whom it counts as. `excludeCreatorPerson: true` also refuses the
+  person the creator acted for, the subject the table's own `createdFor`
+  holds. `excludeSubjectsIn` names own fields that list subjects, persons
+  and Agents (`pushers`); a caller is excluded when its subject, the person
+  it acts for or its run's Agent is listed. Each is read again at every
+  guard, so a signer a later write lists stops counting.
+- **The permission again** (`recheckPermission: true`). Each guard reads
+  each signer's permission now, so a signer who lost it stops counting;
+  without it the permission is read at the sign-off.
+- **When it applies** (`when`). A list of conditions on own fields, all of
+  which must hold: `{ field, test, values, negate? }`, `test` one of
+  `every-matches` and `any-matches` (glob patterns: `*` within a path
+  segment, `**` across them), `contains` and `at-most` (one number). A
+  requirement that does not apply asks for nothing. A condition on a field
+  with no value holds, so a fact not yet written never exempts.
+- **Requirements from rows** (`requirementsFrom: { schema, link, in? }`).
+  The gate reads its requirements from the rows of `schema` whose to-one
+  relation `link` points at the row, or with `in`, at one of the keys the
+  row's own list field `in` holds. Each row holds the members above as its
+  own fields, may hold `name`, `resetOn` and `archivedAt`, and is read at
+  each guard and each sign-off, so an edit of a row applies at once; an
+  archived row asks for nothing. A sign-off counts toward every
+  requirement it meets. A row's `resetOn` spends a sign-off for that
+  requirement alone: each sign-off records the values of the fields the
+  rows reset on, and counts only while those fields still hold them. The
+  gate then names no requirement member and names its own `resetOn`, often
+  `[]`, so the writes of the facts its rows read spend nothing. A row that
+  does not parse applies and is never met, and the veto says why;
+  `approvals_missing`'s details then list each requirement still `missing`.
+  The table `schema` names composes a behavior, so the core reads its rows.
+- **Pinned fields** (`pinOn`). `signOff` takes `read`, the value of each
+  field the signer read (`{ "headSha": "..." }`); one that moved is 409
+  `stale`, `{ field, read, current }`. A write to another field makes no
+  signer stale. The generated clients type `read` with the fields the
+  table's gates pin, and a table whose gates pin none has no `read`.
+
+```ts
+// forge-db
+export abstract class Change implements Approvals<Change, {
+  gates: {
+    ready: {
+      from: ["open"];
+      resetOn: [];
+      pinOn: ["headSha"];
+      requirementsFrom: { schema: "MergeRequirement"; link: "rule"; in: "rules" };
+    };
+  };
+}> {
+  // ...
+  headSha: string;
+  patchId?: string;
+  rules?: Identity.UUID[];
+  pushers?: Identity.UUID[];
+  createdBy: Identity.UUID;
+  createdFor?: Identity.UUID;
+}
+```
 
 The three hold every write through the core: the repositories' creates,
 their updates and deletes of one row by its key, the table's behavior
@@ -3161,9 +3235,9 @@ an API operation that updates a row and takes a StateRules or Workflow
 ([Who may move a row](/superschematic/guides/api-routes/#who-may-move-a-row-and-a-move-that-changes-nothing)).
 
 A type that composes these with `@behavior("Constants", ...)` and the like
-is an engine type: its configs have no `oneWay`, `by`, `status`, `resetOn`
-or `pinned`, its `signOff` takes no `version`, and the build and the
-engine refuse each.
+is an engine type: its configs have no `oneWay`, `by`, `status`, `resetOn`,
+`pinned` or D200's requirement members, its `signOff` takes no `version` or
+`read`, and the build and the engine refuse each.
 
 ### Rows a worker leases, retries, beats and meters
 
