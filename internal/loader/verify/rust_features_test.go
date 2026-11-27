@@ -54,15 +54,26 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 	if got := rustFindings(db, Input{}); len(got) != 0 {
 		t.Fatalf("a service with no Rust output has findings: %v", got)
 	}
-	got := rustFindings(db, Input{RustOutput: "outputs.types.rust"})
+	// On Postgres the Rust types serve every table feature of D152 to
+	// D159: Recurrence through the core, an audience, references and
+	// attachments (D185), a calendar source and a search index (D188),
+	// events, the notifier's tables and the channel identities (D191), and
+	// parties, the conversations, the run requests and the agent
+	// orchestration (D193).
+	if got := rustFindings(db, Input{RustOutput: "outputs.types.rust", Dialects: []string{"postgres"}}); len(got) != 0 {
+		t.Fatalf("the Rust types on Postgres have findings:\n%s", strings.Join(got, "\n"))
+	}
+	// On SQLite, D157's and D158's tables are refused: their queues are
+	// claimed through the Postgres queue client alone.
+	got := rustFindings(db, Input{RustOutput: "outputs.types.rust", Dialects: []string{"postgres", "sqlite"}})
 	want := []string{
-		"type Agent: @agents (D158)",
-		"type RunRequest: @runRequests (D157)",
-		"type Tenant: @party (D157)",
-		"type Thread: @conversations (D157)",
+		"type Agent: @agents (D158) on SQLite",
+		"type RunRequest: @runRequests (D157) on SQLite",
+		"type Tenant: @party (D157) on SQLite",
+		"type Thread: @conversations (D157) on SQLite",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("the Rust types' findings are %d, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
+		t.Fatalf("the Rust types' findings on SQLite are %d, want %d:\n%s", len(got), len(want), strings.Join(got, "\n"))
 	}
 	for i, prefix := range want {
 		if !strings.Contains(got[i], prefix+" is served by the TypeScript runtime alone so far, and platform-db builds Rust (outputs.types.rust)") {
@@ -72,25 +83,18 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 			t.Errorf("finding %d = %q names no schema file", i, got[i])
 		}
 	}
-	// The Rust types write Recurrence through the core, and serve an
-	// audience, references and attachments (D185), a calendar source and
-	// a search index (D188), and events, the notifier's tables and the
-	// channel identities (D191).
-	served := []string{"Chore", "Folder", "Page", "Report", "Visit", "Article", "Ticket", "Notice", "Identity"}
-	for _, finding := range got {
-		for _, name := range served {
-			if strings.Contains(finding, "type "+name+":") {
-				t.Errorf("the Rust types refuse %q", finding)
-			}
-		}
+	if err := RefuseRustTypes(db, false); err != nil {
+		t.Errorf("RefuseRustTypes on Postgres = %v, want nothing refused", err)
 	}
-	if err := RefuseRustTypes(db); err == nil || !strings.Contains(err.Error(), "type Tenant: @party (D157)") {
-		t.Errorf("RefuseRustTypes = %v, want the party refused", err)
+	if err := RefuseRustTypes(db, true); err == nil || !strings.Contains(err.Error(), "type Tenant: @party (D157) on SQLite") {
+		t.Errorf("RefuseRustTypes on SQLite = %v, want the party refused", err)
 	}
 
-	// A Rust server: a provider of no Rust crate and autonomy, and its
-	// database's table features. Its slots and a provider crate are served
-	// (D185), and so are Recurrence, the calendar and search (D188).
+	// A Rust server: a provider of no Rust crate. Its slots and a provider
+	// crate are served (D185), Recurrence, the calendar and search (D188),
+	// and an operation's @autonomy and its database's parties and agents
+	// (D193); rustrestgen refuses those on a database that lists sqlite
+	// first.
 	api := ir.NewSchema("platform-api", ir.SchemaKindAPI)
 	api.Types["Config"] = &ir.TypeDef{Name: "Config", EnvVars: true, ProviderSlots: map[string]string{"SMS": "channel"}}
 	api.Providers = []*ir.RuntimeProvider{
@@ -103,22 +107,11 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 	}}
 	server := rustFindings(api, Input{RustOutput: "outputs.api.language: rust", Database: db})
 	joined := strings.Join(server, "\n")
-	for _, want := range []string{
-		"type provider relay-a: a provider of no Rust crate (providers/relay-a declares it in its package.json alone",
-		"type Tickets.closeTicket: @autonomy (D158)",
-		"type platform-db.Tenant: @party (D157)",
-	} {
-		if !strings.Contains(joined, want) || !strings.Contains(joined, "is served by the TypeScript runtime alone so far, and platform-api builds Rust (outputs.api.language: rust)") {
-			t.Errorf("the Rust server's findings lack %s:\n%s", want, joined)
-		}
+	if len(server) != 1 || !strings.Contains(joined, "type provider relay-a: a provider of no Rust crate (providers/relay-a declares it in its package.json alone") || !strings.Contains(joined, "is served by the TypeScript runtime alone so far, and platform-api builds Rust (outputs.api.language: rust)") {
+		t.Errorf("the Rust server's findings are not the provider of no crate alone:\n%s", joined)
 	}
-	for _, name := range []string{"listTickets", "Folder", "Config", "relay-b", "Chore", "Visit", "Article", "platform-db.Ticket", "platform-db.Notice", "platform-db.Identity"} {
-		if strings.Contains(joined, name+":") {
-			t.Errorf("the Rust server refuses %s, which it serves:\n%s", name, joined)
-		}
-	}
-	if err := RefuseRustServer(api, db); err == nil || !strings.Contains(err.Error(), "type platform-db.Tenant: @party (D157)") {
-		t.Errorf("RefuseRustServer = %v, want the party refused", err)
+	if err := RefuseRustServer(api, db); err == nil || !strings.Contains(err.Error(), "type provider relay-a") || strings.Contains(err.Error(), "closeTicket") || strings.Contains(err.Error(), "Tenant") {
+		t.Errorf("RefuseRustServer = %v, want the provider of no crate alone refused", err)
 	}
 	if err := RefuseRustServer(ir.NewSchema("plain-api", ir.SchemaKindAPI)); err != nil {
 		t.Errorf("RefuseRustServer of a plain API = %v", err)

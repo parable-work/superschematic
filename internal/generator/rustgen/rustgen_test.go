@@ -82,6 +82,11 @@ func TestWriteTypesGolden(t *testing.T) {
 		// what it is to the notifier, in the Postgres definition, which
 		// orm::notify reads.
 		{service: "fixture-notifications-db", core: true},
+		// Parties and the agent orchestration (D157, D158, D193): each
+		// table's party, conversations and agents part, in the Postgres
+		// definition, which orm::parties, orm::inbound and orm::agents read.
+		{service: "fixture-parties-db", core: true},
+		{service: "fixture-agent-runs-db", core: true},
 	}
 
 	for _, tc := range cases {

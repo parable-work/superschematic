@@ -15,7 +15,7 @@ takes one path, which decides who sent it and what it may reach.
 
 | Built | Not built yet |
 | --- | --- |
-| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Go and Rust runtimes |
+| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | the Go runtime; the Rust runtime on SQLite |
 | one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a generated server that mounts the path and its workers |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
 | threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
@@ -23,6 +23,7 @@ takes one path, which decides who sent it and what it may reach.
 | a lapsed identity, verified again by a code | |
 | sending as a permission, with a rate limit, an approval policy and opt-outs | |
 | a message's trust narrowing the agent run that takes its request: a sender entered by hand asks before every write ([agent runs](/superschematic/guides/agent-runs/)) | |
+| the Rust runtime's `orm::parties` and `orm::inbound`, on Postgres | |
 
 D157 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
 records the design and what is left. `examples/parties` is the worked
@@ -151,3 +152,43 @@ pool. A message, its files and its run request are written as the
 repositories write them, each statement its own on D1, which holds no
 transaction open: a run request is enqueued once the message and its
 files are stored.
+
+## In Rust
+
+The Rust HTTP runtime's `orm::parties` and `orm::inbound` are the same
+path, on Postgres (D193). The Postgres definition of a generated Rust
+types crate carries each table's `@party` and its conversations part, so
+`Inbound::new` finds the conversations, the messages and the channel
+identities by itself, and the crate re-exports both modules. It takes the
+database's `Tables`, the notifier (D191) and the `@runRequests` queue's
+descriptor:
+
+```rust
+use superschematic_http_runtime::orm::inbound::{Inbound, SendInput};
+use superschematic_http_runtime::orm::parties::PartyRef;
+
+let inbound = Inbound::new(orm::postgres::tables(pool.clone()), notifier.clone(), QueueDefinition::parse(queues::RUN_REQUEST_QUEUE)?)?
+    .with_providers(deps.providers.clone())
+    .with_bucket(deps.files.clone())
+    .with_inbound_address("inbox@example.test");
+
+// A relay's @webhook route.
+let outcomes = inbound.inbound("SMS", &request).await?;
+// The run requests queue's worker: each request to a handler, the agent
+// dispatcher's or the app's own.
+run_worker(inbound.run_queue(), move |request| { let agents = agents.clone(); async move { Ok(agents.handle(request.into()).await?) } }, options, shutdown).await?;
+// A send, held to the permission, the identity, the rate limit and the
+// approval policy.
+inbound.send(SendInput::new(principal, PartyRef::new("Contact", key), "sms", "Booked for Monday.")).await?;
+```
+
+`principal_of` is `party_principal`, a party with its grants' reach and
+their roles' permissions, and `identity_lapsed` decides a lapsed identity
+from the rows, which the notifier now asks too before it sends to a
+party's address. Rust has no ambient caller, so a read as the sender or
+the party opens the repositories for it (`with_access`). The approval
+policy is a `SendApproval`: the app's, or the agent dispatcher's
+`send_approval`. A run request's message and grant are in base62, as the
+repositories write a key. A Rust types crate that lists `sqlite` is
+refused `@party`, the conversations and the run requests, which run on
+SQLite and D1 in TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).

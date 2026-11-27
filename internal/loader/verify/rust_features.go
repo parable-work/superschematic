@@ -3,8 +3,10 @@ package verify
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -32,11 +34,17 @@ import (
 // notifier, and the runtime's notify module raises, routes, delivers and
 // reads replies over them. On SQLite the notifier runs in TypeScript alone
 // (D189), and rustgen refuses it for a crate that lists sqlite.
+// Parties, inbound messages and conversations (D157) and the agent
+// orchestration (D158) are served on Postgres (D193): the Postgres
+// definition carries each table's party, conversations and agents part,
+// the runtime's parties, inbound and agents modules read them, and a Rust
+// server's MCP endpoint holds an agent run's calls to an operation's
+// @autonomy. They stay refused for a Rust service that lists sqlite, whose
+// queues the dispatcher and the inbound path do not claim.
 //
-// A DB service's Rust types are refused for a table feature; a Rust server
-// for a listed provider with no Rust crate, an @autonomy operation, and
-// the table features of the database its operations read (Input.Database),
-// where the build loaded one.
+// A Rust server is refused a listed provider with no Rust crate; a DB
+// service's Rust types that list sqlite the table features of D157 and
+// D158.
 
 // RustFeature is one feature a schema declares that the Rust outputs do
 // not serve yet (D181): the type it is on and what it is.
@@ -49,13 +57,13 @@ type RustFeature struct {
 }
 
 // RustTableFeatures are the features of schema's tables a Rust types crate
-// does not carry (D181), sorted by type: @party, @conversations and
-// @runRequests (D157), and @agents (D158). A Rust server is refused
-// the same table features (server); none is a server's alone since
-// D188 served Recurrence.
-func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
-	_ = server
-	if schema == nil {
+// does not carry (D181), sorted by type: on a database that lists the
+// sqlite dialect (sqlite), @party, @conversations and @runRequests (D157)
+// and @agents (D158), which the Rust runtime serves on Postgres alone
+// (D193); none on Postgres. A Rust server is refused the same table
+// features of its database.
+func RustTableFeatures(schema *ir.Schema, sqlite bool) []RustFeature {
+	if schema == nil || !sqlite {
 		return nil
 	}
 	var out []RustFeature
@@ -65,16 +73,16 @@ func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
 			out = append(out, RustFeature{Owner: td.Owner, Type: td.Name, Feature: feature})
 		}
 		if td.Party != nil {
-			add("@party (D157)")
+			add("@party (D157) on SQLite")
 		}
 		if td.Conversations != nil {
-			add("@conversations (D157)")
+			add("@conversations (D157) on SQLite")
 		}
 		if td.RunRequests != nil {
-			add("@runRequests (D157)")
+			add("@runRequests (D157) on SQLite")
 		}
 		if td.Agents != nil {
-			add("@agents (D158)")
+			add("@agents (D158) on SQLite")
 		}
 	}
 	return out
@@ -82,8 +90,9 @@ func RustTableFeatures(schema *ir.Schema, server bool) []RustFeature {
 
 // RustServerFeatures are the features of an API's schema a Rust server
 // does not serve (D181): a provider the API's config lists whose directory
-// holds no Rust crate of it (D185), which a Rust server cannot link, and
-// an operation's @autonomy (D158), sorted by type.
+// holds no Rust crate of it (D185), which a Rust server cannot link. An
+// operation's @autonomy is served since D193: the MCP tool's record
+// carries it, and the agent dispatcher's gate holds a run's call to it.
 func RustServerFeatures(schema *ir.Schema) []RustFeature {
 	if schema == nil {
 		return nil
@@ -92,14 +101,6 @@ func RustServerFeatures(schema *ir.Schema) []RustFeature {
 	for _, p := range schema.Providers {
 		if p != nil && p.Crate == "" {
 			out = append(out, RustFeature{Type: "provider " + p.Name, Feature: fmt.Sprintf("a provider of no Rust crate (%s declares it in its package.json alone; a Rust server links a crate whose Cargo.toml declares it under [package.metadata.superschematic.provider], D185)", p.Path)})
-		}
-	}
-	for _, name := range sortedTypes(schema) {
-		td := schema.Types[name]
-		for _, fd := range td.Fields {
-			if fd != nil && fd.Autonomy != nil {
-				out = append(out, RustFeature{Owner: td.Owner, Type: td.Name + "." + fd.Name, Feature: "@autonomy (D158)"})
-			}
 		}
 	}
 	return out
@@ -130,10 +131,13 @@ func checkRustFeatures(schema *ir.Schema, in Input, r *Result) {
 	var features []RustFeature
 	switch schema.Kind {
 	case ir.SchemaKindDB:
-		features = RustTableFeatures(schema, false)
+		features = RustTableFeatures(schema, slices.Contains(in.Dialects, registry.SQLDialectSQLite))
 	case ir.SchemaKindAPI:
 		features = RustServerFeatures(schema)
-		for _, f := range RustTableFeatures(in.Database, true) {
+		// The database's dialects are its own config's, which an API's
+		// build does not read here: rustrestgen refuses a database that
+		// lists sqlite first (checkSQLiteDeps).
+		for _, f := range RustTableFeatures(in.Database, false) {
 			f.Type = in.Database.Name + "." + f.Type
 			f.Owner = ""
 			features = append(features, f)
@@ -146,12 +150,13 @@ func checkRustFeatures(schema *ir.Schema, in Input, r *Result) {
 
 // RefuseRustTypes is the Rust types generator's own check of a DB
 // schema (D181): the table features checkRustFeatures refuses, for a
-// schema that did not come through the loader's config.
-func RefuseRustTypes(schema *ir.Schema) error {
+// schema that did not come through the loader's config, on SQLite when
+// sqlite.
+func RefuseRustTypes(schema *ir.Schema, sqlite bool) error {
 	if schema == nil || schema.Kind != ir.SchemaKindDB {
 		return nil
 	}
-	return rustErrors(schema.Name, RustTableFeatures(schema, false), "its Rust types")
+	return rustErrors(schema.Name, RustTableFeatures(schema, sqlite), "its Rust types")
 }
 
 // RefuseRustServer is the Rust server generator's own check of an API and
@@ -162,7 +167,7 @@ func RefuseRustServer(api *ir.Schema, databases ...*ir.Schema) error {
 	}
 	features := RustServerFeatures(api)
 	for _, database := range databases {
-		for _, f := range RustTableFeatures(database, true) {
+		for _, f := range RustTableFeatures(database, false) {
 			f.Type = database.Name + "." + f.Type
 			features = append(features, f)
 		}

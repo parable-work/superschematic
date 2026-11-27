@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::super::parties::identity_lapsed;
 use super::super::postgres::{deadpool_postgres, Repositories, Tables};
 use super::super::{
     AccessCaller, Caller, Definition, Error, EventDefinition, FindOptions, OrderBy, Values,
@@ -356,6 +357,7 @@ struct Inner {
     retention_days: u64,
     now: Option<Clock>,
     health: Mutex<HashMap<String, Health>>,
+    agents: Option<QueueDefinition>,
 }
 
 /// The notifier (D153). Build one with [`Notifier::new`] and its `with_`
@@ -532,6 +534,7 @@ impl Notifier {
                 retention_days: DEFAULT_DELIVERY_RETENTION_DAYS,
                 now: None,
                 health: Mutex::new(HashMap::new()),
+                agents: None,
             }),
         })
     }
@@ -611,6 +614,16 @@ impl Notifier {
     #[must_use]
     pub fn with_delivery_retention_days(self, days: u64) -> Self {
         self.edit(|inner| inner.retention_days = days)
+    }
+
+    /// The agent dispatcher's request queue (D158, D193), its
+    /// `@agents("requests")` queue's descriptor: a route's `{ agent }`
+    /// recipient puts a run request about the event's record on it, in the
+    /// routing transaction. Without it, such a recipient is logged and
+    /// reaches no one.
+    #[must_use]
+    pub fn with_agents(self, requests: QueueDefinition) -> Self {
+        self.edit(|inner| inner.agents = Some(requests))
     }
 
     /// The clock; the system's unless set, for a test.
@@ -1642,11 +1655,29 @@ impl Notifier {
             .cloned()
             .unwrap_or_default();
         // A route that names an agent starts its run about the record
-        // (D158), which the Rust runtime does not serve yet.
+        // (D158): a request on the dispatcher's queue, in the routing
+        // transaction.
         for spec in &specs {
-            if let Some(agent) = spec.get("agent").and_then(Value::as_str) {
+            let Some(agent) = spec.get("agent").and_then(Value::as_str) else {
+                continue;
+            };
+            let Some(requests) = &self.inner.agents else {
                 tracing::warn!(route = %route_id, agent = %agent, "a route names an agent, and the notifier has no agent dispatcher");
+                continue;
+            };
+            let mut request = obj(json!({
+                "step": "start",
+                "trigger": "route",
+                "agent": agent,
+                "subjectTable": event.table,
+                "subjectKey": event.key,
+                "event": { "id": event.id, "kind": event.kind, "payload": event.payload },
+                "requestedBy": { "kind": "route", "subject": route_id },
+            }));
+            if let Some(task) = spec.get("task").and_then(Value::as_str) {
+                request.insert("input".to_owned(), json!({ "task": task }));
             }
+            enqueue_in(client, requests, &Value::Object(request), Duration::ZERO).await?;
         }
         let recipients = self.recipients_of(client, event, &specs).await?;
         for recipient in &recipients {
@@ -1721,7 +1752,9 @@ impl Notifier {
         let Some(identities) = &self.inner.parts.identities else {
             return Ok(None);
         };
-        // An address that opted out is sent nothing (D157).
+        // An address that opted out is sent nothing, and a party's identity
+        // whose grants have all ended since it was verified may be someone
+        // else's now (D157).
         let filter = obj(json!({
             "principal": { "eq": recipient.id },
             "kind": { "eq": self.address_kind_of(channel) },
@@ -1735,7 +1768,12 @@ impl Notifier {
             .find_many(Some(&filter), &many(10))
             .await?
             .rows;
-        Ok(rows.first().map(|row| string(row, "address")))
+        for row in rows {
+            if !identity_lapsed(client, self.inner.definition, &row, self.now()).await? {
+                return Ok(Some(string(&row, "address")));
+            }
+        }
+        Ok(None)
     }
 
     /// Falls through from a delivery that failed to the recipient's next

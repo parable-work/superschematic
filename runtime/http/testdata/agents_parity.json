@@ -1,0 +1,858 @@
+{
+  "comment": "The agent orchestration's and the inbound path's pure parts (D157, D158, D183, D193). Every want is computed by runtime/http/typescript/src/agents-parity.test.ts from the inputs here; AGENTS_PARITY_WRITE=1 bun test src/agents-parity.test.ts writes this file. The Rust runtime's orm::agents and orm::inbound read it.",
+  "defaultAutonomy": [
+    {
+      "class": "read",
+      "want": "auto"
+    },
+    {
+      "class": "internalWrite",
+      "want": "auto"
+    },
+    {
+      "class": "messageParty",
+      "want": "ask"
+    },
+    {
+      "class": "moneyMovement",
+      "want": "ask"
+    }
+  ],
+  "trustOf": [
+    {
+      "recorded": null,
+      "want": "entered"
+    },
+    {
+      "recorded": "verified",
+      "want": "verified"
+    },
+    {
+      "recorded": "entered",
+      "want": "entered"
+    },
+    {
+      "recorded": "unverified",
+      "want": "entered"
+    },
+    {
+      "recorded": "VERIFIED",
+      "want": "entered"
+    },
+    {
+      "recorded": "",
+      "want": "entered"
+    }
+  ],
+  "effectiveAutonomy": [
+    {
+      "mode": "auto",
+      "class": "read",
+      "trust": null,
+      "want": "auto"
+    },
+    {
+      "mode": "auto",
+      "class": "read",
+      "trust": "verified",
+      "want": "auto"
+    },
+    {
+      "mode": "auto",
+      "class": "read",
+      "trust": "entered",
+      "want": "auto"
+    },
+    {
+      "mode": "auto",
+      "class": "internalWrite",
+      "trust": null,
+      "want": "auto"
+    },
+    {
+      "mode": "auto",
+      "class": "internalWrite",
+      "trust": "verified",
+      "want": "auto"
+    },
+    {
+      "mode": "auto",
+      "class": "internalWrite",
+      "trust": "entered",
+      "want": "ask"
+    },
+    {
+      "mode": "auto",
+      "class": "messageParty",
+      "trust": null,
+      "want": "auto"
+    },
+    {
+      "mode": "auto",
+      "class": "messageParty",
+      "trust": "verified",
+      "want": "auto"
+    },
+    {
+      "mode": "auto",
+      "class": "messageParty",
+      "trust": "entered",
+      "want": "ask"
+    },
+    {
+      "mode": "auto",
+      "class": "moneyMovement",
+      "trust": null,
+      "want": "ask"
+    },
+    {
+      "mode": "auto",
+      "class": "moneyMovement",
+      "trust": "verified",
+      "want": "ask"
+    },
+    {
+      "mode": "auto",
+      "class": "moneyMovement",
+      "trust": "entered",
+      "want": "ask"
+    },
+    {
+      "mode": "tell",
+      "class": "read",
+      "trust": null,
+      "want": "tell"
+    },
+    {
+      "mode": "tell",
+      "class": "read",
+      "trust": "verified",
+      "want": "tell"
+    },
+    {
+      "mode": "tell",
+      "class": "read",
+      "trust": "entered",
+      "want": "tell"
+    },
+    {
+      "mode": "tell",
+      "class": "internalWrite",
+      "trust": null,
+      "want": "tell"
+    },
+    {
+      "mode": "tell",
+      "class": "internalWrite",
+      "trust": "verified",
+      "want": "tell"
+    },
+    {
+      "mode": "tell",
+      "class": "internalWrite",
+      "trust": "entered",
+      "want": "ask"
+    },
+    {
+      "mode": "tell",
+      "class": "messageParty",
+      "trust": null,
+      "want": "tell"
+    },
+    {
+      "mode": "tell",
+      "class": "messageParty",
+      "trust": "verified",
+      "want": "tell"
+    },
+    {
+      "mode": "tell",
+      "class": "messageParty",
+      "trust": "entered",
+      "want": "ask"
+    },
+    {
+      "mode": "tell",
+      "class": "moneyMovement",
+      "trust": null,
+      "want": "ask"
+    },
+    {
+      "mode": "tell",
+      "class": "moneyMovement",
+      "trust": "verified",
+      "want": "ask"
+    },
+    {
+      "mode": "tell",
+      "class": "moneyMovement",
+      "trust": "entered",
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "read",
+      "trust": null,
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "read",
+      "trust": "verified",
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "read",
+      "trust": "entered",
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "internalWrite",
+      "trust": null,
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "internalWrite",
+      "trust": "verified",
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "internalWrite",
+      "trust": "entered",
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "messageParty",
+      "trust": null,
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "messageParty",
+      "trust": "verified",
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "messageParty",
+      "trust": "entered",
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "moneyMovement",
+      "trust": null,
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "moneyMovement",
+      "trust": "verified",
+      "want": "ask"
+    },
+    {
+      "mode": "ask",
+      "class": "moneyMovement",
+      "trust": "entered",
+      "want": "ask"
+    }
+  ],
+  "narrowReaches": [
+    {
+      "role": {
+        "TaskNote": [
+          "task"
+        ],
+        "Invoice": [
+          "task"
+        ]
+      },
+      "party": [],
+      "want": {}
+    },
+    {
+      "role": {
+        "TaskNote": [
+          "task"
+        ],
+        "Invoice": [
+          "task"
+        ]
+      },
+      "party": [
+        {}
+      ],
+      "want": {}
+    },
+    {
+      "role": {
+        "TaskNote": [
+          "task"
+        ],
+        "Invoice": [
+          "task"
+        ]
+      },
+      "party": [
+        {
+          "TaskNote": [
+            "task"
+          ]
+        }
+      ],
+      "want": {
+        "TaskNote": [
+          "task"
+        ]
+      }
+    },
+    {
+      "role": {
+        "TaskNote": [
+          "task",
+          "task.parent"
+        ]
+      },
+      "party": [
+        {
+          "TaskNote": [
+            "task.parent"
+          ]
+        },
+        {
+          "TaskNote": [
+            "task"
+          ]
+        }
+      ],
+      "want": {
+        "TaskNote": [
+          "task",
+          "task.parent"
+        ]
+      }
+    },
+    {
+      "role": {
+        "Report": [
+          "job",
+          "job"
+        ]
+      },
+      "party": [
+        {
+          "Report": [
+            "job"
+          ]
+        }
+      ],
+      "want": {
+        "Report": [
+          "job"
+        ]
+      }
+    },
+    {
+      "role": {
+        "Report": [
+          "*"
+        ]
+      },
+      "party": [
+        {
+          "Report": [
+            "job"
+          ]
+        }
+      ],
+      "want": {}
+    },
+    {
+      "role": {},
+      "party": [
+        {
+          "Report": [
+            "job"
+          ]
+        }
+      ],
+      "want": {}
+    }
+  ],
+  "narrowPermissions": [
+    {
+      "agent": [
+        "tasks.read",
+        "tasks.write",
+        "invoices.pay",
+        "parties.message"
+      ],
+      "actor": [
+        "tasks.read",
+        "parties.message"
+      ],
+      "want": [
+        "tasks.read",
+        "parties.message"
+      ]
+    },
+    {
+      "agent": [
+        "tasks"
+      ],
+      "actor": [
+        "tasks.read"
+      ],
+      "want": [
+        "tasks.read"
+      ]
+    },
+    {
+      "agent": [
+        "tasks.read"
+      ],
+      "actor": [
+        "tasks"
+      ],
+      "want": [
+        "tasks.read"
+      ]
+    },
+    {
+      "agent": [
+        "tasks.read",
+        "reports"
+      ],
+      "actor": [
+        "reports.export",
+        "tasks.read"
+      ],
+      "want": [
+        "tasks.read",
+        "reports.export"
+      ]
+    },
+    {
+      "agent": [
+        "invoices.pay"
+      ],
+      "actor": [],
+      "want": []
+    },
+    {
+      "agent": [],
+      "actor": [
+        "tasks"
+      ],
+      "want": []
+    }
+  ],
+  "paramsHash": [
+    {
+      "operation": "pay_invoice",
+      "params": {
+        "invoice": "x",
+        "amount": 100
+      },
+      "want": "eece8e27d1cdd083ce514196cbc4bbf5f936197e3023376b6f0792cd7a4d4b79"
+    },
+    {
+      "operation": "pay_invoice",
+      "params": {
+        "amount": 100,
+        "invoice": "x"
+      },
+      "want": "eece8e27d1cdd083ce514196cbc4bbf5f936197e3023376b6f0792cd7a4d4b79"
+    },
+    {
+      "operation": "pay_invoice",
+      "params": {
+        "invoice": "x",
+        "amount": 250
+      },
+      "want": "4987e3fcd23b5303a8d446edfad76425d16b795fd6e880ec5bc117e57d97d2b2"
+    },
+    {
+      "operation": "send_message",
+      "params": {
+        "party": {
+          "table": "Customer",
+          "key": "k"
+        },
+        "channel": "sms",
+        "body": "Booked"
+      },
+      "want": "be95ca169073363afb122cfa1205c0e0dea5227d4c4ecf055320d468db8e2b0f"
+    },
+    {
+      "operation": "agents.overBudget",
+      "params": {
+        "agent": "reviewer",
+        "run": "r1"
+      },
+      "want": "622266c317019d8d1bac50ece13e0ad292bc0ed82c2c648b92dc5476499c9bb8"
+    },
+    {
+      "operation": "note_task",
+      "params": {},
+      "want": "e92cceb0bde3695cba2d3a4fd12aa8d4b9e44d9a0fd621c5f89527b748c35e84"
+    },
+    {
+      "operation": "note_task",
+      "params": {
+        "text": "é ü 中",
+        "list": [
+          1,
+          "two",
+          null,
+          true
+        ]
+      },
+      "want": "38fa60bf92a517dd0ebb84b89bb4b853ebb738ff5bfe87a0f0e3ead91f6573a7"
+    }
+  ],
+  "bestPolicy": [
+    {
+      "rows": [],
+      "operation": "read_task",
+      "class": "read",
+      "want": null
+    },
+    {
+      "rows": [
+        {
+          "agent": null,
+          "operationClass": "read",
+          "mode": "ask"
+        }
+      ],
+      "operation": "read_task",
+      "class": "read",
+      "want": 0
+    },
+    {
+      "rows": [
+        {
+          "agent": null,
+          "operationClass": "internalWrite",
+          "mode": "ask"
+        }
+      ],
+      "operation": "read_task",
+      "class": "read",
+      "want": null
+    },
+    {
+      "rows": [
+        {
+          "agent": null,
+          "operationClass": "read",
+          "mode": "ask"
+        },
+        {
+          "agent": "a1",
+          "operationClass": "read",
+          "mode": "auto"
+        }
+      ],
+      "operation": "read_task",
+      "class": "read",
+      "want": 1
+    },
+    {
+      "rows": [
+        {
+          "agent": "a1",
+          "operationClass": "read",
+          "mode": "auto"
+        },
+        {
+          "agent": null,
+          "operation": "read_task",
+          "mode": "ask"
+        }
+      ],
+      "operation": "read_task",
+      "class": "read",
+      "want": 0
+    },
+    {
+      "rows": [
+        {
+          "agent": "a1",
+          "operation": "other",
+          "mode": "auto"
+        },
+        {
+          "agent": null,
+          "operation": "read_task",
+          "mode": "tell"
+        }
+      ],
+      "operation": "read_task",
+      "class": "read",
+      "want": 1
+    },
+    {
+      "rows": [
+        {
+          "agent": "a1",
+          "operation": "read_task",
+          "mode": "ask"
+        },
+        {
+          "agent": "a1",
+          "operationClass": "read",
+          "mode": "auto"
+        }
+      ],
+      "operation": "read_task",
+      "class": "read",
+      "want": 0
+    },
+    {
+      "rows": [
+        {
+          "agent": "a1",
+          "operationClass": "read",
+          "mode": "auto"
+        },
+        {
+          "agent": "a1",
+          "operationClass": "read",
+          "mode": "tell"
+        }
+      ],
+      "operation": "read_task",
+      "class": "read",
+      "want": 0
+    }
+  ],
+  "budgetCrossing": [
+    {
+      "before": 0,
+      "after": 3,
+      "limit": 6,
+      "warnAt": 50,
+      "warns": true,
+      "capped": false
+    },
+    {
+      "before": 3,
+      "after": 4,
+      "limit": 6,
+      "warnAt": 50,
+      "warns": false,
+      "capped": false
+    },
+    {
+      "before": 0,
+      "after": 2,
+      "limit": 6,
+      "warnAt": 50,
+      "warns": false,
+      "capped": false
+    },
+    {
+      "before": 4,
+      "after": 9,
+      "limit": 6,
+      "warnAt": 50,
+      "warns": false,
+      "capped": true
+    },
+    {
+      "before": 0,
+      "after": 80,
+      "limit": 100,
+      "warnAt": 80,
+      "warns": true,
+      "capped": false
+    },
+    {
+      "before": 79,
+      "after": 81,
+      "limit": 100,
+      "warnAt": 80,
+      "warns": true,
+      "capped": false
+    },
+    {
+      "before": 0,
+      "after": 5,
+      "limit": null,
+      "warnAt": 80,
+      "warns": false,
+      "capped": false
+    },
+    {
+      "before": 0,
+      "after": 1,
+      "limit": 0,
+      "warnAt": 80,
+      "warns": false,
+      "capped": true
+    },
+    {
+      "before": 99,
+      "after": 100,
+      "limit": 100,
+      "warnAt": 100,
+      "warns": true,
+      "capped": true
+    }
+  ],
+  "redactText": [
+    {
+      "text": "no secret here",
+      "secrets": [],
+      "want": "no secret here"
+    },
+    {
+      "text": "token grant_abcdefghijklmnopqrstuvwxyz0123 used",
+      "secrets": [],
+      "want": "token [redacted] used"
+    },
+    {
+      "text": "grant_short stays",
+      "secrets": [],
+      "want": "grant_short stays"
+    },
+    {
+      "text": "grant_0123456789abcdef",
+      "secrets": [],
+      "want": "[redacted]"
+    },
+    {
+      "text": "Authorization: Bearer abc.def~ghi+/= then",
+      "secrets": [],
+      "want": "Authorization: [redacted] then"
+    },
+    {
+      "text": "Bearer",
+      "secrets": [],
+      "want": "Bearer"
+    },
+    {
+      "text": "Bearer  ",
+      "secrets": [],
+      "want": "Bearer  "
+    },
+    {
+      "text": "turn 1: the search sent Bearer abc.def",
+      "secrets": [],
+      "want": "turn 1: the search sent [redacted]"
+    },
+    {
+      "text": "Bearer grant_abcdefghijklmnopqrstuvwxyz",
+      "secrets": [],
+      "want": "Bearer [redacted]"
+    },
+    {
+      "text": "{\"thinking\":\"Bearer x\\\"y\",\"sig\":\"s\"}",
+      "secrets": [],
+      "want": "{\"thinking\":\"[redacted]\\\"y\",\"sig\":\"s\"}"
+    },
+    {
+      "text": "the key site-key-4b9e17c2 twice site-key-4b9e17c2",
+      "secrets": [
+        "site-key-4b9e17c2"
+      ],
+      "want": "the key [redacted] twice [redacted]"
+    },
+    {
+      "text": "grant_grant_abcdefghijklmnopqrst",
+      "secrets": [],
+      "want": "[redacted]"
+    },
+    {
+      "text": "é Bearer\ttok é",
+      "secrets": [
+        ""
+      ],
+      "want": "é [redacted] é"
+    }
+  ],
+  "emailAuthenticated": [
+    {
+      "authentication": null,
+      "want": false
+    },
+    {
+      "authentication": {},
+      "want": false
+    },
+    {
+      "authentication": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "pass"
+      },
+      "want": true
+    },
+    {
+      "authentication": {
+        "spf": "pass",
+        "dkim": "pass",
+        "dmarc": "fail"
+      },
+      "want": false
+    },
+    {
+      "authentication": {
+        "spf": "fail",
+        "dkim": "pass",
+        "dmarc": "pass"
+      },
+      "want": false
+    },
+    {
+      "authentication": {
+        "spf": "softfail",
+        "dmarc": "pass"
+      },
+      "want": false
+    },
+    {
+      "authentication": {
+        "dkim": "permerror",
+        "dmarc": "pass"
+      },
+      "want": false
+    },
+    {
+      "authentication": {
+        "spf": "neutral",
+        "dkim": "none",
+        "dmarc": "pass"
+      },
+      "want": true
+    },
+    {
+      "authentication": {
+        "spf": "PASS",
+        "dkim": " Pass ",
+        "dmarc": " PASS "
+      },
+      "want": true
+    },
+    {
+      "authentication": {
+        "dmarc": "none"
+      },
+      "want": false
+    },
+    {
+      "authentication": {
+        "spf": "temperror",
+        "dmarc": "pass"
+      },
+      "want": true
+    }
+  ]
+}
