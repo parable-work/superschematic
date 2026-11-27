@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -27,8 +26,11 @@ const tasksGenerator = "tasks"
 // task, and the defaults of all of them with @tasks. Like a Stack's, its
 // classes declare: they hold no fields and are no language's types, so the
 // kind's one generator writes the task file. Nothing names a Tasks
-// service, so it has no sentinel. Its verification reads the registry, for
-// the input kinds and the sections an extension registers.
+// service, so it has no sentinel. A schema input may name its service by
+// the service's handle, so its schema files import its siblings'
+// sentinels, which names them and references no type of theirs. Its
+// verification reads the registry, for the input kinds and the sections
+// an extension registers.
 func tasksKind(r *Registry) KindSpec {
 	return KindSpec{
 		Name:       string(ir.SchemaKindTasks),
@@ -38,14 +40,10 @@ func tasksKind(r *Registry) KindSpec {
 			pkgDB:    true,
 			pkgStack: true,
 		},
-		DeniedReferences: map[string]bool{
-			string(ir.SchemaKindAPI):     true,
-			string(ir.SchemaKindDB):      true,
-			string(ir.SchemaKindGeneral): true,
-		},
-		Pipeline:   []string{tasksGenerator},
-		NoSentinel: true,
-		Verify:     func(schema *ir.Schema, rep VerifyReporter) { verifyTasks(r, schema, rep) },
+		Pipeline:                []string{tasksGenerator},
+		NoSentinel:              true,
+		ImportsSiblingSentinels: true,
+		Verify:                  func(schema *ir.Schema, rep VerifyReporter) { verifyTasks(r, schema, rep) },
 	}
 }
 
@@ -115,6 +113,10 @@ func tasksDecorators() []DecoratorSpec {
 	spec := func(name string, args json.RawMessage, apply func(*ir.TypeDef, any) error) DecoratorSpec {
 		return DecoratorSpec{
 			Name: name, Packages: []string{pkgTasks}, Target: TargetType, Kinds: kinds, Args: args,
+			// A handle in an input, as a schema input's service, only
+			// names its service: the task file holds the name, and the
+			// build of a Tasks schema reads nothing of the service.
+			Identities: []string{"inputs"},
 			Apply: func(n Node, args []any, _ Site) error {
 				if n.Type.Tasks != nil || n.Type.Task != nil {
 					return fmt.Errorf("class %s already has a declaration; a class takes one of @tasks and @task", n.Type.Name)
@@ -144,7 +146,8 @@ func tasksDecorators() []DecoratorSpec {
 }
 
 // applyTask reads @task's argument. An input written as a string is a path
-// input, and a task named as a value is its class.
+// input, a schema input's service written as a handle is its name, and a
+// task named as a value is its class.
 func applyTask(td *ir.TypeDef, arg any) error {
 	var args struct {
 		Name   string   `json:"name"`
@@ -180,6 +183,21 @@ func applyTask(td *ir.TypeDef, arg any) error {
 		input := ir.TaskInput{}
 		input.Kind, _ = obj["kind"].(string)
 		input.Spec, _ = obj["spec"].(map[string]any)
+		// A schema input's service is written as its name, or as its
+		// handle, which a wrong name cannot be: the declaration keeps the
+		// name, as the data forms write it.
+		if handle, ok := input.Spec["service"].(map[string]any); ok && input.Kind == ir.TaskSchemaInput {
+			name, _ := handle["name"].(string)
+			if name == "" {
+				return ArgErrorf(0, "@task inputs: a schema input's service is a service's name or its handle")
+			}
+			spec := make(map[string]any, len(input.Spec))
+			for key, value := range input.Spec {
+				spec[key] = value
+			}
+			spec["service"] = name
+			input.Spec = spec
+		}
 		decl.Inputs = append(decl.Inputs, input)
 	}
 	for i, use := range args.Uses {
@@ -210,21 +228,7 @@ var (
 // CheckTaskPath checks one path of an output or of a path input: a path
 // or a glob from the repository root, slash-separated, that stays inside
 // it.
-func CheckTaskPath(p string) error {
-	switch {
-	case p == "":
-		return fmt.Errorf("is empty")
-	case strings.Contains(p, `\`):
-		return fmt.Errorf("%q holds a backslash; a path is slash-separated", p)
-	case strings.HasPrefix(p, "/"):
-		return fmt.Errorf("%q is absolute; a path starts at the repository root", p)
-	case path.Clean(p) != p:
-		return fmt.Errorf("%q is not in its shortest form, which is %q", p, path.Clean(p))
-	case p == "." || p == ".." || strings.HasPrefix(p, "../"):
-		return fmt.Errorf("%q leaves the repository or names all of it; name the directories the task reads or writes", p)
-	}
-	return nil
-}
+func CheckTaskPath(p string) error { return tasks.CheckPath(p) }
 
 // verifyTasks is the Tasks kind's verification (D203), in every form.
 //

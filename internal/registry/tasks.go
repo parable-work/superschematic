@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"sort"
+	"strings"
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
 
@@ -293,4 +295,38 @@ func validateRaw(schema *validator.Schema, value json.RawMessage) error {
 		return err
 	}
 	return schema.Validate(instance)
+}
+
+// TaskEntriesUnder returns the entries of a tree's sorted list that are
+// dir or sit under it, found by search and not by a scan of the whole
+// tree. dir "" is the repository root, and gives every entry.
+func TaskEntriesUnder(entries []TaskTreeEntry, dir string) []TaskTreeEntry {
+	if dir == "" {
+		return entries
+	}
+	var out []TaskTreeEntry
+	if i := sort.Search(len(entries), func(i int) bool { return entries[i].Path >= dir }); i < len(entries) && entries[i].Path == dir {
+		out = append(out, entries[i])
+	}
+	prefix := dir + "/"
+	start := sort.Search(len(entries), func(i int) bool { return entries[i].Path >= prefix })
+	end := start
+	for end < len(entries) && strings.HasPrefix(entries[end].Path, prefix) {
+		end++
+	}
+	return append(out, entries[start:end]...)
+}
+
+// MatchTaskPaths returns the paths of the tree's entries that pattern
+// covers, as tasks.Covers reads a pattern: a path or a glob from the
+// repository root, where a pattern that names a directory covers every
+// file under it.
+func MatchTaskPaths(tree TaskTree, pattern string) []string {
+	var out []string
+	for _, entry := range TaskEntriesUnder(tree.Entries(), tasks.LiteralPrefix(pattern)) {
+		if tasks.Covers(pattern, entry.Path) {
+			out = append(out, entry.Path)
+		}
+	}
+	return out
 }

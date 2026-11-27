@@ -219,3 +219,54 @@ func TestRegisterTaskSeams(t *testing.T) {
 		t.Errorf("sections: %v", got)
 	}
 }
+
+// listTree is a commit's entries by path, for the tree helpers.
+type listTree []TaskTreeEntry
+
+func (l listTree) Entries() []TaskTreeEntry { return l }
+func (l listTree) Entry(path string) (TaskTreeEntry, bool) {
+	for _, entry := range l {
+		if entry.Path == path {
+			return entry, true
+		}
+	}
+	return TaskTreeEntry{}, false
+}
+func (l listTree) Read(string) ([]byte, error) { return nil, nil }
+
+// TestTaskTreeHelpers: a resolver reads a tree by directory and by
+// pattern, and neither reads a sibling whose name starts the same way.
+func TestTaskTreeHelpers(t *testing.T) {
+	var tree listTree
+	for _, path := range []string{"go.mod", "go/api/main.go", "go/api/sub/x.go", "go/apiv2/main.go", "go/lib/lib.go", "golang/x.go", "web/app.ts"} {
+		tree = append(tree, TaskTreeEntry{Path: path})
+	}
+	paths := func(entries []TaskTreeEntry) string {
+		var out []string
+		for _, entry := range entries {
+			out = append(out, entry.Path)
+		}
+		return strings.Join(out, ",")
+	}
+	for dir, want := range map[string]string{
+		"go/api":  "go/api/main.go,go/api/sub/x.go",
+		"go":      "go/api/main.go,go/api/sub/x.go,go/apiv2/main.go,go/lib/lib.go",
+		"go.mod":  "go.mod",
+		"missing": "",
+		"":        "go.mod,go/api/main.go,go/api/sub/x.go,go/apiv2/main.go,go/lib/lib.go,golang/x.go,web/app.ts",
+	} {
+		if got := paths(TaskEntriesUnder(tree, dir)); got != want {
+			t.Errorf("TaskEntriesUnder(%q) = %s, want %s", dir, got, want)
+		}
+	}
+	for pattern, want := range map[string]string{
+		"go/api":       "go/api/main.go,go/api/sub/x.go",
+		"go/*/main.go": "go/api/main.go,go/apiv2/main.go",
+		"**/*.go":      "go/api/main.go,go/api/sub/x.go,go/apiv2/main.go,go/lib/lib.go,golang/x.go",
+		"web/*.go":     "",
+	} {
+		if got := strings.Join(MatchTaskPaths(tree, pattern), ","); got != want {
+			t.Errorf("MatchTaskPaths(%q) = %s, want %s", pattern, got, want)
+		}
+	}
+}

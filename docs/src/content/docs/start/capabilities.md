@@ -52,7 +52,7 @@ breaks your code, the type checker of each language points at the line.
 | You need | Declare | The build generates | You write | Guide |
 | --- | --- | --- | --- | --- |
 | A project | nothing: `superschematic init` writes the schemas root, its naming file, base tsconfig and ignore rules | nothing yet | nothing | [CLI](/superschematic/reference/cli/#init-schemas-root) |
-| A service of any kind | nothing: `superschematic new service <name> --kind DB\|API\|General\|Bucket\|Site\|MemoryStore` writes its config, package files and a starter schema | its first build, and the handle other configs import | the schema, from the starter | [CLI](/superschematic/reference/cli/#new-service-name---kind-dbapigeneralbucketsitememorystore) |
+| A service of any kind | nothing: `superschematic new service <name> --kind DB\|API\|General\|Bucket\|Site\|MemoryStore\|Tasks` writes its config, package files and a starter schema | its first build, and the handle other configs import | the schema, from the starter | [CLI](/superschematic/reference/cli/#new-service-name---kind-dbapigeneralbucketsitememorystoretasks) |
 
 ## Data
 

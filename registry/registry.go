@@ -307,6 +307,20 @@ type (
 	TaskPathSpec       = registry.TaskPathSpec
 )
 
+// TaskEntriesUnder returns the entries of a tree's sorted list that are
+// dir or sit under it, and MatchTaskPaths the paths of a tree's entries a
+// pattern covers; see internal/registry. A resolver reads a commit with
+// them.
+func TaskEntriesUnder(entries []TaskTreeEntry, dir string) []TaskTreeEntry {
+	return registry.TaskEntriesUnder(entries, dir)
+}
+
+// MatchTaskPaths returns the paths of the tree's entries that pattern
+// covers.
+func MatchTaskPaths(tree TaskTree, pattern string) []string {
+	return registry.MatchTaskPaths(tree, pattern)
+}
+
 const (
 	TargetType         = registry.TargetType
 	TargetField        = registry.TargetField

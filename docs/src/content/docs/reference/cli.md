@@ -49,7 +49,7 @@ writes its boilerplate by hand (D71). Without a directory, it writes
 | `superschematic.toml` | `go_module_root` and `npm_scope`, and a [`[paths]`](/superschematic/reference/naming/#paths) table pointing the generated packages' path dependencies at a superschematic checkout, relative to the parent of the schemas root; `build_context` too when the checkout holds the project |
 | `tsconfig.base.json` | `strict`, `experimentalDecorators` and the options acme-shop's has, with `paths` mapping `@superschematic/*` and `superscalar` to the checkout's sources and `<npm_scope>/*` to `./services/*/src/index.ts` |
 | `.gitignore` | the output root's contents, but for the lockfiles of its Bun and Cargo workspaces: `!/dist/`, `/dist/*`, `!/dist/bun.lock`, `!/dist/Cargo.lock` (D51) |
-| `services/` | empty: [`new service`](#new-service-name---kind-dbapigeneralbucketsitememorystore) adds each service |
+| `services/` | empty: [`new service`](#new-service-name---kind-dbapigeneralbucketsitememorystoretasks) adds each service |
 
 Nothing of superschematic is published yet, so the schema files compile
 against a checkout that `make setup` has prepared: `--superschematic`
@@ -75,7 +75,7 @@ superschematic init ./schemas --go-module-root example.com/acme --npm-scope @acm
 | `--npm-scope` | `@<project>` | the npm scope of the generated packages and of the services' own |
 | `--superschematic` | the checkout that holds the schemas root | the superschematic checkout the schema files and generated packages build against |
 
-## `new service <name> --kind DB|API|General|Bucket|Site|MemoryStore`
+## `new service <name> --kind DB|API|General|Bucket|Site|MemoryStore|Tasks`
 
 Write a service into a schemas root and build it once (D71). The name is
 lower-case words joined by hyphens, such as `shop-db`; `--kind` takes the
@@ -89,7 +89,7 @@ It writes `<schemas-root>/services/<name>/`:
 | `package.json` | `{ "name": "<npm_scope>/<name>", "private": true }`, the package other services import |
 | `tsconfig.json` | extends `../../tsconfig.base.json`; includes `schema.config.ts` and `src/**/*.ts` |
 | `src/index.ts` | re-exports the starter's declarations and `./service.generated` |
-| `src/<name>.schema.ts` | a starter to rename and grow: a table `Item` with a `@key` for a DB, an operation `ItemQueries.getItem` (`GET items/{id}`) returning `ItemView` for an API, an object type `Item` for General, a channel `ItemChanged` and a claim `ItemNoticeSent` (600 seconds) for a MemoryStore |
+| `src/<name>.schema.ts` | a starter to rename and grow: a table `Item` with a `@key` for a DB, an operation `ItemQueries.getItem` (`GET items/{id}`) returning `ItemView` for an API, an object type `Item` for General, a channel `ItemChanged` and a claim `ItemNoticeSent` (600 seconds) for a MemoryStore, a task `Check` for Tasks |
 
 | Kind | `outputs` |
 | --- | --- |
@@ -99,15 +99,18 @@ It writes `<schemas-root>/services/<name>/`:
 | `Bucket` | `{}` |
 | `Site` | none |
 | `MemoryStore` | Go and TypeScript `types`, its definitions in each ([Memory stores](/superschematic/guides/memory-stores/#declare-a-store)) |
+| `Tasks` | `{}`; `tasks: { install }` commits its task file ([Tasks](/superschematic/guides/tasks/#declare-the-service)) |
 
 A Bucket and a Site declare nothing in schema files, so they get no
 starter schema: an API lists a bucket in its `buckets`, and a site's
 config lists the APIs its browser code calls in `calls`. An API lists a
-MemoryStore in its `memoryStores`.
+MemoryStore in its `memoryStores`. Nothing names a Tasks service, so it
+has no handle: its `src/index.ts` exports its starter alone, a task that
+is not hermetic, to rename and grow ([Tasks](/superschematic/guides/tasks/)).
 
 Last, it builds the service as [`build`](#build-service-dir) does, into
 `<schemas-root>/dist`, which writes `src/service.generated.ts`, the
-handle other services' configs import. A Site's build also writes its
+handle other services' configs import, for every kind but Tasks. A Site's build also writes its
 code's mirror under `web/<name>`, as every build of a Site does. A build
 that fails leaves the files written and says so.
 
@@ -122,7 +125,7 @@ superschematic new service shop-api --kind API --root ./schemas
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--kind` | (required) | the service's kind: `DB`, `API`, `General`, `Bucket`, `Site` or `MemoryStore` |
+| `--kind` | (required) | the service's kind: `DB`, `API`, `General`, `Bucket`, `Site`, `MemoryStore` or `Tasks` |
 | `--root` | the working directory when it holds `superschematic.toml`, else `./schemas` | the schemas root |
 | `--naming` | `<schemas-root>/superschematic.toml` | naming config file |
 

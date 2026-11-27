@@ -1105,13 +1105,14 @@ the checkout's runtimes), `tsconfig.base.json` (whose `paths` map
 nothing is published, so it needs a checkout prepared with `make setup`:
 `--superschematic` names it, else the checkout that holds the project.
 
-`new service <name> --kind DB|API|General|Bucket|Site|MemoryStore [--root <schemas-root>]`
+`new service <name> --kind DB|API|General|Bucket|Site|MemoryStore|Tasks [--root <schemas-root>]`
 writes `services/<name>/`: `schema.config.ts` with an `outputs` block
 that loads, `package.json` (`<npm_scope>/<name>`), `tsconfig.json`,
-`src/index.ts` and, for DB, API, General and MemoryStore, a starter
-`src/<name>.schema.ts` to rename and grow. Then it builds the service
-once, which writes `src/service.generated.ts`, so other configs can
-import its handle at once. Wire services together afterwards in the
+`src/index.ts` and, for DB, API, General, MemoryStore and Tasks, a
+starter `src/<name>.schema.ts` to rename and grow. Then it builds the
+service once, which writes `src/service.generated.ts`, so other configs
+can import its handle at once; a Tasks service, which nothing names, has
+none. Wire services together afterwards in the
 configs (`authDb`, `calls`, `buckets`, `memoryStores`, `rateLimitStore`,
 `dependencies`).
 
