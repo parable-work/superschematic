@@ -673,9 +673,79 @@ Links, Search, Queue and Branches are removed with engine types at step
 7, since engine types and the examples still compose them. On
 development mode, `examples/engine-jobs` replaces Links with a relation,
 Search with a `contains` list filter, since development mode serves no
-`searchText`, and Queue with D104's claim. Then steps 5 to 7, whose step
-6 D117 renames development mode. What the built steps left follows. The
-names and rules are reversible until the first release.
+`searchText`, and Queue with D104's claim. Then step 5, below, and steps
+6 and 7, whose step 6 D117 renames development mode. What the built steps
+left follows. The names and rules are reversible until the first release.
+
+Step 5 is built, its three ways each:
+
+- **A class.** A behavior is declared by an exported abstract class
+  marked `@declaresBehavior` (`@superschematic/db`), and the build derives
+  its declaration from it (`internal/tools/behaviorclasses`, `make
+  behaviors`). The core's behaviors are classes, Comments aside. A class
+  states which config paths each operation's permissions are (`@checks`,
+  `BehaviorOperation.Permissions`), and the permission catalog lists under
+  an operation only those; and the config's references (`Names`, `Hears`),
+  to which the build holds a use's config and from which it derives the
+  listeners (`registry.BehaviorListens`).
+- **The implements form.** A project names its behaviors' directory
+  (`behaviors` in `superschematic.toml`), of classes or of declarations as
+  data, each named `<prefix>.<Name>`. A table implements one with
+  `implements Behavior<typeof B, T, C>`. A behavior whose rules need code
+  names its crate (`crate`), and the build of its DB schema writes the
+  project's rules crate (`rules/rust/<schema>`): the core's behaviors and
+  the crates', behind the core's ABI (`export_rules_abi!`), whose archive
+  and module stand in the stock ones' place. A generated Rust server builds
+  that crate's core, or the stock core with the layout's declarations.
+- **Bundles.** A bundle is a type alias (`Bundle<Parts, Fields>`), or
+  `bundles` in the data forms, which the loader expands into its parts'
+  uses, so the core never meets one. The core's are Reservation, Barrier,
+  Mailbox and Assignment (`internal/registry/bundles`), replayed in
+  `core-bundles`.
+- **Declarative rules.** A declaration's `rules` state a behavior's rules
+  in a fixed vocabulary the core interprets (`Declarative`): conditions in
+  the filter grammar with D104's `caller` operand, Constants' and
+  StateRules' field rules, guards, an operation's params, effects and
+  result, reactions, fields derived from a sub-table, and `configChange`. A
+  class gives them in `@declaresBehavior({ rules })`. A layout lists the
+  declarative behaviors its tables compose (`declarations`), and every host
+  hands them to its core (`declare`). acme.Rating is a class with rules
+  and no crate; its engine crate stays until step 7. Constants and
+  StateRules are declarative too, the question D104 left for step 5:
+  their registered declarations state rules, and no Rust behavior of
+  either is registered.
+
+Choices made: a class's rules are written as the JSON the declaration
+holds, and the canonical declaration sorts their object members; a class
+names a crate or rules, not both; a declare refuses a name the core it was
+built with registers, a project's crates' among them; a layout lists only
+the declarative behaviors the stock core does not embed; a bundle's parts
+are named as their uses, a field part by its fixed field.
+
+What step 5 left:
+
+- The bundle declarations (`internal/registry/bundles/*.bundle.json`) and
+  the TypeScript aliases (`packages/db/src/bundles.ts`) are two
+  definitions, held equal by the loader's tests. Deriving the JSON from an
+  alias needs a reader of its type-level configs, with `S["name"]` as a
+  placeholder, and a JSON Schema of its settings interface, whose keywords
+  the alias does not state (a currency's pattern, a lease's minimum), and
+  the declarations' descriptions are not the aliases' JSDoc.
+- A bundle written as a class, an extension's bundles, settings with
+  defaults, and bundles in `superschematic catalog`. Mailbox's take stays
+  the app's, and Reservation's resource's Calendar stays the resource's.
+- Runtime mode's publish and `superschematic-dev` take no declarations,
+  and a TypeScript server does not load a project's wasm core: a host
+  passes it to `@superschematic/rules`' `init` by hand.
+- Comments as a class: its signal's `paramsSchema` keeps the order it is
+  written in, which a class does not keep.
+- `@checks` and references for Budget, Lease, Retries, Schedules,
+  Recurrence, Derived, Payments, Revisions and Comments, which keep the
+  catalog's old rule. The Timers and Reactions checks a declaration cannot
+  state stay code (`verify/behaviors_timers.go`,
+  `verify/behaviors_reactions.go`).
+- A generated Rust server over a project's rules crate is built by
+  clippy in a test, and no test calls it.
 
 Four of step 4's ports met the test in part or not at all: Rollups,
 Blueprint, Revisions and Variants. D149 settles each: Rollups and
@@ -733,8 +803,7 @@ engine types alone); a supply key held as a UUID in two forms, which the
 holder check compares as text; Stock's ledger read whole for its next
 number, where a count would do; Calendar's exclusion constraint on
 Postgres, which D83's DDL has no form for (and which says capacity 1
-alone); two claims raced through a Go or a Rust API server; and the
-Reservation bundle (step 5).
+alone); and two claims raced through a Go or a Rust API server.
 
 What Derived and Provenance left: an index for a deriver's pull, which
 scans rows a page at a time until a declaration may list a column (step
@@ -846,19 +915,12 @@ with several Workflows.
     stages the archive); a release's archives tarball holds it.
   - The layout holds only tables that compose a behavior, so
     `Cx::create_row` and `Cx::call_on` reach those tables alone.
-  - Typed operations (`behaviortypes.Narrow`), the field types and
+  - Typed operations (`behaviortypes.Narrow`) and the field types and
     carriers in `@superschematic/db` (`Workflow<C>`, `Timers<T, C>`,
-    `Reactions<T, C>`), the build's checks of Timers' and Reactions'
-    configs against the table (`verify/behaviors_timers.go`,
-    `verify/behaviors_reactions.go`) and the listener computation
-    (`registry.BehaviorListens`) are per-behavior code, as D58's are,
-    until step 5 derives them from a behavior's class declaration. Until
-    then an extension's field behavior has the data forms alone, and the
-    build checks Timers' rules that read the IR alone: its other rules
-    (states, transitions) and Workflow's are the core's define check's, at
-    the first command on the table.
-  - The implements form for behaviors other than the core's, bundles and
-    the declarative vocabulary (step 5).
+    `Reactions<T, C>`) are per-behavior code, as D58's are. The build
+    checks Timers' rules that read the IR alone: its other rules (states,
+    transitions) and Workflow's are the core's define check's, at the
+    first command on the table.
   - A read of a row's deadlines (`Timers.deadlines`) in the repositories,
     the API, the SDKs and MCP, through `Core::read_fields` or a declared
     read (D86), and a read of a use's sub-table rows in the repositories:
@@ -918,10 +980,6 @@ with several Workflows.
     for tables: only the build refuses it on an engine type, so a type the
     engine defines at run time keeps it unread, until step 7 removes
     engine types.
-  - The permission catalog lists a use's config permission under each of
-    its operations (`tickets.timers` under `fireTimer` too), though only
-    `resetTimer` and `snoozeTimer` check it, as the item on the catalog
-    below says.
   - A `dueAt` in the API is epoch milliseconds, an integer, as Timers
     declares it, not a date-time.
   - Timers' declaration lists `deadlines`, its computed read, as a field
@@ -979,9 +1037,10 @@ with several Workflows.
     where TypeScript's binds a string as it is. The adapters are to agree,
     and a transcript case would hold them to it.
   - An own field the layout leaves unconverted reaches the core apart in
-    each adapter, which no ported behavior reads yet and declarative rules
-    (step 5) will. On Postgres, Go reads a `DATE` as an instant's ISO
-    text, and a `TIME` or an `INTERVAL` as pgx's struct, where TypeScript
+    each adapter, which no ported behavior reads yet and a declarative
+    rule's condition may (step 5). On Postgres, Go reads a `DATE` as an
+    instant's ISO text, and a `TIME` or an `INTERVAL` as pgx's struct,
+    where TypeScript
     and Rust read the column's text. A list of date-times is left out of
     the Go ORM's create's own fields, which TypeScript's passes, and reads
     back as RFC 3339 with the server's offset in Go, `toISOString` text in
@@ -1029,11 +1088,11 @@ with several Workflows.
   - A non-writing behavior operation is a `POST` like the rest; a read
     that is a query, as a declared query (D86) and a `GET`, comes with the
     first behavior that declares one.
-  - A config's permissions are attributed to every operation of its use:
-    the catalog lists each string under a key `permission`, or since D104
-    one ending in `Permission` (Workflow's `overridePermission`), under each,
-    until step 5 derives which operation checks which from the class
-    declaration.
+  - A config's permissions are attributed to every operation of its use
+    when its declaration states no operation's `permissions`: the catalog
+    lists each string under a key `permission`, or since D104 one ending
+    in `Permission` (Workflow's `overridePermission`), under each. Step 5's
+    left names the behaviors whose classes state none.
   - The TypeScript SDK's typed states are the API's enum
     (`OrderStatusState.Paid`), not the literals the repository takes, and
     the TypeScript handler passes the decoded input to the repository
@@ -1062,7 +1121,7 @@ with several Workflows.
 
 ## D104. A transition may name who makes it and may repeat as no change, a sign-off pins what was read, Retries waits, Budget keeps periods, Presence times by state, Lease and Retries stay behaviors on tables, and Pool, Schedules, Seats and Reconcile join the core (D16, D56, D103 amended)
 
-Built: steps 1 to 3. A Workflow transition takes `by`,
+Built: steps 1 to 4. A Workflow transition takes `by`,
 `overridePermission`, `repeat` and `from`; Constants, StateRules,
 Approvals, Lease, Retries, Presence and Budget run on the core with their
 upgrades; and Seats, Reconcile, Schedules and Pool join it, with the
@@ -1070,27 +1129,29 @@ upgrades; and Seats, Reconcile, Schedules and Pool join it, with the
 `examples/engine-jobs` as a declared read and Lease's `acquire`, with no
 new primitive: it lists the queued rows by `-priority,id`, skips those
 `dependenciesBlocked`, takes the first with `Lease.acquire`, transitions
-it with the token as a precondition, and calls `Budget.reserve`. Left:
-step 4, "Barrier, Mailbox and Assignment as bundles with step 5, and the
-`caller` operand of its declarative conditions", and what the built
-steps left.
+it with the token as a precondition, and calls `Budget.reserve`.
 
-### Step 4
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| The declarative vocabulary (D103, step 5) gains a `caller` operand in its conditions, compared with a field that holds a subject. | Conditions over the row alone, which cannot say whose row it is |
-| `Assignment` becomes a bundle of one seat with `max: 1` and `onFull: refuse` (step 5), and its guard on another principal's `acquire` reads that seat. | Two behaviors that say who a row is for |
-
-### Two bundles
-
-Two of the app's patterns need no rules of their own, and wait for step
-5's bundles.
-
-| Decision | Alternatives not taken |
-|----------|------------------------|
-| *Barrier* is Workflow (`waiting`, `released`, `cancelled`), Rollups' `all` over the rows that relate to it, gating `released`, a Timers deadline whose `then` releases it, and a `release` transition behind a permission, a person's go-ahead: an update that waits for every running agent to say it is ready, for five minutes when a person started it, or for a person's go-ahead. It needed Rollups ported over a `HasMany` relation, which step 4 has built. | A behavior of its own |
-| *Mailbox* is Workflow (`queued`, `urgent`, `taken`, `sent`, `canceled`, `failed`), StateRules freezing a taken message, `by: ["createdBy"]` on the sender's moves, and Lease on a taken message, whose expiry moves it back to `queued`. A take is the declared read of a conversation's oldest waiting message and Lease's `acquire`, as above. | Comments, whose deliveries tell a subject of a message and are no work an agent takes in turn |
+Step 4 is built with D103's step 5. The declarative vocabulary's `caller`
+operand compares the caller's subject with a field that holds a subject.
+Barrier, Mailbox and Assignment are the core's bundles
+(`internal/registry/bundles`, and `@superschematic/db`'s aliases), each a
+fixture, replayed in `core-bundles` on every host. Barrier is built as
+this entry meant it: Rollups' gate takes `exemptions`, a permission whose
+holder passes it and the Timers deadlines whose moves do, and Barrier's
+exempts its release permission and its `timeout`. A barrier releases once
+every row is ready, at the timeout, or on a person's go-ahead, whether
+every row is ready or not; a caller without the permission is held by the
+gate. A Timers fire the gate would veto now moves, so it needs no retry.
+An exemption is a gating rollup's member, `{ permission?, deadlines? }`;
+a deadline's move is the Timers use's call of the transition while the
+named deadline is due and has not fired, and each named deadline is held
+at define to the Timers config. With the release permission exempt, the
+gate holds only a caller without it, whom Workflow's release refuses
+too: the gate decides which refusal that caller meets.
+Assignment is Seats with one seat of one subject that refuses a take
+while it is full; its guard on another principal's `acquire` is left
+(below). Step 5's question is answered: Constants and StateRules are
+declarative behaviors (D103's step 5). Left: what the built steps left.
 
 ### What the built steps left
 
@@ -1114,12 +1175,13 @@ context is written out.
   (`Action::NamespaceOperation`); a build's table still leaves Comments'
   streamed replies and read state out, and `@behaviorOperations` warns
   (L 17127, 17262).
-- Step 5's question: whether Constants' constancy and `oneWay`, and
-  StateRules' required and frozen fields, become declarative rules.
-  Constants still requires at least one field (L 15306, 17044, 17103).
+- Assignment's guard on another principal's Lease `acquire`, which reads
+  the assignee seat: a declarative condition reads the row's fields, not
+  Seats' occupants (step 4).
 - The permission catalog lists every permission a config names under
-  each of its use's operations, until a class declaration says which
-  operation checks which (L 17397).
+  each of its use's operations for a behavior whose class states no
+  operation's permissions, which D103's step 5 left names: Budget, Lease,
+  Retries and Schedules among them (L 17397).
 - The engine advertises and refuses the table-only members until engine
   types go (D103's step 7, which D117 reworks) (L 17028, 17124, 17252,
   17328).
