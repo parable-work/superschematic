@@ -73,7 +73,7 @@ const TRANSCRIPTS: [(&str, usize); 39] = [
     ("core-payments", 73),
     ("core-blueprint", 151),
     ("core-aliased", 46),
-    ("core-bundles", 84),
+    ("core-bundles", 90),
     ("core-declarative", 49),
     ("acme-rating", 26),
 ];

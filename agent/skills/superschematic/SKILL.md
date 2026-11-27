@@ -715,8 +715,10 @@ Most are load errors; knowing them saves a build round-trip:
   loader expands a bundle into its parts, each named as the use it is
   (`status`, `holds_state`, the `holds` and `payments` operations), so do
   not also write a part, or declare the field a part is anchored on (the
-  build refuses both). A Barrier is released only once every row is
-  ready: its gate holds the deadline's release and the go-ahead alike.
+  build refuses both). A Barrier is released once every row is ready,
+  at its timeout, or by a go-ahead from a caller who holds
+  `releasePermission`: its gate exempts those two (Rollups'
+  `exemptions`).
   `superschematic format` writes the bundle, not its parts.
 - When a row's status should follow what an outside system reports (a
   sandbox at its provider, a deployment at its platform, a payment at its

@@ -166,6 +166,12 @@
           "config": {
             "rollups": {
               "ready": {
+                "exemptions": {
+                  "deadlines": [
+                    "timeout"
+                  ],
+                  "permission": "rollouts.release"
+                },
                 "function": "all",
                 "gatedStates": [
                   "released"

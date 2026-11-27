@@ -438,13 +438,14 @@ const ALIASED_FLOOR: usize = 46;
 /// The steps `core-bundles.transcript.json` holds, of the hand-written
 /// `core-bundles.json`'s 81 (D103's step 5): the 12 define and publish
 /// checks of each bundle's table, whose uses are the parts the loader
-/// expands the bundle into, and 72 commands, each holding its row's
+/// expands the bundle into, and 78 commands, each holding its row's
 /// version after the step, the deadlines the runner's runDues ran and the
 /// changes of the tables Timers hears among them, in its 4 scenarios,
-/// Reservation's, Barrier's, Mailbox's and Assignment's; none is a
-/// repeat. The 13 left out are the opens, the reads of rows and a runDue
-/// that ran nothing. An adapter's replay holds its own count to this one.
-const BUNDLES_FLOOR: usize = 84;
+/// Reservation's, Barrier's (its gate's exemptions among them, D104),
+/// Mailbox's and Assignment's; none is a repeat. The 11 left out are the
+/// opens, the reads of rows and a runDue that ran nothing. An adapter's
+/// replay holds its own count to this one.
+const BUNDLES_FLOOR: usize = 90;
 
 #[test]
 fn the_checked_in_transcripts_are_what_the_writer_writes() {

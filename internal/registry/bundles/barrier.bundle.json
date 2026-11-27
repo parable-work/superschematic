@@ -1,6 +1,6 @@
 {
   "name": "Barrier",
-  "description": "A point an update waits at (D104): a Workflow on status with fixed states (waiting, released, cancelled); Rollups' all over the rows of another table that relate to the barrier, ready when every one of them has finished with the outcome success, which gates released; a Timers deadline whose then releases the barrier once the timeout has passed since it began waiting; and the move from waiting to released behind a permission, a person's go-ahead. The gate holds the deadline's move and the go-ahead's alike, so a barrier is released only once every row is ready: the deadline's release, at the timeout, is vetoed while a row is not, its fire then recorded vetoed and not tried again, and a person's go-ahead releases the barrier once every row is ready. The worker that runs the table's deadlines holds the release permission.",
+  "description": "A point an update waits at (D104): a Workflow on status with fixed states (waiting, released, cancelled); Rollups' all over the rows of another table that relate to the barrier, ready when every one of them has finished with the outcome success, which gates released; a Timers deadline whose then releases the barrier once the timeout has passed since it began waiting; and the move from waiting to released behind a permission, a person's go-ahead. The gate exempts the deadline's move and a caller who holds the release permission (Rollups' exemptions), so a barrier is released once every row is ready, at the timeout, or by a person's go-ahead, whether every row is ready or not; a caller without the permission is held by the gate. The worker that runs the table's deadlines holds the release permission.",
   "settingsSchema": {
     "type": "object",
     "additionalProperties": false,
@@ -38,7 +38,8 @@
             "link": { "$setting": "link" },
             "function": "all",
             "outcomes": ["success"],
-            "gatedStates": ["released"]
+            "gatedStates": ["released"],
+            "exemptions": { "permission": { "$setting": "releasePermission" }, "deadlines": ["timeout"] }
           }
         }
       }

@@ -3240,9 +3240,44 @@
                               }
                             }
                           }
+                        },
+                        {
+                          "if": {
+                            "required": [
+                              "exemptions"
+                            ]
+                          },
+                          "then": {
+                            "required": [
+                              "gatedStates"
+                            ]
+                          }
                         }
                       ],
                       "properties": {
+                        "exemptions": {
+                          "additionalProperties": false,
+                          "description": "For a rollup that gates states, the moves into them its gate lets through though it does not hold: a caller's who holds permission, and the move each deadline of the table's Timers that deadlines names makes, its then, as it falls due. A table's alone: an engine type refuses it.",
+                          "minProperties": 1,
+                          "properties": {
+                            "deadlines": {
+                              "description": "Deadlines of the table's Timers whose then moves into a state the rollup gates, each passing the gate as it falls due.",
+                              "items": {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              "minItems": 1,
+                              "type": "array",
+                              "uniqueItems": true
+                            },
+                            "permission": {
+                              "description": "The permission whose holder moves into a gated state whether the rollup holds or not.",
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "type": "object"
+                        },
                         "field": {
                           "description": "For countBy, a string, enum or boolean field of the linked instances, or status when their schema composes Workflow; for sum, min and max, a numeric field; for latest, any field of theirs, or status when their schema composes Workflow.",
                           "minLength": 1,

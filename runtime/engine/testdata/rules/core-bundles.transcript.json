@@ -4008,7 +4008,7 @@
       ]
     },
     {
-      "name": "Barrier > a rollout waits for every agent that points at it to be ready: a person's go-ahead waits for the gate, which holds once each agent has finished with success; the deadline's release at the timeout waits for it too, and its fire, vetoed while an agent is not ready, is recorded vetoed and not tried again; the go-ahead needs its permission; a cancelled rollout's deadline is skipped",
+      "name": "Barrier > a rollout waits for every agent that points at it to be ready, for its timeout, or for a person's go-ahead: the gate holds a caller without the release permission until each agent has finished with success; the deadline's release at the timeout and a go-ahead by a caller who holds the permission pass it whether the agents are ready or not (Rollups' exemptions); a release once every agent is ready needs the permission too; a cancelled rollout's deadline is skipped",
       "clock": {
         "fixed": 1000000
       },
@@ -4031,6 +4031,12 @@
                   "config": {
                     "rollups": {
                       "ready": {
+                        "exemptions": {
+                          "deadlines": [
+                            "timeout"
+                          ],
+                          "permission": "rollouts.release"
+                        },
                         "function": "all",
                         "gatedStates": [
                           "released"
@@ -4176,6 +4182,12 @@
                 "config": {
                   "rollups": {
                     "ready": {
+                      "exemptions": {
+                        "deadlines": [
+                          "timeout"
+                        ],
+                        "permission": "rollouts.release"
+                      },
                       "function": "all",
                       "gatedStates": [
                         "released"
@@ -4270,6 +4282,12 @@
                 "config": {
                   "rollups": {
                     "ready": {
+                      "exemptions": {
+                        "deadlines": [
+                          "timeout"
+                        ],
+                        "permission": "rollouts.release"
+                      },
                       "function": "all",
                       "gatedStates": [
                         "released"
@@ -4636,10 +4654,8 @@
           "version": 0,
           "command": {
             "caller": {
-              "subject": "lead",
-              "permissions": [
-                "rollouts.release"
-              ]
+              "subject": "agent",
+              "permissions": []
             },
             "now": 1000000,
             "action": {
@@ -4860,8 +4876,8 @@
               },
               "owned": {
                 "status": {
-                  "status": "waiting",
-                  "enteredAt": 1000000
+                  "status": "released",
+                  "enteredAt": 1300000
                 }
               }
             },
@@ -4876,7 +4892,86 @@
                       "dueAt": 1300000,
                       "fired": true,
                       "firedAt": 1300000,
-                      "outcome": "vetoed"
+                      "outcome": "moved"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 11,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Rollout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": [
+                "rollouts.release"
+              ]
+            },
+            "now": 1300000,
+            "action": {
+              "kind": "change",
+              "key": "r1",
+              "change": {
+                "write": "update",
+                "at": 1300000,
+                "before": {
+                  "own": {
+                    "title": "v2"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "waiting",
+                      "enteredAt": 1000000
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "v2"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "released",
+                      "enteredAt": 1300000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-8"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "v2"
+              },
+              "owned": {
+                "status": {
+                  "status": "released",
+                  "enteredAt": 1300000
+                }
+              }
+            },
+            "subRows": {
+              "Timers": {
+                "deadlines": [
+                  {
+                    "key": "timeout",
+                    "values": {
+                      "baseAt": 1000000,
+                      "armedFrom": "1000000",
+                      "dueAt": 1300000,
+                      "fired": true,
+                      "firedAt": 1300000,
+                      "outcome": "moved"
                     }
                   }
                 ]
@@ -4888,50 +4983,6 @@
         {
           "kind": "command",
           "step": 13,
-          "call": "instances.invoke",
-          "database": "{{dir:1}}/engine.db",
-          "type": "Agent",
-          "version": 0,
-          "command": {
-            "caller": {
-              "subject": "agent",
-              "permissions": []
-            },
-            "now": 1301000,
-            "action": {
-              "kind": "operation",
-              "key": "a2",
-              "useId": "status",
-              "operation": "transition",
-              "params": {
-                "to": "ready"
-              }
-            },
-            "request": "request-8"
-          },
-          "expect": {
-            "result": {
-              "from": "running",
-              "to": "ready"
-            },
-            "row": {
-              "own": {
-                "name": "a2",
-                "rolloutId": "r1"
-              },
-              "owned": {
-                "status": {
-                  "status": "ready",
-                  "enteredAt": 1301000
-                }
-              }
-            },
-            "version": 2
-          }
-        },
-        {
-          "kind": "command",
-          "step": 16,
           "call": "instances.create",
           "database": "{{dir:1}}/engine.db",
           "type": "Rollout",
@@ -4995,7 +5046,7 @@
         },
         {
           "kind": "command",
-          "step": 17,
+          "step": 14,
           "call": "instances.create",
           "database": "{{dir:1}}/engine.db",
           "type": "Agent",
@@ -5036,6 +5087,179 @@
         },
         {
           "kind": "command",
+          "step": 15,
+          "call": "instances.invoke",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Rollout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "lead",
+              "permissions": [
+                "rollouts.release"
+              ]
+            },
+            "now": 1400000,
+            "action": {
+              "kind": "operation",
+              "key": "r2",
+              "useId": "status",
+              "operation": "transition",
+              "params": {
+                "to": "released"
+              }
+            },
+            "request": "request-11"
+          },
+          "expect": {
+            "result": {
+              "from": "waiting",
+              "to": "released"
+            },
+            "row": {
+              "own": {
+                "title": "v3"
+              },
+              "owned": {
+                "status": {
+                  "status": "released",
+                  "enteredAt": 1400000
+                }
+              }
+            },
+            "subRows": {
+              "Timers": {
+                "deadlines": [
+                  {
+                    "key": "timeout",
+                    "values": {
+                      "baseAt": 1400000,
+                      "armedFrom": "1400000",
+                      "dueAt": 1700000,
+                      "fired": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Timers",
+                "name": "timeout",
+                "at": 1700000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 16,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Rollout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "lead",
+              "permissions": [
+                "rollouts.release"
+              ]
+            },
+            "now": 1400000,
+            "action": {
+              "kind": "create",
+              "id": "r3",
+              "own": {
+                "title": "v4"
+              },
+              "params": {}
+            },
+            "request": "request-12"
+          },
+          "expect": {
+            "key": "r3",
+            "row": {
+              "own": {
+                "title": "v4"
+              },
+              "owned": {
+                "status": {
+                  "status": "waiting",
+                  "enteredAt": 1400000
+                }
+              }
+            },
+            "subRows": {
+              "Timers": {
+                "deadlines": [
+                  {
+                    "key": "timeout",
+                    "values": {
+                      "baseAt": 1400000,
+                      "armedFrom": "1400000",
+                      "dueAt": 1700000,
+                      "fired": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Timers",
+                "name": "timeout",
+                "at": 1700000,
+                "payload": null
+              }
+            ],
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
+          "step": 17,
+          "call": "instances.create",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Agent",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "agent",
+              "permissions": []
+            },
+            "now": 1400000,
+            "action": {
+              "kind": "create",
+              "id": "a4",
+              "own": {
+                "name": "a4",
+                "rolloutId": "r3"
+              },
+              "params": {}
+            },
+            "request": "request-13"
+          },
+          "expect": {
+            "key": "a4",
+            "row": {
+              "own": {
+                "name": "a4",
+                "rolloutId": "r3"
+              },
+              "owned": {
+                "status": {
+                  "status": "running",
+                  "enteredAt": 1400000
+                }
+              }
+            },
+            "version": 1
+          }
+        },
+        {
+          "kind": "command",
           "step": 18,
           "call": "instances.invoke",
           "database": "{{dir:1}}/engine.db",
@@ -5049,14 +5273,14 @@
             "now": 1400000,
             "action": {
               "kind": "operation",
-              "key": "a3",
+              "key": "a4",
               "useId": "status",
               "operation": "transition",
               "params": {
                 "to": "ready"
               }
             },
-            "request": "request-11"
+            "request": "request-14"
           },
           "expect": {
             "result": {
@@ -5065,8 +5289,8 @@
             },
             "row": {
               "own": {
-                "name": "a3",
-                "rolloutId": "r2"
+                "name": "a4",
+                "rolloutId": "r3"
               },
               "owned": {
                 "status": {
@@ -5093,25 +5317,25 @@
             "now": 1400000,
             "action": {
               "kind": "operation",
-              "key": "r2",
+              "key": "r3",
               "useId": "status",
               "operation": "transition",
               "params": {
                 "to": "released"
               }
             },
-            "request": "request-12"
+            "request": "request-15"
           },
           "expect": {
             "refused": {
               "code": "forbidden",
               "status": 403,
               "class": "EngineError",
-              "message": "agent may not move Rollout r2's status from waiting to released: the transition needs permission rollouts.release"
+              "message": "agent may not move Rollout r3's status from waiting to released: the transition needs permission rollouts.release"
             },
             "row": {
               "own": {
-                "title": "v3"
+                "title": "v4"
               },
               "owned": {
                 "status": {
@@ -5163,14 +5387,14 @@
             "now": 1400000,
             "action": {
               "kind": "operation",
-              "key": "r2",
+              "key": "r3",
               "useId": "status",
               "operation": "transition",
               "params": {
                 "to": "released"
               }
             },
-            "request": "request-13"
+            "request": "request-16"
           },
           "expect": {
             "result": {
@@ -5179,7 +5403,7 @@
             },
             "row": {
               "own": {
-                "title": "v3"
+                "title": "v4"
               },
               "owned": {
                 "status": {
@@ -5231,19 +5455,19 @@
             "now": 1400000,
             "action": {
               "kind": "create",
-              "id": "r3",
+              "id": "r4",
               "own": {
-                "title": "v4"
+                "title": "v5"
               },
               "params": {}
             },
-            "request": "request-14"
+            "request": "request-17"
           },
           "expect": {
-            "key": "r3",
+            "key": "r4",
             "row": {
               "own": {
-                "title": "v4"
+                "title": "v5"
               },
               "owned": {
                 "status": {
@@ -5295,14 +5519,14 @@
             "now": 1400000,
             "action": {
               "kind": "operation",
-              "key": "r3",
+              "key": "r4",
               "useId": "status",
               "operation": "transition",
               "params": {
                 "to": "cancelled"
               }
             },
-            "request": "request-15"
+            "request": "request-18"
           },
           "expect": {
             "result": {
@@ -5311,7 +5535,7 @@
             },
             "row": {
               "own": {
-                "title": "v4"
+                "title": "v5"
               },
               "owned": {
                 "status": {
@@ -5380,7 +5604,7 @@
                 }
               }
             },
-            "request": "request-16"
+            "request": "request-19"
           },
           "expect": {
             "row": {
@@ -5465,7 +5689,7 @@
                 }
               }
             },
-            "request": "request-17"
+            "request": "request-20"
           },
           "expect": {
             "row": {
@@ -5539,7 +5763,7 @@
                 }
               }
             },
-            "request": "request-18"
+            "request": "request-21"
           },
           "expect": {
             "row": {
@@ -5548,7 +5772,7 @@
               },
               "owned": {
                 "status": {
-                  "status": "cancelled",
+                  "status": "released",
                   "enteredAt": 1400000
                 }
               }
@@ -5617,6 +5841,165 @@
                   },
                   "owned": {
                     "status": {
+                      "status": "released",
+                      "enteredAt": 1400000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-22"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "v4"
+              },
+              "owned": {
+                "status": {
+                  "status": "released",
+                  "enteredAt": 1400000
+                }
+              }
+            },
+            "subRows": {
+              "Timers": {
+                "deadlines": [
+                  {
+                    "key": "timeout",
+                    "values": {
+                      "baseAt": 1400000,
+                      "armedFrom": "1400000",
+                      "dueAt": 1700000,
+                      "fired": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Timers",
+                "name": "timeout",
+                "at": 1700000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 23,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Rollout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": [
+                "rollouts.release"
+              ]
+            },
+            "now": 1800000,
+            "action": {
+              "kind": "change",
+              "key": "r4",
+              "change": {
+                "write": "insert",
+                "at": 1400000,
+                "after": {
+                  "own": {
+                    "title": "v5"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "waiting",
+                      "enteredAt": 1400000
+                    }
+                  }
+                }
+              }
+            },
+            "request": "request-23"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "v5"
+              },
+              "owned": {
+                "status": {
+                  "status": "cancelled",
+                  "enteredAt": 1400000
+                }
+              }
+            },
+            "subRows": {
+              "Timers": {
+                "deadlines": [
+                  {
+                    "key": "timeout",
+                    "values": {
+                      "baseAt": 1400000,
+                      "armedFrom": "1400000",
+                      "dueAt": 1700000,
+                      "fired": false
+                    }
+                  }
+                ]
+              }
+            },
+            "deadlines": [
+              {
+                "useId": "Timers",
+                "name": "timeout",
+                "at": 1700000,
+                "payload": null
+              }
+            ],
+            "version": 2
+          }
+        },
+        {
+          "kind": "command",
+          "step": 23,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Rollout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": [
+                "rollouts.release"
+              ]
+            },
+            "now": 1800000,
+            "action": {
+              "kind": "change",
+              "key": "r4",
+              "change": {
+                "write": "update",
+                "at": 1400000,
+                "before": {
+                  "own": {
+                    "title": "v5"
+                  },
+                  "owned": {
+                    "status": {
+                      "status": "waiting",
+                      "enteredAt": 1400000
+                    }
+                  }
+                },
+                "after": {
+                  "own": {
+                    "title": "v5"
+                  },
+                  "owned": {
+                    "status": {
                       "status": "cancelled",
                       "enteredAt": 1400000
                     }
@@ -5624,12 +6007,12 @@
                 }
               }
             },
-            "request": "request-19"
+            "request": "request-24"
           },
           "expect": {
             "row": {
               "own": {
-                "title": "v4"
+                "title": "v5"
               },
               "owned": {
                 "status": {
@@ -5687,7 +6070,7 @@
               "at": 1700000,
               "payload": null
             },
-            "request": "request-20"
+            "request": "request-25"
           },
           "expect": {
             "row": {
@@ -5744,12 +6127,69 @@
               "at": 1700000,
               "payload": null
             },
-            "request": "request-21"
+            "request": "request-26"
           },
           "expect": {
             "row": {
               "own": {
                 "title": "v4"
+              },
+              "owned": {
+                "status": {
+                  "status": "released",
+                  "enteredAt": 1400000
+                }
+              }
+            },
+            "subRows": {
+              "Timers": {
+                "deadlines": [
+                  {
+                    "key": "timeout",
+                    "values": {
+                      "baseAt": 1400000,
+                      "armedFrom": "1400000",
+                      "dueAt": 1700000,
+                      "fired": true,
+                      "firedAt": 1800000,
+                      "outcome": "skipped"
+                    }
+                  }
+                ]
+              }
+            },
+            "version": 3
+          }
+        },
+        {
+          "kind": "command",
+          "step": 23,
+          "call": "runner.runDue",
+          "database": "{{dir:1}}/engine.db",
+          "type": "Rollout",
+          "version": 0,
+          "command": {
+            "caller": {
+              "subject": "runner",
+              "permissions": [
+                "rollouts.release"
+              ]
+            },
+            "now": 1800000,
+            "action": {
+              "kind": "deadline",
+              "key": "r4",
+              "useId": "Timers",
+              "name": "timeout",
+              "at": 1700000,
+              "payload": null
+            },
+            "request": "request-27"
+          },
+          "expect": {
+            "row": {
+              "own": {
+                "title": "v5"
               },
               "owned": {
                 "status": {
@@ -5787,16 +6227,6 @@
         },
         {
           "step": 12,
-          "call": "instances.get",
-          "reason": "a read of rows, which the transcript holds after each command that names one"
-        },
-        {
-          "step": 14,
-          "call": "runner.runDue",
-          "reason": "no change waited and no deadline was armed and due, so the runner ran no command"
-        },
-        {
-          "step": 15,
           "call": "instances.get",
           "reason": "a read of rows, which the transcript holds after each command that names one"
         },

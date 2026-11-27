@@ -364,12 +364,13 @@ const BLUEPRINT_FLOOR: usize = 151;
 /// removeAlias, resolve a command without a row, and a delete that deletes
 /// the row's rows of the shared table.
 const ALIASED_FLOOR: usize = 46;
-/// core-bundles' floor (D103's step 5): 84 steps of the scenarios written
-/// by hand, 72 commands and 12 checks: the core's four bundles, each a
+/// core-bundles' floor (D103's step 5): 90 steps of the scenarios written
+/// by hand, 78 commands and 12 checks: the core's four bundles, each a
 /// table whose uses are the parts the loader expands the bundle into, a
-/// booking's hold, payment and expiry, a rollout's gate and deadline, a
-/// message's lease and its expiry back to the queue, and one seat.
-const BUNDLES_FLOOR: usize = 84;
+/// booking's hold, payment and expiry, a rollout's gate, its exemptions
+/// and its deadline, a message's lease and its expiry back to the queue,
+/// and one seat.
+const BUNDLES_FLOOR: usize = 90;
 /// core-declarative's floor (D103's step 5): the steps of the scenarios
 /// written by hand over test.Votes, a behavior whose declaration states its
 /// rules, which the transcript holds whole and the core is handed before

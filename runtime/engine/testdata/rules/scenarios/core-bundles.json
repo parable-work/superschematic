@@ -1176,7 +1176,7 @@
       ]
     },
     {
-      "name": "Barrier > a rollout waits for every agent that points at it to be ready: a person's go-ahead waits for the gate, which holds once each agent has finished with success; the deadline's release at the timeout waits for it too, and its fire, vetoed while an agent is not ready, is recorded vetoed and not tried again; the go-ahead needs its permission; a cancelled rollout's deadline is skipped",
+      "name": "Barrier > a rollout waits for every agent that points at it to be ready, for its timeout, or for a person's go-ahead: the gate holds a caller without the release permission until each agent has finished with success; the deadline's release at the timeout and a go-ahead by a caller who holds the permission pass it whether the agents are ready or not (Rollups' exemptions); a release once every agent is ready needs the permission too; a cancelled rollout's deadline is skipped",
       "behaviors": [
         "Links",
         "Rollups",
@@ -1244,6 +1244,12 @@
                       "config": {
                         "rollups": {
                           "ready": {
+                            "exemptions": {
+                              "deadlines": [
+                                "timeout"
+                              ],
+                              "permission": "rollouts.release"
+                            },
                             "function": "all",
                             "gatedStates": [
                               "released"
@@ -1533,7 +1539,7 @@
         {
           "engine": "e1",
           "call": "instances.invoke",
-          "principal": "lead",
+          "principal": "agent",
           "args": [
             "Rollout",
             "r1",
@@ -1614,77 +1620,13 @@
                     "dueAt": 1300000,
                     "fired": true,
                     "firedAt": 1300000,
-                    "outcome": "vetoed"
+                    "outcome": "moved"
                   }
                 }
               },
               "status": {
-                "status": "waiting",
-                "enteredAt": 1000000
-              }
-            }
-          }
-        },
-        {
-          "engine": "e1",
-          "call": "instances.invoke",
-          "principal": "agent",
-          "args": [
-            "Agent",
-            "a2",
-            "transition",
-            {
-              "to": "ready"
-            }
-          ],
-          "now": 1301000,
-          "expect": {
-            "from": "running",
-            "to": "ready"
-          }
-        },
-        {
-          "engine": "e1",
-          "call": "runner.runDue",
-          "now": 1360000,
-          "expect": {
-            "failed": 0
-          }
-        },
-        {
-          "engine": "e1",
-          "call": "instances.get",
-          "principal": "lead",
-          "args": [
-            "Rollout",
-            "r1"
-          ],
-          "expect": {
-            "namespace": "default",
-            "schema": "Rollout",
-            "id": "r1",
-            "data": {
-              "title": "v2"
-            },
-            "behaviors": {
-              "Rollups": {
-                "values": {
-                  "ready": true
-                }
-              },
-              "Timers": {
-                "deadlines": {
-                  "timeout": {
-                    "dueAt": 1300000,
-                    "fired": true,
-                    "firedAt": 1300000,
-                    "outcome": "vetoed"
-                  }
-                }
-              },
-              "status": {
-                "status": "waiting",
-                "enteredAt": 1000000
+                "status": "released",
+                "enteredAt": 1300000
               }
             }
           }
@@ -1775,41 +1717,6 @@
         {
           "engine": "e1",
           "call": "instances.invoke",
-          "principal": "agent",
-          "args": [
-            "Agent",
-            "a3",
-            "transition",
-            {
-              "to": "ready"
-            }
-          ],
-          "expect": {
-            "from": "running",
-            "to": "ready"
-          }
-        },
-        {
-          "engine": "e1",
-          "call": "instances.invoke",
-          "principal": "agent",
-          "args": [
-            "Rollout",
-            "r2",
-            "transition",
-            {
-              "to": "released"
-            }
-          ],
-          "error": {
-            "class": "EngineError",
-            "code": "forbidden",
-            "message": "agent may not move Rollout r2's status from waiting to released: the transition needs permission rollouts.release"
-          }
-        },
-        {
-          "engine": "e1",
-          "call": "instances.invoke",
           "principal": "lead",
           "args": [
             "Rollout",
@@ -1867,11 +1774,145 @@
         },
         {
           "engine": "e1",
+          "call": "instances.create",
+          "principal": "agent",
+          "args": [
+            "Agent",
+            {
+              "name": "a4"
+            },
+            {
+              "id": "a4",
+              "behaviors": {
+                "Links": {
+                  "rollout": "r3"
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Agent",
+            "id": "a4",
+            "data": {
+              "name": "a4"
+            },
+            "behaviors": {
+              "status": {
+                "status": "running",
+                "enteredAt": 1400000
+              },
+              "Links": {
+                "targets": {
+                  "rollout": {
+                    "schema": "Rollout",
+                    "id": "r3"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Agent",
+            "a4",
+            "transition",
+            {
+              "to": "ready"
+            }
+          ],
+          "expect": {
+            "from": "running",
+            "to": "ready"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "agent",
+          "args": [
+            "Rollout",
+            "r3",
+            "transition",
+            {
+              "to": "released"
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "agent may not move Rollout r3's status from waiting to released: the transition needs permission rollouts.release"
+          }
+        },
+        {
+          "engine": "e1",
           "call": "instances.invoke",
           "principal": "lead",
           "args": [
             "Rollout",
             "r3",
+            "transition",
+            {
+              "to": "released"
+            }
+          ],
+          "expect": {
+            "from": "waiting",
+            "to": "released"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            {
+              "title": "v5"
+            },
+            {
+              "id": "r4"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Rollout",
+            "id": "r4",
+            "data": {
+              "title": "v5"
+            },
+            "behaviors": {
+              "Rollups": {
+                "values": {
+                  "ready": true
+                }
+              },
+              "Timers": {
+                "deadlines": {
+                  "timeout": {
+                    "dueAt": 1700000,
+                    "fired": false
+                  }
+                }
+              },
+              "status": {
+                "status": "waiting",
+                "enteredAt": 1400000
+              }
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "lead",
+          "args": [
+            "Rollout",
+            "r4",
             "transition",
             {
               "to": "cancelled"
@@ -1896,14 +1937,14 @@
           "principal": "lead",
           "args": [
             "Rollout",
-            "r3"
+            "r4"
           ],
           "expect": {
             "namespace": "default",
             "schema": "Rollout",
-            "id": "r3",
+            "id": "r4",
             "data": {
-              "title": "v4"
+              "title": "v5"
             },
             "behaviors": {
               "Rollups": {

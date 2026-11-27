@@ -108,12 +108,11 @@ export interface BarrierSettings {
  * success, which gates released; a Timers deadline whose then releases the
  * barrier once the timeout has passed; and a Workflow on status (waiting,
  * released, cancelled) whose release needs the permission, a person's
- * go-ahead. The gate holds the deadline's and the go-ahead's moves alike:
- * a barrier is released once every row is ready. The deadline's release,
- * at the timeout, is vetoed while a row is not, its fire recorded vetoed
- * and not tried again, and a person's go-ahead then releases the barrier
- * once every row is ready. The table's behavior worker holds the release
- * permission.
+ * go-ahead. The gate exempts the deadline's move and a caller who holds
+ * the permission (Rollups' exemptions), so a barrier is released once
+ * every row is ready, at the timeout, or by a person's go-ahead, whether
+ * every row is ready or not. The table's behavior worker holds the
+ * release permission.
  */
 export type Barrier<T, S extends BarrierSettings> = Bundle<
   [
@@ -121,7 +120,14 @@ export type Barrier<T, S extends BarrierSettings> = Bundle<
       T,
       {
         rollups: {
-          ready: { schema: S["rows"]; link: S["link"]; function: "all"; outcomes: ["success"]; gatedStates: ["released"] };
+          ready: {
+            schema: S["rows"];
+            link: S["link"];
+            function: "all";
+            outcomes: ["success"];
+            gatedStates: ["released"];
+            exemptions: { permission: S["releasePermission"]; deadlines: ["timeout"] };
+          };
         };
       }
     >,

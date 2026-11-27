@@ -37,7 +37,20 @@ interface RollupsConfig {
      * have to count; every outcome when absent.
      */
     outcomes?: JsonSchema<("success" | "failure" | "neutral")[], { minItems: 1; uniqueItems: true }>;
-  }, { allOf: [{ if: { properties: { function: { enum: ["countBy", "sum", "min", "max", "latest"] } } }; then: { required: ["field"] }; else: { not: { required: ["field"] } } }, { if: { required: ["gatedStates"] }; then: { properties: { function: { enum: ["all", "any"] } } } }, { if: { required: ["outcomes"] }; then: { properties: { function: { enum: ["all", "any"] } } } }] }>>, { minProperties: 1 }>;
+    /**
+     * For a rollup that gates states, the moves into them its gate lets
+     * through though it does not hold: a caller's who holds permission, and
+     * the move each deadline of the table's Timers that deadlines names
+     * makes, its then, as it falls due. A table's alone: an engine type
+     * refuses it.
+     */
+    exemptions?: JsonSchema<{
+      /** The permission whose holder moves into a gated state whether the rollup holds or not. */
+      permission?: Named;
+      /** Deadlines of the table's Timers whose then moves into a state the rollup gates, each passing the gate as it falls due. */
+      deadlines?: JsonSchema<Named[], { minItems: 1; uniqueItems: true }>;
+    }, { minProperties: 1 }>;
+  }, { allOf: [{ if: { properties: { function: { enum: ["countBy", "sum", "min", "max", "latest"] } } }; then: { required: ["field"] }; else: { not: { required: ["field"] } } }, { if: { required: ["gatedStates"] }; then: { properties: { function: { enum: ["all", "any"] } } } }, { if: { required: ["outcomes"] }; then: { properties: { function: { enum: ["all", "any"] } } } }, { if: { required: ["exemptions"] }; then: { required: ["gatedStates"] } }] }>>, { minProperties: 1 }>;
 }
 
 /** The codes Rollups's refusals carry. */

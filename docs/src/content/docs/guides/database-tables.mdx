@@ -3808,7 +3808,12 @@ this one (`link`), and a function:
 - `gatedStates` names states of the table's one Workflow. A transition
   into one is refused as `not_held` until every rollup that gates it
   holds, whoever asks, with the rollup and its counts in the veto's
-  details. A rollup reads the rows that relate to the row 500 at a time,
+  details. A gating rollup's `exemptions` let a move through though it
+  does not hold (D104's Barrier): a caller's who holds `permission`, and
+  the move each of `deadlines`, deadlines of the table's one Timers whose
+  `then` moves into a gated state, makes as it falls due. The core holds
+  each named deadline to the Timers config at define. An engine type
+  refuses `exemptions`. A rollup reads the rows that relate to the row 500 at a time,
   up to 10,000; past that the value is `{ "over": true }` and its gate
   does not hold.
 - Rollups keeps no column. A read of the row computes its values through
@@ -4377,7 +4382,7 @@ format. The core's bundles:
 | Bundle | Parts | Settings |
 | --- | --- | --- |
 | `Reservation` | `Holds` (`slot` on the resource, `takeOn: ["held"]`, `commitOn: ["booked"]`, `releaseOn: ["expired", "cancelled"]`), `Payments` (`require: { booked: "paid" }`, `voidOn` the two ends, `record` needs `payments.record`), `Timers` (`holdExpiry`, fifteen minutes after `held`, moves to `expired`), `Workflow` on `status` (`draft`, `held`, `booked`, `expired`, `cancelled`) | `resource`, `interval` (`start`, `end`), `amount`, `currency`, each required |
-| `Barrier` | `Rollups` (`ready`: `all` of `rows` through `link` finished with `success`, gating `released`), `Timers` (`timeout`, `timeoutMs` after `waiting`, moves to `released`), `Workflow` on `status` (`waiting`, `released`, `cancelled`; the release needs `releasePermission`) | `rows`, `link`, `timeoutMs`, `releasePermission`, each required |
+| `Barrier` | `Rollups` (`ready`: `all` of `rows` through `link` finished with `success`, gating `released`, exempting `releasePermission` and the `timeout` deadline), `Timers` (`timeout`, `timeoutMs` after `waiting`, moves to `released`), `Workflow` on `status` (`waiting`, `released`, `cancelled`; the release needs `releasePermission`) | `rows`, `link`, `timeoutMs`, `releasePermission`, each required |
 | `Mailbox` | `StateRules` (`taken` freezes every own field), `Lease` (`onExpiry` moves a taken message back to `queued`), `Workflow` on `status` (`queued`, `urgent`, `taken`, `sent`, `canceled`, `failed`; the sender's moves are `by: ["createdBy"]`) | `ttlMs`, Lease's; `takePermission`, Lease's `acquirePermission`; both optional |
 | `Assignment` | `Seats` (one seat, `assignee`, `max: 1`, `onFull: "refuse"`) | `take`, `assign`, both optional |
 
@@ -4391,14 +4396,15 @@ booking that enters `held` takes the resource's time, `booked` waits
 until the payment is captured, and the deadline moves a booking still
 `held` to `expired`, which lets the time go.
 
-`Barrier`'s gate holds every move into `released`: the deadline's and a
-person's go-ahead alike. A barrier is released only once every row that
-points at it has finished with the outcome `success`. When the timeout
-passes first, the deadline's fire is vetoed, recorded `vetoed` in
-`Timers.deadlines`, and not tried again, so a person's go-ahead releases
-the barrier once its rows are ready. A barrier no row points at is
-ready. The table's `@behaviorWorker` holds `releasePermission`, or its
-fire is recorded `forbidden`.
+`Barrier` is released once every row that points at it has finished
+with the outcome `success`, at the timeout, or by a person's go-ahead.
+Its gate exempts the deadline's move and a caller who holds
+`releasePermission` (Rollups' `exemptions`), so the timeout and a
+go-ahead release it whether its rows are ready or not; the deadline's
+fire is recorded `moved` in `Timers.deadlines`. A caller without the
+permission is held by the gate, and Workflow refuses its release too. A
+barrier no row points at is ready. The table's `@behaviorWorker` holds
+`releasePermission`, or its fire is recorded `forbidden`.
 
 `Mailbox`'s table declares `createdBy`, an own field that holds the
 sender's subject. A take is your API's: a declared query of the oldest

@@ -166,7 +166,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   // The core's bundles (D103's step 5): Reservation, Barrier, Mailbox and
   // Assignment, each a table whose uses are the parts the loader expands
   // the bundle into.
-  { file: 'core-bundles', floor: 84 },
+  { file: 'core-bundles', floor: 90 },
   // The declarative vocabulary (D103's step 5): test.Votes, whose
   // declaration states its rules, which the transcript holds whole and the
   // core is handed (declare) before the replay.

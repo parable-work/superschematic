@@ -107,9 +107,11 @@ writes them, and `test/corpus.test.ts` does not list them.
   enters held, Payments holding booked until it is paid, the commit, a
   second hold of the time unavailable, the Timers deadline that expires a
   hold and lets the time go, and a cancellation. Barrier: Rollups' gate,
-  which holds the go-ahead and the deadline's release until every agent
-  is ready, the deadline's fire recorded vetoed, the go-ahead's
-  permission, and a cancelled rollout's deadline skipped. Mailbox: the
+  which holds a caller without the release permission until every agent
+  is ready, and its exemptions, which let the deadline's release at the
+  timeout and a go-ahead by the permission's holder through before then;
+  a release once every agent is ready; and a cancelled rollout's
+  deadline skipped. Mailbox: the
   sender's moves by `createdBy`, the taker's permission and lease, the
   token presented with the move to taken, StateRules' freeze, the
   lease's expiry back to queued and a send. Assignment: one seat of one

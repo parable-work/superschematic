@@ -130,7 +130,7 @@ var transcriptFiles = []transcriptFile{
 	// The core's bundles (D103's step 5): Reservation, Barrier, Mailbox
 	// and Assignment, each a table whose uses are the parts the loader
 	// expands the bundle into.
-	{"../../engine/testdata/rules/core-bundles.transcript.json", 84},
+	{"../../engine/testdata/rules/core-bundles.transcript.json", 90},
 	// The declarative vocabulary (D103's step 5): test.Votes, whose
 	// declaration states its rules, which the transcript holds whole and
 	// the core is handed (Declare) before the replay.
