@@ -136,6 +136,12 @@ type FieldInfo struct {
 	// true: an omitted false would decode back as true.
 	KeepsZeroValue bool
 
+	// OmitsUnsetEnum gives a required enum field omitzero (D202): a value
+	// that was never set, the Go zero value "", is left out of the JSON, as
+	// no reader takes "" for a member. It decodes back as "", and Validate
+	// reports the field as required.
+	OmitsUnsetEnum bool
+
 	// LimitConsts are the constants of the limits the field declares with
 	// Validate<>, written with go.limit_constants = "on" (D160).
 	LimitConsts []LimitConst
@@ -1129,6 +1135,9 @@ func convertFields(codegenFields []codegen.FieldInfo, scalarMap map[string]*Scal
 		if shapes.KeepZero {
 			field.KeepsZeroValue = !isInput && !cf.Required && field.HasDefault && defaultHidesZero(goType, field.DefaultLiteral)
 		}
+
+		field.OmitsUnsetEnum = cf.Required && !cf.RequiredNull && !cf.IsArray && !cf.IsMap && !usesWrapper &&
+			!strings.HasPrefix(goType, "*") && enumLookup != nil && enumLookup(cf.Type)
 
 		fields[i] = field
 	}
