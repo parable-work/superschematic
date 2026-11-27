@@ -1,48 +1,43 @@
 // The job runner on development mode (D117): the jobs, workers and batches
 // of schemas/dev, served by @superschematic/rules-handler, the handler of
-// the behaviors' core, in place of the engine. A row is kept as JSON in the
-// handler's own tables over one SQLite connection, a publish takes effect
-// at once, and the behaviors run on the core
-// (runtime/engine/rust/rules-behaviors). The host's clock and its runner
-// are the caller's, so a test moves time by hand.
+// the behaviors' core. A row is kept as JSON in the handler's own tables
+// over one SQLite connection, a publish takes effect at once, and the
+// behaviors run on the core (runtime/engine/rust/rules-behaviors). The
+// host's clock and its runner are the caller's, so a test moves time by
+// hand.
 //
-// What the engine's server has that this one differs in (README.md, "On
-// development mode"):
+// How it is built (README.md, "How it works"):
 //
-// - Links, Search and Queue are behaviors no table composes (D103).
+// - Links, Search and Queue are no behaviors: D103 folds each into a
+//   schema feature, and the build refuses them.
 //   - A job's batch is a relation (batch, held as batchId).
 //   - Search is a list's text filter: filter[title][contains] matches a
 //     title anywhere, case aside. Development mode serves no searchText, no
 //     weights and no ranking (D62's search fields wait).
-//   - Queue's claimNext is a claim (claim below): the declared read of the
-//     queued jobs of a topic, most urgent first, and Lease's acquire on the
-//     first no blocker holds; then the holder moves it to running with the
-//     lease's token, and reserves its CPU seconds. A claimer that loses the
-//     race meets held_by_another and reads again (D104).
+//   - A claim (claim below) is the declared read of the queued jobs of a
+//     topic, most urgent first, and Lease's acquire on the first no blocker
+//     holds; then the holder moves it to running with the lease's token,
+//     and reserves its CPU seconds. A claimer that loses the race meets
+//     held_by_another and reads again (D104).
 // - A job's Dependencies gates running, so a job a batch stamped does not
-//   start before the steps it comes after; the engine's Queue skipped a
-//   blocked job at its claim, and a claim here skips one the read shows
-//   dependenciesBlocked.
+//   start before the steps it comes after, and a claim skips one the read
+//   shows dependenciesBlocked.
 // - A job keeps no result field. A table's Retries takes no resultField,
 //   and a worker writes a job only through the work's operations, since
 //   the policy as data cannot tell an update from a create and so grants a
 //   worker no update: the result is the successful attempt's detail, in
 //   Retries' attempts.
-// - The types are Job, Worker and Batch; the engine names the schemas
-//   jobs, workers and batches. A row is its own fields beside its
+// - The types are Job, Worker and Batch. A row is its own fields beside its
 //   behaviors' fields, each named after its behavior (workflowStatus,
-//   leaseToken, blueprintChildren); the engine answers data and behaviors
-//   apart.
-// - The caller is whoever the x-superschematic-subject and
-//   x-superschematic-permissions headers say, and the policy is data
-//   (devPolicy); the engine authenticates a bearer token and asks a
-//   function.
+//   leaseToken, blueprintChildren).
+// - A caller is the one its bearer token names (authenticate), and the
+//   policy is data (devPolicy).
 // - The runner is the host's: runDue runs the changes the writes queued,
 //   Reactions among them, and the deadlines due by the host's clock, Lease's
 //   expiries and Presence's misses, as devRunner.
 import { readFileSync } from 'node:fs';
 
-import { Dev, SqliteStore, type Caller, type Policy, type SqliteConnection } from '@superschematic/rules-handler';
+import { Dev, SqliteStore, type Authenticate, type Caller, type Policy, type SqliteConnection } from '@superschematic/rules-handler';
 
 /** The schemas, in the order they are published: a job's batch relation points at a live Batch. */
 export const devSchemas: readonly Record<string, unknown>[] = ['workers', 'batches', 'jobs'].map(
@@ -52,10 +47,32 @@ export const devSchemas: readonly Record<string, unknown>[] = ['workers', 'batch
 /** The workers: each is its own principal, and its Worker row has its subject as its id. */
 export const workers = ['worker-1', 'worker-2'];
 
-/** The callers of src/auth.ts, by subject, as development mode reads them from headers. */
+/** The callers this example knows, by subject. */
 export const devCallers: Readonly<Record<string, Caller>> = {
+  // An operator: defines the schemas, queues jobs and batches, and may
+  // override a lease (Lease's overridePermission).
   operator: { subject: 'operator', permissions: ['schemas', 'jobs', 'workers', 'batches'] },
+  // A worker reads jobs and does their work, and beats its Worker row.
   ...Object.fromEntries(workers.map((subject) => [subject, { subject, permissions: ['jobs.read', 'jobs.work', 'workers.read', 'workers.work'] }])),
+};
+
+/** Each caller's bearer token, by subject: <subject>-token. */
+export const tokens: Readonly<Record<string, string>> = Object.fromEntries(Object.keys(devCallers).map((subject) => [subject, `${subject}-token`]));
+
+/**
+ * authenticate is the host's Authenticate: it turns a request's bearer
+ * token into the caller it names, or undefined (401). This example looks
+ * the token up in a fixed table; a deployment verifies a signed token or a
+ * session instead. The runner's principal, devRunner, has no token.
+ */
+export const authenticate: Authenticate = (request) => {
+  const header = request.headers.get('authorization') ?? '';
+  const match = /^Bearer\s+(\S+)$/i.exec(header.trim());
+  if (match === null) {
+    return undefined;
+  }
+  const subject = Object.keys(tokens).find((name) => tokens[name] === match[1]);
+  return subject === undefined ? undefined : devCallers[subject];
 };
 
 /**
@@ -65,15 +82,17 @@ export const devCallers: Readonly<Record<string, Caller>> = {
  */
 export const devRunner: Caller = { subject: 'runner', permissions: ['jobs.override'] };
 
-/** The operations that do the work, which a worker may call: src/auth.ts's, Lease's and Budget's for a claim's. */
+/** The operations that do the work, which a worker may call: Workflow's, Lease's, Budget's and Retries'. */
 const workOperations = ['acquire', 'heartbeat', 'release', 'reserve', 'recordUsage', 'settle', 'recordAttempt', 'transition', 'acknowledge'];
 
 /**
- * The access policy of src/auth.ts as development mode's data: defining and
- * publishing to a holder of schemas.<action>; the work to a holder of
- * jobs.work, and a beat to one of workers.work, which the operator's jobs
- * and workers cover; and the rest to a holder of <table>.<action>, the
- * tables by their engine schemas' names.
+ * The access policy, as development mode's data: defining and publishing to
+ * a holder of schemas.<action>; the work to a holder of jobs.work, and a
+ * beat to one of workers.work, which the operator's jobs and workers cover;
+ * and the rest to a holder of <table>.<action>, the tables by the names of
+ * their permissions. A permission covers every permission nested under it,
+ * so the operator's jobs covers jobs.write and the jobs.override that
+ * Lease's config names.
  */
 export const devPolicy: Policy = {
   rules: [
@@ -90,8 +109,8 @@ export const devPolicy: Policy = {
  * openJobsDev serves the schemas on development mode over a SQLite
  * connection (bun:sqlite's Database or node:sqlite's DatabaseSync) on the
  * clock given: it publishes each schema as the operator and registers a
- * Worker row for each worker, as the engine's server does when it starts.
- * The host runs its queues only when asked (dev.runDue()).
+ * Worker row for each worker, its subject its id. The host runs its queues
+ * only when asked (dev.runDue()).
  */
 export async function openJobsDev(connection: SqliteConnection, clock: () => number): Promise<Dev> {
   const dev = await Dev.open((layout, codec) => new SqliteStore(connection, layout, codec), {
@@ -99,6 +118,7 @@ export async function openJobsDev(connection: SqliteConnection, clock: () => num
     clock,
     drain: 'whenAsked',
     runner: devRunner,
+    authenticate,
   });
   const operator = devCallers.operator!;
   for (const document of devSchemas) {
@@ -126,17 +146,14 @@ export interface DevClient {
   job(id: string, operation: string, params?: unknown, token?: number): Promise<Reply>;
 }
 
-/** devClient calls the routes as one of devCallers, by its headers. */
+/** devClient calls the routes as one of devCallers, by its bearer token. */
 export function devClient(dev: Dev, subject: string): DevClient {
-  const caller = devCallers[subject];
-  if (caller === undefined) {
+  const token = tokens[subject];
+  if (token === undefined) {
     throw new Error(`no caller ${subject}`);
   }
   const call = async (method: string, route: string, body?: unknown, preconditions?: Record<string, unknown>): Promise<Reply> => {
-    const headers: Record<string, string> = {
-      'x-superschematic-subject': caller.subject,
-      'x-superschematic-permissions': (caller.permissions ?? []).join(','),
-    };
+    const headers: Record<string, string> = { authorization: `Bearer ${token}` };
     if (body !== undefined) {
       headers['content-type'] = method === 'PATCH' ? 'application/merge-patch+json' : 'application/json';
     }

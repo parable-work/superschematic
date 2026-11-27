@@ -1,19 +1,18 @@
-// The job runner end to end on development mode (D117), as
-// test/jobs.test.ts runs it on the engine: @superschematic/rules-handler
-// serves schemas/dev over a SQLite database in memory (bun:sqlite under
-// Bun, node:sqlite under Node.js), on a clock the test moves, and the test
-// drives its routes through dev.http as the callers of src/auth.ts, under
-// the same policy written as data (src/dev.ts). It holds what the engine
-// holds where development mode answers alike: a worker claims the most
-// urgent job of its topic and finishes it, a held job is its holder's
-// alone, an operator's cancel reaches the holder as a directive and fails
-// the job, a worker that stops beating is missed and loses its job to
-// another, whose new token fences the old one, and a batch stamps a job per
-// step (Blueprint on the core, D149), each claimed in its order, a
-// transient failure retried, until the runner's Reactions settle the batch.
-// A claim is the declared read of the queued jobs and Lease's acquire
-// (D104), and the search is a list's text filter. src/dev.ts lists what
-// differs.
+// The job runner end to end on development mode (D117):
+// @superschematic/rules-handler serves schemas/dev over a SQLite database
+// in memory (bun:sqlite under Bun, node:sqlite under Node.js), on a clock
+// the test moves, and the test drives its routes through dev.http as the
+// callers of src/dev.ts, each by its bearer token, under the policy written
+// as data: a worker claims the most urgent job of its topic and finishes
+// it, a held job is its holder's alone, an operator's cancel reaches the
+// holder as a directive and fails the job, a worker that stops beating is
+// missed and loses its job to another, whose new token fences the old one,
+// and a batch stamps a job per step (Blueprint on the core, D149), each
+// claimed in its order, a transient failure retried, until the runner's
+// Reactions settle the batch. A claim is the declared read of the queued
+// jobs and Lease's acquire (D104), and the search is a list's text filter,
+// since D103 folds Queue and Search into schema features. src/dev.ts says
+// how each is built.
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
 
@@ -115,14 +114,21 @@ test('a worker claims the most urgent job of its topic, works it and finishes it
   const presence = await operator.call('GET', '/schemas/Worker/instances/worker-1');
   assert.deepEqual([presence.body.workflowStatus, presence.body.presenceDeadline], ['active', iso(1_015_000)]);
 
-  // The engine's Search indexed a job's title and result; development mode
-  // filters a field's text, matched anywhere, case aside, with no weights
-  // and no ranking (searchText waits for D62's search fields).
+  // A list filters a field's text, matched anywhere, case aside, with no
+  // weights and no ranking (searchText waits for D62's search fields).
   const hits = await operator.call('GET', '/schemas/Job/instances?filter[title][contains]=CATALOG');
   assert.deepEqual(
     hits.body.items.map((hit: { id: string }) => hit.id),
     [catalog]
   );
+});
+
+test('a request with no bearer token, or one the example does not know, is 401', async () => {
+  const { dev } = await start();
+  for (const headers of [{}, { authorization: 'Bearer nobody-token' }] as Record<string, string>[]) {
+    const response = await dev.http(new Request('http://jobs.dev/namespaces/default/schemas/Job/instances', { headers }));
+    assert.equal(response.status, 401);
+  }
 });
 
 test('a held job belongs to its holder alone', async () => {
