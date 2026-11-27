@@ -15,6 +15,7 @@ import sqlite3
 import sys
 import threading
 import time
+from dataclasses import replace
 from datetime import timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
@@ -55,6 +56,7 @@ from superschematic_versiongraph.storage import (
     ReleasedWrite,
     ReleaseWrite,
     RowWrite,
+    SnapshotEntry,
     Tx,
 )
 
@@ -2042,3 +2044,57 @@ def test_new_adapter(name: str, edit: Callable[[Dict[str, Any]], None], options:
         return
     with pytest.raises((ValueError, TypeError), match=re.escape(refuse)):
         SqliteAdapter(json.dumps(d), **kwargs)
+
+
+def test_patches_a_snapshot_and_released_rows_are_written_a_hundred_to_a_statement(setup: Callable[..., Setup]) -> None:
+    """Patches, a snapshot's entries and released rows, more of each than
+    one statement takes, are written 100 to a statement, in the order given,
+    and read back as given, each column of the type one statement a row
+    stored: keys of digits alone stay text, versions and sequences
+    integers. A released key the upserts repeat keeps its first row's place
+    and takes its last row."""
+    s = setup()
+    statements: List[str] = []
+    s.connection.set_trace_callback(statements.append)
+    n = 250
+    operations = ["ADD", "UPDATE", "DELETE"]
+    patches = [Patch("", "step", str(i + 1), str(1000 + i), i + 1, operations[i % 3]) for i in range(n)]
+    entries = [SnapshotEntry("step", str(i + 1), str(1000 + i), i + 1) for i in range(n)]
+    upserts = [part_row(str(i + 1), f"Part {i + 1}", str(i + 1)) for i in range(n)] + [part_row("200", "Again", "200")]
+
+    def written(prefix: str) -> int:
+        found = sum(1 for sql in statements if sql.startswith(prefix))
+        statements.clear()
+        return found
+
+    def write(tx: Tx) -> None:
+        _, commit = ref_and_commit(tx)
+        statements.clear()
+        tx.insert_patches(commit, patches)
+        assert written('INSERT INTO "graph_patch"') == 3
+        tx.insert_snapshot(commit, entries)
+        assert written('INSERT INTO "graph_snapshot_entry"') == 3
+        tx.write_released("part", ReleasedWrite(BREAD, commit, 7, False, upserts, []))
+        assert written('INSERT INTO "graph_released"') == 3
+        tx.write_released("part", ReleasedWrite(BREAD, commit, 8, False, [], [str(i + 1) for i in range(150)]))
+        assert written('DELETE FROM "graph_released"') == 2
+        read = sorted(tx.patches([commit]), key=lambda p: p.entity_version)
+        assert [replace(p, commit="") for p in read] == patches
+        assert sorted(tx.snapshot(commit), key=lambda e: e.entity_version) == entries
+
+    s.storage.transact(write)
+    s.connection.set_trace_callback(None)
+    for table in ("graph_patch", "graph_snapshot_entry"):
+        rows = s.connection.execute(
+            f'SELECT entity_key, typeof(entity_key), typeof(entity_version) FROM "{table}" ORDER BY rowid'
+        ).fetchall()
+        assert rows == [(str(i + 1), "text", "integer") for i in range(n)], table
+    rows = s.connection.execute(
+        'SELECT entity_key, typeof(entity_key), sequence, typeof(sequence), data FROM "graph_released" ORDER BY rowid'
+    ).fetchall()
+    heading = {i: f"Part {i}" for i in range(151, n + 1)}
+    heading[200] = "Again"
+    assert rows == [
+        (str(i), "text", 7, "integer", f'{{"heading":"{heading[i]}","parent_key":null,"rank":"{i}"}}')
+        for i in range(151, n + 1)
+    ]

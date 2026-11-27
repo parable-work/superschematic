@@ -482,6 +482,7 @@ var accountSQLite = &sqliteTable{
 		pageTiebreak:        `, account.id %s`,
 		pageKeyExists:       `SELECT EXISTS (SELECT 1 FROM account WHERE account.id = ?1)`,
 		insert:              `INSERT INTO account (%s) VALUES (%s) RETURNING %s`,
+		insertMany:          `INSERT INTO account (%s) VALUES %s RETURNING %s`,
 		update:              `UPDATE account SET %s WHERE id = ?%d`,
 		versionFence:        ` AND _version = ?%d`,
 		returning:           ` RETURNING "id", "name", "code", "opened_on", "mailing_address", "created_at", "created_by", "updated_at", "updated_by"`,
@@ -592,15 +593,16 @@ func (r *AccountSQLiteRepository) GetOne(ctx context.Context, id types.IdentityU
 	return rows[0], nil
 }
 
-// GetManyByIDs retrieves the live Account rows of ids, by ID.
+// GetManyByIDs retrieves the live Account rows of ids, by ID: a query of
+// at most as many keys as SQLite binds the parameters of, as many times
+// as the keys take.
 func (r *AccountSQLiteRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Account, error) {
 	out := make(map[types.IdentityUUID]*types.Account, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
 	seen := make(map[types.IdentityUUID]bool, len(ids))
-	var args []any
-	var placeholders []string
+	var keys []any
 	for _, id := range ids {
 		if seen[id] {
 			continue
@@ -610,12 +612,20 @@ func (r *AccountSQLiteRepository) GetManyByIDs(ctx context.Context, ids []types.
 		if err != nil {
 			return nil, err
 		}
-		args = append(args, key)
-		placeholders = append(placeholders, fmt.Sprintf("?%d", len(args)))
+		keys = append(keys, key)
 	}
-	records, err := accountSQLite.query(ctx, r.q(), fmt.Sprintf(accountSQLite.st.getMany, strings.Join(placeholders, ", "))+accountSQLite.st.live, args...)
-	if err != nil {
-		return nil, err
+	var records []sqliteRecord
+	for start := 0; start < len(keys); start += 32766 {
+		args := keys[start:min(start+32766, len(keys))]
+		placeholders := make([]string, len(args))
+		for i := range args {
+			placeholders[i] = fmt.Sprintf("?%d", i+1)
+		}
+		read, err := accountSQLite.query(ctx, r.q(), fmt.Sprintf(accountSQLite.st.getMany, strings.Join(placeholders, ", "))+accountSQLite.st.live, args...)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, read...)
 	}
 	rows, err := r.decode(ctx, records, AccountFields{}, false)
 	if err != nil {
@@ -776,22 +786,36 @@ func (r *AccountSQLiteRepository) CreateOne(ctx context.Context, input *types.Ac
 	return rows[0], nil
 }
 
-// CreateMany inserts the rows, in order, a row at a time, in one
-// transaction: a VALUES list on SQLite takes no DEFAULT.
+// CreateMany inserts the rows in the inputs' order and returns them, in one
+// transaction: a statement per run of consecutive rows that write the same
+// columns, since a VALUES list on SQLite takes no DEFAULT, of at most 4680
+// rows, as many as SQLite binds the parameters of (sqliteTable.insertMany).
 func (r *AccountSQLiteRepository) CreateMany(ctx context.Context, inputs []*types.Account) ([]*types.Account, error) {
 	out := make([]*types.Account, 0, len(inputs))
 	if len(inputs) == 0 {
 		return out, nil
 	}
-	err := r.within(ctx, func(q sqliteQuerier) error {
-		in := &AccountSQLiteRepository{db: r.db, tx: q.(*sql.Tx)}
-		for _, input := range inputs {
-			row, err := in.CreateOne(ctx, input)
-			if err != nil {
-				return err
-			}
-			out = append(out, row)
+	records := make([]sqliteRecord, len(inputs))
+	for i, input := range inputs {
+		if err := r.stampCreate(ctx, input); err != nil {
+			return nil, err
 		}
+		record, err := sqliteMembersOf(input)
+		if err != nil {
+			return nil, fmt.Errorf("create Account %d: %w", i, err)
+		}
+		records[i] = record
+	}
+	err := r.within(ctx, func(q sqliteQuerier) error {
+		written, err := accountSQLite.insertMany(ctx, q, records, 4680)
+		if err != nil {
+			return err
+		}
+		rows, err := r.decode(ctx, written, AccountFields{}, false)
+		if err != nil {
+			return err
+		}
+		out = append(out, rows...)
 		return nil
 	})
 	if err != nil {

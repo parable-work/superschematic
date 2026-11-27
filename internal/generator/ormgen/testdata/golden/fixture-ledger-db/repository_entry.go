@@ -614,10 +614,12 @@ func (r *EntryRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple Entry records by their IDs in a single query
+// GetManyByIDs retrieves multiple Entry records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *EntryRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Entry, error) {
+	resultMap := make(map[types.IdentityUUID]*types.Entry, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.Entry{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -629,7 +631,22 @@ func (r *EntryRepository) GetManyByIDs(ctx context.Context, ids []types.Identity
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *EntryRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.Entry, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -756,7 +773,6 @@ func (r *EntryRepository) GetManyByIDs(ctx context.Context, ids []types.Identity
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -2871,7 +2887,9 @@ func (r *EntryRepository) heldOfKey(ctx context.Context, on EntryUniqueKey, keyV
 	return row, nil
 }
 
-// CreateMany inserts multiple Entry records in a single statement
+// CreateMany inserts multiple Entry records and returns them in the
+// inputs' order: a statement of at most 4368 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *EntryRepository) CreateMany(ctx context.Context, inputs []*types.Entry) ([]*types.Entry, error) {
 	if len(inputs) == 0 {
 		return []*types.Entry{}, nil
@@ -3027,18 +3045,40 @@ func (r *EntryRepository) CreateMany(ctx context.Context, inputs []*types.Entry)
 		}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 4368 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.Entry, error) {
+		return (&EntryRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 4368 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *EntryRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.Entry, error) {
+	results := make([]*types.Entry, 0, len(batch))
+	for start := 0; start < len(batch); start += 4368 {
+		created, err := r.createBatch(ctx, batch[start:min(start+4368, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *EntryRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.Entry, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO entry (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -3050,104 +3090,17 @@ func (r *EntryRepository) CreateMany(ctx context.Context, inputs []*types.Entry)
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.Entry{}
+	results := make([]*types.Entry, 0, len(batch))
 	for rows.Next() {
-		result := &types.Entry{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		var tempBookedOn pgtype.Date
-		var tempMemo sql.NullString
-		var tempExternalId sql.NullString
-		var tempTags []*string
-		var tempMetadata []byte
-		var tempReviewedAt *types.TemporalDateTime
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		var tempRelAccount *types.IdentityUUID
-		var tempRelTransfer *types.IdentityUUID
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.Id,
-
-			&tempRelAccount,
-
-			&tempRelTransfer,
-
-			&result.AmountCents,
-
-			&tempBookedOn,
-
-			&result.Kind,
-
-			&tempMemo,
-
-			&tempExternalId,
-
-			&tempTags,
-
-			&tempMetadata,
-
-			&tempReviewedAt,
-
-			&result.CreatedAt,
-
-			&result.CreatedBy,
-
-			&result.UpdatedAt,
-
-			&result.UpdatedBy,
-
-			&result.DeletedAt,
-
-			&result.DeletedBy,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		if tempBookedOn.Valid {
-			result.BookedOn = types.TemporalDate(tempBookedOn.Time.Format("2006-01-02"))
-		}
-		if tempMemo.Valid {
-			result.Memo = tempMemo.String
-		}
-		if tempExternalId.Valid {
-			result.ExternalId = tempExternalId.String
-		}
-		if err := copyListElements("tags", tempTags, &result.Tags); err != nil {
-			return nil, fmt.Errorf("failed to decode field tags: %w", err)
-		}
-		if len(tempMetadata) > 0 {
-			if err := unmarshalGenericJSONFieldValue(tempMetadata, &result.Metadata); err != nil {
-				return nil, fmt.Errorf("failed to decode JSON field metadata: %w", err)
-			}
-		}
-		if tempReviewedAt != nil {
-			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-			result.ReviewedAt = tempReviewedAt
-		}
-
-		// Set relationship IDs from scanned FK values
-		if tempRelAccount != nil {
-			result.Account.Id = entryUUIDPtr(*tempRelAccount)
-		}
-		if tempRelTransfer != nil {
-			// Initialize pointer for optional relationship before setting ID
-			result.Transfer = &types.Account{Id: entryUUIDPtr(*tempRelTransfer)}
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

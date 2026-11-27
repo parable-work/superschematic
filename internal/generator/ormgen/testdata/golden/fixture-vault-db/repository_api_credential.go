@@ -232,10 +232,12 @@ func (r *ApiCredentialRepository) GetOne(ctx context.Context, id types.IdentityU
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple ApiCredential records by their IDs in a single query
+// GetManyByIDs retrieves multiple ApiCredential records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *ApiCredentialRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.ApiCredential, error) {
+	resultMap := make(map[types.IdentityUUID]*types.ApiCredential, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.ApiCredential{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -247,7 +249,22 @@ func (r *ApiCredentialRepository) GetManyByIDs(ctx context.Context, ids []types.
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *ApiCredentialRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.ApiCredential, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -319,7 +336,6 @@ func (r *ApiCredentialRepository) GetManyByIDs(ctx context.Context, ids []types.
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -1528,7 +1544,9 @@ func (r *ApiCredentialRepository) resealed(ctx context.Context, result *UpsertRe
 	return &UpsertResult[*types.ApiCredential]{Row: row, Status: UpsertUpdated}, nil
 }
 
-// CreateMany inserts multiple ApiCredential records in a single statement
+// CreateMany inserts multiple ApiCredential records and returns them in the
+// inputs' order: a statement of at most 16383 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *ApiCredentialRepository) CreateMany(ctx context.Context, inputs []*types.ApiCredential) ([]*types.ApiCredential, error) {
 	if len(inputs) == 0 {
 		return []*types.ApiCredential{}, nil
@@ -1590,18 +1608,40 @@ func (r *ApiCredentialRepository) CreateMany(ctx context.Context, inputs []*type
 		// Relationship foreign key columns, matching CreateOne
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 16383 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.ApiCredential, error) {
+		return (&ApiCredentialRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "service", "secret", "rotated_at"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 16383 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *ApiCredentialRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.ApiCredential, error) {
+	results := make([]*types.ApiCredential, 0, len(batch))
+	for start := 0; start < len(batch); start += 16383 {
+		created, err := r.createBatch(ctx, batch[start:min(start+16383, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *ApiCredentialRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.ApiCredential, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO api_credential (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"id", "service", "secret", "rotated_at"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -1613,50 +1653,17 @@ func (r *ApiCredentialRepository) CreateMany(ctx context.Context, inputs []*type
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.ApiCredential{}
+	results := make([]*types.ApiCredential, 0, len(batch))
 	for rows.Next() {
-		result := &types.ApiCredential{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		var tempRotatedAt *types.TemporalDateTime
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.Id,
-
-			&result.Service,
-
-			&result.Secret,
-
-			&tempRotatedAt,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		if tempRotatedAt != nil {
-			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-			result.RotatedAt = tempRotatedAt
-		}
-
-		// Set relationship IDs from scanned FK values
-		if err := r.open(result); err != nil {
-			return nil, err
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

@@ -1224,10 +1224,12 @@ func (r *RefundRepository) GetOne(ctx context.Context, id types.IdentityUUID, op
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple Refund records by their IDs in a single query
+// GetManyByIDs retrieves multiple Refund records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *RefundRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Refund, error) {
+	resultMap := make(map[types.IdentityUUID]*types.Refund, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.Refund{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -1239,7 +1241,22 @@ func (r *RefundRepository) GetManyByIDs(ctx context.Context, ids []types.Identit
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *RefundRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.Refund, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -1366,7 +1383,6 @@ func (r *RefundRepository) GetManyByIDs(ctx context.Context, ids []types.Identit
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
