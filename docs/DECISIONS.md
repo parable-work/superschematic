@@ -2328,8 +2328,9 @@ is refused `done`; and password reset sends through the email adapter.
 
 Left:
 
-- Go and Rust: the notifier, `@event` raising, the reply entry point and
-  password reset, and SQLite and D1.
+- Go: the notifier, `@event` raising, the reply entry point and password
+  reset; and SQLite and D1 in every language (Rust's on Postgres is
+  D191's).
 - Comments raising its mentions and replies into the inbox, and the core's
   Comments `inbox` operation retired.
 - A generated server that builds the notifier into its `Deps` (with D159's
@@ -2635,7 +2636,8 @@ Left:
 - The typed filters' one-to-many members; a path filter is the
   untyped repositories' and the table operations' so far.
 - The D152 to D159 features the refusals name, which the later Rust
-  entries port: D185 ports D154 and D159, and D188 D152 and D155.
+  entries port: D185 ports D154 and D159, D188 D152 and D155, and D191
+  D153.
 
 ## D182. The TypeScript repositories run on SQLite and D1, an audience there is a JSON array of ids a trigger keeps and a read reaches through json_each, references and files are row triggers, and no trigger counts on another firing (D79, D116, D154, D156 amended)
 
@@ -2920,3 +2922,56 @@ Left:
   TypeScript (D152's and D155's left).
 - A generated handler for a `@searchable` declaration's queue, which an
   app's `@worker` writes, calling `index_search`.
+
+## D191. The Rust runtime serves D153's notifier on Postgres: the definition carries each table's events and notifier part, `orm::notify` raises, routes, delivers, escalates and reads replies as the TypeScript notifier does, and an approval's approve and deny are two reply actions (D153, D181 amended)
+
+D153 built the notifier in the TypeScript runtime, and D181 refused
+`@event`, `@notifier` and `@channelIdentities` in the Rust outputs. This
+entry ports it to Rust, on Postgres, with the TypeScript tables,
+statements, states and refusals. It is the fourth of the Rust parity
+entries.
+
+| Decision | Alternatives not taken |
+|----------|------------------------|
+| The Postgres definition of a Rust types crate carries each table's `@event` declarations (`Table.events`: kind, urgency, title, payload) and what it is to the notifier (`Table.notifier`: its part, or `channelIdentities`), member for member what tsgen writes into orm.ts (`rustgen/notifications.go`). The crate re-exports `orm::notify`. A crate that lists `sqlite` is refused, as the loader refuses the notifier for every language. | Tables the app names to the notifier, which the definition already knows. |
+| `orm::notify::Notifier` is `createNotifier` over the untyped repositories: `raise` in the caller's transaction (any `GenericClient`), `from_behavior_event`, `cleared`, `handle` for each dispatch message (route, deliver, timeout, escalate, digest, brief), `worker_queue` (the queue's claims, whose prune deletes the deliveries past retention), `reply`, `inbound`, `statuses`, `check_health`, the inbox, identities and codes, `send_direct`, `schedule_subscription`, `prune`, and `PasswordReset` over the identity service's new `reset_password`. Escalation is a delayed message of the dispatch queue, as in TypeScript. | A generated notifier per database, typed by its tables: the parts' fields are the loader's, the same in every database. |
+| Rust has no ambient caller (D181), so a recipient's read of the record opens the repositories for the recipient (`with_access`), a party or an agent with its active grants, and a reply's action runs on repositories of its transaction that act as the sender, keep to its reach and run a behavior's command with the permissions the channel's trust leaves it (`with_caller`), with the `Tables`' keys and behaviors (`Tables::rules`). | Repositories the caller opened, which a worker's message has none of. |
+| A reply action is a trait (`ReplyAction`: permission, describe, run, undoable, undo) whose context holds the acting repositories, the notice, the narrowed principal, the words and the channel. `approval_replies(table, permission)` are the `approve` and `deny` of `approval.requested`, which decide the approval the notice is about as the replier: its own permission held within the channel's trust, no agent run, and only a pending one, writing `state`, `decidedBy`, `decidedVia` and `decidedAt`, the members of D158's approvals. | Approvals in an agents module, which the Rust runtime does not have yet (D158 is refused). |
+| The wall time of quiet hours and of a digest's date is read from Postgres (`AT TIME ZONE`), which holds the zone database; the pure rule over it (`quiet_delay_seconds`) is shared. A notice's next reference is taken in a SQL savepoint of the routing transaction, tried again when another notice of the recipient took it. | A zone database in the runtime, a copy of one Postgres keeps. A savepoint through the deadpool `Transaction`, which needs it borrowed mutably while the routing holds it. |
+| Whether an adapter reports statuses or reads inbound messages is its definition's optional operations (`Providers::operations`), since a Rust trait's optional method always exists. | Calling it and reading `Unsupported`, which would wait on a report from an adapter that never sends one. |
+| The pure parts are shared through `runtime/http/testdata/notify_parity.json`, which TypeScript's `notify-parity.test.ts` writes and checks and Rust reads: `normalise_address`, `read_reply` (TypeScript's new `readReply`, which `reply` now reads with), `looks_like_code`, `quiet_delay_seconds`, `reply_allows`, `narrowed_permissions`, `code_hash` and `same_id`. | Vectors written by Go, which has no notifier yet. |
+
+Built: the refusals of D181 lose `@event`, `@notifier` and
+`@channelIdentities` (`verify/rust_features.go`); the definition's
+`events` and `notifier` (`internal/generator/rustgen/notifications.go`,
+golden `fixture-notifications-db`); `orm::notify`
+(`runtime/http/rust/src/orm/notify/`), `Tables::rules`,
+`Providers::operations` and `identity::Service::reset_password`; the
+parity file, TypeScript's exported pure functions and its test; an
+`Approval` table in `fixture-notifications-db`.
+`TestRustNotificationsEndToEnd` runs D153's cases, the TypeScript
+repositories' ten, through the Rust repositories and notifier on Postgres
+over a stand-in SMS relay and mail relay: an urgent event reaches two
+recipients, skips one who cannot read the record, and escalates to email;
+`ack`, `done 142` and `undo` as their sender with the audit; SMS refused
+`done`, and an address entered by hand only acknowledging; a reply by
+reference; a code verifying an address and an unknown sender reaching
+nothing; a failed send falling through and an adapter down alerted once;
+quiet hours, digests and record; statuses, inbound, a cleared reference
+and a behavior's event; password reset by email; and an approval asked of
+its approvers, refused by SMS, approved and denied by email, and decided
+once. The guide's Rust section.
+
+Left:
+
+- Rust on SQLite, as in every language (D153's).
+- A route to an agent in Rust, which is logged and reaches no one until
+  the Rust runtime serves D158's agent runs; the approvals table itself
+  is D158's.
+- A party's channel identity that lapsed with its grants (D157's
+  `identityLapsed`), which the Rust notifier does not ask until it serves
+  parties.
+- A generated Rust server that builds the notifier into its `Deps`,
+  mounts the inbox and the relay routes, and fills a `@worker` of the
+  dispatch queue with `handle`; an app wires them, as in TypeScript
+  (D153's left).
