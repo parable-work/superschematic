@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/parable-work/superschematic/runtime/schema/go/notifications"
 	"github.com/parable-work/superschematic/runtime/schema/go/rowrefs"
 )
@@ -18,8 +19,8 @@ import (
 // loader's, the same in every database, so the notifier reads and writes
 // them by the columns the generated ORM's definitions name, as the
 // TypeScript notifier does through its untyped repositories: a row reads
-// as its fields, a UUID in base62, a date-time a time.Time, a JSON value
-// decoded.
+// as its fields, a UUID in base62, a date-time a time.Time, a time of day
+// its HH:MM:SS text, a JSON value decoded.
 
 // table is one of the notifier's tables.
 type table struct {
@@ -244,6 +245,18 @@ func cleanValue(v any) any {
 			out[i] = cleanValue(item)
 		}
 		return out
+	case pgtype.Time:
+		// A time of day (a Temporal.Time column), which the driver reads
+		// as microseconds of the day.
+		if !value.Valid {
+			return nil
+		}
+		seconds := value.Microseconds / 1_000_000
+		text := fmt.Sprintf("%02d:%02d:%02d", seconds/3600, seconds/60%60, seconds%60)
+		if micros := value.Microseconds % 1_000_000; micros != 0 {
+			text += strings.TrimRight(fmt.Sprintf(".%06d", micros), "0")
+		}
+		return text
 	}
 	return v
 }

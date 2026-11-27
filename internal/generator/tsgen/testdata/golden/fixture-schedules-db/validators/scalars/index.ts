@@ -3,3 +3,4 @@ export * from './generic_int64';
 export * from './generic_json';
 export * from './identity_uuid';
 export * from './temporal_date_time';
+export * from './temporal_time_zone';

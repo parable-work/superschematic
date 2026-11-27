@@ -59,6 +59,7 @@ fn kim() -> Caller {
         subject: "kim".to_owned(),
         permissions: vec!["orders.ship".to_owned()],
         stands_in: false,
+        ..Default::default()
     }
 }
 

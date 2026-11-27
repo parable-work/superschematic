@@ -27,6 +27,12 @@ pub mod scalars {
 
     static IDENTITY_UUID_PATTERN: rt::Pattern = rt::Pattern::new("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$");
 
+    static TEMPORAL_TIME_PATTERN: rt::Pattern = rt::Pattern::new("^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\\s?[AaPp][Mm])$");
+
+    static TEMPORAL_TIME_ZONE_PATTERN: rt::Pattern = rt::Pattern::new("^(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$");
+
+    static TEXT_MARKDOWN_PATTERN: rt::Pattern = rt::Pattern::new("^[\\s\\S]*$");
+
     /// Validates a `Contact.Email` value.
     pub fn validate_contact_email(value: Option<&Value>) -> rt::ScalarResult {
         let value = match value {
@@ -95,6 +101,37 @@ pub mod scalars {
             None | Some(Value::Null) => Err(vec![ValidationError::required()]),
             Some(Value::String(text)) if text.is_empty() => Err(vec![ValidationError::required()]),
             _ => validate_crypto_sha256(value),
+        }
+    }
+
+    /// Validates a `File.SizeBytes` value.
+    pub fn validate_file_size_bytes(value: Option<&Value>) -> rt::ScalarResult {
+        let value = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(value) => value,
+        };
+        let Some(number) = value.as_number().and_then(rt::integer_value) else {
+            return Err(vec![ValidationError::new("type", "must be an integer")]);
+        };
+        let mut errors = Vec::new();
+        if number < 0_f64 {
+            errors.push(ValidationError::new("min", "must be at least 0"));
+        }
+        if number > 9007199254740991_f64 {
+            errors.push(ValidationError::new("max", "must be at most 9007199254740991"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a `File.SizeBytes` value that must be present.
+    pub fn validate_file_size_bytes_required(value: Option<&Value>) -> rt::ScalarResult {
+        match value {
+            None | Some(Value::Null) => Err(vec![ValidationError::required()]),
+            _ => validate_file_size_bytes(value),
         }
     }
 
@@ -250,6 +287,135 @@ pub mod scalars {
         match value {
             None | Some(Value::Null) => Err(vec![ValidationError::required()]),
             _ => validate_temporal_date_time(value),
+        }
+    }
+
+    /// Validates a `Temporal.RecurrenceRule` value.
+    pub fn validate_temporal_recurrence_rule(value: Option<&Value>) -> rt::ScalarResult {
+        let value = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(value) => value,
+        };
+        let Some(text) = value.as_str() else {
+            return Err(vec![ValidationError::new("type", "expected string value")]);
+        };
+        let mut errors = Vec::new();
+        let length = rt::code_points(text);
+        if length < 6 {
+            errors.push(ValidationError::new("minLength", "must be at least 6 characters"));
+        }
+        if length > 512 {
+            errors.push(ValidationError::new("maxLength", "must be at most 512 characters"));
+        }
+        // The scalar core checks the rules above again, so it runs only when
+        // they pass: one failing value, one error.
+        if errors.is_empty() {
+            return core_check("Temporal.RecurrenceRule", value);
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a `Temporal.RecurrenceRule` value that must be present.
+    pub fn validate_temporal_recurrence_rule_required(value: Option<&Value>) -> rt::ScalarResult {
+        match value {
+            None | Some(Value::Null) => Err(vec![ValidationError::required()]),
+            Some(Value::String(text)) if text.is_empty() => Err(vec![ValidationError::required()]),
+            _ => validate_temporal_recurrence_rule(value),
+        }
+    }
+
+    /// Validates a `Temporal.Time` value.
+    pub fn validate_temporal_time(value: Option<&Value>) -> rt::ScalarResult {
+        let value = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(value) => value,
+        };
+        let Some(text) = value.as_str() else {
+            return Err(vec![ValidationError::new("type", "expected string value")]);
+        };
+        let mut errors = Vec::new();
+        if !TEMPORAL_TIME_PATTERN.is_match(text) {
+            errors.push(ValidationError::new("pattern", "invalid format"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a `Temporal.Time` value that must be present.
+    pub fn validate_temporal_time_required(value: Option<&Value>) -> rt::ScalarResult {
+        match value {
+            None | Some(Value::Null) => Err(vec![ValidationError::required()]),
+            Some(Value::String(text)) if text.is_empty() => Err(vec![ValidationError::required()]),
+            _ => validate_temporal_time(value),
+        }
+    }
+
+    /// Validates a `Temporal.TimeZone` value.
+    pub fn validate_temporal_time_zone(value: Option<&Value>) -> rt::ScalarResult {
+        let value = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(value) => value,
+        };
+        let Some(text) = value.as_str() else {
+            return Err(vec![ValidationError::new("type", "expected string value")]);
+        };
+        let mut errors = Vec::new();
+        let length = rt::code_points(text);
+        if length > 100 {
+            errors.push(ValidationError::new("maxLength", "must be at most 100 characters"));
+        }
+        if !TEMPORAL_TIME_ZONE_PATTERN.is_match(text) {
+            errors.push(ValidationError::new("pattern", "invalid format"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a `Temporal.TimeZone` value that must be present.
+    pub fn validate_temporal_time_zone_required(value: Option<&Value>) -> rt::ScalarResult {
+        match value {
+            None | Some(Value::Null) => Err(vec![ValidationError::required()]),
+            Some(Value::String(text)) if text.is_empty() => Err(vec![ValidationError::required()]),
+            _ => validate_temporal_time_zone(value),
+        }
+    }
+
+    /// Validates a `Text.Markdown` value.
+    pub fn validate_text_markdown(value: Option<&Value>) -> rt::ScalarResult {
+        let value = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(value) => value,
+        };
+        let Some(text) = value.as_str() else {
+            return Err(vec![ValidationError::new("type", "expected string value")]);
+        };
+        let mut errors = Vec::new();
+        if !TEXT_MARKDOWN_PATTERN.is_match(text) {
+            errors.push(ValidationError::new("pattern", "invalid format"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a `Text.Markdown` value that must be present.
+    pub fn validate_text_markdown_required(value: Option<&Value>) -> rt::ScalarResult {
+        match value {
+            None | Some(Value::Null) => Err(vec![ValidationError::required()]),
+            Some(Value::String(text)) if text.is_empty() => Err(vec![ValidationError::required()]),
+            _ => validate_text_markdown(value),
         }
     }
 
@@ -511,10 +677,7 @@ pub fn validate_agent_approval(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("paramsHash");
-        if rt::is_absent(field) {
-            errors.push("paramsHash", ValidationError::required());
-        }
-        rt::expect_string(&mut errors, "paramsHash", field);
+        errors.set_result("paramsHash", scalars::validate_crypto_sha256_required(field));
     }
     {
         let field = value.get("permission");
@@ -3256,19 +3419,27 @@ pub fn validate_notice_preference(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("quietStart");
-        rt::expect_string(&mut errors, "quietStart", field);
+        if !rt::is_absent(field) {
+            errors.set_result("quietStart", scalars::validate_temporal_time(field));
+        }
     }
     {
         let field = value.get("quietEnd");
-        rt::expect_string(&mut errors, "quietEnd", field);
+        if !rt::is_absent(field) {
+            errors.set_result("quietEnd", scalars::validate_temporal_time(field));
+        }
     }
     {
         let field = value.get("timeZone");
-        rt::expect_string(&mut errors, "timeZone", field);
+        if !rt::is_absent(field) {
+            errors.set_result("timeZone", scalars::validate_temporal_time_zone(field));
+        }
     }
     {
         let field = value.get("digest");
-        rt::expect_string(&mut errors, "digest", field);
+        if !rt::is_absent(field) {
+            errors.set_result("digest", scalars::validate_temporal_recurrence_rule(field));
+        }
     }
     errors
 }
@@ -3840,7 +4011,9 @@ pub fn validate_search_index(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("textHash");
-        rt::expect_string(&mut errors, "textHash", field);
+        if !rt::is_absent(field) {
+            errors.set_result("textHash", scalars::validate_crypto_sha256(field));
+        }
     }
     {
         let field = value.get("embedding");
@@ -4473,7 +4646,9 @@ pub fn validate_task_comments_edits(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("body");
-        rt::expect_string(&mut errors, "body", field);
+        if !rt::is_absent(field) {
+            errors.set_result("body", scalars::validate_text_markdown(field));
+        }
     }
     {
         let field = value.get("blocks");
@@ -4667,7 +4842,9 @@ pub fn validate_task_comments_messages(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("body");
-        rt::expect_string(&mut errors, "body", field);
+        if !rt::is_absent(field) {
+            errors.set_result("body", scalars::validate_text_markdown(field));
+        }
     }
     {
         let field = value.get("blocks");
@@ -5163,7 +5340,9 @@ pub fn validate_task_schedules_schedules(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("timeZone");
-        rt::expect_string(&mut errors, "timeZone", field);
+        if !rt::is_absent(field) {
+            errors.set_result("timeZone", scalars::validate_temporal_time_zone(field));
+        }
     }
     {
         let field = value.get("state");

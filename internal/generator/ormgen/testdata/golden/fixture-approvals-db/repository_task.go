@@ -83,9 +83,14 @@ type TaskApprovalsSignOffParams struct {
 type TaskApprovalsSignOffResult struct {
 	// At is when, in epoch milliseconds.
 	At int64 `json:"at"`
-	// Count is how many the gate needs.
-	Count int64   `json:"count"`
-	Note  *string `json:"note,omitempty"`
+	// Count is how many the gate needs: its count, or for a gate that reads its
+	// requirements from rows, the count of the first requirement the sign-off
+	// counts toward.
+	Count int64 `json:"count"`
+	// CountsToward is for a gate that reads its requirements from rows, the name
+	// of each requirement the sign-off counts toward now.
+	CountsToward []string `json:"countsToward,omitempty"`
+	Note         *string  `json:"note,omitempty"`
 	// SignedBy is every subject whose sign-off for the state is not yet
 	// consumed, in the order they signed.
 	SignedBy []string `json:"signedBy"`
@@ -105,6 +110,10 @@ type TaskApprovalsWithdrawSignOffParams struct {
 // TaskApprovalsWithdrawSignOffResult is what approvals's withdrawSignOff
 // returns.
 type TaskApprovalsWithdrawSignOffResult struct {
+	// ActingFor is the subject the caller acted for.
+	ActingFor *string `json:"actingFor,omitempty"`
+	// Agent is the Agent whose run the caller was.
+	Agent *string `json:"agent,omitempty"`
 	// At is when it was signed, in epoch milliseconds.
 	At   int64   `json:"at"`
 	Note *string `json:"note,omitempty"`
@@ -135,6 +144,10 @@ type TaskApprovalsListSignOffsResult struct {
 // TaskApprovalsListSignOffsResultItemsItem types an item of
 // TaskApprovalsListSignOffsResultItems.
 type TaskApprovalsListSignOffsResultItemsItem struct {
+	// ActingFor is the subject the caller acted for.
+	ActingFor *string `json:"actingFor,omitempty"`
+	// Agent is the Agent whose run the caller was.
+	Agent *string `json:"agent,omitempty"`
 	// At is when, in epoch milliseconds.
 	At int64 `json:"at"`
 	// ConsumedAt is when a change of the own fields, entering the state or a new
@@ -152,9 +165,11 @@ type TaskApprovalsListSignOffsResultItemsItem struct {
 // it takes, in a transaction.
 type TaskApprovalsOperations interface {
 	// SignOff signs off on the instance for a gated state, as the caller. Needs
-	// the gate's permission; refused for the instance's creator unless the gate
-	// allows it, while the instance is in the state, and for a caller whose
-	// sign-off for the state is not yet consumed.
+	// the permission of one of the gate's requirements, and is refused unless it
+	// counts toward one of them now: for the instance's creator unless the
+	// requirement allows it, for a caller the requirement does not count,
+	// excludes or whose proof falls short, while the instance is in the state,
+	// and for a caller whose sign-off for the state is not yet consumed.
 	SignOff(ctx context.Context, id types.IdentityUUID, params TaskApprovalsSignOffParams) (*TaskApprovalsSignOffResult, error)
 	// WithdrawSignOff withdraws the caller's sign-off for a gated state, one not
 	// yet consumed.
@@ -800,10 +815,12 @@ func (r *TaskRepository) GetOne(ctx context.Context, id types.IdentityUUID, opts
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple Task records by their IDs in a single query
+// GetManyByIDs retrieves multiple Task records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *TaskRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Task, error) {
+	resultMap := make(map[types.IdentityUUID]*types.Task, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.Task{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -815,7 +832,22 @@ func (r *TaskRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityU
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *TaskRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.Task, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -912,7 +944,6 @@ func (r *TaskRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityU
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 

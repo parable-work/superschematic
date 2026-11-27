@@ -200,6 +200,8 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.oldName))), nil
 	case opDropTrigger:
 		return one(sqliteStep(c, "DROP TRIGGER IF EXISTS "+qs(c.oldTrigger.Name))), nil
+	case opSeedHistory:
+		return one(sqliteSeedHistory(c)), nil
 	case opSeedRole:
 		return one(sqliteStep(c, c.role.Insert)), nil
 	case opUpdateRole:

@@ -1,7 +1,7 @@
 # Engine
 
-The engine runs a schema with no generated code (D16 in
-`docs/DECISIONS.md`). It takes a schema as data, one JSON schema-file
+The engine runs a schema with no generated code (D16).
+It takes a schema as data, one JSON schema-file
 document, versions it per namespace, and keeps it, its instances and an
 event log in a SQLite file, or, for a server in a stack, in a schema of a
 Postgres database.
@@ -624,7 +624,7 @@ deployment's binary, the core's by default. The engine then requires:
   instance type's own fields whose value is a string, a number or a
   boolean, an enum's included, and an index only over fields the type
   has ("Unique fields and indexes" under "Instances");
-- each type's display (`@display`, D48 in `docs/DECISIONS.md`) held to
+- each type's display (`@display`, D48) held to
   the type, as the compiler's loader holds it, with its wording, at
   `/types/<Type>/display`: `titleField` names one of the type's own
   fields, by its name or its JSON key, that holds a single text value (a
@@ -1733,7 +1733,7 @@ write from a read, a promise from a synchronous function.
 ## Behaviors
 
 A behavior adds fields, operations, checks and storage to a schema's
-instance type (D16 in `docs/DECISIONS.md`). The compiler declares it in a
+instance type (D16). The compiler declares it in a
 JSON file (section 3.16 of `docs/extension-model.md`); the engine runs an
 implementation of it that carries the same file. The engine registers
 the core's behaviors when it opens ("Core behaviors"), and the work
@@ -5366,8 +5366,8 @@ a schema's live version:
 }
 ```
 
-- `display` is the instance type's `@display` (D48 in
-  `docs/DECISIONS.md`), as the document holds it, with `titleField` and
+- `display` is the instance type's `@display` (D48),
+  as the document holds it, with `titleField` and
   `summaryFields` naming each own field by its key in an instance's
   `data`, and each behavior's by its qualified name:
   what a UI calls one instance and several, its title and summary fields,
@@ -5990,7 +5990,7 @@ The work-queue package's worker (`runtime/engine-workqueue/README.md`,
 
 The client is generic over schema names and takes `unknown` data and
 parameters. `superschematic engine-client --out <file.ts> <schema file>...`
-(D49 in `docs/DECISIONS.md`; the CLI reference has the command) writes a
+(D49; the CLI reference has the command) writes a
 module that types it for given schemas, from their documents and the
 behavior declarations the binary registers:
 

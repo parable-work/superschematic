@@ -314,7 +314,7 @@ pub struct AgentApprovalRow {
     pub params: GenericJSON,
     /// The SHA-256 of the operation and its parameters as canonical JSON: a call with any other parameter asks again.
     #[serde(rename = "paramsHash")]
-    pub params_hash: String,
+    pub params_hash: CryptoSHA256,
     /// The permission an approver holds.
     pub permission: String,
     /// pending, approved, denied, used or superseded.
@@ -363,7 +363,7 @@ pub struct AgentApprovalCreate {
     pub params: GenericJSON,
     /// The SHA-256 of the operation and its parameters as canonical JSON: a call with any other parameter asks again.
     #[serde(rename = "paramsHash")]
-    pub params_hash: String,
+    pub params_hash: CryptoSHA256,
     /// The permission an approver holds.
     pub permission: String,
     /// pending, approved, denied, used or superseded.
@@ -414,7 +414,7 @@ pub struct AgentApprovalUpdate {
     pub params: Option<GenericJSON>,
     /// The SHA-256 of the operation and its parameters as canonical JSON: a call with any other parameter asks again.
     #[serde(rename = "paramsHash", skip_serializing_if = "Option::is_none")]
-    pub params_hash: Option<String>,
+    pub params_hash: Option<CryptoSHA256>,
     /// The permission an approver holds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission: Option<String>,
@@ -462,7 +462,7 @@ pub struct AgentApprovalFilter {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<orm::Equals<GenericJSON>>,
     #[serde(rename = "paramsHash", skip_serializing_if = "Option::is_none")]
-    pub params_hash: Option<orm::Text<String>>,
+    pub params_hash: Option<orm::Text<CryptoSHA256>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission: Option<orm::Text<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2691,18 +2691,18 @@ pub struct NoticePreferenceRow {
     pub urgency: String,
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     pub channels: Vec<String>,
-    /// When quiet hours start, HH:MM in the time zone; null for none.
+    /// When quiet hours start, a time of day in the time zone; null for none.
     #[serde(default, rename = "quietStart")]
-    pub quiet_start: Option<String>,
-    /// When they end, HH:MM.
+    pub quiet_start: Option<TemporalTime>,
+    /// When they end.
     #[serde(default, rename = "quietEnd")]
-    pub quiet_end: Option<String>,
+    pub quiet_end: Option<TemporalTime>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null.
     #[serde(default, rename = "timeZone")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once.
     #[serde(default)]
-    pub digest: Option<String>,
+    pub digest: Option<TemporalRecurrenceRule>,
 }
 
 /// What a create of a row of `NoticePreference` sets; a member left unset takes its
@@ -2722,18 +2722,18 @@ pub struct NoticePreferenceCreate {
     pub urgency: Option<String>,
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     pub channels: Vec<String>,
-    /// When quiet hours start, HH:MM in the time zone; null for none.
+    /// When quiet hours start, a time of day in the time zone; null for none.
     #[serde(rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<String>,
-    /// When they end, HH:MM.
+    pub quiet_start: Option<TemporalTime>,
+    /// When they end.
     #[serde(rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<String>,
+    pub quiet_end: Option<TemporalTime>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null.
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
+    pub digest: Option<TemporalRecurrenceRule>,
 }
 
 /// What an update of a row of `NoticePreference` sets: each member that is `Some`.
@@ -2751,18 +2751,18 @@ pub struct NoticePreferenceUpdate {
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channels: Option<Vec<String>>,
-    /// When quiet hours start, HH:MM in the time zone; null for none. `Some(None)` sets the column NULL.
+    /// When quiet hours start, a time of day in the time zone; null for none. `Some(None)` sets the column NULL.
     #[serde(rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<Option<String>>,
-    /// When they end, HH:MM. `Some(None)` sets the column NULL.
+    pub quiet_start: Option<Option<TemporalTime>>,
+    /// When they end. `Some(None)` sets the column NULL.
     #[serde(rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<Option<String>>,
+    pub quiet_end: Option<Option<TemporalTime>>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null. `Some(None)` sets the column NULL.
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<Option<String>>,
+    pub time_zone: Option<Option<TemporalTimeZone>>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once. `Some(None)` sets the column NULL.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<Option<String>>,
+    pub digest: Option<Option<TemporalRecurrenceRule>>,
 }
 
 /// The rows of `NoticePreference` a read or a write finds: each member set is one
@@ -2778,13 +2778,13 @@ pub struct NoticePreferenceFilter {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub urgency: Option<orm::Text<String>>,
     #[serde(rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<orm::Text<String>>,
+    pub quiet_start: Option<orm::Text<TemporalTime>>,
     #[serde(rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<orm::Text<String>>,
+    pub quiet_end: Option<orm::Text<TemporalTime>>,
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<orm::Text<String>>,
+    pub time_zone: Option<orm::Text<TemporalTimeZone>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<orm::Text<String>>,
+    pub digest: Option<orm::Text<TemporalRecurrenceRule>>,
     /// The rows every one of the filters finds, beside the other members (D99).
     #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
     pub all_of: Vec<NoticePreferenceFilter>,
@@ -5165,7 +5165,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"email\"",
         "updateMany": "UPDATE account SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO account (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"email\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -5528,7 +5528,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"name\", \"purpose\", \"instructions\", \"task\", \"role\", \"tools\", \"credentials\", \"model\", \"model_slot\", \"sandbox_slot\", \"image\", \"command\", \"limits\", \"inbound\", \"created_at\", \"_version\"",
         "updateMany": "UPDATE agent SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO agent (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"purpose\", \"instructions\", \"task\", \"role\", \"tools\", \"credentials\", \"model\", \"model_slot\", \"sandbox_slot\", \"image\", \"command\", \"limits\", \"inbound\", \"created_at\", \"_version\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -5869,7 +5869,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"summary\", \"agent\", \"run\", \"operation\", \"operation_class\", \"params\", \"params_hash\", \"permission\", \"state\", \"requested_at\", \"decided_by\", \"decided_via\", \"decided_at\", \"used_at\", \"expires_at\", \"holds\"",
         "updateMany": "UPDATE agent_approval SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO agent_approval (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"summary\", \"agent\", \"run\", \"operation\", \"operation_class\", \"params\", \"params_hash\", \"permission\", \"state\", \"requested_at\", \"decided_by\", \"decided_via\", \"decided_at\", \"used_at\", \"expires_at\", \"holds\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -5998,7 +5998,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"name\", \"budget_limit\", \"_version\"",
         "updateMany": "UPDATE agent_budget SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO agent_budget (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"budget_limit\", \"_version\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -6237,7 +6237,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"budget_limit\", \"total_id\", \"agent\", \"paused\", \"paused_reason\", \"paused_by\", \"paused_at\", \"warn_at\", \"_version\"",
         "updateMany": "UPDATE agent_control SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO agent_control (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"budget_limit\", \"total_id\", \"agent\", \"paused\", \"paused_reason\", \"paused_by\", \"paused_at\", \"warn_at\", \"_version\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -7314,7 +7314,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"lease_holder\", \"lease_token\", \"lease_acquired_at\", \"lease_renewed_at\", \"lease_expires_at\", \"lease_expiries\", \"lease_ended\", \"retries_total\", \"retries_class_attempts\", \"retries_best_score\", \"retries_exhausted\", \"retries_stuck\", \"retries_retry_at\", \"retries_failing_since\", \"retries_keyed_by\", \"status\", \"status_entered_at\", \"agent\", \"agent_name\", \"definition_version\", \"trigger\", \"trigger_table\", \"trigger_key\", \"event\", \"input\", \"requested_by\", \"requested_by_kind\", \"acting_for_kind\", \"acting_for\", \"acting_for_table\", \"trust\", \"targets\", \"grants\", \"instance\", \"sandbox_slot\", \"model_slot\", \"outcome\", \"detail\", \"attempts\", \"turns\", \"reads\", \"writes\", \"messages_sent\", \"approvals\", \"untrusted\", \"input_tokens\", \"output_tokens\", \"cost\", \"credential_uses\", \"untrusted_calls\", \"transcript\", \"transcript_object\", \"transcript_pruned_at\", \"created_at\", \"started_at\", \"ended_at\", \"_version\"",
         "updateMany": "UPDATE agent_run SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO agent_run (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"lease_holder\", \"lease_token\", \"lease_acquired_at\", \"lease_renewed_at\", \"lease_expires_at\", \"lease_expiries\", \"lease_ended\", \"retries_total\", \"retries_class_attempts\", \"retries_best_score\", \"retries_exhausted\", \"retries_stuck\", \"retries_retry_at\", \"retries_failing_since\", \"retries_keyed_by\", \"status\", \"status_entered_at\", \"agent\", \"agent_name\", \"definition_version\", \"trigger\", \"trigger_table\", \"trigger_key\", \"event\", \"input\", \"requested_by\", \"requested_by_kind\", \"acting_for_kind\", \"acting_for\", \"acting_for_table\", \"trust\", \"targets\", \"grants\", \"instance\", \"sandbox_slot\", \"model_slot\", \"outcome\", \"detail\", \"attempts\", \"turns\", \"reads\", \"writes\", \"messages_sent\", \"approvals\", \"untrusted\", \"input_tokens\", \"output_tokens\", \"cost\", \"credential_uses\", \"untrusted_calls\", \"transcript\", \"transcript_object\", \"transcript_pruned_at\", \"created_at\", \"started_at\", \"ended_at\", \"_version\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -7501,7 +7501,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"agent\", \"operation\", \"operation_class\", \"mode\", \"permission\", \"created_at\"",
         "updateMany": "UPDATE autonomy_policy SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO autonomy_policy (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"agent\", \"operation\", \"operation_class\", \"mode\", \"permission\", \"created_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -7818,7 +7818,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"kind\", \"address\", \"principal_kind\", \"principal_table\", \"principal\", \"trust\", \"verified_at\", \"code_hash\", \"code_purpose\", \"code_expires_at\", \"code_attempts\", \"created_at\", \"revoked_at\", \"opted_out_at\"",
         "updateMany": "UPDATE channel_identity SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO channel_identity (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"kind\", \"address\", \"principal_kind\", \"principal_table\", \"principal\", \"trust\", \"verified_at\", \"code_hash\", \"code_purpose\", \"code_expires_at\", \"code_attempts\", \"created_at\", \"revoked_at\", \"opted_out_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -7923,7 +7923,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"channel_kind\", \"level\", \"permissions\"",
         "updateMany": "UPDATE channel_trust SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO channel_trust (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"channel_kind\", \"level\", \"permissions\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -8114,7 +8114,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"channel_kind\", \"address\", \"party_table\", \"party\", \"subject\", \"created_at\", \"last_message_at\"",
         "updateMany": "UPDATE conversation SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO conversation (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"channel_kind\", \"address\", \"party_table\", \"party\", \"subject\", \"created_at\", \"last_message_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -8196,7 +8196,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"name\"",
         "updateMany": "UPDATE customer SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO customer (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -8587,7 +8587,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"notice\", \"purpose\", \"recipient\", \"channel_kind\", \"slot\", \"address\", \"attempt\", \"state\", \"provider_message_id\", \"detail\", \"queued_at\", \"due_at\", \"sent_at\", \"delivered_at\", \"read_at\", \"failed_at\", \"acknowledged_at\", \"ended_at\"",
         "updateMany": "UPDATE delivery SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO delivery (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"notice\", \"purpose\", \"recipient\", \"channel_kind\", \"slot\", \"address\", \"attempt\", \"state\", \"provider_message_id\", \"detail\", \"queued_at\", \"due_at\", \"sent_at\", \"delivered_at\", \"read_at\", \"failed_at\", \"acknowledged_at\", \"ended_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -8876,7 +8876,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\"",
         "updateMany": "UPDATE \"grant\" SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO \"grant\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"holder\", \"holder_kind\", \"role\", \"target_type\", \"target_id\", \"starts_at\", \"ends_at\", \"ends_when_field\", \"ends_when_state\", \"revoked_at\", \"token_hash\", \"created_at\", \"created_by\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -9003,7 +9003,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"task_id\", \"amount\", \"paid\"",
         "updateMany": "UPDATE invoice SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO invoice (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"task_id\", \"amount\", \"paid\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -9526,7 +9526,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"conversation\", \"direction\", \"via\", \"slot\", \"from_address\", \"to_address\", \"subject\", \"body\", \"message_id\", \"in_reply_to\", \"thread_refs\", \"provider_message_id\", \"authentication\", \"identity\", \"trust\", \"party_table\", \"party\", \"author\", \"author_kind\", \"for_subject\", \"disposition\", \"state\", \"triage\", \"triage_closed_by\", \"triage_closed_at\", \"grant\", \"detail\", \"at\", \"created_at\"",
         "updateMany": "UPDATE message SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO message (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"conversation\", \"direction\", \"via\", \"slot\", \"from_address\", \"to_address\", \"subject\", \"body\", \"message_id\", \"in_reply_to\", \"thread_refs\", \"provider_message_id\", \"authentication\", \"identity\", \"trust\", \"party_table\", \"party\", \"author\", \"author_kind\", \"for_subject\", \"disposition\", \"state\", \"triage\", \"triage_closed_by\", \"triage_closed_at\", \"grant\", \"detail\", \"at\", \"created_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -9919,7 +9919,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"recipient\", \"recipient_kind\", \"reference\", \"event_id\", \"event_kind\", \"urgency\", \"subject_table\", \"subject_key\", \"title\", \"body\", \"payload\", \"route\", \"state\", \"escalation\", \"created_at\", \"read_at\", \"acknowledged_at\", \"acknowledged_via\", \"digested_at\"",
         "updateMany": "UPDATE notice SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO notice (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"recipient\", \"recipient_kind\", \"reference\", \"event_id\", \"event_kind\", \"urgency\", \"subject_table\", \"subject_key\", \"title\", \"body\", \"payload\", \"route\", \"state\", \"escalation\", \"created_at\", \"read_at\", \"acknowledged_at\", \"acknowledged_via\", \"digested_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -10112,7 +10112,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"principal\", \"event_kind\", \"urgency\", \"channels\", \"quiet_start\", \"quiet_end\", \"time_zone\", \"digest\"",
         "updateMany": "UPDATE notice_preference SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO notice_preference (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"principal\", \"event_kind\", \"urgency\", \"channels\", \"quiet_start\", \"quiet_end\", \"time_zone\", \"digest\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -10337,7 +10337,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"name\", \"event_kind\", \"subject_table\", \"filter\", \"recipients\", \"urgency\", \"escalation\", \"enabled\", \"created_at\", \"created_by\"",
         "updateMany": "UPDATE notice_route SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO notice_route (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"event_kind\", \"subject_table\", \"filter\", \"recipients\", \"urgency\", \"escalation\", \"enabled\", \"created_at\", \"created_by\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -10663,7 +10663,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"received_at\", \"channel_kind\", \"slot\", \"address\", \"provider_message_id\", \"identity\", \"principal\", \"body\", \"interpreter\", \"verb\", \"notice\", \"reference\", \"outcome\", \"detail\", \"undo\", \"undone_at\"",
         "updateMany": "UPDATE reply SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO reply (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"received_at\", \"channel_kind\", \"slot\", \"address\", \"provider_message_id\", \"identity\", \"principal\", \"body\", \"interpreter\", \"verb\", \"notice\", \"reference\", \"outcome\", \"detail\", \"undo\", \"undone_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -10760,7 +10760,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"name\", \"permissions\", \"reaches\"",
         "updateMany": "UPDATE role SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO role (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"permissions\", \"reaches\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -10959,7 +10959,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\"",
         "updateMany": "UPDATE \"session\" SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO \"session\" (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"token_hash\", \"created_at\", \"expires_at\", \"last_seen_at\", \"revoked_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -11141,7 +11141,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"title\", \"details\", \"state\", \"assignee\", \"created_at\", \"_version\"",
         "updateMany": "UPDATE task SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO task (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"title\", \"details\", \"state\", \"assignee\", \"created_at\", \"_version\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -11276,7 +11276,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"task_id\", \"text\"",
         "updateMany": "UPDATE task_note SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO task_note (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"task_id\", \"text\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -11495,7 +11495,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
         "updateMany": "UPDATE user_api_key SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO user_api_key (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"name\", \"token_hash\", \"permissions\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -11664,7 +11664,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\"",
         "updateMany": "UPDATE user_credential SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO user_credential (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"password_hash\", \"password_changed_at\", \"disabled_at\", \"pending_at\", (xmax = 0) AS _inserted",
         "softDelete": "",
@@ -11794,7 +11794,7 @@ pub const POSTGRES: &str = r#"{
         "versionFence": " AND _version = $%d",
         "returning": " RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\"",
         "updateMany": "UPDATE user_role_grant SET %s%s",
-        "updatedAt": "updated_at = $%d",
+        "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
         "upsert": "INSERT INTO user_role_grant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"role_id\", \"granted_at\", (xmax = 0) AS _inserted",
         "softDelete": "",

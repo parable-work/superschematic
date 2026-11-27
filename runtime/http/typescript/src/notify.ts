@@ -7,10 +7,11 @@ import { createLogger, type Logger } from './logger.js';
 import type { EventDefinition } from './orm.js';
 import type { ChannelAdapter, DeliveryState, InboundMessage, WebhookRequest } from './providers/channel.js';
 import type { Providers } from './providers/registry.js';
-import { enqueue, postgresQueue, type QueueDefinition, type QueuePool } from './queue.js';
+import type { QueueDefinition } from './queue-core.js';
+import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-orm.js';
 import { sha256 } from './sha256.js';
 import { idKey } from './uuid.js';
-import type { WorkerMessage, WorkerQueue } from './worker.js';
+import type { WorkerQueue } from './worker.js';
 
 /*
 The notifier (D153, D77): events raised on a table's rows, routed by rows,
@@ -285,8 +286,11 @@ export interface Notifier {
   cleared(tx: any, message: { readonly holderTable: string; readonly holderKey: string; readonly targetTable: string; readonly targetKey: string; readonly role: string }): Promise<string>;
   /** Handles a message of the dispatch queue: the @worker of the queue calls it. */
   handle(message: NoticeWork): Promise<void>;
-  /** The dispatch queue over pool as a worker claims it, for runWorker or runFiring. */
-  workerQueue(pool: QueuePool): WorkerQueue;
+  /**
+   * The dispatch queue as a worker claims it, for runWorker or runFiring: over a pg pool, a SqlDatabase (a D1
+   * binding, or openSqlite's connection, D189), or the queue's claims already made.
+   */
+  workerQueue(source: QueueSource): WorkerQueue;
   /** The entry point of an inbound message (D153, D157): a reply, a verification code, or a sender the notifier does not know. */
   reply(input: ReplyInput): Promise<ReplyOutcome>;
   /** The replies an adapter's @webhook request carries, each through reply. */
@@ -396,8 +400,9 @@ function wallDate(at: Date, zone: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
 }
 
+/** The minutes of the day of a time of day: HH:MM, or the HH:MM:SS a Temporal.Time is stored as, its seconds dropped. */
 function minutesOf(text: string): number | undefined {
-  const m = /^(\d{1,2}):(\d{2})$/u.exec(text);
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/u.exec(text);
   return m ? Number(m[1]) * 60 + Number(m[2]) : undefined;
 }
 
@@ -1087,24 +1092,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
     }
   };
 
-  const workerQueue = (pool: QueuePool): WorkerQueue => {
-    const queue = postgresQueue(pool, options.dispatch);
-    return {
-      name: queue.name,
-      leaseSeconds: queue.leaseSeconds,
-      claim: async (n, leaseSeconds) =>
-        (await queue.claim(n, leaseSeconds)).map(
-          (claim): WorkerMessage => ({ id: claim.id, token: claim.token, attempt: claim.attempt, handle: () => handle(claim.message as NoticeWork) })
-        ),
-      extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
-      complete: (id, token) => queue.complete(id, token),
-      fail: (id, token, cause) => queue.fail(id, token, cause),
-      release: (id, token) => queue.release(id, token),
-      prune: async limit => (await queue.prune(limit)) + (await prune(limit)),
-      slot: slots => queue.slot(slots),
-      nextDue: () => queue.nextDue(),
-    };
-  };
+  const workerQueue = (source: QueueSource): WorkerQueue => workerQueueOf(claimsOver(source, options.dispatch), message => handle(message as NoticeWork), limit => prune(limit));
 
   const prune = async (limit: number): Promise<number> => {
     const deliveries = repo(sys(orm), parts.deliveries);

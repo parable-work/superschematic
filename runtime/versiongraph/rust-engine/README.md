@@ -1,7 +1,7 @@
 # superschematic-versiongraph-engine
 
-The Rust engine of the version graph (D17, D19 and D32 in
-`docs/DECISIONS.md`): every graph operation, written once over a storage
+The Rust engine of the version graph (D17, D19 and D32):
+every graph operation, written once over a storage
 adapter, with a Postgres adapter and a SQLite adapter, whose fixed layout
 also runs on Postgres without a trigger and inside a synchronous
 transaction a host holds (D58). It calls the core

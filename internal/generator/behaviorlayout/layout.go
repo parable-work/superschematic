@@ -1,5 +1,5 @@
 // Package behaviorlayout is the layout of the tables that compose behaviors
-// (D103 in docs/DECISIONS.md): how a host's adapter maps the pure core's
+// (D103, #587): how a host's adapter maps the pure core's
 // logical names onto a build-time project's tables and columns. A
 // behavior adds no code to any adapter or generator; each reads the layout
 // document this package writes, which the generated TypeScript ORM embeds
@@ -1024,7 +1024,8 @@ func readAudit(td *ir.TypeDef, model *sqlutil.TableModel) []Column {
 // readsCreatedBy reports whether the table use ref reads the row's
 // createdBy (D104): a Workflow whose transition's by names it, a StateRules
 // whose state's by names it, or an Approvals with a gate that excludes the
-// creator. A config that does not read reads none; the loader refuses it.
+// creator or reads its requirements from rows, any of which may (D200). A
+// config that does not read reads none; the loader refuses it.
 func readsCreatedBy(ref ir.BehaviorRef) bool {
 	switch ref.Name {
 	case "Workflow":
@@ -1058,14 +1059,17 @@ func readsCreatedBy(ref ir.BehaviorRef) bool {
 	case "Approvals":
 		var config struct {
 			Gates map[string]struct {
-				ExcludeCreator *bool `json:"excludeCreator"`
+				ExcludeCreator   *bool           `json:"excludeCreator"`
+				RequirementsFrom json.RawMessage `json:"requirementsFrom"`
 			} `json:"gates"`
 		}
 		if json.Unmarshal(ref.Config, &config) != nil {
 			return false
 		}
 		for _, gate := range config.Gates {
-			if gate.ExcludeCreator == nil || *gate.ExcludeCreator {
+			// A gate that reads its requirements from rows reads the
+			// creator for any row that excludes it (D200).
+			if len(gate.RequirementsFrom) > 0 || gate.ExcludeCreator == nil || *gate.ExcludeCreator {
 				return true
 			}
 		}

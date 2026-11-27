@@ -1,6 +1,7 @@
 import type { Principal } from './auth.js';
 import { GRANT_TOKEN_PREFIX, grantEnded, grantTokenHash, issueGrant, revokeGrant, type GrantRow } from './access.js';
 import { sha256 } from './sha256.js';
+import { ormDialect } from './orm.js';
 import { quoteIdentifier as quote } from './sql-text.js';
 import { uuidFromDb } from './uuid.js';
 
@@ -197,14 +198,22 @@ async function rowsOf(repository: RepositoryShape, source: CalendarSourceDefinit
   return { entries, more: rows.length > limit };
 }
 
+/** A time a statement read: a Date (pg's), its RFC 3339 text (SQLite's) or epoch milliseconds. */
+function timeOf(value: unknown): Date {
+  if (value instanceof Date) return value;
+  return typeof value === 'string' && !/^\d+$/u.test(value) ? new Date(value) : new Date(Number(value));
+}
+
 // occurrencesOf reads an occurrences source's occurrences in the window,
 // then the rows they belong to through the repository as the caller, and
 // keeps the occurrences of the rows it read.
 async function occurrencesOf(db: OrmShape, repository: RepositoryShape, source: CalendarSourceDefinition, from: Date, to: Date, limit: number, owned: Values): Promise<{ entries: CalendarEntry[]; more: boolean }> {
   const def = repository.def!;
   const occ = source.occurrences!;
+  // On SQLite a time is its RFC 3339 text, which compares in order (D182).
+  const [p1, p2] = ormDialect(db) === 'sqlite' ? ['?1', '?2'] : ['$1', '$2'];
   const { rows } = await db.asSystem().query(
-    `SELECT ${quote(occ.row)} AS row, ${quote(occ.key)} AS key, ${quote(occ.due)} AS due, ${quote(occ.dueAt)} AS due_at, ${quote(occ.state)} AS state FROM ${quote(occ.table)} WHERE ${quote(occ.dueAt)} >= $1 AND ${quote(occ.dueAt)} < $2 ORDER BY ${quote(occ.dueAt)}, ${quote(occ.key)} LIMIT ${limit + 1}`,
+    `SELECT ${quote(occ.row)} AS row, ${quote(occ.key)} AS key, ${quote(occ.due)} AS due, ${quote(occ.dueAt)} AS due_at, ${quote(occ.state)} AS state FROM ${quote(occ.table)} WHERE ${quote(occ.dueAt)} >= ${p1} AND ${quote(occ.dueAt)} < ${p2} ORDER BY ${quote(occ.dueAt)}, ${quote(occ.key)} LIMIT ${limit + 1}`,
     [from, to]
   );
   const keyColumn = def.columns?.find(c => c.name === (def.key ?? 'id'));
@@ -225,7 +234,7 @@ async function occurrencesOf(db: OrmShape, repository: RepositoryShape, source: 
       type: def.name ?? '',
       key: String(parent[def.key ?? 'id']),
       title: String(parent[source.title] ?? ''),
-      start: iso(row.due_at instanceof Date ? row.due_at : new Date(Number(row.due_at)))!,
+      start: iso(timeOf(row.due_at))!,
       occurrence: { key: String(row.key), due: String(row.due ?? ''), state: String(row.state) },
     };
     return [entry];

@@ -101,12 +101,12 @@
         {
           "name": "sourceHash",
           "description": "The SHA-256 of the model label, the instruction, the output schema and the inputs that hold a value; absent while no input holds one.",
-          "type": "string"
+          "type": "Crypto.SHA256"
         },
         {
           "name": "settledHash",
           "description": "The source hash of the last value settled; absent before the first.",
-          "type": "string"
+          "type": "Crypto.SHA256"
         },
         {
           "name": "model",
@@ -116,7 +116,7 @@
         {
           "name": "confidence",
           "description": "The confidence the last value was settled with, from 0 to 1.",
-          "type": "number"
+          "type": "Generic.Probability"
         },
         {
           "name": "settledAt",

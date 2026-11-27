@@ -1,30 +1,28 @@
 import pg from 'pg';
 import {
-  canonicalUUID,
   ClaimLostError,
-  conflictOf,
-  delayOf,
   errorMessage,
   UNREADABLE,
   formatDuration,
   jsonMemberValue,
   messageUUID,
   parseDuration,
-  unset,
-  type EnqueueOptions,
   type PostgresQueue,
   type QueueClaim,
   type QueueDefinition,
-  type QueueField,
 } from './queue-core.js';
-import { wakeAfterEnqueue } from './queue-wake.js';
-import { intervalText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
+import { servePostgresClaims, type QueuePool, type QueueQueryable } from './queue-orm.js';
+import { parseArray, parseInterval, parsePoint } from './pgtext.js';
 
 export { ClaimLostError, formatDuration, parseDuration } from './queue-core.js';
 export { intervalText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
 export { parseQueueWakes, QUEUE_WAKES_VARIABLE, queueWaker, queueWakesSettled, setProcessQueueWaker, WAKE_INTERVAL_MS, wakeRunId } from './queue-wake.js';
 export type { QueueWake, QueueWakeBinding, QueueWakeHost, QueueWaker } from './queue-wake.js';
 export type { EnqueueOptions, PostgresQueue, Queue, QueueClaim, QueueDefinition, QueueField, QueueStatements } from './queue-core.js';
+// The enqueue in the caller's transaction, in its database's dialect, and
+// a worker's claims over what it is given (D189), which import no driver.
+export { claimsOver, enqueue, workerQueueOf } from './queue-orm.js';
+export type { QueuePool, QueueQueryable, QueueQueryConfig, QueueSource } from './queue-orm.js';
 
 /*
 The queue client of a TypeScript API (D53, section 8.8 of
@@ -63,108 +61,9 @@ time.Duration crosses through pgx. An interval with days or months reads
 as their hours, a day 24 and a month 30 days, as pgx reads it.
 */
 
-/** The query config the queue client passes pg. */
-export interface QueueQueryConfig {
-  readonly text: string;
-  readonly values: unknown[];
-  readonly rowMode?: 'array';
-  readonly types?: { getTypeParser(oid: number, format?: 'text' | 'binary'): unknown };
-}
-
-/**
- * What the queue client needs of a pg Pool, PoolClient or Client: an
- * enqueue takes the client of the caller's transaction, and the claims a
- * pool.
- */
-export interface QueueQueryable {
-  query(config: QueueQueryConfig): Promise<{ rows: unknown[]; rowCount: number | null }>;
-}
-
-/**
- * What a queue's claims need of a pg Pool: its queries, and, for a worker
- * in drain mode, a connection of its own to hold its slot's lock on (D145),
- * which a Pool's connect gives. connect is typed loosely so that every pg
- * Pool, and a test's stand-in with a query alone, is one; slot checks what
- * it resolves to.
- */
-export interface QueuePool extends QueueQueryable {
-  connect?(): Promise<unknown>;
-}
-
 /** A connection a pool gave: release(true) ends it, and with it the session and its locks. */
 interface QueueSession extends QueueQueryable {
   release(destroy?: boolean): void;
-}
-
-/**
- * Writes message into queue in the transaction client runs, the caller's:
- * the message is due once the transaction commits, and never if it rolls
- * back. Each member the message sets writes its column, a JSON column its
- * JSON text; one it leaves unset takes the column's default, and an enum
- * with a schema default writes that default, as the Go ORM writes them.
- * With options.delaySeconds the message is due that long after the
- * database's clock, and no worker claims it before (D80).
- */
-export async function enqueue<M>(
-  client: QueueQueryable,
-  queue: QueueDefinition<M>,
-  message: M,
-  options?: EnqueueOptions,
-): Promise<void> {
-  const delay = delayOf(queue.table, queue.statements, options);
-  const columns: string[] = [];
-  const placeholders: string[] = [];
-  const values: unknown[] = [];
-  if (delay > 0) {
-    // due_at goes first: the statement numbers the delay's seconds $1.
-    columns.push('due_at');
-    placeholders.push(queue.statements.dueIn ?? '');
-    values.push(delay);
-  }
-  const members = message as unknown as Readonly<Record<string, unknown>>;
-  for (const field of queue.fields) {
-    const value = members[field.name];
-    if (unset(value, field)) {
-      if (field.default === undefined) continue;
-      columns.push(field.column);
-      values.push(field.default);
-      placeholders.push(`$${values.length}`);
-      continue;
-    }
-    columns.push(field.column);
-    try {
-      values.push(columnValue(value, field));
-    } catch (error) {
-      throw new Error(`enqueue on ${queue.table}: field ${field.name}: ${errorMessage(error)}`, { cause: error });
-    }
-    placeholders.push(`$${values.length}`);
-  }
-  const text =
-    columns.length === 0
-      ? `${queue.statements.insert} DEFAULT VALUES`
-      : `${queue.statements.insert} (${columns.join(', ')}) VALUES (${placeholders.join(', ')})${conflictOf(queue.statements)}`;
-  try {
-    await client.query({ text, values });
-  } catch (error) {
-    throw new Error(`enqueue on ${queue.table}: ${errorMessage(error)}`, { cause: error });
-  }
-  // Where the queue's worker runs in drain mode and its platform gives a
-  // wake, the enqueue starts it (D145), and where it drains at a Cron
-  // Trigger's firings, a message due before the next firing starts a run
-  // that waits for it (D151): sent once the statement has run, awaited by
-  // nothing, and never a failure of the enqueue. The due time is this
-  // process's clock plus the delay, near the database's.
-  wakeAfterEnqueue(queue.name, delay > 0 ? Date.now() + delay * 1000 : undefined);
-}
-
-/** What a member a message sets writes to its column: its JSON text, a location's point, a duration's interval, or itself. */
-function columnValue(value: unknown, field: QueueField): unknown {
-  if (field.json) return JSON.stringify(value);
-  if (field.point) return pointText(value);
-  if (field.interval) return intervalText(value);
-  // A UUID, hyphenated or base62, goes hyphenated, as Go and Rust send it.
-  if (field.uuid) return field.list && Array.isArray(value) ? value.map(canonicalUUID) : canonicalUUID(value);
-  return value;
 }
 
 /**
@@ -357,4 +256,7 @@ const queueTypes = {
   },
 };
 
-
+// A worker's claims over a pg pool are this client's (queue-orm.ts's
+// claimsOver), which the notifier, the inbound path and the agent
+// dispatcher make without importing pg themselves.
+servePostgresClaims(postgresQueue);

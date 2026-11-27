@@ -1,6 +1,6 @@
 # Engine commerce
 
-The engine's commerce package (D70 in `docs/DECISIONS.md`): its crate
+The engine's commerce package (D70): its crate
 `rust/`, `superschematic-engine-commerce`, and the npm package
 `@superschematic/engine-commerce` (`typescript/`). Four behaviors sell
 units a supply counts and book time a supply opens, to claims that hold

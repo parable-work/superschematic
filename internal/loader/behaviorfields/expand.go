@@ -1,6 +1,6 @@
 // Package behaviorfields adds the fields a table's behaviors own to the
 // tables that compose them, and the sub-tables and the deadline queue they
-// keep (D103 in docs/DECISIONS.md). A DB type that
+// keep (D103, #587). A DB type that
 // writes `status: Workflow<{ ... }>` stays a table: each field the
 // behavior declares becomes a column of it, which the readers do not write
 // (they emit no field for the anchor) and the loader adds here, once the

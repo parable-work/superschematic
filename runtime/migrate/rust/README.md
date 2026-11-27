@@ -1,8 +1,8 @@
 # Migration runner in Rust
 
 `superschematic migrate plan` writes a plan: the ordered steps that take a
-DB service's database from one version of its schema to the next (D27 in
-`docs/DECISIONS.md`). This crate applies a plan to a SQLite file from
+DB service's database from one version of its schema to the next (D27).
+This crate applies a plan to a SQLite file from
 inside the process that serves the file. It never computes a plan, so a
 binary that links it needs its plans and no compiler.
 

@@ -16,7 +16,9 @@ use serde::Serialize;
 use serde_json::Value;
 use superschematic_http_runtime::postgres::Pool;
 use superschematic_http_runtime::{wake, ApiError, RequestContext};
-use superschematic_rules_adapter::{postgres, Caller, Core, Error, Host, Layout, Refusal};
+use superschematic_rules_adapter::{
+    postgres, Assurance, Caller, Core, Error, Host, Layout, Refusal,
+};
 
 /// The layout document of fixture-comments-db's tables that compose
 /// behaviors (internal/generator/behaviorlayout), as the Go ORM's RulesLayout
@@ -155,7 +157,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -464,7 +466,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -734,7 +736,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -1043,7 +1045,7 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -1226,8 +1228,10 @@ fn host() -> Host<'static> {
 }
 
 /// The caller the core runs an operation as (D103): the route's principal
-/// with the permissions it holds, each once; else a calling service
-/// standing in for an end user, which holds none (D37); else no one.
+/// with the permissions it holds, each once, its kind and whom it acts for,
+/// each left out for a user, its run's Agent and its assurance (D200);
+/// else a calling service standing in for an end user, which holds none
+/// (D37); else no one.
 fn caller(ctx: &RequestContext) -> Caller {
     if let Some(principal) = &ctx.principal {
         let mut permissions: Vec<&str> = Vec::new();
@@ -1236,7 +1240,21 @@ fn caller(ctx: &RequestContext) -> Caller {
                 permissions.push(permission);
             }
         }
-        return Caller::new(principal.subject.clone(), permissions);
+        let mut caller = Caller::new(principal.subject.clone(), permissions);
+        let named = |kind: &str| (kind != "user").then(|| kind.to_owned());
+        caller.kind = named(principal.kind.as_str());
+        caller.acting_for = principal.acting_for.as_ref().map(|a| a.subject.clone());
+        caller.acting_for_kind = principal
+            .acting_for
+            .as_ref()
+            .and_then(|a| a.kind)
+            .and_then(|kind| named(kind.as_str()));
+        caller.agent = principal.agent().map(str::to_owned);
+        caller.assurance = principal.assurance.as_ref().map(|a| Assurance {
+            signed_in_at: a.signed_in_at,
+            user_verified: a.user_verified,
+        });
+        return caller;
     }
     if let Some(service) = &ctx.service_caller {
         return Caller::standing_in(service.deployable.clone());

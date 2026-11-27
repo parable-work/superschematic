@@ -2,6 +2,7 @@
 
 import type {
   JSDate,
+  GenericJSON,
   IdentityUUID,
   TemporalDateTime,
 } from './scalars';
@@ -59,7 +60,7 @@ export interface Task {
 }
 
 /**
- * TaskApprovalsSignOffs - One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the subject who signed, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.
+ * TaskApprovalsSignOffs - One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the caller who signed (its subject and kind, whom it acted for and its run's Agent), the assurance its host reported, the permissions it held and the values of the fields the gate's requirements reset on, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.
  */
 export interface TaskApprovalsSignOffs {
   /** The Task row the rows are of; deleting it deletes them. */
@@ -70,6 +71,22 @@ export interface TaskApprovalsSignOffs {
   state?: string | null;
   /** The subject of the caller who signed. */
   subject?: string | null;
+  /** The caller's kind (D156): user, party, agent or extension; absent when the host named none. */
+  kind?: string | null;
+  /** The subject the caller acted for (D77); absent when it acted for no one. */
+  actingFor?: string | null;
+  /** The kind of the subject the caller acted for; absent when the host named none. */
+  actingForKind?: string | null;
+  /** The Agent whose run the caller was (D158); absent for a caller that was no agent run. */
+  agent?: string | null;
+  /** When the caller's session last signed in, as its host reported it. */
+  signedInAt?: TemporalDateTime | null;
+  /** Whether the caller proved user verification on the sign-off itself. */
+  userVerified?: boolean | null;
+  /** The permissions the caller held when it signed, a list, which a requirement read from rows counts unless it reads them again. */
+  held?: GenericJSON | null;
+  /** The value each field the gate's requirements reset on held when it signed, by field, null for none. */
+  values?: GenericJSON | null;
   /** Why, for the others. */
   note?: string | null;
   /** When it was given, in epoch milliseconds. */

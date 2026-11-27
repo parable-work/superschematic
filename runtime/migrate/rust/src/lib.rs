@@ -1,5 +1,5 @@
 //! Applies a migration plan to a SQLite file, in the process that serves
-//! the file (D27 and D116 in `docs/DECISIONS.md`). The compiler writes
+//! the file (D27, and D116, #589). The compiler writes
 //! plans (`superschematic migrate plan`); this crate reads them, checks
 //! them and runs their steps, and it never computes one.
 //! `runtime/migrate/README.md` is the contract: the plan document, its

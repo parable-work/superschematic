@@ -12,7 +12,7 @@
 //! `maxProperties`, `propertyNames`, `minimum`, `maximum`, `minLength` and
 //! `maxLength` (in code points), `pattern` ([`matches`], the subset of
 //! ECMAScript patterns the declarations write), `format` (`uri`, checked
-//! for a scheme), `enum`, `const`, `oneOf`, `allOf`, `if` with `then`,
+//! for a scheme), `enum`, `const`, `oneOf`, `allOf`, `if` with `then` and `else`,
 //! `items`, `prefixItems`, `minItems`, `maxItems` and `uniqueItems`. Every
 //! failure is reported, as `allErrors` has ajv do: a `oneOf` that no branch
 //! matches lists each branch's failures before its own, and a `then` its
@@ -164,13 +164,18 @@ fn check(schema: &Value, value: &Value, at: &str, words: Words, found: &mut Issu
             found.push(at, "oneOf", "must match exactly one schema in oneOf");
         }
     }
-    if let (Some(condition), Some(then)) = (keywords.get("if"), keywords.get("then")) {
-        if valid(condition, value) {
-            let mut then_found = Issues::default();
-            check(then, value, at, words, &mut then_found);
-            if !then_found.is_empty() {
-                found.extend(then_found);
-                found.push(at, "if", "must match \"then\" schema");
+    if let Some(condition) = keywords.get("if") {
+        let (branch, name) = if valid(condition, value) {
+            (keywords.get("then"), "then")
+        } else {
+            (keywords.get("else"), "else")
+        };
+        if let Some(branch) = branch {
+            let mut branch_found = Issues::default();
+            check(branch, value, at, words, &mut branch_found);
+            if !branch_found.is_empty() {
+                found.extend(branch_found);
+                found.push(at, "if", format!("must match \"{name}\" schema"));
             }
         }
     }

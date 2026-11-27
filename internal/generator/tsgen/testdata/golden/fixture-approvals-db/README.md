@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { IdentityUUID, TemporalDateTime, Note, Task, TaskApprovalsSignOffs,  } from '@schemas/fixture-approvals-db-types/types';
+import type { GenericJSON, IdentityUUID, TemporalDateTime, Note, Task, TaskApprovalsSignOffs,  } from '@schemas/fixture-approvals-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-approvals-db-types';
@@ -76,7 +76,11 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ## Type System
 
 
-### Scalars (2)
+### Scalars (3)
+
+
+- **Generic.JSON** - Any valid JSON value: object, array, primitive, or null
+  - TypeScript type: `JSONValue`
 
 
 - **Identity.UUID** - UUID v4 with automatic base62 encoding for client-facing APIs
@@ -113,7 +117,7 @@ edits the plan, and while it is working only its reviewer does; it enters
 proving only with a proof. Its owner stays who its create named, and
 urgent and attempts only go up, unless the caller holds tasks.admin.
 
-- **TaskApprovalsSignOffs** - One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the subject who signed, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.
+- **TaskApprovalsSignOffs** - One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the caller who signed (its subject and kind, whom it acted for and its run's Agent), the assurance its host reported, the permissions it held and the values of the fields the gate's requirements reset on, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.
 
 
 

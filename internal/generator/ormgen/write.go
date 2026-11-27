@@ -407,6 +407,10 @@ func templateFuncs() template.FuncMap {
 		"goRawString": goRawString,
 		"docComment":  docComment,
 		"filled":      sqlutil.Filled,
+		// The most parameters one statement binds, on Postgres and on a
+		// SQLite file.
+		"maxParameters":       func() int { return sqlutil.MaxParameters },
+		"sqliteMaxParameters": func() int { return sqlutil.SQLiteMaxParameters },
 	}
 }
 

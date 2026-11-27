@@ -898,6 +898,78 @@ fn the_sweep_removes_what_a_crash_left_in_a_driver_that_lists_its_hashes_and_ref
     }
 }
 
+// The sweep checks a page of hashes in one statement and removes
+// engine_payloads' unheld rows in one more: across pages of 500, it
+// removes every value no holder references and leaves each held one, in
+// engine_payloads and in a driver.
+#[test]
+fn the_sweep_removes_every_unheld_value_across_pages_and_leaves_the_held_ones() {
+    use superschematic_engine::storage::{Error as StorageError, Lock, SqlValue};
+    for target in targets("the_sweep_across_pages") {
+        let left: Vec<String> = (0..1200)
+            .map(|i| sha256_hex(&format!("left behind {i}")))
+            .collect();
+        let (x, y) = (verify(60, "x"), verify(60, "y"));
+        let engine = open(&target, |_| {});
+        publish(&engine, &steps(), None);
+        create(
+            &engine,
+            json!({"title": "X", "kind": "verify", "result": x}),
+            "s1",
+            None,
+        );
+        create(
+            &engine,
+            json!({"title": "Y", "kind": "verify", "result": y}),
+            "s2",
+            None,
+        );
+        engine
+            .db()
+            .write(Lock::Catalog, |tx| {
+                for hash in &left {
+                    tx.run(
+                        "INSERT INTO engine_payloads (hash, value, bytes) VALUES (?, ?, ?)",
+                        &[
+                            SqlValue::from(hash.as_str()),
+                            SqlValue::from("\"left behind\""),
+                            SqlValue::Integer(13),
+                        ],
+                    )?;
+                }
+                Ok::<_, StorageError>(())
+            })
+            .unwrap();
+        assert_eq!(payloads(&engine).len(), 1202);
+        assert_eq!(engine.values().sweep().unwrap().removed, 1200);
+        let mut held = vec![hash_of(&x), hash_of(&y)];
+        held.sort();
+        assert_eq!(payloads(&engine), held);
+        assert_eq!(engine.values().sweep().unwrap().removed, 0);
+        assert_eq!(row_of(&engine, "s2").0["result"], ref_of(&y));
+
+        let driver = Arc::new(MapDriver {
+            lists: true,
+            ..MapDriver::default()
+        });
+        let fresh = target.fresh();
+        let engine = open(&fresh, with_driver(&driver, None));
+        publish(&engine, &steps(), None);
+        create(
+            &engine,
+            json!({"title": "X", "kind": "verify", "result": x}),
+            "s1",
+            None,
+        );
+        driver.values.lock().unwrap().extend(
+            left.iter()
+                .map(|hash| (hash.clone(), "\"left behind\"".to_owned())),
+        );
+        assert_eq!(engine.values().sweep().unwrap().removed, 1200);
+        assert_eq!(driver.keys(), [hash_of(&x)]);
+    }
+}
+
 #[test]
 fn a_value_longer_than_max_bytes_is_refused_with_value_too_large_where_it_would_be_stored() {
     for target in targets("a_value_longer_than_max_bytes_is_refused") {

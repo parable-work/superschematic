@@ -20,6 +20,9 @@ const (
 	dateTimeScalar = "Temporal.DateTime"
 	int64Scalar    = "Generic.Int64"
 	jsonScalar     = "Generic.JSON"
+	timeScalar     = "Temporal.Time"
+	timeZoneScalar = "Temporal.TimeZone"
+	ruleScalar     = "Temporal.RecurrenceRule"
 )
 
 // Expand fills the fields of every notifier class and of the channel
@@ -50,7 +53,7 @@ func Expand(schema *ir.Schema) []string {
 	if !used {
 		return nil
 	}
-	scalars := []string{uuidScalar, dateTimeScalar, int64Scalar, jsonScalar}
+	scalars := []string{uuidScalar, dateTimeScalar, int64Scalar, jsonScalar, timeScalar, timeZoneScalar, ruleScalar}
 	for _, name := range scalars {
 		if schema.Scalars[name] == nil {
 			schema.Scalars[name] = &ir.ScalarDef{Name: name}
@@ -248,10 +251,10 @@ func preferenceFields() ([]*ir.FieldDef, []ir.IndexDef) {
 		withDefault(required("eventKind", "string", "The event kind it is for, or * for every kind."), &any),
 		withDefault(required("urgency", "string", "The urgency it is for, or * for every one."), &any),
 		{Name: "channels", Comment: "The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.", TypeRef: ir.TypeRef{Name: "string", IsArray: true}, Required: true},
-		optional("quietStart", "string", "When quiet hours start, HH:MM in the time zone; null for none."),
-		optional("quietEnd", "string", "When they end, HH:MM."),
-		optional("timeZone", "string", "The IANA time zone quiet hours and digests are read in; UTC when null."),
-		optional("digest", "string", "The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once."),
+		optional("quietStart", timeScalar, "When quiet hours start, a time of day in the time zone; null for none."),
+		optional("quietEnd", timeScalar, "When they end."),
+		optional("timeZone", timeZoneScalar, "The IANA time zone quiet hours and digests are read in; UTC when null."),
+		optional("digest", ruleScalar, "The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once."),
 	}, []ir.IndexDef{
 		{Keys: []string{"principal"}, Name: "principal"},
 	}
@@ -268,9 +271,9 @@ func subscriptionFields() ([]*ir.FieldDef, []ir.IndexDef) {
 		required("subjectTable", "string", "The table it reads, by its type's name."),
 		optional("filter", jsonScalar, "The saved query: a filter in the repositories' syntax; null for every row the principal reads."),
 		optional("titleField", "string", "The field each row is listed by; the key when null."),
-		required("rule", "string", "The RRULE it goes out on (D152)."),
+		required("rule", ruleScalar, "The RRULE it goes out on (D152)."),
 		required("start", "string", "The wall date-time the rule starts from: 2026-01-05T08:00."),
-		required("timeZone", "string", "The IANA time zone the rule is read in."),
+		required("timeZone", timeZoneScalar, "The IANA time zone the rule is read in."),
 		{Name: "channels", Comment: "The channel kinds it goes out on.", TypeRef: ir.TypeRef{Name: "string", IsArray: true}, Required: true},
 		withDefault(required("enabled", "boolean", "Whether it goes out."), &on),
 		optional("nextAt", dateTimeScalar, "When it next goes out."),

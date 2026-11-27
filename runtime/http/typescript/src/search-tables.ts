@@ -1,6 +1,6 @@
 import type { Principal } from './auth.js';
 import { accessCallerOf } from './caller.js';
-import { audienceConditions } from './orm.js';
+import { audienceConditions, ormDialect } from './orm.js';
 import { sha256 } from './sha256.js';
 import { uuidFromDb, uuidToDb } from './uuid.js';
 
@@ -46,6 +46,24 @@ or otherwise:
 - scope is the app's filter: the value of the field each declaration names
   as its scope, a workspace or a project, copied into the index row.
 
+On SQLite and D1 (D186) the index is the same table, its audience a JSON
+array (D182), and its words an FTS5 table beside it, search_index_fts,
+which the index table's triggers keep in the statement that writes an index
+row. A search matches it with each word a quoted phrase of the words FTS5's
+unicode61 tokenizer finds in it (folded to lower case, no diacritic removed
+and none stemmed, as the simple configuration reads them), every one
+required, and only in the four texts; it ranks by bm25 with the same weights
+of the title, the body, the conversation and the files (1, 0.4, 0.2, 0.1),
+best first, then the table and the key; a snippet is FTS5's, of the first
+of the four texts that holds every word, as on Postgres. Access is checked
+inside the query as on Postgres, the audience through json_each over the
+index row's copy and a grant's reach by an EXISTS back to each table with
+its repository's conditions on SQLite. Embeddings are Postgres's alone: a
+search or an indexing on SQLite that asks for them is refused. indexSearch
+reads the row and writes its index row with the row's access columns in
+one statement, so on D1, which holds no transaction open, an audience
+change between its reads and its write is still copied as it stands.
+
 Nothing here imports pg or Hono: the ORM is the generated createOrm's, taken
 as a value; searchRoutes answers a fetch Request with a Response.
 */
@@ -72,6 +90,10 @@ export interface SearchableDefinition {
   readonly comments?: { readonly table: string; readonly row: string; readonly body: string; readonly state: string; readonly order: string };
   /** The table's files, whose extracted text an index row holds. */
   readonly files?: { readonly table: string; readonly row: string; readonly text: string; readonly state: string };
+  /** On SQLite (D186): the FTS5 table of the index's words, quoted, in place of document. */
+  readonly fts?: string;
+  /** On SQLite: how the index's audience, a JSON array, holds one of a caller's ids, and a parameter (sqlutil.SQLiteAudienceContains). */
+  readonly indexAudience?: { readonly contains: string; readonly placeholder: string };
 }
 
 /** A search. */
@@ -261,6 +283,10 @@ export async function searchTables(orm: object, principal: Principal | null, req
     return permission === undefined || (principal?.permissions ?? []).includes(permission);
   });
   if (sources.length === 0) return empty;
+  if (ormDialect(db) === 'sqlite') {
+    if (request.vector || options.embeddings) refuseEmbeddings('searchTables', request.vector !== undefined);
+    return searchOnSQLite(db, principal, words, sources, all, request.scope, limit, offset);
+  }
   const { index, document } = sources[0]![1].definition;
 
   const caller = accessCallerOf(principal);
@@ -289,20 +315,7 @@ export async function searchTables(orm: object, principal: Principal | null, req
   }
   // The caller's audience, on the index row's copy of each row's.
   conditions.push(...audienceConditions({ effective: 'si.audience', agents: 'si.agents' }, caller, args, args.length));
-  if (request.scope !== undefined) {
-    const values = [request.scope].flat();
-    const forms = new Set<string>();
-    for (const value of values) {
-      if (typeof value !== 'string') throw new TypeError('searchTables: a scope is a text');
-      forms.add(value);
-      try {
-        forms.add(uuidToDb(value));
-      } catch {
-        // Not a UUID: its text alone.
-      }
-    }
-    conditions.push(`si.scope = ANY(${param([...forms])}::text[])`);
-  }
+  if (request.scope !== undefined) conditions.push(`si.scope = ANY(${param(scopeForms(request.scope))}::text[])`);
 
   // The query's embedding, when embeddings are on or the request brings one.
   let vector: number[] | undefined;
@@ -393,6 +406,142 @@ export async function searchTables(orm: object, principal: Principal | null, req
   return { items, total, more: offset + items.length < total, reranked: vector !== undefined };
 }
 
+/** Throws for embeddings on SQLite, which re-rank on Postgres alone (D186): a TypeError for a request's vector, an Error for the options'. */
+function refuseEmbeddings(what: string, request: boolean): never {
+  const message = `${what}: embeddings re-rank and are stored on Postgres alone; a search on SQLite and D1 ranks by its words (D186)`;
+  throw request ? new TypeError(message) : new Error(message);
+}
+
+/** The scope values a search keeps to, each as text and, for a UUID, in its database form too. */
+function scopeForms(scope: string | readonly string[]): string[] {
+  const forms = new Set<string>();
+  for (const value of [scope].flat()) {
+    if (typeof value !== 'string') throw new TypeError('searchTables: a scope is a text');
+    forms.add(value);
+    try {
+      forms.add(uuidToDb(value));
+    } catch {
+      // Not a UUID: its text alone.
+    }
+  }
+  return [...forms];
+}
+
+/** bm25's weights of the FTS5 table's columns on SQLite: the title, the body, the conversation and the files as Postgres weighs A to D, and none for the row's ref and key (D186). */
+const FTS_WEIGHTS = '1.0, 0.4, 0.2, 0.1, 0.0, 0.0, 0.0';
+/** The texts a search on SQLite matches, the FTS5 table's first four columns, in the order a hit's matched names them. */
+const FTS_TEXTS = ['title', 'body', 'comments', 'files'] as const;
+
+/** A query's words as an FTS5 expression, each a quoted phrase, every one required; none for words with no letter or digit, which match nothing on Postgres either. */
+function ftsPhrases(words: readonly string[]): string | null {
+  const phrases = words.filter(word => /[\p{L}\p{N}]/u.test(word)).map(word => `"${word.replaceAll('"', '""')}"`);
+  return phrases.length === 0 ? null : phrases.join(' ');
+}
+
+/**
+ * searchTables on SQLite and D1 (D186): the rows whose FTS5 words hold
+ * every word, of those principal may read, ranked by bm25, one page of
+ * them and how many there are, each with where the words matched first
+ * and a snippet of that text.
+ */
+async function searchOnSQLite(
+  db: OrmShape,
+  principal: Principal | null,
+  words: readonly string[],
+  sources: readonly (readonly [string, { readonly definition: SearchableDefinition; readonly repository: RepositoryShape }])[],
+  all: ReadonlyMap<string, { readonly definition: SearchableDefinition }>,
+  scope: string | readonly string[] | undefined,
+  limit: number,
+  offset: number
+): Promise<SearchResult> {
+  const empty: SearchResult = { items: [], total: 0, more: false, reranked: false };
+  const phrases = ftsPhrases(words);
+  if (phrases === null) return empty;
+  const { index, fts = '"search_index_fts"', indexAudience } = sources[0]![1].definition;
+  const caller = accessCallerOf(principal);
+  const args: unknown[] = [];
+  const param = (value: unknown): string => {
+    args.push(value);
+    return `?${args.length}`;
+  };
+  const conditions = [`${fts} MATCH ${param(`{${FTS_TEXTS.join(' ')}} : (${phrases})`)}`];
+  if (caller.grants === undefined) {
+    conditions.push(`si.source_table IN (${sources.map(([table]) => param(table)).join(', ')})`);
+  } else {
+    const branches: string[] = [];
+    for (const [table, { definition, repository }] of sources) {
+      const kept = repository.conditions(null, args, args.length);
+      if (kept.length === 1 && kept[0] === 'FALSE') continue;
+      const name = param(table);
+      const match = `${definition.table}.${definition.key} = si.source_key`;
+      branches.push(`(si.source_table = ${name} AND EXISTS (SELECT 1 FROM ${definition.table} WHERE ${[match, ...kept].join(' AND ')}))`);
+    }
+    if (branches.length === 0) return empty;
+    conditions.push(`(${branches.join(' OR ')})`);
+  }
+  conditions.push(
+    ...audienceConditions(
+      { effective: 'si.audience', agents: 'si.agents', contains: indexAudience?.contains ?? 'EXISTS (SELECT 1 FROM json_each(%s) WHERE json_each.value IN (%s))', placeholder: indexAudience?.placeholder ?? '?%d' },
+      caller,
+      args,
+      args.length
+    )
+  );
+  if (scope !== undefined) conditions.push(`si.scope IN (${scopeForms(scope).map(param).join(', ')})`);
+  const sql = `WITH hits AS (
+      SELECT si.source_table, si.source_key, si.title, ${fts}.rowid AS fts, bm25(${fts}, ${FTS_WEIGHTS}) AS rank
+      FROM ${fts} JOIN ${index} AS si ON si.source_table = ${fts}.source_table AND si.source_key = ${fts}.source_key
+      WHERE ${conditions.join(' AND ')}
+    ),
+    ranked AS (
+      SELECT h.*, row_number() OVER (ORDER BY h.rank, h.source_table, h.source_key) AS place FROM hits AS h
+    )
+    SELECT c.total, p.source_table, p.source_key, p.title, p.fts, p.place
+    FROM (SELECT count(*) AS total FROM hits) AS c
+    LEFT JOIN (SELECT * FROM ranked ORDER BY place LIMIT ${limit} OFFSET ${offset}) AS p ON 1
+    ORDER BY p.place`;
+  const system = db.asSystem();
+  const { rows } = await system.query(sql, args);
+  const total = Number(rows[0]?.total ?? 0);
+  const page = rows.filter(row => row.source_table !== null && row.source_table !== undefined);
+  // Where the words matched first, and a snippet of each text, for the page.
+  const matched = new Map<number, string>();
+  const snippets = new Map<number, Values>();
+  if (page.length > 0) {
+    const ids = page.map(row => Number(row.fts));
+    const among = (from: number) => ids.map((_, i) => `?${from + i}`).join(', ');
+    const texts: unknown[] = [];
+    const branches = FTS_TEXTS.map(text => {
+      texts.push(`${text} : (${phrases})`, ...ids);
+      const at = texts.length - ids.length;
+      return `SELECT '${text}' AS text, rowid AS fts FROM ${fts} WHERE ${fts} MATCH ?${at} AND rowid IN (${among(at + 1)})`;
+    });
+    for (const row of (await system.query(branches.join(' UNION ALL '), texts)).rows) {
+      const id = Number(row.fts);
+      const text = String(row.text);
+      if (!matched.has(id) || FTS_TEXTS.indexOf(text as never) < FTS_TEXTS.indexOf(matched.get(id) as never)) matched.set(id, text);
+    }
+    const parts = FTS_TEXTS.map((_, i) => `snippet(${fts}, ${i}, ?2, ?3, '', 24) AS s${i}`).join(', ');
+    const read = await system.query(`SELECT rowid AS fts, ${parts} FROM ${fts} WHERE ${fts} MATCH ?1 AND rowid IN (${among(4)})`, [`{${FTS_TEXTS.join(' ')}} : (${phrases})`, OPEN, CLOSE, ...ids]);
+    for (const row of read.rows) snippets.set(Number(row.fts), row);
+  }
+  const items: SearchHit[] = page.map((row, i) => {
+    const table = String(row.source_table);
+    const key = String(row.source_key);
+    const id = Number(row.fts);
+    const where = (matched.get(id) ?? 'title') as SearchHit['matched'];
+    return {
+      table,
+      key: all.get(table)?.definition.uuid ? uuidFromDb(key) : key,
+      title: String(row.title ?? ''),
+      matched: where,
+      snippet: snippetParts(String(snippets.get(id)?.[`s${FTS_TEXTS.indexOf(where)}`] ?? '')),
+      place: offset + i + 1,
+    };
+  });
+  return { items, total, more: offset + items.length < total, reranked: false };
+}
+
 function clean(text: unknown): string | null {
   if (text === null || text === undefined) return null;
   const out = String(text).replace(MARKS, ' ').slice(0, MAX_INDEXED_TEXT);
@@ -419,6 +568,10 @@ export async function indexSearch(orm: object, message: SearchIndexing, options:
   const system = (orm as OrmShape).asSystem();
   const definition = searchSourcesOf(system).get(message.sourceTable)?.definition;
   if (!definition) return 'unknown';
+  if (ormDialect(system) === 'sqlite') {
+    if (options.embeddings) refuseEmbeddings('indexSearch', false);
+    return indexOnSQLite(system, definition, message);
+  }
   const indexed = await indexRows(system, message.sourceTable, definition, [message.sourceKey], options);
   return indexed.has(message.sourceKey) ? 'indexed' : 'removed';
 }
@@ -556,6 +709,63 @@ async function indexRows(system: OrmShape, table: string, d: SearchableDefinitio
 }
 
 /**
+ * indexSearch on SQLite and D1 (D186): the row read by its key, its
+ * conversation's and files' text in their order, and its index row written
+ * with the row's access columns, read by the write itself, or deleted for a
+ * row that is gone or soft deleted. The index table's triggers write its
+ * words into the FTS5 table in the same statement.
+ */
+async function indexOnSQLite(system: OrmShape, d: SearchableDefinition, message: SearchIndexing): Promise<'indexed' | 'removed'> {
+  const written = await system.transaction(async tx => {
+    const columns = [`${d.title} AS title`, ...(d.body ?? []).map((c, i) => `${c} AS b${i}`), `CAST(${d.key} AS TEXT) AS key`];
+    if (d.scope) columns.push(`CAST(${d.scope} AS TEXT) AS scope`);
+    if (d.deletedAt) columns.push(`${d.deletedAt} IS NOT NULL AS deleted`);
+    const row = (await tx.query(`SELECT ${columns.join(', ')} FROM ${d.table} WHERE ${d.key} = ?1`, [message.sourceKey])).rows[0];
+    if (!row || Number(row.deleted ?? 0) === 1) {
+      await tx.query(`DELETE FROM ${d.index} WHERE source_table = ?1 AND source_key = ?2`, [message.sourceTable, message.sourceKey]);
+      return null;
+    }
+    const title = clean(row.title) ?? '';
+    const body = clean((d.body ?? []).map((_, i) => row[`b${i}`]).filter(v => v !== null && v !== undefined).join('\n'));
+    let comments: string | null = null;
+    if (d.comments) {
+      const c = d.comments;
+      const read = await tx.query(
+        `SELECT group_concat(text, char(10)) AS text FROM (SELECT ${c.body} AS text FROM ${c.table} WHERE ${c.row} = ?1 AND ${c.state} IN ('posted', 'interrupted') AND ${c.body} <> '' ORDER BY ${c.order})`,
+        [message.sourceKey]
+      );
+      comments = clean(read.rows[0]?.text);
+    }
+    let files: string | null = null;
+    if (d.files) {
+      const f = d.files;
+      const read = await tx.query(`SELECT group_concat(text, char(10)) AS text FROM (SELECT ${f.text} AS text FROM ${f.table} WHERE ${f.row} = ?1 AND ${f.state} = 'ready' AND ${f.text} IS NOT NULL ORDER BY ${f.text})`, [
+        message.sourceKey,
+      ]);
+      files = clean(read.rows[0]?.text);
+    }
+    const text = [title, body, comments, files].filter((t): t is string => t !== null).join('\n');
+    const hash = hex(sha256(new TextEncoder().encode(text)));
+    const key = String(row.key);
+    const audience = d.audience ? `s.${d.audience.effective.split('.').pop()}` : 'NULL';
+    const agents = d.audience ? `s.${d.audience.agents.split('.').pop()}` : `'followRole'`;
+    await tx.query(
+      `INSERT INTO ${d.index} (source_table, source_key, title, body, comments, files, scope, audience, agents, text_hash, indexed_at)
+       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ${audience}, ${agents}, ?8, strftime('%Y-%m-%dT%H:%M:%fZ', 'now') FROM ${d.table} AS s WHERE s.${d.key} = ?9
+       ON CONFLICT (source_table, source_key) DO UPDATE SET
+         title = excluded.title, body = excluded.body, comments = excluded.comments, files = excluded.files, scope = excluded.scope,
+         audience = excluded.audience, agents = excluded.agents, indexed_at = excluded.indexed_at,
+         embedding = CASE WHEN ${d.index}.text_hash = excluded.text_hash THEN ${d.index}.embedding END,
+         embedding_model = CASE WHEN ${d.index}.text_hash = excluded.text_hash THEN ${d.index}.embedding_model END,
+         text_hash = excluded.text_hash`,
+      [message.sourceTable, key, title, body, comments, files, row.scope ?? null, hash, message.sourceKey]
+    );
+    return key;
+  });
+  return written === null ? 'removed' : 'indexed';
+}
+
+/**
  * Builds the index row of every row of orm's @searchable tables, or of
  * tables, as indexSearch does one, in key order, batch rows a read and an
  * indexRows: what a table that became @searchable with rows in it needs
@@ -566,22 +776,29 @@ export async function reindexSearch(orm: object, options: SearchOptions & { read
   const system = (orm as OrmShape).asSystem();
   const batch = options.batch ?? 500;
   let count = 0;
+  const sqlite = ormDialect(system) === 'sqlite';
   for (const [table, { definition }] of searchSourcesOf(system)) {
     if (options.tables && !options.tables.includes(table)) continue;
-    let after: string | undefined;
+    let after: unknown;
     for (;;) {
+      // On SQLite the next page starts after the key as the table holds it.
       const { rows } = await system.query(
-        `SELECT ${definition.key}::text AS key, ${definition.key} AS k FROM ${definition.table}${after === undefined ? '' : ` WHERE ${definition.key} > $1::${definition.keyType}`} ORDER BY ${definition.key} LIMIT ${batch}`,
+        sqlite
+          ? `SELECT CAST(${definition.key} AS TEXT) AS key, ${definition.key} AS k FROM ${definition.table}${after === undefined ? '' : ` WHERE ${definition.key} > ?1`} ORDER BY ${definition.key} LIMIT ${batch}`
+          : `SELECT ${definition.key}::text AS key, ${definition.key} AS k FROM ${definition.table}${after === undefined ? '' : ` WHERE ${definition.key} > $1::${definition.keyType}`} ORDER BY ${definition.key} LIMIT ${batch}`,
         after === undefined ? [] : [after]
       );
       // A page's rows are indexed together: as many statements and one
       // model call whatever its size.
       if (rows.length > 0) {
-        await indexRows(system, table, definition, rows.map(row => String(row.key)), options);
+        // On SQLite each row is indexed by its own statements (indexOnSQLite).
+        if (sqlite) for (const row of rows) await indexSearch(orm, { sourceTable: table, sourceKey: String(row.key) }, options);
+        else await indexRows(system, table, definition, rows.map(row => String(row.key)), options);
         count += rows.length;
       }
       if (rows.length < batch) break;
-      after = String(rows[rows.length - 1]!.key);
+      const last = rows[rows.length - 1]!;
+      after = sqlite ? last.k : String(last.key);
     }
   }
   return count;

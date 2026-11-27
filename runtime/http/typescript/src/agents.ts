@@ -1,6 +1,7 @@
 import type { Authenticator, GrantReach, Principal } from './auth.js';
 import { covers } from './auth.js';
 import { activeGrants, grantAuthenticator, grantAuthenticatorAdmittingRuns, issueGrant, permissionsOf as rolePermissions, reachesOf, revokeGrant, rolesById, rolesByName } from './access.js';
+import { principalCaller } from './behavior-routes.js';
 import type { BucketBody } from './bucket.js';
 import { withCaller } from './caller.js';
 import { createLogger, type Logger } from './logger.js';
@@ -14,13 +15,14 @@ import type { ModelCompletion, ModelMessage, ModelTool, ModelUsage } from './pro
 import type { Providers } from './providers/registry.js';
 import type { SandboxCost, SandboxProvider } from './providers/sandbox.js';
 import type { RowRef } from './rowfeatures.js';
-import { enqueue, postgresQueue, type QueueDefinition, type QueuePool } from './queue.js';
+import type { QueueDefinition } from './queue-core.js';
+import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-orm.js';
 import type { CoreCaller } from './rules.js';
 import { callSearchTool, searchMcpTool, type SearchOptions } from './search-tables.js';
 import { SecretValue } from './secret.js';
 import { sha256 } from './sha256.js';
 import { idKey } from './uuid.js';
-import type { WorkerMessage, WorkerQueue } from './worker.js';
+import type { WorkerQueue } from './worker.js';
 
 /*
 Agent orchestration (D158, D77's dispatcher): agents are rows, each run gets
@@ -326,8 +328,8 @@ export interface Agents {
   request(tx: any, input: AgentRunRequest, options?: { readonly delaySeconds?: number }): Promise<void>;
   /** Handles one message of the request queue: the dispatcher's worker handler. */
   handle(message: AgentRunRequest): Promise<void>;
-  /** The request queue as a worker runs it. */
-  workerQueue(pool: QueuePool): WorkerQueue;
+  /** The request queue as a worker runs it, over a pg pool, a SqlDatabase (D189) or the queue's claims already made. */
+  workerQueue(source: QueueSource): WorkerQueue;
   /** The authenticator of a run's token: kind agent, acting for whom the run acts for, its permissions narrowed and its grants the run's; inner establishes every other caller. */
   authenticator(inner?: Authenticator): Authenticator;
   /** The principal a request's run token resolves to, or null. */
@@ -1038,22 +1040,8 @@ export function createAgents(options: AgentsOptions): Agents {
     }
   };
 
-  const workerQueue = (pool: QueuePool): WorkerQueue => {
-    const queue = postgresQueue(pool, options.requests);
-    return {
-      name: queue.name,
-      leaseSeconds: queue.leaseSeconds,
-      claim: async (n, leaseSeconds) =>
-        (await queue.claim(n, leaseSeconds)).map((claim): WorkerMessage => ({ id: claim.id, token: claim.token, attempt: claim.attempt, handle: () => handle(claim.message as AgentRunRequest) })),
-      extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
-      complete: (id, token) => queue.complete(id, token),
-      fail: (id, token, cause) => queue.fail(id, token, cause),
-      release: (id, token) => queue.release(id, token),
-      prune: async limit => (await queue.prune(limit)) + (await prune(limit)),
-      slot: slots => queue.slot(slots),
-      nextDue: () => queue.nextDue(),
-    };
-  };
+  const workerQueue = (source: QueueSource): WorkerQueue => workerQueueOf(claimsOver(source, options.requests), message => handle(message as AgentRunRequest), limit => prune(limit));
+
 
   const request = async (tx: any, input: AgentRunRequest, enqueueOptions?: { readonly delaySeconds?: number }): Promise<void> => {
     if (input.requestedBy?.kind === 'agent') {
@@ -1172,7 +1160,9 @@ export function createAgents(options: AgentsOptions): Agents {
     if (!run) throw new AgentsError(401, 'unauthorized', 'no such run');
     return run;
   };
-  const callerOf = (principal: Principal): CoreCaller => ({ subject: principal.subject, permissions: principal.permissions });
+  // A run's tool calls reach the core as the run: its Agent and whom it
+  // acts for, which an Approvals requirement counts it by (D200).
+  const callerOf = (principal: Principal): CoreCaller => principalCaller(principal);
 
   // ---- autonomy ----
 
