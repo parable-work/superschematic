@@ -22,12 +22,13 @@ depends on none of them.
 
 | Built | Not built yet |
 | --- | --- |
-| the five interfaces in the TypeScript HTTP runtime, `defineProvider`, and `providersFrom`, which reads the providers an environment configures | the interfaces in the Go runtime |
+| the five interfaces in the TypeScript HTTP runtime, `defineProvider`, and `providersFrom`, which reads the providers an environment configures | |
 | the same in the Rust HTTP runtime, and a provider crate whose `Cargo.toml` declares it ([In Rust](#in-rust)) | |
+| the same in the Go HTTP runtime's `providers` package, and a Go module in the provider's directory ([In Go](#in-go)) | |
 | a provider package's manifest in its `package.json`, which the build checks against its interface's contract | a provider package named by its npm name; the config lists directories |
-| `@providers` on an API's `@envVars` class, and the API config's `providers` | a generated TypeScript server that links the packages and builds `Providers` in its `Deps`; a Rust server does |
+| `@providers` on an API's `@envVars` class, and the API config's `providers` | a generated TypeScript server that links the packages and builds `Providers` in its `Deps`; a Rust server and a Go server do |
 | the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | a check for `files` (attachments) and `credentials` (agent runs' credentials): those features register as they are built |
-| credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | provider packages in `build-all`'s dependency graph and its build cache key |
+| credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
 
 D159 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
 records the design and what is left. `examples/runtime-providers` is the
@@ -274,3 +275,68 @@ gives it to the app. A provider that writes through the app's
 repositories opens them `with_access(AccessCaller::of(Some(&principal)))`.
 `examples/runtime-providers/rust` ports a stub of each interface. D185
 records the Rust design.
+
+## In Go
+
+A Go server reads the same slots through the Go HTTP runtime's
+`providers` package (D184). A Go provider is a Go module in the
+provider's directory, the one the API's config lists: its `go.mod` names
+the module, and the package at its root exports `Definition()`, which
+`providers.MustDefine` checks as `defineProvider` does. The directory
+declares the provider once: in its `package.json`, beside the TypeScript
+package, or, for a provider of Go alone, in a `superschematic.json` whose
+`provider` object is the `package.json`'s `superschematic.provider`.
+`examples/runtime-providers/providers` holds a Go module beside each
+TypeScript package.
+
+```go
+package smsrelayb
+
+func Definition() providers.Definition {
+	return providers.MustDefine(providers.Definition{
+		Name:       "sms-relay-b",
+		Implements: providers.Channel,
+		Config:     map[string]providers.SettingSpec{"URL": {}, "ACCOUNT": {}, "TOKEN": {Secret: true}},
+		Create: func(ctx context.Context, settings providers.Settings, pc providers.Context) (any, error) {
+			token, err := settings.Secret("TOKEN") // a SecretValue, never a string
+			// ...
+			return &adapter{token: token}, nil
+		},
+	})
+}
+```
+
+The provider implements the Go interface of its contract
+(`CredentialProvider`, `ChannelAdapter`, `SandboxProvider`,
+`ModelProvider` or `FileProcessor`), an optional operation an interface
+of its own (`ChannelStatusReader`, `ChannelInboundReader`, and a model's
+`ModelEmbedder`). In the package's own test, `providers.ReadManifest(".")`
+reads the declaration and `providers.CheckManifest(manifest,
+Definition(), provider)` holds it to the code.
+
+The generated server of an API with slots writes `providers.go`, whose
+`ProvidersOf(config, logger)` reads the providers its config names, over
+the definitions of the modules the API lists, and the entrypoint puts
+them in `Deps.Providers`; `go.mod` requires each module and replaces it
+with its directory. A Go server is refused a listed provider whose
+directory holds no Go module.
+
+```go
+sms, err := deps.Providers.Channel(ctx, "SMS")
+_, err = sms.Send(ctx, providers.OutboundMessage{To: "+15550100", Body: "Review moved to Thursday"})
+
+use, err := providers.UseCredential(ctx, providers.UseCredentialInput{
+	Provider: broker, ProviderName: "vault-broker", Ref: ref,
+	Target: providers.HeaderTarget("https://reports.example.test", "Authorization"),
+	Runner: runner, // Fill(ctx, selector, value) and SetHeader(ctx, name, value)
+})
+```
+
+Every call into a provider is made with a context of its own principal,
+kind `extension`, and its role, which the server binds to the ORM too
+(`orm.WithPrincipal`), so a provider reads what everyone may read.
+`providers.ExtensionAuthenticator` authenticates a provider that calls
+the app with its key as that principal, and composes with
+`session.GrantAuthenticator`. An `Injection` has no exported field, so
+no other package makes one that holds a value, and its JSON and every
+`fmt` verb print its reference and target alone.

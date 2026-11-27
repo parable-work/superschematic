@@ -182,6 +182,15 @@ exactly as a server does.
 
 {{- define "deps" }}
 	{{ .Var }}Logger := logger.With(zap.String("api", {{ quote .Service }}))
+{{- if .Providers }}
+	// The runtime providers the environment names in the API's slots
+	// (D159, D184): a slot that names a provider the server does not link,
+	// or leaves a setting unset, stops it here.
+	{{ .Var }}Providers, err := {{ .Package }}.ProvidersOf(*{{ .Var }}Config, {{ .Var }}Logger)
+	if err != nil {
+		return fmt.Errorf("providers of {{ .Service }}: %w", err)
+	}
+{{- end }}
 	{{ .Var }}Deps := {{ .Package }}.Deps{
 {{- if .Config }}
 		Config: *{{ .Var }}Config,
@@ -204,6 +213,9 @@ exactly as a server does.
 {{- end }}
 {{- if .Engine }}
 		Engine: {{ .Engine.Var }}.Background,
+{{- end }}
+{{- if .Providers }}
+		Providers: {{ .Var }}Providers,
 {{- end }}
 		Logger: {{ .Var }}Logger,
 	}
