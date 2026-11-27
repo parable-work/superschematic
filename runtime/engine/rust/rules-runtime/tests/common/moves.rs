@@ -412,3 +412,48 @@ fn write_tsconfig(dir: &Path) {
     )
     .expect("tsconfig.json");
 }
+
+/// A create that makes rows, as Blueprint's stamps a job per step, makes
+/// them again when its row is replayed through its rules, and the rows it
+/// made in development mode replay beside them: a batch and its three
+/// steps replay, and the runtime holds six jobs. Development mode's store
+/// does not say which rows a create made.
+pub fn a_create_makes_its_rows_again<S: Store>(
+    open: Open<'_>,
+    binaries: &Binaries,
+    dev: &mut Dev<S>,
+) {
+    for document in development(&["batches", "jobs", "workers"]) {
+        let name = document["name"].as_str().expect("a name").to_owned();
+        dev_ok(dev, Request::Define { document });
+        dev_ok(
+            dev,
+            Request::Publish {
+                type_name: name,
+                discard: false,
+            },
+        );
+    }
+    dev_ok(
+        dev,
+        Request::Create {
+            type_name: "Batch".into(),
+            data: json!({"title": "Nightly", "topic": "crawl"})
+                .as_object()
+                .cloned()
+                .expect("data"),
+            params: Default::default(),
+        },
+    );
+    let mut runtime = host(open, binaries, &Clock::now());
+    let moved = runtime
+        .publish_from(dev.store(), &Publish::default().service("jobs-db"))
+        .expect("the store moves");
+    assert_eq!(
+        moved["rows"],
+        json!({"replayed": 4, "refused": []}),
+        "{moved}"
+    );
+    let jobs = ok(&mut runtime, json!({"kind": "list", "type": "Job"}));
+    assert_eq!(jobs["items"].as_array().map(Vec::len), Some(6), "{jobs}");
+}

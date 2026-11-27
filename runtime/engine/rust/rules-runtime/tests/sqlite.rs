@@ -401,6 +401,16 @@ fn a_development_file_publishes_its_schemas() {
     common::moves::development_documents_publish(&opener(file("schemas")), &binaries, &mut dev);
 }
 
+/// A replayed create runs its rules: a batch stamps its steps again.
+#[test]
+fn a_replayed_create_makes_its_rows_again() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let mut dev = superschematic_rules_dev::Dev::memory().expect("a development store");
+    common::moves::a_create_makes_its_rows_again(&opener(file("stamped")), &binaries, &mut dev);
+}
+
 /// A runtime file exports as a compiled DB service whose first plan from
 /// the recorded model is empty.
 #[test]
