@@ -753,29 +753,79 @@ func ensureCompiled(reg *registry.Registry) *compiled {
 			return
 		}
 
-		resource, err := validator.UnmarshalJSON(bytes.NewReader(c.bytes))
-		if err != nil {
-			c.err = fmt.Errorf("decoding generated JSON Schema: %w", err)
-			return
-		}
-		compiler := validator.NewCompiler()
-		resourceURL := reg.Naming().MetaSchemaURL(schemaResourceName)
-		if err := compiler.AddResource(resourceURL, resource); err != nil {
-			c.err = fmt.Errorf("registering generated JSON Schema: %w", err)
-			return
-		}
-
-		c.defs = make(map[string]*validator.Schema)
-		for _, defName := range []string{"Document", "TypeDef", "EnumFile", "UnionFile", "ScalarFile", "OperationSetFile"} {
-			sch, err := compiler.Compile(resourceURL + "#/$defs/" + defName)
-			if err != nil {
-				c.err = fmt.Errorf("compiling generated JSON Schema (%s): %w", defName, err)
-				return
-			}
-			c.defs[defName] = sch
-		}
+		c.defs, c.err = definitionValidators(reg.Naming().MetaSchemaURL(schemaResourceName), c.bytes)
 	})
 	return c
+}
+
+// recentDefinitions holds the validators of the documents compiled last,
+// by a document's URL and bytes. Registries that generate the same
+// document share its validators: every core registry generates one
+// document, and a process that builds a registry a load (the tests do,
+// thousands of times) compiled it for each, several megabytes and most of
+// the load's time. Only a few are kept, the one used longest ago dropped
+// first, so registries with documents of their own (test registries,
+// mostly) pin no more than that many between them. Validators are never
+// written to.
+var recentDefinitions struct {
+	sync.Mutex
+	entries []definitionEntry // most recently used first
+}
+
+type definitionEntry struct {
+	url, document string
+	defs          map[string]*validator.Schema
+}
+
+const recentDefinitionsKept = 4
+
+// definitionValidators compiles a validator per dispatchable definition of
+// the schema-file JSON Schema document registered under resourceURL, or
+// returns the ones a registry with the same document compiled.
+func definitionValidators(resourceURL string, document []byte) (map[string]*validator.Schema, error) {
+	recentDefinitions.Lock()
+	for i, entry := range recentDefinitions.entries {
+		if entry.url == resourceURL && entry.document == string(document) {
+			copy(recentDefinitions.entries[1:i+1], recentDefinitions.entries[:i])
+			recentDefinitions.entries[0] = entry
+			recentDefinitions.Unlock()
+			return entry.defs, nil
+		}
+	}
+	recentDefinitions.Unlock()
+
+	defs, err := compileDefinitions(resourceURL, document)
+	if err != nil {
+		return nil, err
+	}
+	recentDefinitions.Lock()
+	defer recentDefinitions.Unlock()
+	entries := append([]definitionEntry{{url: resourceURL, document: string(document), defs: defs}}, recentDefinitions.entries...)
+	if len(entries) > recentDefinitionsKept {
+		entries = entries[:recentDefinitionsKept]
+	}
+	recentDefinitions.entries = entries
+	return defs, nil
+}
+
+func compileDefinitions(resourceURL string, document []byte) (map[string]*validator.Schema, error) {
+	resource, err := validator.UnmarshalJSON(bytes.NewReader(document))
+	if err != nil {
+		return nil, fmt.Errorf("decoding generated JSON Schema: %w", err)
+	}
+	compiler := validator.NewCompiler()
+	if err := compiler.AddResource(resourceURL, resource); err != nil {
+		return nil, fmt.Errorf("registering generated JSON Schema: %w", err)
+	}
+	defs := make(map[string]*validator.Schema)
+	for _, defName := range []string{"Document", "TypeDef", "EnumFile", "UnionFile", "ScalarFile", "OperationSetFile"} {
+		sch, err := compiler.Compile(resourceURL + "#/$defs/" + defName)
+		if err != nil {
+			return nil, fmt.Errorf("compiling generated JSON Schema (%s): %w", defName, err)
+		}
+		defs[defName] = sch
+	}
+	return defs, nil
 }
 
 // validateAgainstDef validates a JSON payload against one named definition of
