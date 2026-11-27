@@ -131,8 +131,7 @@ const acmeExtDir = "../../../examples/acme-schematic/ext"
 // (examples/acme-schematic/ext/rating.behavior.ts), a behavior whose rules
 // are the declarative vocabulary's (@declaresBehavior's rules), and holds
 // the declaration derived from it byte for byte to the committed
-// rating.behavior.json the extension registers, and to the acme-behaviors
-// crate's copy, which acme-schematic behaviors writes from it.
+// rating.behavior.json the extension registers.
 func TestAcmeRatingClassDerivesItsDeclaration(t *testing.T) {
 	requireSuperscalarCheckout(t)
 	classes, err := ReadBehaviorClasses(acmeExtDir, nil)
@@ -150,10 +149,7 @@ func TestAcmeRatingClassDerivesItsDeclaration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CanonicalDeclaration: %v", err)
 	}
-	for _, committed := range []string{
-		filepath.Join(acmeExtDir, "rating.behavior.json"),
-		"../../../examples/acme-schematic/crates/behaviors/declarations/acme.Rating.behavior.json",
-	} {
+	for _, committed := range []string{filepath.Join(acmeExtDir, "rating.behavior.json")} {
 		data, err := os.ReadFile(committed)
 		if err != nil {
 			t.Fatal(err)

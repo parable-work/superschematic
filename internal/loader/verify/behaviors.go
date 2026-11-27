@@ -29,12 +29,14 @@ import (
 // implements (registry.EngineImplements: Seats, Reconcile and Schedules,
 // D104) is refused on an engine type, naming the table form. A
 // declaration's own field and operation names are checked when it
-// registers.
+// registers. A behavior D103 folds into a schema feature (Links, Search,
+// Queue, Branches) is refused first, naming its replacement
+// (checkFoldedBehaviors).
 func checkBehaviors(schema *ir.Schema, reg *registry.Registry, r *Result) {
 	bases := codegen.BaseTypeNames(schema)
 	for _, types := range []map[string]*ir.TypeDef{schema.Types, schema.Inputs} {
 		for _, name := range sortedTypeNames(types) {
-			if td := types[name]; td != nil && len(td.Behaviors) > 0 {
+			if td := types[name]; td != nil && len(td.Behaviors) > 0 && !checkFoldedBehaviors(td, r) {
 				checkTypeBehaviors(schema, td, bases, reg, r)
 			}
 		}

@@ -8,6 +8,7 @@ import (
 	"github.com/parable-work/superschematic/docs"
 	"github.com/parable-work/superschematic/internal/generator"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/registry/registrytest"
 	"github.com/parable-work/superschematic/packages"
@@ -70,14 +71,21 @@ func TestEveryDecoratorIsListed(t *testing.T) {
 
 // Every behavior an engine implements is listed, and one the behaviors'
 // core alone implements (Seats, Reconcile, Schedules, Pool, D104, and
-// Aliased, D147) is not: no engine type composes it.
+// Aliased, D147) is not: no engine type composes it. Nor is one D103 folds
+// into a schema feature (Links, Search, Queue and Branches), which the
+// build refuses.
 func TestEveryBehaviorIsListed(t *testing.T) {
 	acme := withAcme(t)
 	catalog := render(t, Behaviors, acme)
-	coreOnly := 0
+	coreOnly, folded := 0, 0
 	for _, beh := range acme.Behaviors() {
 		listed := strings.Contains(catalog, "\n## `"+beh.Name+"`\n")
 		switch {
+		case verify.IsFoldedBehavior(beh.Name):
+			folded++
+			if listed {
+				t.Errorf("behavior %s, which D103 folds into a schema feature, has an entry", beh.Name)
+			}
 		case !registry.EngineImplements(beh):
 			coreOnly++
 			if listed {
@@ -89,6 +97,9 @@ func TestEveryBehaviorIsListed(t *testing.T) {
 	}
 	if coreOnly != 6 {
 		t.Errorf("%d behaviors no engine implements, want Seats, Reconcile, Schedules, Pool, Recurrence and Aliased", coreOnly)
+	}
+	if folded != 4 {
+		t.Errorf("%d folded behaviors registered, want Links, Search, Queue and Branches", folded)
 	}
 	if !strings.Contains(catalog, "- Config: `WorkflowConfig`, required.\n") {
 		t.Error("Workflow's entry does not name its config type")

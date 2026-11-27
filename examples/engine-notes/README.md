@@ -1,24 +1,23 @@
 # engine-notes
 
-A notes server on `@superschematic/engine`, which runs a schema with no
-generated code (D16 in `docs/DECISIONS.md`). A note moves from draft
-through review to published, collects comments and keeps its revisions,
-and a reader can propose a change for an editor to approve. The docs
-site's engine guide (`docs/src/content/docs/guides/engine.mdx`) walks
-through it; `runtime/engine/README.md` is the reference.
+A notes server on development mode (D117 in `docs/DECISIONS.md`), which
+runs a schema with no generated code: `@superschematic/rules-handler`, the
+handler of the behaviors' core, serves it from a server written by hand.
+A note moves from draft through review to published, collects comments
+and keeps its revisions, and a reader can propose a change for an editor
+to approve. The docs site's guide (`docs/src/content/docs/guides/engine.mdx`)
+walks through it; `docs/src/content/docs/guides/development-mode.md` is
+the reference.
 
 | Path | What it is |
 |---|---|
 | `schemas/notes.schema.json` | The notes schema in the JSON data form: a `Note` that composes `Workflow` (a transition that needs `notes.publish`), `Comments` and `Revisions` (review needs `notes.review`) |
-| `src/auth.ts` | The bearer-token `Authenticator` and the access policy |
-| `src/server.ts` | Opens the engine over one SQLite file, publishes the schema, and serves the HTTP API, the event stream and the MCP endpoint on one Hono app with `@hono/node-server` |
-| `src/main.ts` | Runs the server on port 8787 (`PORT`) over `notes.db` (`NOTES_DB`) |
-| `src/notes.client.ts` | Generated: the typed wrappers `superschematic engine-client` writes for the schema (D49), `notesClient` over the engine's client with the note's own fields, its behaviors' fields, states, operations and veto codes |
-| `test/notes.test.ts` | End to end over a listening server: create, transition (refused without the permission, then allowed), a post beside the note, propose and approve, the event log as JSON and as a stream from a cursor, MCP tools listed and called with the official client, the same calls through `notesClient`, a refused draft, and a restart that keeps the notes and publishes a compatible change |
-| `src/dev.ts` | The same schema on development mode (D117): runs `superschematic-dev` over a SQLite file with the policy of `src/auth.ts` written as data, and lists what differs from the engine |
-| `test/notes.dev.test.ts` | The same flows on development mode, plus a streamed reply whose draft reaches the event stream as signals, a caller's typing, and a reader's marker and unread count |
-| `scripts/link.sh` | Links the engine and the packages the example imports into `node_modules` |
-| `scripts/check.sh` | Builds the runtimes, the engine and `superschematic-dev`, links them, type-checks, and runs both tests on Node.js and Bun |
+| `src/dev.ts` | The bearer-token callers and `authenticate`, the access policy as data, `openNotesDev`, which opens the handler over one SQLite connection and publishes the schema, and `listen`, which serves its routes, event stream and MCP endpoint with `@hono/node-server` |
+| `test/notes.dev.test.ts` | End to end over a listening server, on a SQLite file: create, transition (refused without the permission, then allowed), a post beside the note, propose and approve, a streamed reply read midway, a reader's marker and unread count, MCP tools listed and called, a refused draft, and a restart that keeps the notes and publishes a compatible change |
+| `test/notes.dev-server.test.ts` | A smoke of `superschematic-dev`, development mode's server in Rust, over the file the TypeScript host wrote: it serves the note under the same policy, and sends a streamed reply's draft and a caller's typing to a reader's stream as signals |
+| `test/stream.ts` | A reader of the event stream, which both tests open |
+| `scripts/link.sh` | Links development mode's handler, the HTTP runtime and the packages the example imports into `node_modules` |
+| `scripts/check.sh` | Builds the HTTP runtime, development mode's handler and `superschematic-dev`, links them, type-checks, and runs both tests on Node.js and Bun |
 
 ## Run it
 
@@ -28,81 +27,61 @@ From the repository root, after `make setup`:
 examples/engine-notes/scripts/check.sh
 ```
 
-It builds the HTTP runtime and the engine, and the engine's Node-API addon
-with cargo when the engine has none (`scripts/engine-napi.sh`: the engine
-is the Rust library every server links, D58, which the package loads),
-builds `superschematic-dev` with cargo unless `SUPERSCHEMATIC_DEV` names
-one, links them into `node_modules`, type-checks the example, and runs
-`test/notes.test.ts` and `test/notes.dev.test.ts` with `node --test` and
-with `bun test`, each serving the example on a free port. The `typescript` job in
-`.github/workflows/ci.yml` runs it after the engine's own tests in the
-full tier (D40), which the release candidate runs on `main` twice a day,
-and so does `make ts`.
+It builds the HTTP runtime and `@superschematic/rules-handler`
+(`runtime/rules-handler/typescript`, the handler built for WebAssembly,
+which needs cargo and the `wasm32-unknown-unknown` target), builds
+`superschematic-dev` with cargo unless `SUPERSCHEMATIC_DEV` names one,
+links them into `node_modules`, type-checks the example, and runs
+`test/notes.dev.test.ts` and `test/notes.dev-server.test.ts` with
+`node --test` and with `bun test`, each serving the notes on a free port.
+The `typescript` job in `.github/workflows/ci.yml` runs it in the full
+tier (D40), which the release candidate runs on `main` twice a day, and
+so does `make ts`.
 
-To run the server after that:
+To run the server by hand, after that:
 
-```sh
-cd examples/engine-notes
-node src/main.ts      # Node.js 24
-bun src/main.ts       # or Bun
+```ts
+// serve.ts, in examples/engine-notes: bun serve.ts
+import { Database } from 'bun:sqlite';
+import { listen, openNotesDev } from './src/dev.ts';
+
+const dev = await openNotesDev(new Database('notes.db', { create: true }));
+const server = await listen(dev, 8787);
+console.log(`engine-notes: ${server.url}/namespaces/default`);
 ```
 
-It listens on `http://127.0.0.1:8787/api` and keeps its data in
-`notes.db` (gitignored). The routes are under
-`/api/namespaces/default`; the MCP endpoint is
-`/api/namespaces/default/mcp`.
+Under Node.js 24, open the file with `node:sqlite`'s `DatabaseSync`
+instead. It listens on `http://127.0.0.1:8787` and keeps its data in
+`notes.db` (gitignored). The routes are under `/namespaces/default`; the
+MCP endpoint is `/namespaces/default/mcp`.
 
-## On development mode
+## How it works
 
-The schema runs unchanged on development mode, the server of the
-behaviors' core (`superschematic-dev`, D117), which
-`test/notes.dev.test.ts` drives. `check.sh` builds it with cargo, or uses
-the one `SUPERSCHEMATIC_DEV` names. To run it by hand:
-
-```sh
-cargo run --manifest-path runtime/engine/rust/Cargo.toml -p superschematic-rules-dev \
-  --features server --bin superschematic-dev -- --db notes-dev.db
-curl -X POST http://127.0.0.1:4500/namespaces/default/schemas \
-  -H 'content-type: application/json' --data-binary @examples/engine-notes/schemas/notes.schema.json
-curl -X POST http://127.0.0.1:4500/namespaces/default/schemas/Note/publish
-```
-
-What differs from the engine, as `src/dev.ts` lists it:
-
-- The type is `Note`, as the schema file names it; the engine names the
-  schema `notes`.
+- The type is `Note`, as the schema file names it, and its routes are
+  under `/namespaces/default/schemas/Note`.
 - A row is its own fields beside its behaviors', each named after its
-  behavior (`workflowStatus`, `commentsMessages`); the engine answers
-  `data` and `behaviors` apart.
-- The caller is whoever the `X-Superschematic-Subject` and
-  `X-Superschematic-Permissions` headers say, and the policy is data.
+  behavior (`workflowStatus`, `commentsMessages`), and its version is
+  `_version`, which the ETag carries.
+- A caller is the one its bearer token names, and the policy is data
+  (`devPolicy`), asked before every request.
 - The event log holds the events the behaviors emit, which these three do
-  not; the engine logs every write. Signals reach the stream as the
-  engine's do.
+  not. This host publishes no signals yet, so a streamed reply's draft
+  reaches a reader through a read; `superschematic-dev` sends it to the
+  streams open in its process, which `test/notes.dev-server.test.ts`
+  shows.
 - A publish has no compatibility rule: a draft that adds a required field
   is taken, and its publish is refused while a stored note lacks the field.
+- `openNotesDev` publishes the schema when `Note` is not live yet, so a
+  restart over the same file keeps the notes and the version they are at.
 
-## The typed client
-
-`src/notes.client.ts` is generated from `schemas/notes.schema.json`:
-
-```sh
-superschematic engine-client --out examples/engine-notes/src/notes.client.ts examples/engine-notes/schemas/notes.schema.json
-```
-
-`notesClient(client)` wraps an `EngineClient` with the schema's types, so a
-misspelled field, state or parameter fails the typecheck. A read returns a
-note's own fields in `data`, typed `Note`, and its behaviors' fields in
-`behaviors`, typed `NoteBehaviors`, each under its behavior's name:
-`behaviors.Workflow.status`, `behaviors.Comments.messages`,
-`behaviors.Revisions.revision`. The file is a golden of
-`internal/generator/engineclientgen`: its test fails when the file is not
-what the schema generates, and `go test
-./internal/generator/engineclientgen -update` rewrites it. Do not edit it.
+The MCP endpoint is the HTTP runtime's transport
+(`@superschematic/http-runtime/mcp`'s `serveMcp`) over the tools the
+handler makes from the live types, each caller offered the ones the
+policy lets them call.
 
 ## Callers
 
-`src/auth.ts` knows four bearer tokens:
+`src/dev.ts` knows four bearer tokens:
 
 | Token | Subject | Permissions | May |
 |---|---|---|---|
@@ -111,23 +90,14 @@ what the schema generates, and `go test
 | `carol-token` | carol | `notes.read` | read notes, post, reply and react, and propose changes |
 | `dana-token` | dana | `schemas` | define and publish schemas; read no notes |
 
-The server publishes `schemas/notes.schema.json` as `engine-notes` each
-time it starts. An unchanged file mints nothing; a compatible change
-becomes the next version; an incompatible one stops the server from
-starting.
+A request with no token, or one the example does not know, is 401.
 
 ## Until the packages are published
 
-`scripts/link.sh` links `runtime/engine/typescript` as
-`@superschematic/engine`, and links `@superschematic/http-runtime`,
-`hono`, `@hono/node-server`, `@modelcontextprotocol/client`, TypeScript and
-the Node.js types from the engine's `node_modules`, so the engine, the HTTP
-runtime and the example share one Hono at the version the engine pins. The
-engine's build links the HTTP runtime and superscalar into the engine's own
-`node_modules`, and the engine loads its addon from `native/` there. Once
-the packages are published, a project declares `@superschematic/engine`,
-whose prebuilt addon for its platform npm installs as an optional
-dependency (`@superschematic/engine-<target>`), the HTTP runtime and
-superscalar the engine README ("Runtimes") names, `hono` for the `./http`
-and `./mcp` entry points, and a server for the app, such as
-`@hono/node-server`.
+`scripts/link.sh` links `runtime/rules-handler/typescript` as
+`@superschematic/rules-handler` and `runtime/http/typescript` as
+`@superschematic/http-runtime`, and `@hono/node-server`, TypeScript and
+the Node.js types from the HTTP runtime's install. Once the packages are
+published, a project declares `@superschematic/rules-handler`, whose
+module ships in the package, `@superschematic/http-runtime` for the MCP
+transport, and a server for the app, such as `@hono/node-server`.

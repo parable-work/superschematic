@@ -116,7 +116,7 @@ func leaseProblem(schema *ir.Schema, td *ir.TypeDef, ttlMs, heartbeatMs *int64, 
 		}
 	}
 	if directOn {
-		return "directOn sends a directive when the target of a link moves on, a revision of Revisions or a release of Branches, which waits for Revisions and Branches on the core (D103, step 4)"
+		return "directOn sends a directive when a link's target gains a revision or a release, which the core does not hear on a table: a release is a @versioned table's since Branches folded into @versioned (D103), and the core reads no version graph"
 	}
 	if sweepMs {
 		return "sweepMs is how often the engine's runner swept the lapsed leases: a table's lease expires at its own deadline, which the API's behavior worker runs when it falls due (D103), so a table's Lease takes no sweepMs"

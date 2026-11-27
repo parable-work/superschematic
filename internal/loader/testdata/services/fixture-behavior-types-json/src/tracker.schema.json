@@ -6,7 +6,7 @@
     "Ticket": {
       "name": "Ticket",
       "role": "EmbeddedStruct",
-      "description": "A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.",
+      "description": "A ticket that moves through its states, waits for the tickets that block it, and keeps deadlines.",
       "behaviors": [
         {
           "name": "Workflow",
@@ -24,16 +24,6 @@
         { "name": "Comments" },
         { "name": "Revisions", "config": { "review": { "permission": "tracker.review" } } },
         { "name": "Dependencies", "config": { "schemas": ["tickets"], "gatedStates": ["done"] } },
-        {
-          "name": "Links",
-          "config": {
-            "links": {
-              "spec": { "schema": "documents", "pinned": true },
-              "reviewers": { "schema": "people", "many": true, "max": 3 },
-              "project": { "schema": "projects", "required": true }
-            }
-          }
-        },
         {
           "name": "Timers",
           "config": {
@@ -56,7 +46,7 @@
     "Job": {
       "name": "Job",
       "role": "EmbeddedStruct",
-      "description": "A job a worker claims from its topic's queue and holds under a lease, within a CPU budget, retried per failure class.",
+      "description": "A job a worker holds under a lease, within a CPU budget, retried per failure class.",
       "behaviors": [
         {
           "name": "Workflow",
@@ -83,10 +73,6 @@
           }
         },
         { "name": "Assignment", "config": { "permission": "tracker.assign" } },
-        {
-          "name": "Queue",
-          "config": { "claim": { "from": ["queued"], "to": "running" }, "priorityField": "priority", "match": ["topic"] }
-        },
         {
           "name": "Budget",
           "config": {
@@ -182,7 +168,7 @@
       "role": "EmbeddedStruct",
       "description": "A note whose behaviors add no field: its behaviors' type has no member.",
       "behaviors": [
-        { "name": "Search", "config": { "fields": ["text"] } }
+        { "name": "Constants", "config": { "fields": ["text"] } }
       ],
       "fields": [
         { "name": "text", "typeRef": { "name": "string" }, "required": true }
