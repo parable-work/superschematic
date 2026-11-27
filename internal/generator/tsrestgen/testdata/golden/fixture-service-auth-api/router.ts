@@ -139,6 +139,13 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
  */
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-service-auth-api', options);
@@ -152,9 +159,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listReservations,
-      rateLimitPerMinute: options.rateLimits?.listReservations,
-      timeoutSeconds: options.timeouts?.listReservations,
+      bodyLimitBytes: bodyLimits.listReservations,
+      rateLimitPerMinute: rateLimits.listReservations,
+      timeoutSeconds: timeouts.listReservations,
     }
   );
   mountOperation(
@@ -167,9 +174,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.reindexStock,
-      rateLimitPerMinute: options.rateLimits?.reindexStock,
-      timeoutSeconds: options.timeouts?.reindexStock,
+      bodyLimitBytes: bodyLimits.reindexStock,
+      rateLimitPerMinute: rateLimits.reindexStock,
+      timeoutSeconds: timeouts.reindexStock,
     }
   );
   mountOperation(
@@ -184,9 +191,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.reserveStock,
-      rateLimitPerMinute: options.rateLimits?.reserveStock,
-      timeoutSeconds: options.timeouts?.reserveStock,
+      bodyLimitBytes: bodyLimits.reserveStock,
+      rateLimitPerMinute: rateLimits.reserveStock,
+      timeoutSeconds: timeouts.reserveStock,
     }
   );
   mountOperation(
@@ -201,9 +208,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getReservation,
-      rateLimitPerMinute: options.rateLimits?.getReservation,
-      timeoutSeconds: options.timeouts?.getReservation,
+      bodyLimitBytes: bodyLimits.getReservation,
+      rateLimitPerMinute: rateLimits.getReservation,
+      timeoutSeconds: timeouts.getReservation,
     }
   );
   mountOperation(
@@ -218,9 +225,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.releaseReservation,
-      rateLimitPerMinute: options.rateLimits?.releaseReservation,
-      timeoutSeconds: options.timeouts?.releaseReservation,
+      bodyLimitBytes: bodyLimits.releaseReservation,
+      rateLimitPerMinute: rateLimits.releaseReservation,
+      timeoutSeconds: timeouts.releaseReservation,
     }
   );
   mountOperation(
@@ -233,9 +240,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.syncStatus,
-      rateLimitPerMinute: options.rateLimits?.syncStatus,
-      timeoutSeconds: options.timeouts?.syncStatus,
+      bodyLimitBytes: bodyLimits.syncStatus,
+      rateLimitPerMinute: rateLimits.syncStatus,
+      timeoutSeconds: timeouts.syncStatus,
     }
   );
   mountOperation(
@@ -248,9 +255,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.syncStock,
-      rateLimitPerMinute: options.rateLimits?.syncStock,
-      timeoutSeconds: options.timeouts?.syncStock,
+      bodyLimitBytes: bodyLimits.syncStock,
+      rateLimitPerMinute: rateLimits.syncStock,
+      timeoutSeconds: timeouts.syncStock,
     }
   );
   mountOperation(
@@ -263,9 +270,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.syncMyStock,
-      rateLimitPerMinute: options.rateLimits?.syncMyStock,
-      timeoutSeconds: options.timeouts?.syncMyStock,
+      bodyLimitBytes: bodyLimits.syncMyStock,
+      rateLimitPerMinute: rateLimits.syncMyStock,
+      timeoutSeconds: timeouts.syncMyStock,
     }
   );
   return router;

@@ -11,9 +11,11 @@
 // private row and of a named one, whose audience ids are JSON text on
 // SQLite and a uuid[] on Postgres. Each answers the principals the row is
 // visible to, and is not found (NotFoundError, a 404 at a route) for
-// anyone else, never an internal error and never a success. On each, a
-// create that names neither audience nor agentAccess takes its table's
-// defaults: a task is everyone's, and a note its author's alone.
+// anyone else, never an internal error and never a success. A behavior
+// route (behaviorOperation) answers a row kept from its caller word for
+// word as it answers a key no row holds, so the answer never says which.
+// On each, a create that names neither audience nor agentAccess takes its
+// table's defaults: a task is everyone's, and a note its author's alone.
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -23,14 +25,49 @@ import { initSync } from '@superschematic/rules';
 import { execute, readRow, runCreate, sqliteRulesStore, type RulesHost } from '@superschematic/http-runtime/d1';
 import { openSqlite, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import { NotFoundError } from '@superschematic/http-runtime/postgres';
+import { behaviorOperation, HttpProblem } from '@superschematic/http-runtime';
 import { createOrm, fixtureAudienceBehaviorsDbRules as layout, type FixtureAudienceBehaviorsDbOrm } from './orm';
 import { createOrm as createSqliteOrm } from './orm-sqlite';
 import { alice, bob, database, dsn, type TestDatabase } from './harness';
 
 const carol = '3cKSm7Pv2EM8Wl4z4XvMh1';
 
-/** Every behavior call, and an update and a delete, of key as orm's user is not found. */
+/** A key no Task holds. */
+const nowhere = '2aZ9QxW4rT6yU8iO0pL1kJ';
+
+/** What a behavior route answers for run's rejection: the problem's status, code, message and details, with key written as <key>. */
+async function answered(run: () => Promise<unknown>, key: string): Promise<unknown> {
+  const problem = await behaviorOperation(run).then(
+    () => undefined,
+    (error: unknown) => error
+  );
+  expect(problem).toBeInstanceOf(HttpProblem);
+  const { status, code, message, details } = problem as HttpProblem;
+  return { status, code, message: message.replaceAll(key, '<key>'), details };
+}
+
+/** The behavior calls of key as orm's user. */
+function behaviorCalls(as: FixtureAudienceBehaviorsDbOrm, key: string): (() => Promise<unknown>)[] {
+  return [
+    () => as.task.status.transition(key as never, { to: 'done' } as never),
+    () => as.task.comments.post(key as never, { body: 'Can I see this?' } as never),
+    () => as.task.comments.listMessages(key as never, {} as never),
+  ];
+}
+
+/**
+ * Every behavior call, and an update and a delete, of key as orm's user is
+ * not found, and a route answers each behavior call as it answers the call
+ * of a key no row holds: 404 not_found, in the same words.
+ */
 async function notFound(as: FixtureAudienceBehaviorsDbOrm, key: string): Promise<void> {
+  const kept = behaviorCalls(as, key);
+  const missing = behaviorCalls(as, nowhere);
+  for (const [at, call] of kept.entries()) {
+    const answer = await answered(call, key);
+    expect(answer).toMatchObject({ status: 404, code: 'not_found' });
+    expect(answer).toEqual(await answered(missing[at]!, nowhere));
+  }
   await expect(as.task.status.transition(key as never, { to: 'done' } as never)).rejects.toBeInstanceOf(NotFoundError);
   await expect(as.task.comments.post(key as never, { body: 'Can I see this?' } as never)).rejects.toBeInstanceOf(NotFoundError);
   await expect(as.task.comments.listMessages(key as never, {} as never)).rejects.toBeInstanceOf(NotFoundError);

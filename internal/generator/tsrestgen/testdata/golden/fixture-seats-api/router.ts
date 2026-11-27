@@ -167,6 +167,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-seats-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-seats-api', options);
@@ -189,9 +196,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemSeatsLeaveSeatResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.seatsLeaveSeat,
-      rateLimitPerMinute: options.rateLimits?.seatsLeaveSeat,
-      timeoutSeconds: options.timeouts?.seatsLeaveSeat,
+      bodyLimitBytes: bodyLimits.seatsLeaveSeat,
+      rateLimitPerMinute: rateLimits.seatsLeaveSeat,
+      timeoutSeconds: timeouts.seatsLeaveSeat,
     }
   );
   // Problem's Seats listSeats, a Seats (D103): the
@@ -213,9 +220,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemSeatsListSeatsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.seatsListSeats,
-      rateLimitPerMinute: options.rateLimits?.seatsListSeats,
-      timeoutSeconds: options.timeouts?.seatsListSeats,
+      bodyLimitBytes: bodyLimits.seatsListSeats,
+      rateLimitPerMinute: rateLimits.seatsListSeats,
+      timeoutSeconds: timeouts.seatsListSeats,
     }
   );
   // Problem's Seats takeSeat, a Seats (D103): the
@@ -237,9 +244,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemSeatsTakeSeatResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.seatsTakeSeat,
-      rateLimitPerMinute: options.rateLimits?.seatsTakeSeat,
-      timeoutSeconds: options.timeouts?.seatsTakeSeat,
+      bodyLimitBytes: bodyLimits.seatsTakeSeat,
+      rateLimitPerMinute: rateLimits.seatsTakeSeat,
+      timeoutSeconds: timeouts.seatsTakeSeat,
     }
   );
   // Problem's status transition, a Workflow (D103): the
@@ -261,9 +268,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.problemStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.problemStatusTransition,
-      timeoutSeconds: options.timeouts?.problemStatusTransition,
+      bodyLimitBytes: bodyLimits.problemStatusTransition,
+      rateLimitPerMinute: rateLimits.problemStatusTransition,
+      timeoutSeconds: timeouts.problemStatusTransition,
     }
   );
   // Sandbox's observed observe, a Reconcile (D103): the
@@ -284,9 +291,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<SandboxObservedObserveResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.observedObserve,
-      rateLimitPerMinute: options.rateLimits?.observedObserve,
-      timeoutSeconds: options.timeouts?.observedObserve,
+      bodyLimitBytes: bodyLimits.observedObserve,
+      rateLimitPerMinute: rateLimits.observedObserve,
+      timeoutSeconds: timeouts.observedObserve,
     }
   );
   // Sandbox's status transition, a Workflow (D103): the
@@ -308,9 +315,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<SandboxStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.sandboxStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.sandboxStatusTransition,
-      timeoutSeconds: options.timeouts?.sandboxStatusTransition,
+      bodyLimitBytes: bodyLimits.sandboxStatusTransition,
+      rateLimitPerMinute: rateLimits.sandboxStatusTransition,
+      timeoutSeconds: timeouts.sandboxStatusTransition,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

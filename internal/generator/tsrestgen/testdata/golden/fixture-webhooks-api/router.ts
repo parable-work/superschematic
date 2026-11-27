@@ -148,6 +148,14 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     }
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
+  const manualRoutes: NonNullable<typeof options.manualRoutes> = options.manualRoutes ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-webhooks-api', options);
@@ -163,9 +171,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getEvent,
-      rateLimitPerMinute: options.rateLimits?.getEvent,
-      timeoutSeconds: options.timeouts?.getEvent,
+      bodyLimitBytes: bodyLimits.getEvent,
+      rateLimitPerMinute: rateLimits.getEvent,
+      timeoutSeconds: timeouts.getEvent,
     }
   );
   mountOperation(
@@ -181,15 +189,15 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.receiveGithubEvent,
-      rateLimitPerMinute: options.rateLimits?.receiveGithubEvent,
-      timeoutSeconds: options.timeouts?.receiveGithubEvent,
+      bodyLimitBytes: bodyLimits.receiveGithubEvent,
+      rateLimitPerMinute: rateLimits.receiveGithubEvent,
+      timeoutSeconds: timeouts.receiveGithubEvent,
       webhookVerifier: implementations.webhookVerifiers['github'],
     }
   );
-  mountManualOperation(router, operationSpecs.receiveRawGithubEvent, options.manualRoutes?.receiveRawGithubEvent, options, {
-    rateLimitPerMinute: options.rateLimits?.receiveRawGithubEvent,
-    timeoutSeconds: options.timeouts?.receiveRawGithubEvent,
+  mountManualOperation(router, operationSpecs.receiveRawGithubEvent, manualRoutes.receiveRawGithubEvent, options, {
+    rateLimitPerMinute: rateLimits.receiveRawGithubEvent,
+    timeoutSeconds: timeouts.receiveRawGithubEvent,
     webhookVerifier: implementations.webhookVerifiers['github'],
   });
   mountOperation(
@@ -204,9 +212,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.receiveLedgerEvent,
-      rateLimitPerMinute: options.rateLimits?.receiveLedgerEvent,
-      timeoutSeconds: options.timeouts?.receiveLedgerEvent,
+      bodyLimitBytes: bodyLimits.receiveLedgerEvent,
+      rateLimitPerMinute: rateLimits.receiveLedgerEvent,
+      timeoutSeconds: timeouts.receiveLedgerEvent,
     }
   );
   mountOperation(
@@ -221,9 +229,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.receivePlaidEvent,
-      rateLimitPerMinute: options.rateLimits?.receivePlaidEvent,
-      timeoutSeconds: options.timeouts?.receivePlaidEvent,
+      bodyLimitBytes: bodyLimits.receivePlaidEvent,
+      rateLimitPerMinute: rateLimits.receivePlaidEvent,
+      timeoutSeconds: timeouts.receivePlaidEvent,
     }
   );
   mountOperation(
@@ -238,9 +246,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.receiveStripeEvent,
-      rateLimitPerMinute: options.rateLimits?.receiveStripeEvent,
-      timeoutSeconds: options.timeouts?.receiveStripeEvent,
+      bodyLimitBytes: bodyLimits.receiveStripeEvent,
+      rateLimitPerMinute: rateLimits.receiveStripeEvent,
+      timeoutSeconds: timeouts.receiveStripeEvent,
       webhookVerifier: implementations.webhookVerifiers['stripe'],
     }
   );

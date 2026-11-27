@@ -656,6 +656,8 @@ found, err := crosstable.SearchTables(ctx, db.CrossTables(), crosstable.Caller{P
 `crosstable.SearchRoutes` serves `GET /api/search` as an `http.Handler`,
 and `SearchMCPTool` with `CallSearchTool` the MCP tool; an app mounts the
 handler on its router. `ReindexSearch` builds every row's index row again.
+A Go server whose database lists `sqlite` first is refused a `@searchable`
+table, since `crosstable` ranks by Postgres statements alone.
 
 Search across tables is Postgres alone: the build refuses `@searchable` in
 a service that lists `sqlite`.
@@ -3922,6 +3924,13 @@ the read-only `listOccurrences({ from?, to?, states? })`.
 - **Rule changes.** `setRecurrence` replans only the occurrences that
   have not opened. Open and finished ones stay as they are; `kept` names
   the open ones.
+- **A relative date that moves.** A `relative` recurrence reads its date
+  from another table's row, and a write of that row is not one the
+  recurrence hears. It plans again at its next deadline, or at once when
+  you call `setRecurrence` with the rule the row already holds: after you
+  change a contract's `endsOn`, set each of its filings' recurrence again.
+  The call answers `unchanged: true` when the date is where the plan
+  last read it.
 - **What completed it.** `completedBy` is `{ table, key }`, any row as a
   reference names one; the principal that completed it is recorded too.
   An `afterDone` recurrence dates its next occurrence from the completion.
@@ -4000,8 +4009,8 @@ router.Mount("/api/calendar", crosstable.CalendarRoutes(crosstable.CalendarRoute
 `CallCalendarTool` answers the MCP tool `CalendarMCPTool` describes, and
 `IssueFeed`, `RotateFeed` and `RevokeFeed` are the feed's operations; the
 ORM's `AuthenticateGrant` refuses a feed's token on every other route. A
-Go server whose database lists `sqlite` first is refused Recurrence and a
-calendar source, and one whose calendar source is titled by an
+Go server whose database lists `sqlite` first is refused Recurrence, a
+calendar source and search, and one whose calendar source is titled by an
 `Encrypted<T>` field is refused it.
 
 ### A pool of members
