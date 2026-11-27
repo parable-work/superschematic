@@ -246,6 +246,12 @@ type ORMOutput struct {
 	// go.mod requires the schema runtime, whose notifications package
 	// holds the host.
 	Notifications *NotificationsModel
+
+	// Orchestration is the database's parties, inbound path and agent
+	// dispatcher (D157, D158, D192), nil for a database with none or with
+	// no notifier: it writes orchestration.go, and go.mod requires the
+	// schema runtime, whose orchestration package holds the host.
+	Orchestration *OrchestrationModel
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -1342,6 +1348,9 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		RowFeatures:              rowFeatures,
 		CrossTables:              crossTables,
 		Notifications:            notifier,
+	}
+	if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
+		return nil, err
 	}
 
 	return output, nil
