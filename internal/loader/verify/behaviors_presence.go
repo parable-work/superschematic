@@ -124,18 +124,3 @@ func leaseOverridePermission(config json.RawMessage) string {
 	}
 	return lease.OverridePermission
 }
-
-// checkEnginePresenceConfig refuses, on an engine type, ttlByState and
-// status, which a table's Presence alone takes (D104). The declaration is
-// shared, so the configSchema accepts them; the engine's Presence refuses
-// them too, and the build says so first, naming the table form. A config
-// the configSchema refuses is reported by checkTypeBehaviors and left alone
-// here.
-func checkEnginePresenceConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
-	if configNames(ref.Config, "ttlByState") {
-		r.errorf(td.Owner, "type %s: @behavior Presence names ttlByState, which a table's Presence takes (implements Presence<%s, C>, D104); an engine type's instance stays present ttlMs after each beat, so leave it out", td.Name, td.Name)
-	}
-	if configNames(ref.Config, "status") {
-		r.errorf(td.Owner, "type %s: @behavior Presence names status, the Workflow field a table's Presence reads (implements Presence<%s, C>, D104); an engine type's Presence reads its one Workflow, so leave status out", td.Name, td.Name)
-	}
-}

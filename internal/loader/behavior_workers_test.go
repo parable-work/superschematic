@@ -99,8 +99,6 @@ func TestBehaviorWorkerRefusals(t *testing.T) {
 			"TicketTimers: @behaviorWorker names Ticket, which fixture-timers-db does not declare"},
 		{"not a table", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `]}`, func(db *ir.Schema) { db.Types["Ticket"].Role = ir.RoleEmbeddedStruct },
 			"TicketTimers: @behaviorWorker names Ticket, which is not a table of fixture-timers-db: a behavior worker runs a table's behaviors (D103)"},
-		{"an engine type", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `]}`, func(db *ir.Schema) { db.Types["Ticket"].Behaviors = []ir.BehaviorRef{{Name: "Comments"}} },
-			"TicketTimers: @behaviorWorker names Ticket, an engine type of fixture-timers-db (D58), whose engine runs its timed work; a behavior worker runs a table's behaviors (D103)"},
 		{"no deadlines and no changes", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `]}`, func(db *ir.Schema) {
 			db.Types["Ticket"].Behaviors = db.Types["Ticket"].FieldBehaviors()
 			delete(db.Types, "TicketDeadline")

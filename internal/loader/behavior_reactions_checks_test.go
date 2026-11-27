@@ -226,12 +226,6 @@ func TestReactionsChecks(t *testing.T) {
 		{"a then.transition the target has not", func(_, _, task map[string]any) {
 			reactionsRules(task, []any{rule(changes("title"), linkTo("project", "archived"))})
 		}, `type Task: behavior Reactions config: rule 1: then.transition "archived" is not a state of Project's Workflow (active, done)`},
-		{"an engine type's status", func(doc, _, _ map[string]any) {
-			doc["types"].(map[string]any)["Note"] = map[string]any{"name": "Note", "role": "DBTable", "behaviors": []any{
-				map[string]any{"name": "Workflow", "config": map[string]any{"states": []any{"a", "b"}, "transitions": []any{map[string]any{"from": "a", "to": "b"}}}},
-				map[string]any{"name": "Reactions", "config": map[string]any{"status": "Workflow", "rules": []any{rule(enters("b"), moveTo("b"))}}},
-			}, "fields": []any{map[string]any{"name": "id", "typeRef": map[string]any{"name": "Identity.UUID"}, "required": true, "key": true}}}
-		}, "type Note: @behavior Reactions names status, the Workflow field a table's Reactions reads (implements Reactions<Note, C>, D103); an engine type's Reactions reads its one Workflow, so leave status out"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := loadProjects(t, tc.edit)

@@ -123,14 +123,3 @@ func leaseProblem(schema *ir.Schema, td *ir.TypeDef, ttlMs, heartbeatMs *int64, 
 	}
 	return ""
 }
-
-// checkEngineLeaseConfig refuses, on an engine type, status, which a
-// table's Lease alone takes (D104). The declaration is shared, so the
-// configSchema accepts it; the engine's Lease refuses it too, and the build
-// says so first, naming the table form. A config the configSchema refuses
-// is reported by checkTypeBehaviors and left alone here.
-func checkEngineLeaseConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
-	if configNames(ref.Config, "status") {
-		r.errorf(td.Owner, "type %s: @behavior Lease names status, the Workflow field a table's Lease moves (implements Lease<%s, C>, D104); an engine type's Lease moves its one Workflow, so leave status out", td.Name, td.Name)
-	}
-}

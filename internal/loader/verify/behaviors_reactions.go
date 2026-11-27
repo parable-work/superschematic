@@ -220,7 +220,7 @@ func reactionsChangesField(schema *ir.Schema, td *ir.TypeDef, name string) strin
 // one Workflow, whose terminal states the rule reads.
 func reactionsLinking(schema *ir.Schema, td *ir.TypeDef, form string, terminal *reactionsTerminal) string {
 	linking := schema.Types[terminal.Schema]
-	if linking == nil || linking.Role != ir.RoleDBTable || linking.JsonField || linking.IsEngineType() {
+	if linking == nil || linking.Role != ir.RoleDBTable || linking.JsonField {
 		return fmt.Sprintf("when.%s names %s, which is not a table of %s", form, terminal.Schema, schema.Name)
 	}
 	link := fieldNamedIn(linking, terminal.Link)

@@ -120,7 +120,7 @@ func TestTimersChecks(t *testing.T) {
 		}, "type Ticket lists behavior Timers twice"},
 		{"beside @behavior", func(_, ticket map[string]any) {
 			ticket["behaviors"] = []any{map[string]any{"name": "Comments"}, ticket["behaviors"].([]any)[0]}
-		}, "type Ticket composes behavior Comments on the type (@behavior) and behavior Timers by implements: a type composes its behaviors with @behavior (an engine type, D58) or on a table, by implements and field types (D103), never both"},
+		}, "type Ticket composes behavior Comments with @behavior, which a DB type does not take: a DB type is a table, which composes it as implements Comments<Ticket, { ... }> (D103)"},
 		{"not a table", func(_, ticket map[string]any) {
 			ticket["jsonField"] = true
 			ticket["behaviors"] = ticket["behaviors"].([]any)[:1]

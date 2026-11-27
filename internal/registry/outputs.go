@@ -355,6 +355,19 @@ type Outputs struct {
 	Raw map[string]json.RawMessage `json:"-"`
 }
 
+// EngineOutputKey is outputs.engine, which configured the engine a DB
+// service's engine types ran on (D58) and which ErrEngineOutputs refuses.
+const EngineOutputKey = "engine"
+
+// ErrEngineOutputs is the refusal of outputs.engine (D103). It set the
+// namespace, mount, access policy, event retention and MCP tool options of
+// the engine that kept a DB service's engine types, its types that
+// composed a behavior with @behavior. A DB type is a table now, which
+// composes its behaviors by implements and field types: an API serves
+// their operations through @behaviorOperations, under its own permissions,
+// and an operation's @mcp sets its tool's invocation policy.
+var ErrEngineOutputs = errors.New("outputs.engine configured the engine a DB service's engine types ran on (D58), and a DB type is a table, which composes its behaviors by implements and field types (D103): an API serves their operations through @behaviorOperations, and an operation's @mcp sets its tool's invocationPolicy; remove outputs.engine")
+
 // ParseOutputs decodes the raw outputs block from schema.config into its
 // typed form, rejecting keys no registered generator claims, sections that
 // fail their generator's OutputSchema, unknown target languages, an API
@@ -366,6 +379,9 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		return &Outputs{}, nil
 	}
 
+	if _, ok := raw[EngineOutputKey]; ok {
+		return nil, ErrEngineOutputs
+	}
 	known := reg.OutputKeys()
 	for key := range raw {
 		if !containsString(known, key) {
