@@ -1,5 +1,8 @@
 // Constants's class (D103): the build derives constants.behavior.json from it
 // (make behaviors), which the behaviors' core and the engine read.
+// Its rules are the declarative vocabulary's, so the behaviors' core runs
+// Constants from the declaration, with no Rust behavior of its own (D103's step
+// 5); the engine reads the declaration without them.
 import { declaresBehavior, type JsonSchema } from "@superschematic/db";
 
 /** A string that is not empty. */
@@ -48,6 +51,11 @@ enum ConstantsVeto {
  * as a step's kind or the key a blueprint stamped it with, stays what its
  * create gave it.
  */
-@declaresBehavior({ vetoes: ConstantsVeto })
+@declaresBehavior({
+  vetoes: ConstantsVeto,
+  // The declarative vocabulary's field rules (D103's step 5), over the
+  // use's config: the core runs Constants from this declaration.
+  rules: { constant: { config: "fields" }, oneWay: { config: "oneWay" }, permission: { config: "permission" } },
+})
 export abstract class Constants<C extends ConstantsConfig> {
 }

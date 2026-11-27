@@ -9,10 +9,15 @@
 //!
 //! Constants is held to D103's test of a behavior and fails it: it keeps
 //! no state of its own, and its rules hold the table's own fields, a field
-//! kept as its create gave it or moved one way. It is ported because D104
-//! orders it, with `oneWay`; whether a field's constancy and direction
-//! become a declarative rule (D103, step 5, beside the fields a state
-//! freezes) is step 5's question, which D104's status records.
+//! kept as its create gave it or moved one way. Step 5 answered its
+//! question (D103, D104): Constants is a declarative behavior, its
+//! registered declaration's `rules` (`{ "constant": { "config": "fields"
+//! }, "oneWay": { "config": "oneWay" }, "permission": { "config":
+//! "permission" } }`), which the core runs as a [`crate::Declarative`].
+//! This module keeps the rules as the vocabulary's field rules
+//! `constant` and `oneWay`: [`ConstantsConfig`], which the vocabulary
+//! builds from the use's config, and [`Constants`]' validate and guard,
+//! which it runs. There is no Rust behavior of Constants.
 //!
 //! An update that changes a listed field is refused at the field, with the
 //! rule `constant` (`invalid_instance`), unless the caller holds the
@@ -71,11 +76,9 @@ use std::cmp::Ordering;
 
 use serde_json::{Map, Value};
 use superschematic_rules::{
-    Behavior, ConfigCx, ConfigError, ConfigTarget, Declaration, GuardRequest, Hook,
-    ValidationIssue, ValidationRequest, Veto, View,
+    ConfigError, ConfigTarget, GuardRequest, Hook, ValidationIssue, ValidationRequest, Veto, View,
 };
 
-use crate::declared;
 use crate::schema::{self, Issues};
 use crate::values::{date_time_text, equal, one_way_order};
 
@@ -266,42 +269,18 @@ impl ConstantsConfig {
     }
 }
 
-/// Constants: fields their create sets for good, and fields that move one
-/// way.
+/// Constants' field rules (D103's step 5): fields their create sets for
+/// good, and fields that move one way, which the declarative vocabulary's
+/// `constant` and `oneWay` rules run over the [`ConstantsConfig`] it builds
+/// from a use's config. The core's Constants is its declaration, a
+/// [`crate::Declarative`]; this is no behavior of its own.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Constants;
 
-impl Behavior for Constants {
-    type Config = ConstantsConfig;
-
-    // The declaration file names the one_way veto (D104).
-    fn declaration(&self) -> Declaration {
-        declared::declaration(DECLARATION)
-    }
-
-    fn parse_config(
-        &self,
-        raw: &Value,
-        target: &ConfigTarget<'_>,
-    ) -> Result<ConstantsConfig, ConfigError> {
-        ConstantsConfig::parse(raw, target)
-    }
-
-    // Any change: Constants keeps no state, and joins and leaves a type
-    // with rows.
-    fn config_change(
-        &self,
-        _cx: &ConfigCx<'_>,
-        _before: Option<&ConstantsConfig>,
-        _after: Option<&ConstantsConfig>,
-    ) -> Hook<Option<String>> {
-        Ok(None)
-    }
-
-    // validate refuses an update that changes a listed field, at the field,
-    // unless the caller holds the config's permission. A create is never
-    // refused.
-    fn validate(
+impl Constants {
+    /// Refuses an update that changes a listed field, at the field, unless
+    /// the caller holds the config's permission. A create is never refused.
+    pub fn validate(
         &self,
         view: &View<'_, ConstantsConfig>,
         request: &ValidationRequest<'_>,
@@ -344,11 +323,11 @@ impl Behavior for Constants {
             .collect())
     }
 
-    // guard vetoes an update that moves a oneWay field the other way, the
-    // first in the type's order, unless the caller holds the config's
-    // permission, asked only when one moved so (D104). The row before the
-    // update is the view's.
-    fn guard(
+    /// Vetoes an update that moves a oneWay field the other way, the first
+    /// in the type's order, unless the caller holds the config's
+    /// permission, asked only when one moved so (D104). The row before the
+    /// update is the view's.
+    pub fn guard(
         &self,
         view: &View<'_, ConstantsConfig>,
         request: &GuardRequest<'_>,

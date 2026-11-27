@@ -21,7 +21,7 @@
 //! writes of the rows that point at its row too. Workflow's transitions name
 //! who makes them, and a move to the state a row is in may answer as no
 //! change, in step 1 of D104's ([`subjects`] is how a field names a
-//! subject). [`Constants`], [`StateRules`] and [`Approvals`], in step 2 of
+//! subject). Constants, StateRules and [`Approvals`], in step 2 of
 //! D104's order of the work, each with its upgrade: fields that move one
 //! way, who may change a frozen field, and gates whose sign-offs a change
 //! of chosen fields consumes and that pin the version their signer read.
@@ -106,6 +106,10 @@
 //! caller as an operand, Constants' and StateRules' field rules, guards,
 //! an operation's effects, reactions and fields derived from a sub-table),
 //! one value per file a host hands its core ([`core_declaring`]).
+//! Constants and StateRules are two (step 5's question, D104): the core
+//! runs each from its registered declaration, whose `rules` hand the
+//! vocabulary's field rules ([`Constants`], [`StateRules`]) the use's
+//! config.
 //! The engine's behaviors
 //! (`superschematic-engine-behaviors`) stay beside these until each is
 //! ported and the engine goes.
@@ -302,8 +306,8 @@ pub fn core() -> Core {
     Core::new()
         .with(Workflow)
         .with(Reactions)
-        .with(Constants)
-        .with(StateRules)
+        .with(registered(constants::DECLARATION))
+        .with(registered(staterules::DECLARATION))
         .with(Approvals)
         .with(Timers)
         .with(Lease)
@@ -328,6 +332,14 @@ pub fn core() -> Core {
         .with(Recurrence)
         .with(Blueprint)
         .with(Aliased)
+}
+
+// registered is a behavior of the core whose registered declaration states
+// its rules (D103's step 5): Constants and StateRules, which the core runs
+// as declarations, their rules the vocabulary's field rules. A file that
+// does not read is a defect of this crate, which its tests catch.
+fn registered(text: &str) -> Declarative {
+    Declarative::from_text(text).unwrap_or_else(|reason| panic!("a core declaration: {reason}"))
 }
 
 /// The declarative behaviors (D103's step 5) of declaration files a host

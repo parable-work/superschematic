@@ -682,7 +682,9 @@ func declarationsOf(schema *ir.Schema, reg *registry.Registry) ([]json.RawMessag
 	named := map[string]bool{}
 	for _, td := range sqlutil.TableTypes(schema) {
 		for _, ref := range td.TableBehaviors() {
-			if b, ok := reg.Behavior(ref.Name); ok && b.Declarative() {
+			// The stock core runs its own declarative behaviors (Constants,
+			// StateRules) from the declarations it embeds.
+			if b, ok := reg.Behavior(ref.Name); ok && b.Declarative() && !registry.RunsOnTheCore(ref.Name) {
 				named[ref.Name] = true
 			}
 		}

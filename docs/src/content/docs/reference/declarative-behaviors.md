@@ -303,9 +303,10 @@ its core first.
 ## Constants and StateRules as declarations
 
 Constants and StateRules keep no state of their own, and the field rules
-above are theirs. Each is a declaration in
-`runtime/engine/testdata/rules/declarations`: its own declaration file with
-rules that read the use's config.
+above are theirs. Each is a declarative behavior: its registered
+declaration (`internal/registry/behaviors/constants.behavior.json`, derived
+from its class) states rules that read the use's config, and the core runs
+it from that declaration. No Rust behavior of either is registered.
 
 ```json
 "rules": {
@@ -315,7 +316,8 @@ rules that read the use's config.
 }
 ```
 
-On a core whose Constants or StateRules is that declaration in place of
-the Rust one, every recorded scenario that composes it answers alike and
-writes the same transcript (`rules-testkit`'s `declarative_field_rules`).
-The Rust behaviors stay registered under their names.
+Every recorded scenario that composes them answered alike and wrote the
+same transcripts after the switch, on every host that replays them. A
+host does not hand the core their declarations: the stock core embeds
+them, and a layout's `declarations` lists only the declarative behaviors
+it does not.

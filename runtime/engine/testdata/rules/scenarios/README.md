@@ -129,10 +129,10 @@ writes them, and `test/corpus.test.ts` does not list them.
   cases the same way (`examples/acme-schematic/testdata/rules/acme-rating.json`),
   whose transcript is `../acme-rating.transcript.json`.
 
-`../declarations` also holds Constants and StateRules written in the
-vocabulary, each its own declaration file with rules that read the use's
-config, which `rules-testkit`'s `declarative_field_rules` replays every
-file composing it on in place of the Rust behavior (step 5's question).
+Constants and StateRules are declarative behaviors of the core itself
+(step 5's question): their registered declarations state rules that read
+the use's config, and the files that compose them replay on the core that
+runs them from those declarations.
 
 A step's answer holds what the replayer compares: a record's id, `data`
 and `behaviors`, an operation's result, an event's kind and change, and a

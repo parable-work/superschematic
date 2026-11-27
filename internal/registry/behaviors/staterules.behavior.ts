@@ -1,5 +1,8 @@
 // StateRules's class (D103): the build derives staterules.behavior.json from it
 // (make behaviors), which the behaviors' core and the engine read.
+// Its rules are the declarative vocabulary's, so the behaviors' core runs
+// StateRules from the declaration, with no Rust behavior of its own (D103's step
+// 5); the engine reads the declaration without them.
 import { declaresBehavior, type Const, type JsonSchema } from "@superschematic/db";
 
 /** A state's name, as a config writes it. */
@@ -76,6 +79,12 @@ enum StateRulesVeto {
  * requires, or changes one it freezes, is vetoed; a caller with the config's
  * permission may change a frozen field. Requires Workflow.
  */
-@declaresBehavior({ requires: ["Workflow"], vetoes: StateRulesVeto })
+@declaresBehavior({
+  requires: ["Workflow"],
+  vetoes: StateRulesVeto,
+  // The declarative vocabulary's field rules (D103's step 5), over the
+  // use's config: the core runs StateRules from this declaration.
+  rules: { states: { config: "states" }, status: { config: "status" }, permission: { config: "permission" } },
+})
 export abstract class StateRules<C extends StateRulesConfig> {
 }

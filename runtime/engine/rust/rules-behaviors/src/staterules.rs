@@ -15,9 +15,15 @@
 //! StateRules is held to D103's test of a behavior and fails it: it keeps
 //! no state of its own, and its rules read the table's own fields by the
 //! state of its Workflow; D103 names the fields a state requires or freezes
-//! among step 5's declarative vocabulary. It is ported because D104 orders
-//! it, with `by`, and the question is step 5's, which D104's status
-//! records.
+//! among step 5's declarative vocabulary. Step 5 answered its question
+//! (D103, D104): StateRules is a declarative behavior, its registered
+//! declaration's `rules` (`{ "states": { "config": "states" }, "status": {
+//! "config": "status" }, "permission": { "config": "permission" } }`),
+//! which the core runs as a [`crate::Declarative`]. This module keeps the
+//! rules as the vocabulary's field rule `states`: [`StateRulesConfig`],
+//! which the vocabulary builds from the use's config, and [`StateRules`]'
+//! validate and guard, which it runs. There is no Rust behavior of
+//! StateRules.
 //!
 //! Each rule sits where it reads what it needs:
 //!
@@ -92,11 +98,9 @@
 
 use serde_json::{Map, Value};
 use superschematic_rules::{
-    Behavior, ConfigCx, ConfigError, ConfigTarget, Declaration, GuardRequest, Hook,
-    ValidationIssue, ValidationRequest, Veto, View,
+    ConfigError, ConfigTarget, GuardRequest, Hook, ValidationIssue, ValidationRequest, Veto, View,
 };
 
-use crate::declared;
 use crate::flow::{self, flow_of, Flow};
 use crate::schema::{self, Issues};
 use crate::seats::{self, SeatRef};
@@ -336,40 +340,19 @@ impl StateRulesConfig {
     }
 }
 
-/// StateRules: what each state of a Workflow requires and freezes, and who
-/// may change what it freezes.
+/// StateRules' field rules (D103's step 5): what each state of a Workflow
+/// requires and freezes, and who may change what it freezes, which the
+/// declarative vocabulary's `states` rule runs over the
+/// [`StateRulesConfig`] it builds from a use's config. The core's
+/// StateRules is its declaration, a [`crate::Declarative`]; this is no
+/// behavior of its own.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StateRules;
 
-impl Behavior for StateRules {
-    type Config = StateRulesConfig;
-
-    fn declaration(&self) -> Declaration {
-        declared::declaration(DECLARATION)
-    }
-
-    fn parse_config(
-        &self,
-        raw: &Value,
-        target: &ConfigTarget<'_>,
-    ) -> Result<StateRulesConfig, ConfigError> {
-        StateRulesConfig::parse(raw, target)
-    }
-
-    // Any change: StateRules keeps no state, and joins and leaves a type
-    // with rows.
-    fn config_change(
-        &self,
-        _cx: &ConfigCx<'_>,
-        _before: Option<&StateRulesConfig>,
-        _after: Option<&StateRulesConfig>,
-    ) -> Hook<Option<String>> {
-        Ok(None)
-    }
-
-    // A create starts in the initial state: what it requires, the create
-    // gives. An update's rules read the status, which the guard reads.
-    fn validate(
+impl StateRules {
+    /// A create starts in the initial state: what it requires, the create
+    /// gives. An update's rules read the status, which the guard reads.
+    pub fn validate(
         &self,
         view: &View<'_, StateRulesConfig>,
         request: &ValidationRequest<'_>,
@@ -399,7 +382,9 @@ impl Behavior for StateRules {
             .collect())
     }
 
-    fn guard(
+    /// Holds a move into a state to what the state requires, and an update
+    /// to what the row's state requires and freezes.
+    pub fn guard(
         &self,
         view: &View<'_, StateRulesConfig>,
         request: &GuardRequest<'_>,
