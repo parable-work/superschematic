@@ -222,26 +222,6 @@ export interface TicketBehaviors {
     /** Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts. */
     readonly blocked: boolean;
   };
-  readonly Links: {
-    /** The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none. */
-    readonly targets: {
-      /** The projects instance project points at. */
-      project: { id: string; schema: 'projects' };
-      /** The people instances reviewers points at, in the order they were linked. */
-      reviewers?: Array<{ id: string; schema: 'people' }>;
-      /** The documents instance spec points at. */
-      spec?: {
-        id: string;
-        /** The target's latest revision. */
-        latest?: number;
-        /** The target's revision the link records. */
-        revision?: number;
-        schema: 'documents';
-        /** Whether the target has moved past that revision. */
-        stale?: boolean;
-      };
-    };
-  };
   readonly Timers: {
     /** Each started deadline, by name: { dueAt, fired, firedAt?, outcome? }, when it is due, in epoch milliseconds, whether it has fired and when, and what its then met: moved, skipped (the status was not one it moves from), vetoed or forbidden. A deadline not started, or cancelled, is absent. Nothing in it follows the clock: a deadline is overdue while it has not fired and its dueAt has passed. */
     readonly deadlines: {

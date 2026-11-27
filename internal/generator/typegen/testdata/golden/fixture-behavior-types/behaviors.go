@@ -346,8 +346,6 @@ type TicketBehaviors struct {
 	Revisions TicketRevisions `json:"Revisions"`
 	// The fields of Dependencies.
 	Dependencies TicketDependencies `json:"Dependencies"`
-	// The fields of Links.
-	Links TicketLinks `json:"Links"`
 	// The fields of Timers.
 	Timers TicketTimers `json:"Timers"`
 	// The fields of Approvals.
@@ -398,49 +396,6 @@ type TicketRevisions struct {
 type TicketDependencies struct {
 	// Whether a blocker is not finished: its status is not a terminal state of its schema's Workflow whose outcome the config accepts.
 	Blocked bool `json:"blocked"`
-}
-
-// TicketLinks holds the fields a Ticket's Links adds, as a read returns them: a field with no value is absent.
-type TicketLinks struct {
-	// The links the instance holds, by name: each target's schema and id, and for a pinned link the revision or the release it records, the target's latest and whether the target has moved past it; for a many-valued link, a list of them in the order they were linked. Absent when the instance holds none.
-	Targets TicketLinksTargets `json:"targets"`
-}
-
-// TicketLinksTargets types TicketLinks.targets.
-type TicketLinksTargets struct {
-	// The projects instance project points at.
-	Project TicketLinksTargetsProject `json:"project"`
-	// The people instances reviewers points at, in the order they were linked.
-	Reviewers []TicketLinksTargetsReviewersItem `json:"reviewers,omitempty"`
-	// The documents instance spec points at.
-	Spec *TicketLinksTargetsSpec `json:"spec,omitempty"`
-}
-
-// TicketLinksTargetsProject types TicketLinksTargets.project.
-type TicketLinksTargetsProject struct {
-	Id string `json:"id"`
-	// Always "projects".
-	Schema string `json:"schema"`
-}
-
-// TicketLinksTargetsReviewersItem types an item of TicketLinksTargets.reviewers.
-type TicketLinksTargetsReviewersItem struct {
-	Id string `json:"id"`
-	// Always "people".
-	Schema string `json:"schema"`
-}
-
-// TicketLinksTargetsSpec types TicketLinksTargets.spec.
-type TicketLinksTargetsSpec struct {
-	Id string `json:"id"`
-	// The target's latest revision.
-	Latest *int64 `json:"latest,omitempty"`
-	// The target's revision the link records.
-	Revision *int64 `json:"revision,omitempty"`
-	// Always "documents".
-	Schema string `json:"schema"`
-	// Whether the target has moved past that revision.
-	Stale *bool `json:"stale,omitempty"`
 }
 
 // TicketTimers holds the fields a Ticket's Timers adds, as a read returns them: a field with no value is absent.
