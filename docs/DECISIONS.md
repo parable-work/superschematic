@@ -1883,7 +1883,9 @@ Left:
 - Search across tables, the calendar and its feed, references and
   notifications applying `audienceConditions` (sections 2 to 5), and the
   backlinks an owner sees, designed above.
-- A generated route and declared query that list the active grants.
+- A generated route and declared query that list the active grants. A
+  `@tableOperation` over an API's `@source` view of the grants table
+  lists every grant, the ended and the revoked among them.
 - A generated TypeScript server that wires `accessLogOf` and
   `grantAuthenticator` itself; an app passes them in the router's options
   now. The Go server records its calls in the access log itself (D180);

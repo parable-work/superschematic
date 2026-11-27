@@ -3,6 +3,8 @@ Per-record access (D156): who may see a row of a table, the grants that let a
 caller who is no user reach rows, and the log of sensitive reads.
 */
 
+import type { RelationKeyOf } from "./wrappers";
+
 /** Who may see a row: every principal the route admits, the owner alone, the owner and the principals it names, or what its parent sees. */
 export type AudienceValue = "everyone" | "private" | "named" | "inherit";
 
@@ -13,10 +15,11 @@ export type AgentAccessValue = "followRole" | "readOnly" | "none";
 export interface AudienceOptions<T> {
   /**
    * The field that holds the row's owner, the one principal a private row is
-   * visible to: a field that holds a UUID, or a to-one relation. Unset, the
-   * owner is createdBy, which the table then declares.
+   * visible to: a field that holds a UUID, or a to-one relation, by its
+   * name or by the field that holds its key (ownerId). Unset, the owner is
+   * createdBy, which the table then declares.
    */
-  readonly owner?: keyof T & string;
+  readonly owner?: (keyof T & string) | RelationKeyOf<T>;
   /**
    * A to-one relation to a table that is @audience too: a row whose audience
    * is inherit sees what its parent sees, and keeps doing so when the
