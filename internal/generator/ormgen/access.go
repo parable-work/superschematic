@@ -222,3 +222,32 @@ func attachManyRelations(repositories []Repository, tables []sqlutil.TableModel,
 func (o *ORMOutput) HeldByAccess() bool {
 	return o.Access != nil && o.Access.Held
 }
+
+// refuseSQLiteAccess refuses the ORM of a database whose DB service lists
+// the sqlite dialect and declares per-record access (D156): its
+// repositories on SQLite (D116) keep to no audience and no grant's reach,
+// and record no access log, so a held caller would read every row there.
+// The loader refuses such a service's Go types by decorator and table
+// (verify/sqlite_features.go, D182); this holds a generation that did not
+// read the service's config to the same.
+func refuseSQLiteAccess(schema *ir.Schema, access *AccessModel, sqlite bool) error {
+	if !sqlite || access == nil {
+		return nil
+	}
+	var declared []string
+	for _, t := range access.Tables {
+		if t.Effective != "" {
+			declared = append(declared, "@audience on "+t.Type)
+		}
+	}
+	if access.Grants != "" {
+		declared = append(declared, "@accessGrants on "+access.Grants)
+	}
+	if access.Log != "" {
+		declared = append(declared, "@accessLog on "+access.Log)
+	}
+	if len(declared) == 0 {
+		return nil
+	}
+	return fmt.Errorf("ormgen: %s lists the sqlite dialect and declares %s: the Go repositories on SQLite keep to no audience or grant and record no access log yet (D180, D182); build it for postgres alone (outputs.sql.dialects: [\"postgres\"])", schema.Name, strings.Join(declared, ", "))
+}

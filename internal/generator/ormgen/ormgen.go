@@ -1176,6 +1176,9 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := refuseSQLiteAccess(schema, access, opts.SQLite); err != nil {
+		return nil, err
+	}
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
