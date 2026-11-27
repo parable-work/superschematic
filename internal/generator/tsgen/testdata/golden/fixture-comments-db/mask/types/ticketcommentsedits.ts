@@ -15,7 +15,7 @@ export function maskSecretsTicketCommentsEdits(value: TicketCommentsEdits): Tick
     edit: value.edit,
     message: value.message,
     number: value.number,
-    body: value.body !== undefined ? value.body : null,
+    body: value.body,
     blocks: value.blocks,
     mentions: value.mentions,
     by: value.by !== undefined ? value.by : null,

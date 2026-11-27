@@ -25,6 +25,8 @@ const (
 	uuidScalar     = "Identity.UUID"
 	dateTimeScalar = "Temporal.DateTime"
 	int64Scalar    = "Generic.Int64"
+	sizeScalar     = "File.SizeBytes"
+	sha256Scalar   = "Crypto.SHA256"
 )
 
 // Expand adds the sub-table of each @references and @attachments table
@@ -53,7 +55,7 @@ func Expand(schema *ir.Schema) []string {
 	if !used {
 		return nil
 	}
-	scalars := []string{uuidScalar, dateTimeScalar, int64Scalar}
+	scalars := []string{uuidScalar, dateTimeScalar, int64Scalar, sizeScalar, sha256Scalar}
 	for _, name := range scalars {
 		if schema.Scalars[name] == nil {
 			schema.Scalars[name] = &ir.ScalarDef{Name: name}
@@ -194,8 +196,8 @@ func attachmentsTable(td *ir.TypeDef) *ir.TypeDef {
 			rowRelation(td, origin),
 			{Name: ir.AttNameField, Description: "The file's name, as its uploader gave it.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
 			{Name: ir.AttMediaTypeField, Description: "Its media type.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
-			{Name: ir.AttSizeField, Description: "Its length in bytes.", TypeRef: ir.TypeRef{Name: int64Scalar}, Required: true},
-			{Name: ir.AttContentHashField, Description: "The SHA-256 of its bytes, 64 lowercase hex digits: declared by the upload, checked when it completes.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
+			{Name: ir.AttSizeField, Description: "Its length in bytes.", TypeRef: ir.TypeRef{Name: sizeScalar}, Required: true},
+			{Name: ir.AttContentHashField, Description: "The SHA-256 of its bytes, 64 lowercase hex digits: declared by the upload, checked when it completes.", TypeRef: ir.TypeRef{Name: sha256Scalar}, Required: true},
 			{Name: ir.AttObjectKeyField, Description: "The name of the bucket's object that holds its bytes, which a file filed onto another row shares.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
 			{Name: ir.AttCaptionField, Description: "A caption; null for none.", TypeRef: ir.TypeRef{Name: "string"}},
 			{Name: ir.AttStateField, Description: "pending while its upload is under way, ready once its bytes were checked.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Default: &pending},
@@ -236,7 +238,7 @@ func clearedFields() []*ir.FieldDef {
 func releasedFields() []*ir.FieldDef {
 	return []*ir.FieldDef{
 		{Name: "objectKey", Description: "The object the file named.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
-		{Name: "contentHash", Description: "The SHA-256 of its bytes.", TypeRef: ir.TypeRef{Name: "string"}},
+		{Name: "contentHash", Description: "The SHA-256 of its bytes.", TypeRef: ir.TypeRef{Name: sha256Scalar}},
 		{Name: "reason", Description: "Why: detached, a file row deleted; expired, an upload never completed.", TypeRef: ir.TypeRef{Name: "string"}, Required: true},
 	}
 }

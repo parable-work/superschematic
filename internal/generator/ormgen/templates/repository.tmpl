@@ -1294,6 +1294,46 @@ func (r *{{ .Name }}) requireCreatedReach(ctx context.Context, row *types.{{ .Ty
 	return r.requireCreatedKey(ctx, row.{{ toGoName .PrimaryKeyField }}{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }})
 	{{- end }}
 }
+
+// requireCreatedRows is requireCreatedReach of each of rows, the rows a
+// create returned, in one read: ErrAccessRefused unless the caller's
+// grants reach every one of them (D156).
+func (r *{{ .Name }}) requireCreatedRows(ctx context.Context, rows []*types.{{ .TypeName }}) error {
+	if !accessGranted(ctx) || len(rows) == 0 {
+		return nil
+	}
+	keys := make([]any, len(rows))
+	for i, row := range rows {
+		{{- if .PrimaryKeyIsPointer }}
+		if row.{{ toGoName .PrimaryKeyField }} == nil {
+			return fmt.Errorf("{{ .TypeName }}: %w", ErrAccessRefused)
+		}
+		keys[i] = (*row.{{ toGoName .PrimaryKeyField }}){{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}
+		{{- else }}
+		keys[i] = row.{{ toGoName .PrimaryKeyField }}{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}
+		{{- end }}
+	}
+	// A create returns each row it made once, so every key is reached when
+	// the count of the reached rows is the count of the keys.
+	args := []any{keys}
+	paramNum := 1
+	conditions := append([]string{ {{- goRawString .QualifiedKey }} + " = ANY($1::{{ .PrimaryKeySQLType }}[])"}, accessConditions(ctx, {{ printf "%q" .TypeName }}, &args, &paramNum, true)...)
+	query := "SELECT count(*) FROM " + {{ goRawString .QuotedTableName }} + " WHERE " + strings.Join(conditions, " AND ")
+	var row pgx.Row
+	if r.tx != nil {
+		row = r.tx.QueryRow(ctx, query, args...)
+	} else {
+		row = r.db.pool.QueryRow(ctx, query, args...)
+	}
+	var reached int
+	if err := row.Scan(&reached); err != nil {
+		return fmt.Errorf("failed to read the access of {{ .TypeName }}: %w", err)
+	}
+	if reached != len(keys) {
+		return fmt.Errorf("{{ .TypeName }}: %w", ErrAccessRefused)
+	}
+	return nil
+}
 {{- end }}
 {{- if .AnswersRows }}
 
@@ -1701,10 +1741,13 @@ func (r *{{ .Name }}) GetOne(ctx context.Context, id {{ .PrimaryKeyType }}, opts
 	{{- end }}
 }
 
-// GetManyByIDs retrieves multiple {{ .TypeName }} records by their IDs in a single query
+// GetManyByIDs retrieves multiple {{ .TypeName }} records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of{{ if $.HeldByAccess }} beside those
+// of the caller's access conditions{{ end }}, as many times as the keys take.
 func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType }}) (map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, error) {
+	resultMap := make(map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, len(ids))
 	if len(ids) == 0 {
-		return map[{{ .LookupKeyType }}]*types.{{ .TypeName }}{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -1716,7 +1759,31 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	{{- if $.HeldByAccess }}
 
+	// The access conditions bind their own parameters after the keys
+	// (D156): as many as the caller's audience and grants take.
+	var held []any
+	accessConditions(ctx, {{ printf "%q" .TypeName }}, &held, new(int), false)
+	most := max(1, {{ maxParameters }}-len(held))
+	{{- else }}
+	most := {{ maxParameters }}
+	{{- end }}
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
+
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *{{ .Name }}) getManyByIDs(ctx context.Context, uniqueIDs []{{ .LookupKeyType }}) (map[{{ .LookupKeyType }}]*types.{{ .TypeName }}, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -1730,6 +1797,15 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 
 	{{- if .ReadsLive }}
 	query += {{ printf "%q" .SQL.Live }}
+	{{- end }}
+	{{- if $.HeldByAccess }}
+
+	// The rows the caller sees alone, in the same statement: a row the
+	// caller does not see is one that is not there (D156).
+	paramNum := len(args)
+	if conditions := accessConditions(ctx, {{ printf "%q" .TypeName }}, &args, &paramNum, false); len(conditions) > 0 {
+		query += " AND " + strings.Join(conditions, " AND ")
+	}
 	{{- end }}
 
 	// Execute query
@@ -1812,18 +1888,6 @@ func (r *{{ .Name }}) GetManyByIDs(ctx context.Context, ids []{{ .LookupKeyType 
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-	{{- if $.HeldByAccess }}
-
-	// A row the caller does not see is one that is not there (D156).
-	for id := range resultMap {
-		if err := r.requireReach(ctx, id{{ if .PrimaryKeyIsUUID }}.ToUUID(){{ end }}, false); err == ErrNotFound {
-			delete(resultMap, id)
-		} else if err != nil {
-			return nil, err
-		}
-	}
-	{{- end }}
-
 	return resultMap, nil
 	{{- end }}
 }
@@ -4071,7 +4135,9 @@ func (r *{{ .Name }}) resealed(ctx context.Context, result *UpsertResult[*types.
 {{ template "behaviorCreateMany" . }}
 {{- else }}
 
-// CreateMany inserts multiple {{ .TypeName }} records in a single statement
+// CreateMany inserts multiple {{ .TypeName }} records and returns them in the
+// inputs' order: a statement of at most {{ .BatchRows }} rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeName }}) ([]*types.{{ .TypeName }}, error) {
 	if len(inputs) == 0 {
 		return []*types.{{ .TypeName }}{}, nil
@@ -4149,18 +4215,54 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 		{{- template "batchInsertRow" . }}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	{{- if $.HeldByAccess }}
+	// More than one statement, or a read of the rows' access after the
+	// insert, runs in a transaction of its own when none is open, so a
+	// refused create writes nothing (D156).
+	if len(batch) <= {{ .BatchRows }} && !accessGranted(ctx) {
+	{{- else }}
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= {{ .BatchRows }} {
+	{{- end }}
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.{{ .TypeName }}, error) {
+		return (&{{ .Name }}{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := {{ goRawString .SQL.Columns }}
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most {{ .BatchRows }} rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES{{ if $.HeldByAccess }},
+// then one read of whether the caller's grants reach every row it made
+// (D156){{ end }}.
+func (r *{{ .Name }}) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.{{ .TypeName }}, error) {
+	results := make([]*types.{{ .TypeName }}, 0, len(batch))
+	for start := 0; start < len(batch); start += {{ .BatchRows }} {
+		created, err := r.createBatch(ctx, batch[start:min(start+{{ .BatchRows }}, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	{{- if $.HeldByAccess }}
+	if err := r.requireCreatedRows(ctx, results); err != nil {
+		return nil, err
+	}
+	{{- end }}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *{{ .Name }}) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.{{ .TypeName }}, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		{{ goRawString .SQL.InsertMany }},
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		{{ goRawString .SQL.Columns }},
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -4172,69 +4274,17 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*types.{{ .TypeNa
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.{{ .TypeName }}{}
+	results := make([]*types.{{ .TypeName }}, 0, len(batch))
 	for rows.Next() {
-		result := &types.{{ .TypeName }}{}
-		{{- if eq (len .OrderedMembers) 0 }}
-		// No fields to scan
-		{{- else }}
-		// Create temporary variables for nullable fields that need pointer scanning
-		{{ template "nullableTempVarsMembers" .OrderedMembers }}
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		{{- range $i, $member := .OrderedMembers }}
-		{{- if $member.IsRelationship }}
-		var tempRel{{ toGoName $member.Relationship.FieldName }} *{{ $.UUIDGoType }}
-		{{- end }}
-		{{- end }}
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-			{{- range $i, $member := .OrderedMembers }}
-			{{ template "scanArgForMember" $member }}
-			{{- end }}
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-		{{ template "nullablePostCopyMembers" .OrderedMembers }}
-
-		// Set relationship IDs from scanned FK values
-		{{- range $i, $rel := .Relationships }}
-		{{- if not $rel.IsArray }}
-		if tempRel{{ toGoName $rel.FieldName }} != nil {
-			{{- if $rel.IsRequired }}
-			result.{{ toGoName $rel.FieldName }}.Id = {{ if $rel.TargetPrimaryKeyIsPointer }}{{ lowerFirst $.TypeName }}UUIDPtr(*tempRel{{ toGoName $rel.FieldName }}){{ else }}*tempRel{{ toGoName $rel.FieldName }}{{ end }}
-			{{- else }}
-			// Initialize pointer for optional relationship before setting ID
-			result.{{ toGoName $rel.FieldName }} = &types.{{ $rel.TargetType }}{Id: {{ if $rel.TargetPrimaryKeyIsPointer }}{{ lowerFirst $.TypeName }}UUIDPtr(*tempRel{{ toGoName $rel.FieldName }}){{ else }}*tempRel{{ toGoName $rel.FieldName }}{{ end }}}
-			{{- end }}
-		}
-		{{- end }}
-		{{- end }}
-
-		{{- end }}
-		{{- if .EncryptedFields }}
-		if err := r.open(result); err != nil {
-			return nil, err
-		}
-		{{- end }}
-		{{- if $.HeldByAccess }}
-		if err := r.requireCreatedReach(ctx, result); err != nil {
-			return nil, err
-		}
-		{{- end }}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 {{- end }}

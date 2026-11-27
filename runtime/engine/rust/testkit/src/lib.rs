@@ -51,7 +51,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::{Map, Value};
 
@@ -363,6 +363,9 @@ struct Run<'d> {
     /// read in its place ([`Run::match_cursor`]).
     cursors: BTreeMap<i64, i64>,
     counter: IdCounter,
+    /// The engine the last step on a wall clock was made on
+    /// ([`Run::hold_apart`]).
+    wall_engine: Option<Arc<Engine>>,
     unknown_questions: Arc<Mutex<Vec<String>>>,
     /// The apps a case serves, and its open streams (`http`).
     http: http::Served,
@@ -403,6 +406,7 @@ impl<'d> Run<'d> {
             bindings: HashMap::new(),
             cursors: BTreeMap::new(),
             counter: IdCounter::new(),
+            wall_engine: None,
             unknown_questions: Arc::new(Mutex::new(Vec::new())),
             http: http::Served::default(),
             transport,
@@ -459,7 +463,11 @@ impl<'d> Run<'d> {
             "open" => self.open(step, &args).map(|()| None),
             "close" => {
                 let opened = self.engine_of(step)?;
+                let fixed_clock = opened.fixed_clock;
                 if let Some(engine) = opened.engine.take() {
+                    if !fixed_clock {
+                        self.hold_apart(Some(&engine));
+                    }
                     engine.shutdown();
                 }
                 Ok(None)
@@ -474,11 +482,7 @@ impl<'d> Run<'d> {
                 let set = self
                     .behavior_set(&name)
                     .ok_or_else(|| format!("the test kit has no behavior {name}"))?;
-                let engine = self
-                    .engine_of(step)?
-                    .engine
-                    .as_ref()
-                    .ok_or("the engine is closed")?;
+                let engine = self.engine_called(step)?;
                 engine
                     .behaviors()
                     .register_set(set)
@@ -489,12 +493,8 @@ impl<'d> Run<'d> {
                 if self.database.dialect() == Dialect::Postgres {
                     return Ok(Outcome::Skipped);
                 }
-                let engine = self
-                    .engine_of(step)?
-                    .engine
-                    .as_ref()
-                    .ok_or("the engine is closed")?;
-                storage_call(engine, call, &args)
+                let engine = self.engine_called(step)?;
+                storage_call(&engine, call, &args)
             }
             _ => {
                 let principal: Option<Result<Principal, EngineError>> = match step.get("principal")
@@ -524,7 +524,7 @@ impl<'d> Run<'d> {
                 let opened = self.engine_of(step)?;
                 let fixed_clock = opened.fixed_clock;
                 let ids = opened.ids.clone();
-                let engine = opened.engine.as_ref().ok_or("the engine is closed")?;
+                let engine = &self.engine_called(step)?;
                 if fixed_clock {
                     if let Some(now) = step.get("now").and_then(Value::as_i64) {
                         engine.clock().set(now).map_err(|error| error.to_string())?;
@@ -597,6 +597,41 @@ impl<'d> Run<'d> {
         found
             .map(|(_, opened)| opened)
             .ok_or_else(|| "no engine is open".to_owned())
+    }
+
+    // engine_called is the engine a step calls, its wall clock held apart
+    // from the last engine's (hold_apart).
+    fn engine_called(&mut self, step: &Value) -> Result<Arc<Engine>, String> {
+        let opened = self.engine_of(step)?;
+        let fixed_clock = opened.fixed_clock;
+        let engine = opened.engine.clone().ok_or("the engine is closed")?;
+        if !fixed_clock {
+            self.hold_apart(Some(&engine));
+        }
+        Ok(engine)
+    }
+
+    // hold_apart keeps the wall clocks of a scenario's engines apart, as
+    // the recorder does (the README's `Times`): before a step on another
+    // engine than the last, or the open of one (`next` is None), it waits
+    // until the system's clock is past every instant the last one read.
+    // Each engine reads a strict clock of its own, which runs ahead of the
+    // system's by as many readings as it took in one millisecond, so
+    // without the wait a second engine can read an instant the first has
+    // read already, and two symbols of the recording stand for one value.
+    // The last engine's clock is read here, so the wait is past what it
+    // read and did not show too. Every wait leaves the system's clock past
+    // all the scenario's readings, so being past the last engine's is
+    // being past every engine's.
+    pub(crate) fn hold_apart(&mut self, next: Option<&Arc<Engine>>) {
+        if let Some(last) = &self.wall_engine {
+            if !next.is_some_and(|next| Arc::ptr_eq(next, last)) {
+                wait_past(last.clock().now());
+            }
+        }
+        if let Some(next) = next {
+            self.wall_engine = Some(Arc::clone(next));
+        }
     }
 
     fn open(&mut self, step: &Value, args: &[Value]) -> Result<(), Value> {
@@ -715,7 +750,13 @@ impl<'d> Run<'d> {
             options.signals = superschematic_engine::SignalOptions::from_json(signals)
                 .map_err(|error| error_json(&error))?;
         }
+        if !fixed_clock {
+            self.hold_apart(None);
+        }
         let engine = Engine::open_shared(options).map_err(|error| error_json(&error))?;
+        if !fixed_clock {
+            self.wall_engine = Some(Arc::clone(&engine));
+        }
         self.engines.push((
             name,
             Opened {
@@ -778,6 +819,7 @@ impl<'d> Run<'d> {
     // finish closes the engines and removes their places.
     fn finish(mut self) {
         self.http = http::Served::default();
+        self.wall_engine = None;
         for (_, opened) in self.engines.drain(..) {
             if let Some(engine) = opened.engine {
                 engine.shutdown();
@@ -1110,6 +1152,20 @@ impl<'d> Run<'d> {
                 }
             }
         }
+    }
+}
+
+// wait_past sleeps until the system's clock reads a millisecond after
+// `instant`, in epoch milliseconds.
+fn wait_past(instant: i64) {
+    let past = Duration::from_millis(u64::try_from(instant).unwrap_or(0) + 1);
+    while let Some(left) = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|now| past.checked_sub(now))
+        .filter(|left| !left.is_zero())
+    {
+        std::thread::sleep(left);
     }
 }
 
@@ -1642,5 +1698,51 @@ mod tests {
         let sqlite = Database::Sqlite;
         let mut run = Run::new(&sqlite, &repository, "f", &json!({}), &Direct);
         assert!(run.matches(&page(&[3], 3), &page(&[4], 4), "").is_err());
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn a_step_on_another_engine_reads_no_instant_the_last_engine_read() {
+        let repository = PathBuf::new();
+        let scenario = json!({"principals": {"alice": {"subject": "alice", "permissions": []}}});
+        let mut run = Run::new(&Database::Sqlite, &repository, "f", &scenario, &Direct);
+        let open = |name: &str, dir: &str| {
+            json!({
+                "call": "open",
+                "as": name,
+                "args": [{"path": format!("{dir}/engine.db"), "policy": "allowAll", "ids": "seeded", "clock": "wall"}]
+            })
+        };
+        let create = |name: &str, time: &str| {
+            json!({
+                "engine": name,
+                "call": "namespaces.create",
+                "principal": "alice",
+                "args": ["acme"],
+                "expect": {
+                    "name": "acme", "origin": "created", "shared": false, "state": "active",
+                    "createdAt": time, "createdBy": "alice", "archivedAt": null, "archivedBy": null
+                }
+            })
+        };
+        run.step(&open("e1", "{{dir:1}}")).expect("e1 opens");
+        run.step(&open("e2", "{{dir:2}}")).expect("e2 opens");
+        // Both strict clocks read on to one instant ahead of the system's
+        // clock, as far ahead as a hundred readings in one millisecond
+        // take one: each engine's next reading is the instant after it.
+        let ahead = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0))
+            + 100;
+        for (_, opened) in &run.engines {
+            let clock = opened.engine.as_ref().expect("an open engine").clock();
+            while clock.now() < ahead {}
+        }
+        run.step(&create("e2", "{{time:1}}")).expect("e2 creates");
+        // Without the wait e1 reads the instant e2 just read, and the
+        // step fails: {{time:2}} and {{time:1}} stand for one value.
+        run.step(&create("e1", "{{time:2}}"))
+            .expect("e1 reads an instant of its own");
+        run.finish();
     }
 }

@@ -170,6 +170,7 @@ interface RepositoryShape {
   findOne(filter: Values): Promise<Row | null>;
   findPage(filter: Values, options: Values): Promise<{ readonly rows: readonly Row[]; readonly next: unknown }>;
   createOne(input: Values): Promise<Row>;
+  createMany(inputs: readonly Values[]): Promise<readonly Row[]>;
   updateOne(id: unknown, update: Values): Promise<Row>;
   deleteOne(id: unknown): Promise<void>;
   /** A Mergeable table's (D147). */
@@ -473,7 +474,7 @@ async function viewsOf(operation: TableOperation, rows: readonly Row[], ctx: Req
     const system = tx.asSystem?.() ?? tx;
     const log = Object.values(system).find(repository => typeof repository === 'object' && repository?.def?.access === 'log') as RepositoryShape | undefined;
     if (!log) throw new Error(`table operation: ${operation.type} reveals ${String(records[0]!.field)}, and the database has no @accessLog table to record it in (D156)`);
-    for (const record of records) await log.createOne(record);
+    await log.createMany(records);
   }
   return views;
 }

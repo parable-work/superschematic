@@ -63,7 +63,7 @@
         { "name": "name", "description": "The schedule's name, its key on the row.", "type": "string" },
         { "name": "kind", "description": "after, every or cron.", "type": "string" },
         { "name": "spec", "description": "The delay or the interval in milliseconds, as its digits, or the cron line, its fields one space apart.", "type": "string" },
-        { "name": "timeZone", "description": "The IANA time zone a cron line is read in, as the bundled database spells it; absent for after and every.", "type": "string" },
+        { "name": "timeZone", "description": "The IANA time zone a cron line is read in, as the bundled database spells it; absent for after and every.", "type": "Temporal.TimeZone" },
         { "name": "state", "description": "active, paused or finished.", "type": "string" },
         { "name": "setAt", "description": "When it was set, in epoch milliseconds: an every schedule's runs fall at whole intervals from it.", "type": "Temporal.DateTime" },
         { "name": "nextAt", "description": "When its next regular run falls due, in epoch milliseconds; absent once it has none.", "type": "Temporal.DateTime" },

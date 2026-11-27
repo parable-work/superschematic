@@ -2,6 +2,23 @@
   "name": "fixture-derived-provenance-db",
   "kind": "DB",
   "scalars": {
+    "Crypto.SHA256": {
+      "name": "Crypto.SHA256",
+      "description": "Lowercase hexadecimal SHA-256 digest",
+      "languagePrimitive": "string",
+      "primitive": "String",
+      "typeMappings": {
+        "go": "CryptoSHA256",
+        "json_schema": "string",
+        "python": "str",
+        "rust": "String",
+        "sql": "VARCHAR(64)",
+        "typescript": "string"
+      },
+      "maxLength": 64,
+      "minLength": 64,
+      "pattern": "^[0-9a-f]{64}$"
+    },
     "Generic.Int64": {
       "name": "Generic.Int64",
       "description": "Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.",
@@ -33,6 +50,22 @@
         "typescript": "JSONValue"
       },
       "hasCustomValidate": true
+    },
+    "Generic.Probability": {
+      "name": "Generic.Probability",
+      "description": "Probability value from 0.0 to 1.0 inclusive",
+      "languagePrimitive": "number",
+      "primitive": "Float",
+      "typeMappings": {
+        "go": "GenericProbability",
+        "json_schema": "number",
+        "python": "float",
+        "rust": "f64",
+        "sql": "DOUBLE PRECISION",
+        "typescript": "number"
+      },
+      "minimum": 0,
+      "maximum": 1
     },
     "Identity.UUID": {
       "name": "Identity.UUID",
@@ -153,14 +186,14 @@
           "name": "sourceHash",
           "description": "The SHA-256 of the model label, the instruction, the output schema and the inputs that hold a value; absent while no input holds one.",
           "typeRef": {
-            "name": "string"
+            "name": "Crypto.SHA256"
           }
         },
         {
           "name": "settledHash",
           "description": "The source hash of the last value settled; absent before the first.",
           "typeRef": {
-            "name": "string"
+            "name": "Crypto.SHA256"
           }
         },
         {
@@ -174,7 +207,7 @@
           "name": "confidence",
           "description": "The confidence the last value was settled with, from 0 to 1.",
           "typeRef": {
-            "name": "number"
+            "name": "Generic.Probability"
           }
         },
         {
@@ -442,14 +475,14 @@
           "name": "sourceHash",
           "description": "The SHA-256 of the model label, the instruction, the output schema and the inputs that hold a value; absent while no input holds one.",
           "typeRef": {
-            "name": "string"
+            "name": "Crypto.SHA256"
           }
         },
         {
           "name": "settledHash",
           "description": "The source hash of the last value settled; absent before the first.",
           "typeRef": {
-            "name": "string"
+            "name": "Crypto.SHA256"
           }
         },
         {
@@ -463,7 +496,7 @@
           "name": "confidence",
           "description": "The confidence the last value was settled with, from 0 to 1.",
           "typeRef": {
-            "name": "number"
+            "name": "Generic.Probability"
           }
         },
         {
@@ -594,7 +627,7 @@
           "name": "confidence",
           "description": "The confidence the write's attribution gave, from 0 to 1.",
           "typeRef": {
-            "name": "number"
+            "name": "Generic.Probability"
           }
         },
         {

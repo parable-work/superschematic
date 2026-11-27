@@ -577,10 +577,12 @@ func (r *BatchRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple Batch records by their IDs in a single query
+// GetManyByIDs retrieves multiple Batch records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *BatchRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Batch, error) {
+	resultMap := make(map[types.IdentityUUID]*types.Batch, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.Batch{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -592,7 +594,22 @@ func (r *BatchRepository) GetManyByIDs(ctx context.Context, ids []types.Identity
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *BatchRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.Batch, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -663,7 +680,6 @@ func (r *BatchRepository) GetManyByIDs(ctx context.Context, ids []types.Identity
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 

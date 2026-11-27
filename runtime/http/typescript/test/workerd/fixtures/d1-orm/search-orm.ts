@@ -1002,7 +1002,7 @@ export const fixtureSearchDbRules: RulesLayout = {
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",
@@ -1311,7 +1311,7 @@ export const fixtureSearchDbRules: RulesLayout = {
                   "name": "body",
                   "field": "body",
                   "column": "body",
-                  "type": "string"
+                  "type": "Text.Markdown"
                 },
                 {
                   "name": "blocks",

@@ -302,6 +302,7 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("display"), displayArgs(def.Display))
 	}
 	e.emitStackDeclarations(def)
+	e.emitTaskDeclarations(def)
 
 	// A class with no fields of its own, such as each class of a Stack
 	// schema, closes on its line, as the @job and @worker classes do.

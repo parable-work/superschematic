@@ -429,7 +429,7 @@ type FixtureConfig struct {
 
 	Port float64 `json:"PORT"`
 
-	Environment FixtureEnvironment `json:"ENVIRONMENT"`
+	Environment FixtureEnvironment `json:"ENVIRONMENT,omitzero"`
 }
 
 // NewFixtureConfig returns a FixtureConfig with @default values from the schema applied.

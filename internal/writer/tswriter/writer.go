@@ -155,6 +155,8 @@ var symbolPackages = map[string]string{
 	// @superschematic/stack
 	"stack": "@superschematic/stack", "server": "@superschematic/stack",
 	"database": "@superschematic/stack", "environment": "@superschematic/stack",
+	// @superschematic/tasks
+	"tasks": "@superschematic/tasks", "task": "@superschematic/tasks",
 }
 
 // use records a toolchain symbol import and returns the symbol for inline use.
@@ -737,6 +739,12 @@ func (e *emitter) sortedTypes() []string {
 		}
 		// A Stack declaration names a declared deployable by its class.
 		for _, ref := range stackClassRefs(def) {
+			if _, ok := e.doc.Types[ref]; ok && ref != name {
+				d = append(d, ref)
+			}
+		}
+		// A task names the tasks it uses and follows by their classes.
+		for _, ref := range taskClassRefs(def) {
 			if _, ok := e.doc.Types[ref]; ok && ref != name {
 				d = append(d, ref)
 			}

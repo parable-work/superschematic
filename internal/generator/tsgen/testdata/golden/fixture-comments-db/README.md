@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, Review, ReviewCommentsConversations, ReviewCommentsDeliveries, ReviewCommentsDrafts, ReviewCommentsEdits, ReviewCommentsFollows, ReviewCommentsMessages, ReviewCommentsReactions, ReviewCommentsReads, Ticket, TicketCommentsConversations, TicketCommentsDeliveries, TicketCommentsDrafts, TicketCommentsEdits, TicketCommentsFollows, TicketCommentsMessages, TicketCommentsReactions, TicketCommentsReads,  } from '@schemas/fixture-comments-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, TextMarkdown, Review, ReviewCommentsConversations, ReviewCommentsDeliveries, ReviewCommentsDrafts, ReviewCommentsEdits, ReviewCommentsFollows, ReviewCommentsMessages, ReviewCommentsReactions, ReviewCommentsReads, Ticket, TicketCommentsConversations, TicketCommentsDeliveries, TicketCommentsDrafts, TicketCommentsEdits, TicketCommentsFollows, TicketCommentsMessages, TicketCommentsReactions, TicketCommentsReads,  } from '@schemas/fixture-comments-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-comments-db-types';
@@ -76,7 +76,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ## Type System
 
 
-### Scalars (4)
+### Scalars (5)
 
 
 - **Generic.Int64** - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
@@ -97,6 +97,11 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **Temporal.DateTime** - ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
   - TypeScript type: `JSDate`
   - Wire format: TypeScript schemas use `@temporalFormat('...')`; JSON/YAML schemas use `x-temporal-format`.
+
+
+- **Text.Markdown** - Markdown text
+  - TypeScript type: `string`
+  - Pattern: `^[\s\S]*$`
 
 
 

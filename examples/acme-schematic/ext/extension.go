@@ -26,6 +26,8 @@
 //     type composes with @behavior or in the data forms (behavior.go), its
 //     config typed in @acme/schema and its engine implementation in the
 //     acme-behaviors crate (crates/behaviors, D58), which the spec names;
+//   - a task section, acme, the part of a Tasks service's task file that
+//     acme's forge reads: its tiers and each task's tier (tasks.go, D203);
 //   - two subcommands through cli.CommandProvider: describe (command.go) and
 //     fields, which type-checks a declaration file with the loader's
 //     compiler (fields.go).
@@ -110,6 +112,9 @@ func (Extension) Register(r *registry.Registry) error {
 		return err
 	}
 	if err := registerBehavior(r); err != nil {
+		return err
+	}
+	if err := registerTaskSection(r); err != nil {
 		return err
 	}
 	return r.RegisterAuthProvider(auth.Provider{})

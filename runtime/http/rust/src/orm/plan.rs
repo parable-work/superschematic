@@ -528,6 +528,29 @@ impl<'a> Plan<'a> {
         Ok(Statement { sql, args })
     }
 
+    /// The statement that reads which of the keys name rows the caller may
+    /// reach (D156), as [`Plan::reach`] reads one: the keys in one `IN`
+    /// list, so a batch create checks the rows it made in one read.
+    pub(crate) fn reach_many(&self, keys: &[Value], write: bool) -> Result<Statement, Error> {
+        let table = self.table;
+        let column = table.key_column();
+        let mut args = Vec::with_capacity(keys.len());
+        let mut placeholders = Vec::with_capacity(keys.len());
+        for key in keys {
+            args.push(self.key(key)?);
+            placeholders.push(self.placeholder(args.len())?);
+        }
+        let mut conditions = vec![fill(
+            &self.definition.clauses.in_,
+            &[&column.qualified, &placeholders.join(", ")],
+        )?];
+        conditions.extend(self.access_conditions(table, &mut args, write)?);
+        let where_ = self.live_where(self.where_of(&conditions), false);
+        let s = &table.statements;
+        let sql = fill(&s.find_many, &[&s.columns, &where_, &"", &""])?;
+        Ok(Statement { sql, args })
+    }
+
     /// The conditions of a filter through the table's relations. Through a
     /// to-one relation (D90): the foreign key in the keys of the target's
     /// live rows its filter finds. Through a one-to-many relation (D156):

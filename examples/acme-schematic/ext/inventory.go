@@ -38,9 +38,13 @@ func registerInventory(r *registry.Registry) error {
 		Run: func(_ context.Context, bc registry.BuildAllContext) error {
 			inventory := Inventory{Services: []Manifest{}}
 			for _, service := range bc.Services {
+				// acmeManifest runs on manifestKinds, so its directory is
+				// one of the output directories of every service of those
+				// kinds; a service of another kind has no manifest.
+				if !slices.Contains(manifestKinds, service.Kind) {
+					continue
+				}
 				dir := ManifestDir(bc.OutputRoot, service.Name)
-				// acmeManifest runs on every kind, so its directory is
-				// one of every service's output directories.
 				if !slices.Contains(service.OutputDirs, dir) {
 					return fmt.Errorf("%s: %s is not one of its output directories", service.Name, dir)
 				}

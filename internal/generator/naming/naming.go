@@ -267,10 +267,98 @@ type Naming struct {
 	// declares none.
 	Behaviors string `toml:"behaviors"`
 
+	// Tasks is the [tasks] table: the task sections the project registers
+	// as data (D203).
+	Tasks TasksConfig `toml:"tasks"`
+
 	// dir is the directory the file this naming was read from sits in,
 	// the schemas root, which Behaviors is relative to; empty for the
 	// defaults.
 	dir string
+}
+
+// TasksConfig is the [tasks] table of superschematic.toml.
+type TasksConfig struct {
+	// Sections registers task sections as data, keyed by the section's
+	// name: [tasks.sections.<name>]. A section is a part of a Tasks
+	// service's task file that one forge owns and reads; the core checks
+	// each part against the section's schema and copies it. A forge with
+	// no extension registers its section here, and checks what a JSON
+	// Schema cannot say when it reads the file.
+	Sections map[string]TaskSectionConfig `toml:"sections"`
+}
+
+// TaskSectionConfig is one [tasks.sections.<name>] table: the JSON Schema
+// files of the section's two parts, relative to the schemas root and
+// slash-separated. A section gives one or both.
+type TaskSectionConfig struct {
+	// File is the JSON Schema of the section's part that belongs to the
+	// task file, which @tasks holds.
+	File string `toml:"file"`
+	// Task is the JSON Schema of the section's part of one task, which
+	// @task holds.
+	Task string `toml:"task"`
+
+	// fileSchema and taskSchema are the files' bytes, read when the naming
+	// is read from a file. They are part of the value, so the build cache,
+	// which keys on it, rebuilds a Tasks service when a schema changes.
+	fileSchema []byte
+	taskSchema []byte
+}
+
+// Schemas returns the bytes of the section's two schema files, nil for a
+// part the section does not give. loaded is false for a naming that was
+// parsed from bytes and never read from a file, which has no directory to
+// read them from.
+func (c TaskSectionConfig) Schemas() (file, task []byte, loaded bool) {
+	loaded = (c.File == "" || c.fileSchema != nil) && (c.Task == "" || c.taskSchema != nil)
+	return c.fileSchema, c.taskSchema, loaded
+}
+
+var taskSectionNameRE = regexp.MustCompile(`^[a-z][a-z0-9]*(-[a-z0-9]+)*$`)
+
+// check refuses a section whose name is no section name, that gives
+// neither schema, or whose schema is no path under the schemas root.
+func (c TasksConfig) check() error {
+	for name, section := range c.Sections {
+		if !taskSectionNameRE.MatchString(name) {
+			return fmt.Errorf("[tasks.sections.%s]: a section's name is lowercase words joined by hyphens", name)
+		}
+		if section.File == "" && section.Task == "" {
+			return fmt.Errorf("[tasks.sections.%s] names neither file nor task, the JSON Schemas of its two parts, so the section holds nothing", name)
+		}
+		for key, rel := range map[string]string{"file": section.File, "task": section.Task} {
+			if rel == "" {
+				continue
+			}
+			if isAbsPath(rel) || strings.Contains(rel, `\`) || filepath.ToSlash(filepath.Clean(rel)) != rel || rel == ".." || strings.HasPrefix(rel, "../") {
+				return fmt.Errorf("[tasks.sections.%s] %s is %q: it is a JSON Schema file's path under the schemas root, slash-separated", name, key, rel)
+			}
+		}
+	}
+	return nil
+}
+
+// load reads each section's schema files from dir, the schemas root.
+func (c *TasksConfig) load(dir string) error {
+	for name, section := range c.Sections {
+		for key, rel := range map[string]string{"file": section.File, "task": section.Task} {
+			if rel == "" {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(dir, filepath.FromSlash(rel)))
+			if err != nil {
+				return fmt.Errorf("[tasks.sections.%s] %s: %w", name, key, err)
+			}
+			if key == "file" {
+				section.fileSchema = data
+			} else {
+				section.taskSchema = data
+			}
+		}
+		c.Sections[name] = section
+	}
+	return nil
 }
 
 // BehaviorsDir is the absolute directory Behaviors names, or "" when the
@@ -1408,8 +1496,16 @@ func LoadFile(path string) (Naming, error) {
 		return Naming{}, fmt.Errorf("naming: read %s: %w", path, err)
 	}
 	n, err := Parse(data, path)
-	if err != nil || n.Behaviors == "" {
+	if err != nil {
 		return n, err
+	}
+	// The schemas of the task sections the file registers (D203) are read
+	// here, relative to the file, and held in the value.
+	if err := n.Tasks.load(filepath.Dir(path)); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", path, err)
+	}
+	if n.Behaviors == "" {
+		return n, nil
 	}
 	abs, err := filepath.Abs(filepath.Dir(path))
 	if err != nil {
@@ -1464,6 +1560,9 @@ func Parse(data []byte, name string) (Naming, error) {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if err := n.GoAPI.check(); err != nil {
+		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
+	}
+	if err := n.Tasks.check(); err != nil {
 		return Naming{}, fmt.Errorf("naming: %s: %w", name, err)
 	}
 	if n.TypeComments != TypeCommentsAttached && n.TypeComments != TypeCommentsLeading {

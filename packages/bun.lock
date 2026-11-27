@@ -43,6 +43,13 @@
         "@superschematic/schema-config": "*",
       },
     },
+    "tasks": {
+      "name": "@superschematic/tasks",
+      "version": "0.0.0",
+      "peerDependencies": {
+        "@superschematic/schema-config": "*",
+      },
+    },
   },
   "packages": {
     "@superschematic/api": ["@superschematic/api@workspace:api"],
@@ -56,6 +63,8 @@
     "@superschematic/schema-config": ["@superschematic/schema-config@workspace:schema-config"],
 
     "@superschematic/stack": ["@superschematic/stack@workspace:stack"],
+
+    "@superschematic/tasks": ["@superschematic/tasks@workspace:tasks"],
 
     "@types/json-schema": ["@types/json-schema@7.0.15", "", {}, "sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA=="],
 

@@ -17,7 +17,7 @@ times than expected.
 
 Version sites (relative to the repository root):
   versions.env                        VERSION=
-  packages/{api,db,memory-store,schema,schema-config,stack}/package.json
+  packages/{api,db,memory-store,schema,schema-config,stack,tasks}/package.json
                                       version
   packages/bun.lock                   the six workspace entries
   ir/typescript/package.json          version
@@ -92,6 +92,8 @@ Version sites (relative to the repository root):
                                       .../superschematic/ir vX.Y.Z
   extensions/embedded/go.mod          require .../superschematic vX.Y.Z and
                                       .../superschematic/ir vX.Y.Z
+  extensions/resolvers/go.mod         require .../superschematic vX.Y.Z and
+                                      .../superschematic/ir vX.Y.Z
   extensions/pulumi/go.mod            require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
                                       .../extensions/gcp vX.Y.Z and
@@ -101,7 +103,8 @@ Version sites (relative to the repository root):
                                       .../superschematic/ir vX.Y.Z,
                                       .../extensions/gcp vX.Y.Z,
                                       .../extensions/cloudflare vX.Y.Z,
-                                      .../extensions/embedded vX.Y.Z and
+                                      .../extensions/embedded vX.Y.Z,
+                                      .../extensions/resolvers vX.Y.Z and
                                       .../extensions/pulumi vX.Y.Z
   extensions/topcoat/go.mod           require .../superschematic vX.Y.Z,
                                       .../superschematic/ir vX.Y.Z,
@@ -109,7 +112,8 @@ Version sites (relative to the repository root):
                                       official extensions its binary links),
                                       .../extensions/gcp vX.Y.Z,
                                       .../extensions/cloudflare vX.Y.Z,
-                                      .../extensions/embedded vX.Y.Z and
+                                      .../extensions/embedded vX.Y.Z,
+                                      .../extensions/resolvers vX.Y.Z and
                                       .../extensions/pulumi vX.Y.Z
 
 The Go requires carry the release version so a consumer at a tag resolves
@@ -143,7 +147,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 GO_MODULE = "github.com/parable-work/superschematic"
 
-NPM_WORKSPACE_PACKAGES = ["api", "db", "memory-store", "schema", "schema-config", "stack"]
+NPM_WORKSPACE_PACKAGES = ["api", "db", "memory-store", "schema", "schema-config", "stack", "tasks"]
 
 # The targets of the engine's prebuilt Node-API addon, one npm package each
 # (@superschematic/engine-<target>, runtime/engine/typescript/npm/<target>),
@@ -168,6 +172,7 @@ GO_MODULES = [
     "extensions/gcp",
     "extensions/cloudflare",
     "extensions/embedded",
+    "extensions/resolvers",
     "extensions/pulumi",
     "cmd/superschematic",
     "extensions/topcoat",
@@ -516,7 +521,7 @@ def sites():
     # The extension modules and the installed binary, for the same reason,
     # and because each is tagged: a consumer at a tag resolves its siblings
     # from theirs.
-    for ext in ("gcp", "cloudflare", "embedded"):
+    for ext in ("gcp", "cloudflare", "embedded", "resolvers"):
         out.append(
             (
                 ROOT / "extensions" / ext / "go.mod",
@@ -548,6 +553,7 @@ def sites():
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/embedded"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/resolvers"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
             ],
             "gomod",
@@ -566,6 +572,7 @@ def sites():
                 (go_require_pattern(GO_MODULE + "/extensions/gcp"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/cloudflare"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/embedded"), 1),
+                (go_require_pattern(GO_MODULE + "/extensions/resolvers"), 1),
                 (go_require_pattern(GO_MODULE + "/extensions/pulumi"), 1),
             ],
             "gomod",

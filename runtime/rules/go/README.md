@@ -1,7 +1,7 @@
 # The behaviors' core (Go)
 
 `github.com/parable-work/superschematic/runtime/rules/go` is the pure core
-of the behaviors (D103 in `docs/DECISIONS.md`) for Go, and the one adapter
+of the behaviors (D103, #587) for Go, and the one adapter
 every Go caller runs it through. Package `rules` binds
 `libsuperschematic_rules.a`, the native build of
 `runtime/engine/rust/rules-wasm` (`superschematic-rules` with every behavior

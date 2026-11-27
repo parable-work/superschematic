@@ -18,7 +18,8 @@
 #      the checks (the icon and audience checks, the @mcp check on API and
 #      the projection check on DB), acme's tool invocation policy, and its
 #      behavior after the core's;
-#   3. build-all over the schemas root builds all five services, whose
+#   3. build-all over the schemas root builds all six services, five of them
+#      generating packages and shop-tasks its task file (D203), whose
 #      schema.config.ts files import the config package under acme's own
 #      name ([package_aliases] "@acme/schema-config"), and the sentinels it
 #      writes import that name too;
@@ -167,7 +168,7 @@ go build -o "$OUT/acme-schematic" ./cmd/acme-schematic
 
 echo "==> describe: the registry the acme binary assembles"
 "$OUT/acme-schematic" describe "$SCHEMAS" | tee "$OUT/describe.txt"
-grep -q '^kinds: API, Bucket, Catalog, DB, General, MemoryStore, Site, Stack$' "$OUT/describe.txt"
+grep -q '^kinds: API, Bucket, Catalog, DB, General, MemoryStore, Site, Stack, Tasks$' "$OUT/describe.txt"
 grep -q '^  Catalog: types -> catalog -> acmeManifest$' "$OUT/describe.txt"
 grep -q '^documents: catalog.config (catalog.config.yaml)$' "$OUT/describe.txt"
 grep -q '^auth providers: apikey, session (selected: apikey)$' "$OUT/describe.txt"
@@ -259,17 +260,45 @@ echo "==> build-all hook merged every manifest, also when every service comes fr
 jq -e '[.services[].service] | sort == ["shop-api", "shop-catalog", "shop-config", "shop-db", "shop-storefront"]' "$DIST/acme/inventory.json" >/dev/null
 cp "$DIST/acme/inventory.json" "$OUT/inventory.json"
 # The first cached run builds and stores every service. Removing dist drops
-# the outputs and the stamps, so the second restores all five from the cache
+# the outputs and the stamps, so the second restores all six from the cache
 # and builds none; the hook must still run and see the same manifests.
 "$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" >/dev/null
 rm -rf "$DIST"
+# The core's own hook installs shop-tasks' task file (D203). With the
+# committed file gone, the all-restored build, which runs no generator,
+# must put it back byte for byte.
+TASK_FILE="$EXAMPLE_DIR/ci/tasks.json"
+cp "$TASK_FILE" "$OUT/tasks.json"
+rm "$TASK_FILE"
 "$OUT/acme-schematic" build-all "$SCHEMAS/services" --cache --cache-root "$OUT/cache" | tee "$OUT/restored.log"
-test "$(grep -c '(restored from cache)' "$OUT/restored.log")" -eq 5
+test "$(grep -c '(restored from cache)' "$OUT/restored.log")" -eq 6
 if grep -q '(built' "$OUT/restored.log"; then
   echo "ERROR: the all-restored build-all built a service" >&2
   exit 1
 fi
 cmp "$OUT/inventory.json" "$DIST/acme/inventory.json"
+cmp "$OUT/tasks.json" "$TASK_FILE"
+
+echo "==> the task file is what shop-tasks gives, its schema inputs hold what the build read, and a commit plans"
+"$OUT/acme-schematic" tasks "$SCHEMAS/services/shop-tasks" --check
+# Each schema input's static set, found from tracked text at HEAD, holds
+# the services and the files the build above recorded reading.
+"$OUT/acme-schematic" tasks inputs "$SCHEMAS/services/shop-tasks"
+# The task file's shape is published as a JSON Schema, for a reader in
+# another language to generate its types from.
+"$OUT/acme-schematic" json-schema --task-file | jq -e '.properties.tasks and .["$defs"].task.properties.uses' >/dev/null
+# A plan of HEAD, when HEAD holds the file: every hermetic task has a key,
+# smoke, which is not hermetic, has none, and each task comes after the
+# tasks it uses and follows.
+if git -C "$EXAMPLE_DIR" cat-file -e "HEAD:examples/acme-schematic/ci/tasks.json" 2>/dev/null; then
+  "$OUT/acme-schematic" tasks plan HEAD --repo "$EXAMPLE_DIR" --file examples/acme-schematic/ci/tasks.json >"$OUT/plan.json"
+  jq -e '.tasks.smoke.key == null
+    and ([.tasks["api-build", "schema-build", "task-file", "vet"].key | length] == [64, 64, 64, 64])
+    and (.order | index("schema-build") < index("api-build"))
+    and (.order | index("vet") < index("api-build"))
+    and (.order | index("api-build") < index("smoke"))
+    and (.sections.acme.tiers | length == 2)' "$OUT/plan.json" >/dev/null
+fi
 
 echo "==> core outputs carry the acme names"
 test -s "$DIST/sql/shop-db/create.sql"
@@ -291,7 +320,7 @@ if "$OUT/superschematic" build "$SCHEMAS/services/shop-catalog" --naming "$OUT/s
   echo "ERROR: the core-only binary built a Catalog service" >&2
   exit 1
 fi
-grep -q 'unknown kind "Catalog" (registered kinds: API, Bucket, DB, General, MemoryStore, Site, Stack)' "$OUT/core-kind.log"
+grep -q 'unknown kind "Catalog" (registered kinds: API, Bucket, DB, General, MemoryStore, Site, Stack, Tasks)' "$OUT/core-kind.log"
 if "$OUT/superschematic" build "$SCHEMAS/services/shop-db" --out "$OUT/core-dist" >"$OUT/core-auth.log" 2>&1; then
   echo "ERROR: the core-only binary accepted auth_provider = \"apikey\"" >&2
   exit 1

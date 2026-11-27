@@ -3164,7 +3164,7 @@ type RecipePatch struct {
 
 	Commit RecipeCommit `json:"commit"`
 
-	EntityKind RecipeEntityKind `json:"entityKind"`
+	EntityKind RecipeEntityKind `json:"entityKind,omitzero"`
 
 	EntityKey IdentityUUID `json:"entityKey"`
 
@@ -3172,7 +3172,7 @@ type RecipePatch struct {
 
 	EntityVersion GenericInt64 `json:"entityVersion"`
 
-	Operation RecipePatchOperation `json:"operation"`
+	Operation RecipePatchOperation `json:"operation,omitzero"`
 }
 
 // MaskSecrets returns a copy of RecipePatch with secret fields cleared.
@@ -4381,7 +4381,7 @@ type RecipeSnapshotEntry struct {
 
 	Commit RecipeCommit `json:"commit"`
 
-	EntityKind RecipeEntityKind `json:"entityKind"`
+	EntityKind RecipeEntityKind `json:"entityKind,omitzero"`
 
 	EntityKey IdentityUUID `json:"entityKey"`
 
@@ -5056,7 +5056,7 @@ type Tasting struct {
 
 	Rested TemporalDuration `json:"rested"`
 
-	Verdict Verdict `json:"verdict"`
+	Verdict Verdict `json:"verdict,omitzero"`
 
 	Remarks GenericJSON `json:"remarks"`
 

@@ -2,8 +2,10 @@
 
 export type {
   JSDate,
+  CryptoSHA256,
   GenericInt64,
   GenericJSON,
+  GenericProbability,
   IdentityUUID,
   TemporalDateTime,
 } from 'superscalar/scalars';

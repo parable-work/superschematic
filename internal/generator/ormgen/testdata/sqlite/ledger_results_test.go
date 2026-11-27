@@ -193,6 +193,22 @@ func script(t *testing.T, db DatabaseInterface) []resultCall {
 		{Id: keyPtr(card), Name: "Card", Code: "card", MailingAddress: &types.MailingAddress{Line1: "1 Main St", City: "Springfield"}},
 	})
 	call("createAccounts", rows, err)
+	// Rows that set different columns, one set between two of another: on
+	// SQLite a statement a set, and the rows come back in the inputs' order.
+	rows, err = accounts.CreateMany(ctx, []*types.Account{
+		{Id: keyPtr(80), Name: "Shares", Code: "shares", OpenedOn: day("2026-10-03")},
+		{Id: keyPtr(81), Name: "Bonds", Code: "bonds", MailingAddress: &types.MailingAddress{Line1: "2 Main St", City: "Springfield"}},
+		{Id: keyPtr(82), Name: "Gold", Code: "gold", OpenedOn: day("2026-10-04")},
+	})
+	call("createAccountsOfSets", rows, err)
+	// A later set's statement fails, and the earlier set's rows go with it.
+	rows, err = accounts.CreateMany(ctx, []*types.Account{
+		{Id: keyPtr(83), Name: "Silver", Code: "silver", OpenedOn: day("2026-10-05")},
+		{Id: keyPtr(84), Name: "Again", Code: "cash"},
+	})
+	call("createAccountsRefused", rows, err)
+	row, err = accounts.GetOne(ctx, key(83), nil)
+	call("getRefusedAccount", row, err)
 	row, err = accounts.CreateOne(ctx, &types.Account{Id: keyPtr(9), Name: "Again", Code: "cash"})
 	call("duplicateAccount", row, err)
 	row, err = accounts.CreateOne(context.Background(), &types.Account{Id: keyPtr(10), Name: "Nobody", Code: "nobody"})
@@ -205,6 +221,18 @@ func script(t *testing.T, db DatabaseInterface) []resultCall {
 	call("getAccountFields", row, err)
 	byID, err := accounts.GetManyByIDs(ctx, []types.IdentityUUID{key(cash), key(bank), key(cash), key(99)})
 	call("getAccounts", sortedMap(byID), err)
+	// More keys than one statement binds on SQLite: a query at a time.
+	manyKeys := []types.IdentityUUID{key(bank)}
+	for i := 0; len(manyKeys) < 40000; i++ {
+		none, err := types.ParseIdentityUUID(fmt.Sprintf("00000000-0000-4000-9000-%012x", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		manyKeys = append(manyKeys, none)
+	}
+	manyKeys = append(manyKeys, key(cash))
+	byID, err = accounts.GetManyByIDs(ctx, manyKeys)
+	call("getAccountsOfManyKeys", sortedMap(byID), err)
 	row, err = accounts.FindOne(ctx, &AccountFilter{Code: &StringFilter{Eq: str("bank")}}, nil)
 	call("findAccount", row, err)
 	row, err = accounts.FindOne(ctx, &AccountFilter{Code: &StringFilter{Eq: str("none")}}, nil)
@@ -515,6 +543,29 @@ func TestRepositoryResultsOnSQLiteAndPostgres(t *testing.T) {
 
 	onPostgres := script(t, postgres)
 	onSQLite := script(t, lite)
+
+	// SQLite numbers a table's rows, its rowid, as it inserts them: a
+	// CreateMany whose rows set columns A, B, A inserts them in the inputs'
+	// order, a statement a run of rows that set the same columns.
+	inserted, err := raw.QueryContext(ctx, "SELECT id FROM account WHERE id IN (?1, ?2, ?3) ORDER BY rowid",
+		key(80).ToUUID().String(), key(81).ToUUID().String(), key(82).ToUUID().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	for inserted.Next() {
+		var id string
+		if err := inserted.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		order = append(order, id)
+	}
+	if err := inserted.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{key(80).ToUUID().String(), key(81).ToUUID().String(), key(82).ToUUID().String()}; !reflect.DeepEqual(order, want) {
+		t.Errorf("SQLite inserted the rows of columns A, B, A as %v, want %v", order, want)
+	}
 
 	// A transaction runs its after-commit work on SQLite as on Postgres
 	// (D166).

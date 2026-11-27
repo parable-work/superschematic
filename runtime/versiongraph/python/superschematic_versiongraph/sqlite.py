@@ -2,8 +2,10 @@
 and ``Tx`` over one fixed layout of tables, the same for every graph, so the
 engine runs a graph in a SQLite file. The Python counterpart of the
 TypeScript package's ``@superschematic/versiongraph/sqlite``, statement for
-statement, so a file one writes the other reads; ``postgres`` is its Postgres
-counterpart, over the tables sqlgen generates per graph.
+statement but that it writes patches, snapshot entries and released rows 100
+to a statement where that one writes a row a statement, so a file one writes
+the other reads; ``postgres`` is its Postgres counterpart, over the tables
+sqlgen generates per graph.
 
 The layout is nine STRICT tables: ref, ref_history, commit, patch,
 snapshot_entry, release, release_history, member and member_history, each
@@ -565,6 +567,11 @@ class _SqliteStorage:
     def transact(self, fn: Callable[[Tx], T]) -> T:
         config = self._config
         return _transact(config, self._client, lambda conn, now: fn(_SqliteTx(config, conn, now)))
+
+
+# The most rows one statement inserts or deletes, so that its placeholders
+# stay under 999, the fewest a SQLite build may take.
+_BATCH_ROWS = 100
 
 
 def _new_id() -> str:
@@ -1235,14 +1242,35 @@ class _SqliteTx:
     def insert_patches(self, commit: str, patches: Sequence[Patch]) -> None:
         with _context("write patches"):
             self._require_own_commit(commit, "the patches' commit")
+            rows: List[List[Value]] = []
             for p in patches:
                 k, key, id = self._pinned(p.kind, p.entity_key, p.entity_id)
-                self._run(
-                    f"INSERT INTO {self._a.tables.patch} "
-                    "(id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version, operation) "
-                    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    [_new_id(), self._a.graph, commit, k.name, key, id, p.entity_version, p.operation],
-                )
+                rows.append([_new_id(), k.name, key, id, p.entity_version, p.operation])
+            self._insert_rows(
+                f"INSERT INTO {self._a.tables.patch} "
+                "(graph, commit_id, id, entity_kind, entity_key, entity_id, entity_version, operation)",
+                "",
+                [self._a.graph, commit],
+                rows,
+            )
+
+    def _insert_rows(self, head: str, tail: str, shared: Sequence[Value], rows: Sequence[Sequence[Value]]) -> None:
+        """Runs an INSERT of rows, _BATCH_ROWS to a statement: head, then a
+        VALUES list, then tail. Each row is the shared values (?1, ?2, ...),
+        then its own, which head's columns name in that order. The values
+        are bound as they are, so each is stored as one row's statement
+        stored it."""
+        common = "".join(f"?{i + 1}, " for i in range(len(shared)))
+        for start in range(0, len(rows), _BATCH_ROWS):
+            args: List[Value] = list(shared)
+            values: List[str] = []
+            for row in rows[start : start + _BATCH_ROWS]:
+                own = []
+                for value in row:
+                    args.append(value)
+                    own.append(f"?{len(args)}")
+                values.append(f"({common}{', '.join(own)})")
+            self._run(f"{head} VALUES {', '.join(values)}{tail}", args)
 
     def _commits(self, sql: str, args: Sequence[Value]) -> List[Commit]:
         return [_scan_commit(row) for row in self._all(sql, args)]
@@ -1375,14 +1403,17 @@ class _SqliteTx:
             return
         with _context("write the snapshot"):
             self._require_own_commit(commit, "the snapshot's commit")
+            rows: List[List[Value]] = []
             for e in entries:
                 k, key, id = self._pinned(e.kind, e.entity_key, e.entity_id)
-                self._run(
-                    f"INSERT INTO {self._a.tables.snapshot} "
-                    "(id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version) "
-                    "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    [_new_id(), self._a.graph, commit, k.name, key, id, e.entity_version],
-                )
+                rows.append([_new_id(), k.name, key, id, e.entity_version])
+            self._insert_rows(
+                f"INSERT INTO {self._a.tables.snapshot} "
+                "(graph, commit_id, id, entity_kind, entity_key, entity_id, entity_version)",
+                "",
+                [self._a.graph, commit],
+                rows,
+            )
 
     def commits(self) -> List[CommitNode]:
         with _context("read the commits"):
@@ -1458,11 +1489,14 @@ class _SqliteTx:
                 f"DELETE FROM {released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3",
                 [self._a.graph, k.name, write.root],
             )
-        for entity_key in write.delete:
+        for start in range(0, len(write.delete), _BATCH_ROWS):
+            keys = list(write.delete[start : start + _BATCH_ROWS])
+            listed = ", ".join(f"?{i + 4}" for i in range(len(keys)))
             self._run(
-                f"DELETE FROM {released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key = ?4",
-                [self._a.graph, k.name, write.root, entity_key],
+                f"DELETE FROM {released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key IN ({listed})",
+                [self._a.graph, k.name, write.root, *keys],
             )
+        rows: List[List[Value]] = []
         for row in write.upsert:
             parsed = loads(row)
             if not isinstance(parsed, dict):
@@ -1478,12 +1512,16 @@ class _SqliteTx:
                 if column in parsed:
                     with _context(f"column {column}"):
                         data[column] = canonical_of(k.columns[column], parsed[column])
-            self._run(
-                f"INSERT INTO {released} (graph, kind, root_id, entity_key, commit_id, sequence, data) "
-                "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET "
-                "commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data",
-                [self._a.graph, k.name, write.root, key, write.commit, write.sequence, _write_object(data)],
-            )
+            rows.append([key, _write_object(data)])
+        # SQLite inserts a VALUES list a row at a time, so a key the list
+        # repeats takes its last row, as one statement a row did.
+        self._insert_rows(
+            f"INSERT INTO {released} (graph, kind, root_id, commit_id, sequence, entity_key, data)",
+            " ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET "
+            "commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data",
+            [self._a.graph, k.name, write.root, write.commit, write.sequence],
+            rows,
+        )
 
     def discarded_refs(self, grace: timedelta) -> List[Ref]:
         return self._refs(

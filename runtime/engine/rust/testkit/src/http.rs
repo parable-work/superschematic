@@ -499,6 +499,8 @@ pub(crate) fn exchange(run: &mut Run<'_>, step: &Value) -> Result<Outcome, Strin
             if let Some(now) = step.get("now").and_then(Value::as_i64) {
                 engine.clock().set(now).map_err(|error| error.to_string())?;
             }
+        } else {
+            run.hold_apart(Some(&engine));
         }
         engine
     };

@@ -18,7 +18,7 @@ export function maskSecretsReviewCommentsMessages(value: ReviewCommentsMessages)
     author: value.author !== undefined ? value.author : null,
     forSubject: value.forSubject !== undefined ? value.forSubject : null,
     state: value.state !== undefined ? value.state : null,
-    body: value.body !== undefined ? value.body : null,
+    body: value.body,
     blocks: value.blocks,
     mentions: value.mentions,
     createdAt: value.createdAt,

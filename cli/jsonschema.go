@@ -8,11 +8,14 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/tasks"
 )
 
 // jsonSchemaFlags holds one json-schema command's flag values.
 type jsonSchemaFlags struct {
 	config     bool
+	taskFile   bool
+	taskPlan   bool
 	namingPath string
 }
 
@@ -31,13 +34,20 @@ decorator names fail validation.
 
 With --config, prints the JSON Schema for the schema.config.json and
 schema.config.yaml service configuration forms instead (generated from
-@superschematic/schema-config).`,
+@superschematic/schema-config).
+
+With --task-file, prints the JSON Schema of the task file a Tasks
+service's build writes, and with --task-plan that of the plan the tasks
+plan command prints. A reader in another language generates its types from them.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runJSONSchema(cmd, a, flags)
 		},
 	}
 	cmd.Flags().BoolVar(&flags.config, "config", false, "emit the schema.config.{json,yaml} JSON Schema instead")
+	cmd.Flags().BoolVar(&flags.taskFile, "task-file", false, "emit the JSON Schema of the task file a Tasks service's build writes instead")
+	cmd.Flags().BoolVar(&flags.taskPlan, "task-plan", false, "emit the JSON Schema of the plan `tasks plan` prints instead")
+	cmd.MarkFlagsMutuallyExclusive("config", "task-file", "task-plan")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names; json-schema has no service directory to find superschematic.toml from)")
 	return cmd
 }
@@ -45,6 +55,17 @@ schema.config.yaml service configuration forms instead (generated from
 func runJSONSchema(cmd *cobra.Command, a *app, flags *jsonSchemaFlags) error {
 	if flags.config {
 		_, _ = fmt.Fprint(cmd.OutOrStdout(), string(schemaconfig.Definition()))
+		return nil
+	}
+	// The task file's and the plan's shapes are the public tasks
+	// package's (D203): a reader in another language generates its types
+	// from these, so nobody writes a mirror by hand.
+	if flags.taskFile {
+		_, _ = cmd.OutOrStdout().Write(tasks.FileSchema())
+		return nil
+	}
+	if flags.taskPlan {
+		_, _ = cmd.OutOrStdout().Write(tasks.PlanSchema())
 		return nil
 	}
 	// The same registry build threads through the loader and generators;

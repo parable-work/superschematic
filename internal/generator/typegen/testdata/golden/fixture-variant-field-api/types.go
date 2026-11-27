@@ -171,7 +171,7 @@ func mapFromYAMLValue(data []byte) (map[string]any, error) {
 type CreateStepInput struct {
 	Title string `json:"title"`
 
-	Kind StepKind `json:"kind"`
+	Kind StepKind `json:"kind,omitzero"`
 
 	Result StepResult `json:"result,omitempty"`
 }
@@ -447,7 +447,7 @@ type StepView struct {
 
 	Title string `json:"title"`
 
-	Kind StepKind `json:"kind"`
+	Kind StepKind `json:"kind,omitzero"`
 
 	Result StepResult `json:"result,omitempty"`
 }

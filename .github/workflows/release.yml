@@ -37,7 +37,7 @@ name: release
 # records the commit too. assemble refuses a set whose binaries and archives
 # disagree on that commit, writes SHA256SUMS over every tarball, the two
 # CLIs' among them, packs the npm tarballs beside
-# the four addon packages, eighteen in all, @superschematic/engine naming the
+# the four addon packages, nineteen in all, @superschematic/engine naming the
 # addon packages as optional dependencies at the release's version, and
 # builds the PyPI sdist and wheel.
 # github-release attaches everything to a GitHub release with build provenance
@@ -139,6 +139,10 @@ jobs:
     permissions:
       contents: read
     uses: ./.github/workflows/ci.yml
+    # Said, not left to the input's default: ci.yml runs its quick tier for
+    # anything else, and a release must not pass on that.
+    with:
+      tier: full
 
   build-archives:
     name: build archives ${{ matrix.name }}
@@ -631,7 +635,7 @@ jobs:
           for target in "${addons[@]}"; do
             optional+=("optionalDependencies.@superschematic/engine-${target}=$VERSION")
           done
-          for pkg in schema db api schema-config stack memory-store; do
+          for pkg in schema db api schema-config stack memory-store tasks; do
             (cd "packages/$pkg" && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           done
           (cd ir/typescript && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
@@ -645,7 +649,7 @@ jobs:
           (cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           (cd runtime/engine-commerce/typescript && bun install --frozen-lockfile && bun run build && npm pack --pack-destination "$GITHUB_WORKSPACE/release-assets/npm" >/dev/null)
           ls -l release-assets/npm
-          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 18
+          test "$(ls release-assets/npm/*.tgz | wc -l)" -eq 19
           python3 scripts/npm_local_specs.py release-assets/npm/*.tgz
 
       - name: Build the PyPI sdist and wheel
@@ -751,13 +755,14 @@ jobs:
   publish-npm:
     name: publish npm
     # Registration (npmjs.com -> package -> Settings -> Trusted Publisher, once
-    # per package; the eighteen exact names are
+    # per package; the nineteen exact names are
     #   @superschematic/schema
     #   @superschematic/db
     #   @superschematic/api
     #   @superschematic/schema-config
     #   @superschematic/stack
     #   @superschematic/memory-store
+    #   @superschematic/tasks
     #   @superschematic/schema-ir
     #   @superschematic/schema-runtime
     #   @superschematic/http-runtime
@@ -776,9 +781,9 @@ jobs:
     # The @superschematic scope is an organization on npmjs.com that must
     # exist and be owned by the publisher before RELEASE_PUBLISH_ENABLED is
     # set. npm only accepts a trusted publisher for a package that already
-    # exists, so the first version of each of the eighteen is published by
+    # exists, so the first version of each of the nineteen is published by
     # hand, and a new entry expires unless it publishes within two days:
-    # register the eighteen no more than two days before the first tag that
+    # register the nineteen no more than two days before the first tag that
     # publishes. npm generates provenance on its own for trusted publishing.
     # Pre-releases go to the `next` dist-tag, releases to `latest`.
     needs: [preflight, github-release]
@@ -809,7 +814,7 @@ jobs:
           name: release-assets
           path: release-assets
 
-      - name: Publish the eighteen packages
+      - name: Publish the nineteen packages
         # The tarballs are the attested release assets, byte for byte. Order:
         # @superschematic/schema first, since the other authoring packages
         # name it in their docs, @superschematic/stack after it and
@@ -819,7 +824,7 @@ jobs:
         # four addon packages, its optional dependencies at the release's
         # version, which an install that finds none skips, and the engine's
         # work-queue and commerce packages last, after the engine, their
-        # peer; no other package of the eighteen depends on another at
+        # peer; no other package of the nineteen depends on another at
         # install time.
         env:
           DIST_TAG: ${{ needs.preflight.outputs.npm_dist_tag }}
@@ -830,7 +835,7 @@ jobs:
           npm --version
           node -e 'const [maj, min, pat] = process.versions.npm.split(".").map(Number); if (maj < 11 || (maj === 11 && (min < 5 || (min === 5 && pat < 1)))) { console.error("npm >= 11.5.1 is required for trusted publishing"); process.exit(1); }'
           cd release-assets/npm
-          for name in schema db api schema-config stack memory-store schema-ir schema-runtime http-runtime versiongraph rules \
+          for name in schema db api schema-config stack memory-store tasks schema-ir schema-runtime http-runtime versiongraph rules \
             engine-darwin-arm64 engine-darwin-x64 engine-linux-x64-gnu engine-linux-arm64-gnu engine engine-workqueue engine-commerce; do
             tgz="superschematic-${name}-${VERSION}.tgz"
             echo "==> $tgz"

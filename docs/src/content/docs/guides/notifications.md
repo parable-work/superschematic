@@ -25,7 +25,7 @@ person who sent it.
 | replies by reference, trust per channel kind, echo and undo, and the audit | |
 | verifying an address by a code, and password reset by email | the dispatch queue drained on Workers over D1 |
 
-D153 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
+[D153](https://github.com/parable-work/superschematic/issues/602)
 records the design and what is left. `examples/notifications` is the
 worked example this page quotes.
 
@@ -148,7 +148,10 @@ Each recipient gets a notice in the inbox, numbered among their own
 (`#142`), and a delivery on the first channel their preferences name. A
 preference row maps an event kind and an urgency (each or `*`) to channel
 kinds in order, quiet hours, a time zone and a digest rule. A row with no
-principal is the default, seed data the app writes.
+principal is the default, seed data the app writes. `quietStart` and
+`quietEnd` are `Temporal.Time`, `timeZone` is a `Temporal.TimeZone` and
+`digest` is a `Temporal.RecurrenceRule`, so a write that names no time of
+day, zone or rule is refused.
 
 ```ts
 await orm.asSystem().noticePreference.createOne({

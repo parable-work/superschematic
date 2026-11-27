@@ -26,7 +26,7 @@ stop switch ends every run in flight.
 | the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres | |
 | the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres | |
 
-D158 and D183 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
+[D158](https://github.com/parable-work/superschematic/issues/607) and [D183](https://github.com/parable-work/superschematic/issues/612)
 record the design and what is left. `examples/agent-orchestration` is
 the worked example this page quotes.
 

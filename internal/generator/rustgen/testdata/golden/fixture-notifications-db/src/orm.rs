@@ -871,18 +871,18 @@ pub struct NoticePreferenceRow {
     pub urgency: String,
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     pub channels: Vec<String>,
-    /// When quiet hours start, HH:MM in the time zone; null for none.
+    /// When quiet hours start, a time of day in the time zone; null for none.
     #[serde(default, rename = "quietStart")]
-    pub quiet_start: Option<String>,
-    /// When they end, HH:MM.
+    pub quiet_start: Option<TemporalTime>,
+    /// When they end.
     #[serde(default, rename = "quietEnd")]
-    pub quiet_end: Option<String>,
+    pub quiet_end: Option<TemporalTime>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null.
     #[serde(default, rename = "timeZone")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once.
     #[serde(default)]
-    pub digest: Option<String>,
+    pub digest: Option<TemporalRecurrenceRule>,
 }
 
 /// What a create of a row of `NoticePreference` sets; a member left unset takes its
@@ -902,18 +902,18 @@ pub struct NoticePreferenceCreate {
     pub urgency: Option<String>,
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     pub channels: Vec<String>,
-    /// When quiet hours start, HH:MM in the time zone; null for none.
+    /// When quiet hours start, a time of day in the time zone; null for none.
     #[serde(rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<String>,
-    /// When they end, HH:MM.
+    pub quiet_start: Option<TemporalTime>,
+    /// When they end.
     #[serde(rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<String>,
+    pub quiet_end: Option<TemporalTime>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null.
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
+    pub digest: Option<TemporalRecurrenceRule>,
 }
 
 /// What an update of a row of `NoticePreference` sets: each member that is `Some`.
@@ -931,18 +931,18 @@ pub struct NoticePreferenceUpdate {
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channels: Option<Vec<String>>,
-    /// When quiet hours start, HH:MM in the time zone; null for none. `Some(None)` sets the column NULL.
+    /// When quiet hours start, a time of day in the time zone; null for none. `Some(None)` sets the column NULL.
     #[serde(rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<Option<String>>,
-    /// When they end, HH:MM. `Some(None)` sets the column NULL.
+    pub quiet_start: Option<Option<TemporalTime>>,
+    /// When they end. `Some(None)` sets the column NULL.
     #[serde(rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<Option<String>>,
+    pub quiet_end: Option<Option<TemporalTime>>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null. `Some(None)` sets the column NULL.
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<Option<String>>,
+    pub time_zone: Option<Option<TemporalTimeZone>>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once. `Some(None)` sets the column NULL.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<Option<String>>,
+    pub digest: Option<Option<TemporalRecurrenceRule>>,
 }
 
 /// The rows of `NoticePreference` a read or a write finds: each member set is one
@@ -958,13 +958,13 @@ pub struct NoticePreferenceFilter {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub urgency: Option<orm::Text<String>>,
     #[serde(rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<orm::Text<String>>,
+    pub quiet_start: Option<orm::Text<TemporalTime>>,
     #[serde(rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<orm::Text<String>>,
+    pub quiet_end: Option<orm::Text<TemporalTime>>,
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<orm::Text<String>>,
+    pub time_zone: Option<orm::Text<TemporalTimeZone>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<orm::Text<String>>,
+    pub digest: Option<orm::Text<TemporalRecurrenceRule>>,
     /// The rows every one of the filters finds, beside the other members (D99).
     #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
     pub all_of: Vec<NoticePreferenceFilter>,
@@ -1456,12 +1456,12 @@ pub struct SubscriptionRow {
     #[serde(default, rename = "titleField")]
     pub title_field: Option<String>,
     /// The RRULE it goes out on (D152).
-    pub rule: String,
+    pub rule: TemporalRecurrenceRule,
     /// The wall date-time the rule starts from: 2026-01-05T08:00.
     pub start: String,
     /// The IANA time zone the rule is read in.
     #[serde(rename = "timeZone")]
-    pub time_zone: String,
+    pub time_zone: TemporalTimeZone,
     /// The channel kinds it goes out on.
     pub channels: Vec<String>,
     /// Whether it goes out.
@@ -1496,12 +1496,12 @@ pub struct SubscriptionCreate {
     #[serde(rename = "titleField", skip_serializing_if = "Option::is_none")]
     pub title_field: Option<String>,
     /// The RRULE it goes out on (D152).
-    pub rule: String,
+    pub rule: TemporalRecurrenceRule,
     /// The wall date-time the rule starts from: 2026-01-05T08:00.
     pub start: String,
     /// The IANA time zone the rule is read in.
     #[serde(rename = "timeZone")]
-    pub time_zone: String,
+    pub time_zone: TemporalTimeZone,
     /// The channel kinds it goes out on.
     pub channels: Vec<String>,
     /// Whether it goes out.
@@ -1535,13 +1535,13 @@ pub struct SubscriptionUpdate {
     pub title_field: Option<Option<String>>,
     /// The RRULE it goes out on (D152).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rule: Option<String>,
+    pub rule: Option<TemporalRecurrenceRule>,
     /// The wall date-time the rule starts from: 2026-01-05T08:00.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<String>,
     /// The IANA time zone the rule is read in.
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// The channel kinds it goes out on.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channels: Option<Vec<String>>,
@@ -1573,11 +1573,11 @@ pub struct SubscriptionFilter {
     #[serde(rename = "titleField", skip_serializing_if = "Option::is_none")]
     pub title_field: Option<orm::Text<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub rule: Option<orm::Text<String>>,
+    pub rule: Option<orm::Text<TemporalRecurrenceRule>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<orm::Text<String>>,
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<orm::Text<String>>,
+    pub time_zone: Option<orm::Text<TemporalTimeZone>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enabled: Option<orm::Equals<bool>>,
     #[serde(rename = "nextAt", skip_serializing_if = "Option::is_none")]

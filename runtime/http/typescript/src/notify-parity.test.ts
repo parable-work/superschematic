@@ -40,6 +40,10 @@ const quiet: { at: string; zone: string; start: string | null; end: string | nul
   { at: '2027-03-10T13:00:00Z', zone: 'UTC', start: '12:00', end: '13:00' },
   { at: '2027-03-10T12:00:00Z', zone: 'UTC', start: '9:00', end: 'noon' },
   { at: '2027-07-01T03:15:10Z', zone: 'America/New_York', start: '22:00', end: '07:00' },
+  // The HH:MM:SS a Temporal.Time is stored as.
+  { at: '2027-03-10T23:30:00Z', zone: 'UTC', start: '22:00:00', end: '07:00:00' },
+  { at: '2027-03-10T12:00:42Z', zone: 'UTC', start: '12:00:00', end: '13:00:00.5' },
+  { at: '2027-03-10T23:30:00Z', zone: 'UTC', start: '22:00:0', end: '07:00:00' },
 ];
 
 const trust: { held: string[]; cap: string[] | null; need: string }[] = [

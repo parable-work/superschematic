@@ -36,7 +36,7 @@ func newInitCmd(a *app) *cobra.Command {
 		Use:   "init [<schemas-root>]",
 		Short: "Write a schemas root: the naming file, the base tsconfig, the ignore rules and services/",
 		Long: `init writes a schemas root, the directory every other command reads
-(docs/DECISIONS.md, D71):
+(D71):
 
   superschematic.toml  go_module_root and npm_scope, and a [paths] table
                        that points the generated packages' path
@@ -157,7 +157,7 @@ func runInit(cmd *cobra.Command, flags *initFlags, schemasRoot string) error {
 		rootFlag = " --root " + displayPath(schemasRoot)
 	}
 	b.WriteString("\nNext, add a service:\n")
-	fmt.Fprintf(&b, "  superschematic new service <name> --kind DB|API|General|Bucket|Site|MemoryStore%s\n", rootFlag)
+	fmt.Fprintf(&b, "  superschematic new service <name> --kind DB|API|General|Bucket|Site|MemoryStore|Tasks%s\n", rootFlag)
 	_, _ = io.WriteString(out, b.String())
 	return nil
 }

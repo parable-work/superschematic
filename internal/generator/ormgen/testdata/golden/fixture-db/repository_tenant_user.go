@@ -672,10 +672,12 @@ func (r *TenantUserRepository) GetOne(ctx context.Context, id types.IdentityUUID
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple TenantUser records by their IDs in a single query
+// GetManyByIDs retrieves multiple TenantUser records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *TenantUserRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.TenantUser, error) {
+	resultMap := make(map[types.IdentityUUID]*types.TenantUser, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.TenantUser{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -687,7 +689,22 @@ func (r *TenantUserRepository) GetManyByIDs(ctx context.Context, ids []types.Ide
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *TenantUserRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.TenantUser, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -769,7 +786,6 @@ func (r *TenantUserRepository) GetManyByIDs(ctx context.Context, ids []types.Ide
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -2115,7 +2131,9 @@ func (r *TenantUserRepository) heldOfKey(ctx context.Context, on TenantUserUniqu
 	return row, nil
 }
 
-// CreateMany inserts multiple TenantUser records in a single statement
+// CreateMany inserts multiple TenantUser records and returns them in the
+// inputs' order: a statement of at most 13106 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *TenantUserRepository) CreateMany(ctx context.Context, inputs []*types.TenantUser) ([]*types.TenantUser, error) {
 	if len(inputs) == 0 {
 		return []*types.TenantUser{}, nil
@@ -2180,18 +2198,40 @@ func (r *TenantUserRepository) CreateMany(ctx context.Context, inputs []*types.T
 		}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 13106 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.TenantUser, error) {
+		return (&TenantUserRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"created_at", "updated_at", "id", "tenant_id", "display_name", "deleted_at", "deleted_by", "_version"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 13106 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *TenantUserRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.TenantUser, error) {
+	results := make([]*types.TenantUser, 0, len(batch))
+	for start := 0; start < len(batch); start += 13106 {
+		created, err := r.createBatch(ctx, batch[start:min(start+13106, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *TenantUserRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.TenantUser, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO tenant_user (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"created_at", "updated_at", "id", "tenant_id", "display_name", "deleted_at", "deleted_by", "_version"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -2203,58 +2243,17 @@ func (r *TenantUserRepository) CreateMany(ctx context.Context, inputs []*types.T
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.TenantUser{}
+	results := make([]*types.TenantUser, 0, len(batch))
 	for rows.Next() {
-		result := &types.TenantUser{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		var tempDisplayName sql.NullString
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		var tempRelTenant *types.IdentityUUID
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.CreatedAt,
-
-			&result.UpdatedAt,
-
-			&result.Id,
-
-			&tempRelTenant,
-
-			&tempDisplayName,
-
-			&result.DeletedAt,
-
-			&result.DeletedBy,
-
-			&result.Version,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		if tempDisplayName.Valid {
-			result.DisplayName = tempDisplayName.String
-		}
-
-		// Set relationship IDs from scanned FK values
-		if tempRelTenant != nil {
-			result.Tenant.Id = tenantUserUUIDPtr(*tempRelTenant)
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

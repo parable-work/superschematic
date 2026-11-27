@@ -8,6 +8,10 @@
 package registry
 
 import (
+	"fmt"
+	"maps"
+	"slices"
+
 	ir "github.com/parable-work/superschematic/ir"
 
 	scalars "github.com/parable-work/superscalar/go"
@@ -284,6 +288,39 @@ type (
 	APIOutputConfig    = registry.APIOutputConfig
 )
 
+// The Tasks kind's seams (D203). An input resolver (TaskResolverSpec) turns
+// one kind of input into tracked files of a commit, which it reads through
+// a TaskTree: it gets a TaskResolveRequest and returns a TaskResolution,
+// whose TaskGeneratedPaths are the paths a manifest names and the commit
+// does not hold. A task section (TaskSectionSpec) is a part of the task
+// file that one forge owns: the core checks it against the section's
+// schemas, hands its Verify a TaskSectionRequest, and copies it.
+type (
+	TaskResolverSpec   = registry.TaskResolverSpec
+	TaskResolveRequest = registry.TaskResolveRequest
+	TaskResolution     = registry.TaskResolution
+	TaskGeneratedPath  = registry.TaskGeneratedPath
+	TaskTree           = registry.TaskTree
+	TaskTreeEntry      = registry.TaskTreeEntry
+	TaskSectionSpec    = registry.TaskSectionSpec
+	TaskSectionRequest = registry.TaskSectionRequest
+	TaskPathSpec       = registry.TaskPathSpec
+)
+
+// TaskEntriesUnder returns the entries of a tree's sorted list that are
+// dir or sit under it, and MatchTaskPaths the paths of a tree's entries a
+// pattern covers; see internal/registry. A resolver reads a commit with
+// them.
+func TaskEntriesUnder(entries []TaskTreeEntry, dir string) []TaskTreeEntry {
+	return registry.TaskEntriesUnder(entries, dir)
+}
+
+// MatchTaskPaths returns the paths of the tree's entries that pattern
+// covers.
+func MatchTaskPaths(tree TaskTree, pattern string) []string {
+	return registry.MatchTaskPaths(tree, pattern)
+}
+
 const (
 	TargetType         = registry.TargetType
 	TargetField        = registry.TargetField
@@ -413,6 +450,17 @@ func Assemble(n Naming, exts ...Extension) (*Registry, error) {
 			if err := reg.RegisterBehavior(spec); err != nil {
 				return nil, err
 			}
+		}
+	}
+	// The task sections the naming file registers as data (D203): a forge
+	// with no extension names the JSON Schemas of its section's two parts.
+	for _, name := range slices.Sorted(maps.Keys(n.Tasks.Sections)) {
+		file, task, loaded := n.Tasks.Sections[name].Schemas()
+		if !loaded {
+			return nil, fmt.Errorf("registry: [tasks.sections.%s] names schema files, and this naming was read from no file to find them beside", name)
+		}
+		if err := reg.RegisterTaskSection(TaskSectionSpec{Name: name, File: file, Task: task}); err != nil {
+			return nil, err
 		}
 	}
 	if err := reg.Finalize(); err != nil {

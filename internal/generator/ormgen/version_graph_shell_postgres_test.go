@@ -923,6 +923,28 @@ func TestVersionGraphShellOnPostgres(t *testing.T) {
 			t.Fatalf("history[%d] = %v, want %v", i, *commit.Id, wantHistory[i])
 		}
 	}
+	// The bake step's history is the line's commits that changed it, in
+	// History's order: the revert's ADD, the delete, and the first ADD.
+	bakeHistory, err := g.EntityHistory(ctx, *recipe.Id, types.RecipeEntityKind_Step, *bake.EntityKey)
+	if err != nil {
+		t.Fatalf("EntityHistory of bake: %v", err)
+	}
+	wantBake := []struct {
+		commit    types.IdentityUUID
+		operation types.RecipePatchOperation
+	}{
+		{*reverted.Commit.Id, types.RecipePatchOperation_Add},
+		{*noBake.Commit.Id, types.RecipePatchOperation_Delete},
+		{*c1.Id, types.RecipePatchOperation_Add},
+	}
+	if len(bakeHistory) != len(wantBake) {
+		t.Fatalf("bake has %d changes, want %d: %+v", len(bakeHistory), len(wantBake), bakeHistory)
+	}
+	for i, change := range bakeHistory {
+		if *change.Commit.Id != wantBake[i].commit || change.Operation != wantBake[i].operation {
+			t.Fatalf("bake's change %d = %v %s, want %v %s", i, *change.Commit.Id, change.Operation, wantBake[i].commit, wantBake[i].operation)
+		}
+	}
 
 	// Pruning with a retention every row is past keeps the rows commits
 	// pin, so every commit still materializes to the hash it recorded. An

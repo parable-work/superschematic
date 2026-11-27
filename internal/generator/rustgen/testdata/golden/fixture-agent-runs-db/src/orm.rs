@@ -314,7 +314,7 @@ pub struct AgentApprovalRow {
     pub params: GenericJSON,
     /// The SHA-256 of the operation and its parameters as canonical JSON: a call with any other parameter asks again.
     #[serde(rename = "paramsHash")]
-    pub params_hash: String,
+    pub params_hash: CryptoSHA256,
     /// The permission an approver holds.
     pub permission: String,
     /// pending, approved, denied, used or superseded.
@@ -363,7 +363,7 @@ pub struct AgentApprovalCreate {
     pub params: GenericJSON,
     /// The SHA-256 of the operation and its parameters as canonical JSON: a call with any other parameter asks again.
     #[serde(rename = "paramsHash")]
-    pub params_hash: String,
+    pub params_hash: CryptoSHA256,
     /// The permission an approver holds.
     pub permission: String,
     /// pending, approved, denied, used or superseded.
@@ -414,7 +414,7 @@ pub struct AgentApprovalUpdate {
     pub params: Option<GenericJSON>,
     /// The SHA-256 of the operation and its parameters as canonical JSON: a call with any other parameter asks again.
     #[serde(rename = "paramsHash", skip_serializing_if = "Option::is_none")]
-    pub params_hash: Option<String>,
+    pub params_hash: Option<CryptoSHA256>,
     /// The permission an approver holds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission: Option<String>,
@@ -462,7 +462,7 @@ pub struct AgentApprovalFilter {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<orm::Equals<GenericJSON>>,
     #[serde(rename = "paramsHash", skip_serializing_if = "Option::is_none")]
-    pub params_hash: Option<orm::Text<String>>,
+    pub params_hash: Option<orm::Text<CryptoSHA256>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub permission: Option<orm::Text<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -2691,18 +2691,18 @@ pub struct NoticePreferenceRow {
     pub urgency: String,
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     pub channels: Vec<String>,
-    /// When quiet hours start, HH:MM in the time zone; null for none.
+    /// When quiet hours start, a time of day in the time zone; null for none.
     #[serde(default, rename = "quietStart")]
-    pub quiet_start: Option<String>,
-    /// When they end, HH:MM.
+    pub quiet_start: Option<TemporalTime>,
+    /// When they end.
     #[serde(default, rename = "quietEnd")]
-    pub quiet_end: Option<String>,
+    pub quiet_end: Option<TemporalTime>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null.
     #[serde(default, rename = "timeZone")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once.
     #[serde(default)]
-    pub digest: Option<String>,
+    pub digest: Option<TemporalRecurrenceRule>,
 }
 
 /// What a create of a row of `NoticePreference` sets; a member left unset takes its
@@ -2722,18 +2722,18 @@ pub struct NoticePreferenceCreate {
     pub urgency: Option<String>,
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     pub channels: Vec<String>,
-    /// When quiet hours start, HH:MM in the time zone; null for none.
+    /// When quiet hours start, a time of day in the time zone; null for none.
     #[serde(rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<String>,
-    /// When they end, HH:MM.
+    pub quiet_start: Option<TemporalTime>,
+    /// When they end.
     #[serde(rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<String>,
+    pub quiet_end: Option<TemporalTime>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null.
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
+    pub digest: Option<TemporalRecurrenceRule>,
 }
 
 /// What an update of a row of `NoticePreference` sets: each member that is `Some`.
@@ -2751,18 +2751,18 @@ pub struct NoticePreferenceUpdate {
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub channels: Option<Vec<String>>,
-    /// When quiet hours start, HH:MM in the time zone; null for none. `Some(None)` sets the column NULL.
+    /// When quiet hours start, a time of day in the time zone; null for none. `Some(None)` sets the column NULL.
     #[serde(rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<Option<String>>,
-    /// When they end, HH:MM. `Some(None)` sets the column NULL.
+    pub quiet_start: Option<Option<TemporalTime>>,
+    /// When they end. `Some(None)` sets the column NULL.
     #[serde(rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<Option<String>>,
+    pub quiet_end: Option<Option<TemporalTime>>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null. `Some(None)` sets the column NULL.
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<Option<String>>,
+    pub time_zone: Option<Option<TemporalTimeZone>>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once. `Some(None)` sets the column NULL.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<Option<String>>,
+    pub digest: Option<Option<TemporalRecurrenceRule>>,
 }
 
 /// The rows of `NoticePreference` a read or a write finds: each member set is one
@@ -2778,13 +2778,13 @@ pub struct NoticePreferenceFilter {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub urgency: Option<orm::Text<String>>,
     #[serde(rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<orm::Text<String>>,
+    pub quiet_start: Option<orm::Text<TemporalTime>>,
     #[serde(rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<orm::Text<String>>,
+    pub quiet_end: Option<orm::Text<TemporalTime>>,
     #[serde(rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<orm::Text<String>>,
+    pub time_zone: Option<orm::Text<TemporalTimeZone>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub digest: Option<orm::Text<String>>,
+    pub digest: Option<orm::Text<TemporalRecurrenceRule>>,
     /// The rows every one of the filters finds, beside the other members (D99).
     #[serde(rename = "allOf", skip_serializing_if = "Vec::is_empty")]
     pub all_of: Vec<NoticePreferenceFilter>,

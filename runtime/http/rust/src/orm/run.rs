@@ -144,12 +144,49 @@ impl<C: Client> Runner<'_, C> {
         }
         let key = row.get(&self.table.key).cloned().unwrap_or(Value::Null);
         match self.require_reach(&key, true).await {
-            Err(Error::NotFound(_)) => Err(Error::AccessRefused(format!(
-                "{}: the row is not one the caller's grants reach",
-                self.table.name
-            ))),
+            Err(Error::NotFound(_)) => Err(self.unreached()),
             other => other,
         }
+    }
+
+    /// [`Self::require_created_reach`] of a batch create's rows: one read
+    /// per REACH_BATCH of their keys (`key IN (...)` and the caller's
+    /// access), not one per row, and the same refusal when any row is
+    /// not reached.
+    async fn require_created_reach_many(&self, rows: &[Values]) -> Result<(), Error> {
+        const REACH_BATCH: usize = 500;
+        let grants = self
+            .plan
+            .session
+            .access
+            .as_ref()
+            .is_some_and(|sees| sees.grants.is_some());
+        if !grants {
+            return Ok(());
+        }
+        let keys: Vec<Value> = rows
+            .iter()
+            .map(|row| row.get(&self.table.key).cloned().unwrap_or(Value::Null))
+            .collect();
+        for chunk in keys.chunks(REACH_BATCH) {
+            let reached: std::collections::HashSet<String> = self
+                .rows(&self.plan.reach_many(chunk, true)?, 0)
+                .await?
+                .iter()
+                .map(|(row, _)| row.get(&self.table.key).unwrap_or(&Value::Null).to_string())
+                .collect();
+            if chunk.iter().any(|key| !reached.contains(&key.to_string())) {
+                return Err(self.unreached());
+            }
+        }
+        Ok(())
+    }
+
+    fn unreached(&self) -> Error {
+        Error::AccessRefused(format!(
+            "{}: the row is not one the caller's grants reach",
+            self.table.name
+        ))
     }
 
     /// Refuses an upsert, `upsert_one` or `upsert_many`, of a table whose
@@ -266,9 +303,7 @@ impl<C: Client> Runner<'_, C> {
         for statement in self.plan.create_many(inputs)? {
             rows.extend(self.query(&statement).await?);
         }
-        for row in &rows {
-            self.require_created_reach(row).await?;
-        }
+        self.require_created_reach_many(&rows).await?;
         Ok(rows)
     }
 
