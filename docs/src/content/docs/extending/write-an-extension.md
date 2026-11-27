@@ -1310,6 +1310,12 @@ declaration the layout hands it. A composed behavior whose crate is not
 in the project leaves no core that can run the schema, and the build's log
 says why.
 
+A Rust server the build writes for an API over the schema runs on the
+same core. Its `src/behaviors.rs` builds the project's rules crate's
+`core()`, which its `Cargo.toml` depends on by path, or the stock core
+when the schema needs no crate. When the layout declares declarative
+behaviors, it adds them to that core.
+
 ## A deploy target
 
 A stack deploys a schema tree through a target, and the target's resources

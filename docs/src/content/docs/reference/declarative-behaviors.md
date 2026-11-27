@@ -294,8 +294,9 @@ A table may implement a declarative behavior as it implements one the core
 runs. Its layout document holds the behavior's declaration in
 `declarations`, and the TypeScript and Go repositories hand it to their
 core before they check the layout, so a generated ORM runs it with no step
-of yours. A generated Rust server builds its core with the core's
-behaviors alone, so it does not run one yet. A transcript of a declarative behavior's scenarios holds
+of yours. A generated Rust server builds its core with the layout's
+declarations too (`core_declaring`), so it runs one as they do. A
+transcript of a declarative behavior's scenarios holds
 its declaration files (`declarations`), which each adapter's replay hands
 its core first.
 

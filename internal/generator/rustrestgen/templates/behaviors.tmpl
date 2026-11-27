@@ -64,12 +64,13 @@ impl Behaviors {
 }
 {{- end }}
 
-/// The core with the behaviors superschematic-rules-behaviors registers,
+/// The core with the behaviors {{ .RulesCoreCrate }} registers{{ if .LayoutDeclares }}
+/// and the declarative ones RULES_LAYOUT declares (D103's step 5){{ end }},
 /// built once per process: a `Core` is `Send` and `Sync`, so one serves
 /// every request.
 fn core() -> &'static Core {
     static CORE: OnceLock<Core> = OnceLock::new();
-    CORE.get_or_init(superschematic_rules_behaviors::core)
+    CORE.get_or_init({{ .RulesCore }})
 }
 
 /// RULES_LAYOUT, read once per process.
