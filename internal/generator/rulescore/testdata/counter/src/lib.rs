@@ -15,7 +15,9 @@ impl Behavior for Counter {
     type Config = ();
 
     fn declaration(&self) -> Declaration {
-        Declaration::new(NAME).field("count").operation("bump", true)
+        Declaration::new(NAME)
+            .field("count")
+            .operation("bump", true)
     }
 
     fn parse_config(&self, _raw: &Value, _target: &ConfigTarget<'_>) -> Result<(), ConfigError> {
@@ -23,7 +25,11 @@ impl Behavior for Counter {
     }
 
     fn operation(&self, cx: &Cx<'_, ()>, _name: &str, _params: &Value) -> Hook<Value> {
-        let count = cx.get("count").and_then(|value| value.as_i64()).unwrap_or(0) + 1;
+        let count = cx
+            .get("count")
+            .and_then(|value| value.as_i64())
+            .unwrap_or(0)
+            + 1;
         cx.set("count", json!(count))?;
         Ok(json!({ "count": count }))
     }

@@ -81,8 +81,8 @@ func CheckConfigPath(configSchema json.RawMessage, path string) error {
 		for _, s := range at {
 			for _, branch := range schemaBranches(s) {
 				m, _ := branch.(map[string]any)
-				switch {
-				case segment == "*":
+				switch segment {
+				case "*":
 					if values, ok := m["additionalProperties"].(map[string]any); ok {
 						next = append(next, values)
 					}
