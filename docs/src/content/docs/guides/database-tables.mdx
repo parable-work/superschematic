@@ -1335,7 +1335,9 @@ The types and the refusals (`rowrefs.Error` and its `Code`) are the
 schema runtime's `rowrefs` package; `bucket.ForAttachments` of the HTTP
 runtime is a listed bucket as the ORM reads it. A Go server serves
 neither as routes yet, as the TypeScript server does not: the
-implementation writes its routes over them.
+implementation writes its routes over them. They run on Postgres alone:
+on SQLite each call answers `ErrSQLiteUnsupported`
+([Go on SQLite](#go-on-sqlite)).
 
 ## State machines
 
@@ -2238,6 +2240,9 @@ lists `sqlite` and enables the Go types for an `@audience`,
 `@accessGrants`, `@accessLog`, `@references` or `@attachments` table,
 naming the decorator and the table
 ([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)).
+The SQLite database and its transactions carry `References()` and
+`Attachments()` (D184), which a table's `Comments` gives a database too,
+and each of their calls answers `ErrSQLiteUnsupported`.
 
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
