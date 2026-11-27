@@ -2013,7 +2013,12 @@ characters, once. `grantAuthenticator({ orm, inner })` runs a request that
 presents one as the holder, with the role's permissions and the grant's
 reach, and hands every other request to `inner`. It reads the grant on
 every call, so a grant that ended or that `revokeGrant` revoked is the 401
-of the very next call. `activeGrants(orm, { holder?, targetType?,
+of the very next call. A grant an agent run holds is the run's token,
+which it answers 401 too: only the agent dispatcher's
+`agents.authenticator(inner)` resolves it, narrowed to whom the run acts
+for and held to its autonomy
+([agent runs](/superschematic/guides/agent-runs/#the-runs-token)).
+`activeGrants(orm, { holder?, targetType?,
 targetId? })` lists the grants active now.
 
 A party's or an agent run's reads and writes keep to the rows its grants
