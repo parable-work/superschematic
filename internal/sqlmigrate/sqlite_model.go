@@ -24,9 +24,10 @@ import (
 // BEFORE UPDATE trigger does (sqliteBumpTrigger). A @stateMachine's guard
 // (D118) is one trigger whose WHEN is the machine's rule and whose body
 // fails the write, and a @fenced counter's (D119) is one of the same form.
-// The model refuses what SQLite has no form of (D27), naming the feature:
-// @versioned, projections, GIN and GIST indexes, and types it has no
-// storage for.
+// A @versioned table's history is a table its row triggers fill (D189,
+// sqlite_history.go). The model refuses what SQLite has no form of (D27),
+// naming the feature: a history's retention, pins and partitions,
+// projections, GIN and GIST indexes, and types it has no storage for.
 func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, error) {
 	m := &Model{Version: ModelVersion, Dialect: SQLite, Service: opts.SchemaName}
 	out, err := sqlgen.Generate(schema, opts)
@@ -83,6 +84,26 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	}
 	if err := errors.Join(errs...); err != nil {
 		return nil, err
+	}
+	// A @versioned table's history and the triggers that keep it (D189).
+	for _, h := range out.HistoryTables {
+		var source *Table
+		for _, t := range m.Tables {
+			if t.Name == h.SourceTableName {
+				source = t
+			}
+		}
+		if source == nil {
+			return nil, fmt.Errorf("sqlmigrate: the history %s has no table %s", h.Name, h.SourceTableName)
+		}
+		source.History = h.Name
+		source.HistoryExclude = append([]string(nil), h.ExcludedColumns...)
+		history, err := sqliteHistoryTable(h, types[h.SourceTableName], ns)
+		if err != nil {
+			return nil, err
+		}
+		m.Tables = append(m.Tables, history)
+		m.Triggers = append(m.Triggers, sqliteHistoryTriggers(h, source)...)
 	}
 	for _, o := range out.OptimisticTables {
 		m.Triggers = append(m.Triggers, &Trigger{Name: o.TriggerName, Table: o.TableName, Definition: sqliteBumpTrigger(o), Origin: types[o.TableName]})
@@ -219,7 +240,7 @@ func sqliteRefusals(out *sqlgen.DDLOutput, types map[string]string) error {
 		}
 	}
 	for _, h := range out.HistoryTables {
-		refuse("%s is @versioned", types[h.SourceTableName])
+		sqliteHistoryRefusals(h, types[h.SourceTableName], refuse)
 	}
 	for _, view := range out.Projections {
 		refuse("%s is a projection (%s.%s)", view.TypeName, view.Pool, view.Name)
