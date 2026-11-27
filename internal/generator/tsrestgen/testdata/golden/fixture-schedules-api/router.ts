@@ -183,6 +183,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-schedules-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-schedules-api', options);
@@ -204,9 +211,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemSchedulesCancelScheduleResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.schedulesCancelSchedule,
-      rateLimitPerMinute: options.rateLimits?.schedulesCancelSchedule,
-      timeoutSeconds: options.timeouts?.schedulesCancelSchedule,
+      bodyLimitBytes: bodyLimits.schedulesCancelSchedule,
+      rateLimitPerMinute: rateLimits.schedulesCancelSchedule,
+      timeoutSeconds: timeouts.schedulesCancelSchedule,
     }
   );
   // Problem's Schedules listSchedules, a Schedules (D103): the
@@ -228,9 +235,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemSchedulesListSchedulesResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.schedulesListSchedules,
-      rateLimitPerMinute: options.rateLimits?.schedulesListSchedules,
-      timeoutSeconds: options.timeouts?.schedulesListSchedules,
+      bodyLimitBytes: bodyLimits.schedulesListSchedules,
+      rateLimitPerMinute: rateLimits.schedulesListSchedules,
+      timeoutSeconds: timeouts.schedulesListSchedules,
     }
   );
   // Problem's Schedules pauseSchedule, a Schedules (D103): the
@@ -251,9 +258,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemSchedulesPauseScheduleResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.schedulesPauseSchedule,
-      rateLimitPerMinute: options.rateLimits?.schedulesPauseSchedule,
-      timeoutSeconds: options.timeouts?.schedulesPauseSchedule,
+      bodyLimitBytes: bodyLimits.schedulesPauseSchedule,
+      rateLimitPerMinute: rateLimits.schedulesPauseSchedule,
+      timeoutSeconds: timeouts.schedulesPauseSchedule,
     }
   );
   // Problem's Schedules reportRun, a Schedules (D103): the
@@ -275,9 +282,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemSchedulesReportRunResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.schedulesReportRun,
-      rateLimitPerMinute: options.rateLimits?.schedulesReportRun,
-      timeoutSeconds: options.timeouts?.schedulesReportRun,
+      bodyLimitBytes: bodyLimits.schedulesReportRun,
+      rateLimitPerMinute: rateLimits.schedulesReportRun,
+      timeoutSeconds: timeouts.schedulesReportRun,
     }
   );
   // Problem's Schedules resumeSchedule, a Schedules (D103): the
@@ -298,9 +305,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemSchedulesResumeScheduleResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.schedulesResumeSchedule,
-      rateLimitPerMinute: options.rateLimits?.schedulesResumeSchedule,
-      timeoutSeconds: options.timeouts?.schedulesResumeSchedule,
+      bodyLimitBytes: bodyLimits.schedulesResumeSchedule,
+      rateLimitPerMinute: rateLimits.schedulesResumeSchedule,
+      timeoutSeconds: timeouts.schedulesResumeSchedule,
     }
   );
   // Problem's Schedules setSchedule, a Schedules (D103): the
@@ -322,9 +329,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemSchedulesSetScheduleResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.schedulesSetSchedule,
-      rateLimitPerMinute: options.rateLimits?.schedulesSetSchedule,
-      timeoutSeconds: options.timeouts?.schedulesSetSchedule,
+      bodyLimitBytes: bodyLimits.schedulesSetSchedule,
+      rateLimitPerMinute: rateLimits.schedulesSetSchedule,
+      timeoutSeconds: timeouts.schedulesSetSchedule,
     }
   );
   // Problem's status transition, a Workflow (D103): the
@@ -346,9 +353,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<ProblemStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.statusTransition,
-      rateLimitPerMinute: options.rateLimits?.statusTransition,
-      timeoutSeconds: options.timeouts?.statusTransition,
+      bodyLimitBytes: bodyLimits.statusTransition,
+      rateLimitPerMinute: rateLimits.statusTransition,
+      timeoutSeconds: timeouts.statusTransition,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

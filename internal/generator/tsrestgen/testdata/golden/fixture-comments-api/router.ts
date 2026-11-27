@@ -302,6 +302,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-comments-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-comments-api', options);
@@ -323,9 +330,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsDeleteMessage,
-      rateLimitPerMinute: options.rateLimits?.commentsDeleteMessage,
-      timeoutSeconds: options.timeouts?.commentsDeleteMessage,
+      bodyLimitBytes: bodyLimits.commentsDeleteMessage,
+      rateLimitPerMinute: rateLimits.commentsDeleteMessage,
+      timeoutSeconds: timeouts.commentsDeleteMessage,
     }
   );
   // Ticket's Comments edit, a Comments (D103): the
@@ -347,9 +354,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsEdit,
-      rateLimitPerMinute: options.rateLimits?.commentsEdit,
-      timeoutSeconds: options.timeouts?.commentsEdit,
+      bodyLimitBytes: bodyLimits.commentsEdit,
+      rateLimitPerMinute: rateLimits.commentsEdit,
+      timeoutSeconds: timeouts.commentsEdit,
     }
   );
   // Ticket's Comments getMessage, a Comments (D103): the
@@ -370,9 +377,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsGetMessage,
-      rateLimitPerMinute: options.rateLimits?.commentsGetMessage,
-      timeoutSeconds: options.timeouts?.commentsGetMessage,
+      bodyLimitBytes: bodyLimits.commentsGetMessage,
+      rateLimitPerMinute: rateLimits.commentsGetMessage,
+      timeoutSeconds: timeouts.commentsGetMessage,
     }
   );
   // Ticket's Comments listEdits, a Comments (D103): the
@@ -394,9 +401,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsListEditsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsListEdits,
-      rateLimitPerMinute: options.rateLimits?.commentsListEdits,
-      timeoutSeconds: options.timeouts?.commentsListEdits,
+      bodyLimitBytes: bodyLimits.commentsListEdits,
+      rateLimitPerMinute: rateLimits.commentsListEdits,
+      timeoutSeconds: timeouts.commentsListEdits,
     }
   );
   // Ticket's Comments listMessages, a Comments (D103): the
@@ -418,9 +425,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsListMessagesResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsListMessages,
-      rateLimitPerMinute: options.rateLimits?.commentsListMessages,
-      timeoutSeconds: options.timeouts?.commentsListMessages,
+      bodyLimitBytes: bodyLimits.commentsListMessages,
+      rateLimitPerMinute: rateLimits.commentsListMessages,
+      timeoutSeconds: timeouts.commentsListMessages,
     }
   );
   // Ticket's Comments listPinned, a Comments (D103): the
@@ -442,9 +449,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsListPinnedResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsListPinned,
-      rateLimitPerMinute: options.rateLimits?.commentsListPinned,
-      timeoutSeconds: options.timeouts?.commentsListPinned,
+      bodyLimitBytes: bodyLimits.commentsListPinned,
+      rateLimitPerMinute: rateLimits.commentsListPinned,
+      timeoutSeconds: timeouts.commentsListPinned,
     }
   );
   // Ticket's Comments listReactions, a Comments (D103): the
@@ -466,9 +473,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsListReactionsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsListReactions,
-      rateLimitPerMinute: options.rateLimits?.commentsListReactions,
-      timeoutSeconds: options.timeouts?.commentsListReactions,
+      bodyLimitBytes: bodyLimits.commentsListReactions,
+      rateLimitPerMinute: rateLimits.commentsListReactions,
+      timeoutSeconds: timeouts.commentsListReactions,
     }
   );
   // Ticket's Comments pin, a Comments (D103): the
@@ -489,9 +496,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsPin,
-      rateLimitPerMinute: options.rateLimits?.commentsPin,
-      timeoutSeconds: options.timeouts?.commentsPin,
+      bodyLimitBytes: bodyLimits.commentsPin,
+      rateLimitPerMinute: rateLimits.commentsPin,
+      timeoutSeconds: timeouts.commentsPin,
     }
   );
   // Ticket's Comments post, a Comments (D103): the
@@ -513,9 +520,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsPost,
-      rateLimitPerMinute: options.rateLimits?.commentsPost,
-      timeoutSeconds: options.timeouts?.commentsPost,
+      bodyLimitBytes: bodyLimits.commentsPost,
+      rateLimitPerMinute: rateLimits.commentsPost,
+      timeoutSeconds: timeouts.commentsPost,
     }
   );
   // Ticket's Comments purge, a Comments (D103): the
@@ -536,9 +543,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsPurgeResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsPurge,
-      rateLimitPerMinute: options.rateLimits?.commentsPurge,
-      timeoutSeconds: options.timeouts?.commentsPurge,
+      bodyLimitBytes: bodyLimits.commentsPurge,
+      rateLimitPerMinute: rateLimits.commentsPurge,
+      timeoutSeconds: timeouts.commentsPurge,
     }
   );
   // Ticket's Comments react, a Comments (D103): the
@@ -559,9 +566,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsReact,
-      rateLimitPerMinute: options.rateLimits?.commentsReact,
-      timeoutSeconds: options.timeouts?.commentsReact,
+      bodyLimitBytes: bodyLimits.commentsReact,
+      rateLimitPerMinute: rateLimits.commentsReact,
+      timeoutSeconds: timeouts.commentsReact,
     }
   );
   // Ticket's Comments reopen, a Comments (D103): the
@@ -582,9 +589,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsReopen,
-      rateLimitPerMinute: options.rateLimits?.commentsReopen,
-      timeoutSeconds: options.timeouts?.commentsReopen,
+      bodyLimitBytes: bodyLimits.commentsReopen,
+      rateLimitPerMinute: rateLimits.commentsReopen,
+      timeoutSeconds: timeouts.commentsReopen,
     }
   );
   // Ticket's Comments resolve, a Comments (D103): the
@@ -605,9 +612,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsResolve,
-      rateLimitPerMinute: options.rateLimits?.commentsResolve,
-      timeoutSeconds: options.timeouts?.commentsResolve,
+      bodyLimitBytes: bodyLimits.commentsResolve,
+      rateLimitPerMinute: rateLimits.commentsResolve,
+      timeoutSeconds: timeouts.commentsResolve,
     }
   );
   // Ticket's Comments unpin, a Comments (D103): the
@@ -628,9 +635,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsUnpin,
-      rateLimitPerMinute: options.rateLimits?.commentsUnpin,
-      timeoutSeconds: options.timeouts?.commentsUnpin,
+      bodyLimitBytes: bodyLimits.commentsUnpin,
+      rateLimitPerMinute: rateLimits.commentsUnpin,
+      timeoutSeconds: timeouts.commentsUnpin,
     }
   );
   // Ticket's Comments unreact, a Comments (D103): the
@@ -651,9 +658,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketCommentsCommentMessage>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.commentsUnreact,
-      rateLimitPerMinute: options.rateLimits?.commentsUnreact,
-      timeoutSeconds: options.timeouts?.commentsUnreact,
+      bodyLimitBytes: bodyLimits.commentsUnreact,
+      rateLimitPerMinute: rateLimits.commentsUnreact,
+      timeoutSeconds: timeouts.commentsUnreact,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

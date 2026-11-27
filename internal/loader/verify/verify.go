@@ -309,6 +309,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkHTTPBinaryStreams(schema, r)
 	checkMCPToolsLeftOut(schema, r)
 	checkPublicRoutes(schema, r)
+	checkOperationRoutes(schema, r)
 	checkServiceCallers(schema, r)
 	checkJobs(schema, r)
 	checkQueues(schema, r)

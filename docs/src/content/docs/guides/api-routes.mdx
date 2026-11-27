@@ -2163,7 +2163,8 @@ serve yet, on its database's tables and its own: `@party`,
 module and `@autonomy`. References, attachments and provider slots are
 served (D184), and so are Recurrence, the calendar and search across
 tables, on Postgres (D187): a Go server whose database lists `sqlite`
-first is refused Recurrence and a calendar source. Events, the notifier's
+first is refused Recurrence, a calendar source and a `@searchable` table.
+Events, the notifier's
 tables and the channel identities are served on Postgres too (D190),
 through the HTTP runtime's `notify` package over the ORM's
 `Notifications()`. Serve such an API in TypeScript (`outputs.api.language:

@@ -135,6 +135,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-timers-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-timers-api', options);
@@ -157,9 +164,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.statusTransition,
-      rateLimitPerMinute: options.rateLimits?.statusTransition,
-      timeoutSeconds: options.timeouts?.statusTransition,
+      bodyLimitBytes: bodyLimits.statusTransition,
+      rateLimitPerMinute: rateLimits.statusTransition,
+      timeoutSeconds: timeouts.statusTransition,
     }
   );
   // Ticket's Timers fireTimer, a Timers (D103): the
@@ -180,9 +187,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketTimersFireTimerResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.timersFireTimer,
-      rateLimitPerMinute: options.rateLimits?.timersFireTimer,
-      timeoutSeconds: options.timeouts?.timersFireTimer,
+      bodyLimitBytes: bodyLimits.timersFireTimer,
+      rateLimitPerMinute: rateLimits.timersFireTimer,
+      timeoutSeconds: timeouts.timersFireTimer,
     }
   );
   // Ticket's Timers resetTimer, a Timers (D103): the
@@ -203,9 +210,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketTimersResetTimerResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.timersResetTimer,
-      rateLimitPerMinute: options.rateLimits?.timersResetTimer,
-      timeoutSeconds: options.timeouts?.timersResetTimer,
+      bodyLimitBytes: bodyLimits.timersResetTimer,
+      rateLimitPerMinute: rateLimits.timersResetTimer,
+      timeoutSeconds: timeouts.timersResetTimer,
     }
   );
   // Ticket's Timers snoozeTimer, a Timers (D103): the
@@ -226,9 +233,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<TicketTimersSnoozeTimerResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.timersSnoozeTimer,
-      rateLimitPerMinute: options.rateLimits?.timersSnoozeTimer,
-      timeoutSeconds: options.timeouts?.timersSnoozeTimer,
+      bodyLimitBytes: bodyLimits.timersSnoozeTimer,
+      rateLimitPerMinute: rateLimits.timersSnoozeTimer,
+      timeoutSeconds: timeouts.timersSnoozeTimer,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

@@ -359,6 +359,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-payments-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-payments-api', options);
@@ -380,9 +387,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderPaymentsListPaymentActionsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderPaymentsPaymentsListPaymentActions,
-      rateLimitPerMinute: options.rateLimits?.orderPaymentsPaymentsListPaymentActions,
-      timeoutSeconds: options.timeouts?.orderPaymentsPaymentsListPaymentActions,
+      bodyLimitBytes: bodyLimits.orderPaymentsPaymentsListPaymentActions,
+      rateLimitPerMinute: rateLimits.orderPaymentsPaymentsListPaymentActions,
+      timeoutSeconds: timeouts.orderPaymentsPaymentsListPaymentActions,
     }
   );
   // Order's Payments capturePayment, a Payments (D103): the
@@ -404,9 +411,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderPaymentsCapturePaymentResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderPaymentsPaymentsCapturePayment,
-      rateLimitPerMinute: options.rateLimits?.orderPaymentsPaymentsCapturePayment,
-      timeoutSeconds: options.timeouts?.orderPaymentsPaymentsCapturePayment,
+      bodyLimitBytes: bodyLimits.orderPaymentsPaymentsCapturePayment,
+      rateLimitPerMinute: rateLimits.orderPaymentsPaymentsCapturePayment,
+      timeoutSeconds: timeouts.orderPaymentsPaymentsCapturePayment,
     }
   );
   // Order's Payments openPayment, a Payments (D103): the
@@ -428,9 +435,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderPaymentsOpenPaymentResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderPaymentsPaymentsOpenPayment,
-      rateLimitPerMinute: options.rateLimits?.orderPaymentsPaymentsOpenPayment,
-      timeoutSeconds: options.timeouts?.orderPaymentsPaymentsOpenPayment,
+      bodyLimitBytes: bodyLimits.orderPaymentsPaymentsOpenPayment,
+      rateLimitPerMinute: rateLimits.orderPaymentsPaymentsOpenPayment,
+      timeoutSeconds: timeouts.orderPaymentsPaymentsOpenPayment,
     }
   );
   // Order's Payments recordPaymentEvent, a Payments (D103): the
@@ -452,9 +459,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderPaymentsRecordPaymentEventResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderPaymentsPaymentsRecordPaymentEvent,
-      rateLimitPerMinute: options.rateLimits?.orderPaymentsPaymentsRecordPaymentEvent,
-      timeoutSeconds: options.timeouts?.orderPaymentsPaymentsRecordPaymentEvent,
+      bodyLimitBytes: bodyLimits.orderPaymentsPaymentsRecordPaymentEvent,
+      rateLimitPerMinute: rateLimits.orderPaymentsPaymentsRecordPaymentEvent,
+      timeoutSeconds: timeouts.orderPaymentsPaymentsRecordPaymentEvent,
     }
   );
   // Order's Payments refundFor, a Payments (D103): the
@@ -475,9 +482,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderPaymentsRefundForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderPaymentsPaymentsRefundFor,
-      rateLimitPerMinute: options.rateLimits?.orderPaymentsPaymentsRefundFor,
-      timeoutSeconds: options.timeouts?.orderPaymentsPaymentsRefundFor,
+      bodyLimitBytes: bodyLimits.orderPaymentsPaymentsRefundFor,
+      rateLimitPerMinute: rateLimits.orderPaymentsPaymentsRefundFor,
+      timeoutSeconds: timeouts.orderPaymentsPaymentsRefundFor,
     }
   );
   // Order's Payments refundPayment, a Payments (D103): the
@@ -498,9 +505,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderPaymentsRefundPaymentResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderPaymentsPaymentsRefundPayment,
-      rateLimitPerMinute: options.rateLimits?.orderPaymentsPaymentsRefundPayment,
-      timeoutSeconds: options.timeouts?.orderPaymentsPaymentsRefundPayment,
+      bodyLimitBytes: bodyLimits.orderPaymentsPaymentsRefundPayment,
+      rateLimitPerMinute: rateLimits.orderPaymentsPaymentsRefundPayment,
+      timeoutSeconds: timeouts.orderPaymentsPaymentsRefundPayment,
     }
   );
   // Order's Payments settleRefundFor, a Payments (D103): the
@@ -521,9 +528,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderPaymentsSettleRefundForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderPaymentsPaymentsSettleRefundFor,
-      rateLimitPerMinute: options.rateLimits?.orderPaymentsPaymentsSettleRefundFor,
-      timeoutSeconds: options.timeouts?.orderPaymentsPaymentsSettleRefundFor,
+      bodyLimitBytes: bodyLimits.orderPaymentsPaymentsSettleRefundFor,
+      rateLimitPerMinute: rateLimits.orderPaymentsPaymentsSettleRefundFor,
+      timeoutSeconds: timeouts.orderPaymentsPaymentsSettleRefundFor,
     }
   );
   // Order's Payments voidPayment, a Payments (D103): the
@@ -544,9 +551,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderPaymentsVoidPaymentResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderPaymentsPaymentsVoidPayment,
-      rateLimitPerMinute: options.rateLimits?.orderPaymentsPaymentsVoidPayment,
-      timeoutSeconds: options.timeouts?.orderPaymentsPaymentsVoidPayment,
+      bodyLimitBytes: bodyLimits.orderPaymentsPaymentsVoidPayment,
+      rateLimitPerMinute: rateLimits.orderPaymentsPaymentsVoidPayment,
+      timeoutSeconds: timeouts.orderPaymentsPaymentsVoidPayment,
     }
   );
   // Order's status transition, a Workflow (D103): the
@@ -568,9 +575,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<OrderStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.orderPaymentsStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.orderPaymentsStatusTransition,
-      timeoutSeconds: options.timeouts?.orderPaymentsStatusTransition,
+      bodyLimitBytes: bodyLimits.orderPaymentsStatusTransition,
+      rateLimitPerMinute: rateLimits.orderPaymentsStatusTransition,
+      timeoutSeconds: timeouts.orderPaymentsStatusTransition,
     }
   );
   // Refund's Payments listPaymentActions, a Payments's operation of the table as a
@@ -591,9 +598,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<RefundPaymentsListPaymentActionsResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.refundPaymentsPaymentsListPaymentActions,
-      rateLimitPerMinute: options.rateLimits?.refundPaymentsPaymentsListPaymentActions,
-      timeoutSeconds: options.timeouts?.refundPaymentsPaymentsListPaymentActions,
+      bodyLimitBytes: bodyLimits.refundPaymentsPaymentsListPaymentActions,
+      rateLimitPerMinute: rateLimits.refundPaymentsPaymentsListPaymentActions,
+      timeoutSeconds: timeouts.refundPaymentsPaymentsListPaymentActions,
     }
   );
   // Refund's Payments capturePayment, a Payments (D103): the
@@ -615,9 +622,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<RefundPaymentsCapturePaymentResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.refundPaymentsPaymentsCapturePayment,
-      rateLimitPerMinute: options.rateLimits?.refundPaymentsPaymentsCapturePayment,
-      timeoutSeconds: options.timeouts?.refundPaymentsPaymentsCapturePayment,
+      bodyLimitBytes: bodyLimits.refundPaymentsPaymentsCapturePayment,
+      rateLimitPerMinute: rateLimits.refundPaymentsPaymentsCapturePayment,
+      timeoutSeconds: timeouts.refundPaymentsPaymentsCapturePayment,
     }
   );
   // Refund's Payments openPayment, a Payments (D103): the
@@ -639,9 +646,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<RefundPaymentsOpenPaymentResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.refundPaymentsPaymentsOpenPayment,
-      rateLimitPerMinute: options.rateLimits?.refundPaymentsPaymentsOpenPayment,
-      timeoutSeconds: options.timeouts?.refundPaymentsPaymentsOpenPayment,
+      bodyLimitBytes: bodyLimits.refundPaymentsPaymentsOpenPayment,
+      rateLimitPerMinute: rateLimits.refundPaymentsPaymentsOpenPayment,
+      timeoutSeconds: timeouts.refundPaymentsPaymentsOpenPayment,
     }
   );
   // Refund's Payments recordPaymentEvent, a Payments (D103): the
@@ -663,9 +670,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<RefundPaymentsRecordPaymentEventResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.refundPaymentsPaymentsRecordPaymentEvent,
-      rateLimitPerMinute: options.rateLimits?.refundPaymentsPaymentsRecordPaymentEvent,
-      timeoutSeconds: options.timeouts?.refundPaymentsPaymentsRecordPaymentEvent,
+      bodyLimitBytes: bodyLimits.refundPaymentsPaymentsRecordPaymentEvent,
+      rateLimitPerMinute: rateLimits.refundPaymentsPaymentsRecordPaymentEvent,
+      timeoutSeconds: timeouts.refundPaymentsPaymentsRecordPaymentEvent,
     }
   );
   // Refund's Payments refundFor, a Payments (D103): the
@@ -686,9 +693,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<RefundPaymentsRefundForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.refundPaymentsPaymentsRefundFor,
-      rateLimitPerMinute: options.rateLimits?.refundPaymentsPaymentsRefundFor,
-      timeoutSeconds: options.timeouts?.refundPaymentsPaymentsRefundFor,
+      bodyLimitBytes: bodyLimits.refundPaymentsPaymentsRefundFor,
+      rateLimitPerMinute: rateLimits.refundPaymentsPaymentsRefundFor,
+      timeoutSeconds: timeouts.refundPaymentsPaymentsRefundFor,
     }
   );
   // Refund's Payments refundPayment, a Payments (D103): the
@@ -709,9 +716,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<RefundPaymentsRefundPaymentResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.refundPaymentsPaymentsRefundPayment,
-      rateLimitPerMinute: options.rateLimits?.refundPaymentsPaymentsRefundPayment,
-      timeoutSeconds: options.timeouts?.refundPaymentsPaymentsRefundPayment,
+      bodyLimitBytes: bodyLimits.refundPaymentsPaymentsRefundPayment,
+      rateLimitPerMinute: rateLimits.refundPaymentsPaymentsRefundPayment,
+      timeoutSeconds: timeouts.refundPaymentsPaymentsRefundPayment,
     }
   );
   // Refund's Payments settleRefundFor, a Payments (D103): the
@@ -732,9 +739,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<RefundPaymentsSettleRefundForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.refundPaymentsPaymentsSettleRefundFor,
-      rateLimitPerMinute: options.rateLimits?.refundPaymentsPaymentsSettleRefundFor,
-      timeoutSeconds: options.timeouts?.refundPaymentsPaymentsSettleRefundFor,
+      bodyLimitBytes: bodyLimits.refundPaymentsPaymentsSettleRefundFor,
+      rateLimitPerMinute: rateLimits.refundPaymentsPaymentsSettleRefundFor,
+      timeoutSeconds: timeouts.refundPaymentsPaymentsSettleRefundFor,
     }
   );
   // Refund's Payments voidPayment, a Payments (D103): the
@@ -755,9 +762,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<RefundPaymentsVoidPaymentResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.refundPaymentsPaymentsVoidPayment,
-      rateLimitPerMinute: options.rateLimits?.refundPaymentsPaymentsVoidPayment,
-      timeoutSeconds: options.timeouts?.refundPaymentsPaymentsVoidPayment,
+      bodyLimitBytes: bodyLimits.refundPaymentsPaymentsVoidPayment,
+      rateLimitPerMinute: rateLimits.refundPaymentsPaymentsVoidPayment,
+      timeoutSeconds: timeouts.refundPaymentsPaymentsVoidPayment,
     }
   );
   // Refund's status transition, a Workflow (D103): the
@@ -779,9 +786,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<RefundStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.refundPaymentsStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.refundPaymentsStatusTransition,
-      timeoutSeconds: options.timeouts?.refundPaymentsStatusTransition,
+      bodyLimitBytes: bodyLimits.refundPaymentsStatusTransition,
+      rateLimitPerMinute: rateLimits.refundPaymentsStatusTransition,
+      timeoutSeconds: timeouts.refundPaymentsStatusTransition,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

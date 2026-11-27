@@ -133,6 +133,13 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
 /** Mounts every operation of the schema on a new Hono router. Mount it at '/' of the application. */
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-mcp', options);
@@ -149,9 +156,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.listOrders,
-      rateLimitPerMinute: options.rateLimits?.listOrders,
-      timeoutSeconds: options.timeouts?.listOrders,
+      bodyLimitBytes: bodyLimits.listOrders,
+      rateLimitPerMinute: rateLimits.listOrders,
+      timeoutSeconds: timeouts.listOrders,
     }
   );
   mountOperation(
@@ -164,9 +171,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.exportOrders,
-      rateLimitPerMinute: options.rateLimits?.exportOrders,
-      timeoutSeconds: options.timeouts?.exportOrders,
+      bodyLimitBytes: bodyLimits.exportOrders,
+      rateLimitPerMinute: rateLimits.exportOrders,
+      timeoutSeconds: timeouts.exportOrders,
     }
   );
   mountOperation(
@@ -181,9 +188,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.deleteOrder,
-      rateLimitPerMinute: options.rateLimits?.deleteOrder,
-      timeoutSeconds: options.timeouts?.deleteOrder,
+      bodyLimitBytes: bodyLimits.deleteOrder,
+      rateLimitPerMinute: rateLimits.deleteOrder,
+      timeoutSeconds: timeouts.deleteOrder,
     }
   );
   mountOperation(
@@ -198,9 +205,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.getOrder,
-      rateLimitPerMinute: options.rateLimits?.getOrder,
-      timeoutSeconds: options.timeouts?.getOrder,
+      bodyLimitBytes: bodyLimits.getOrder,
+      rateLimitPerMinute: rateLimits.getOrder,
+      timeoutSeconds: timeouts.getOrder,
     }
   );
   mountOperation(
@@ -216,9 +223,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.updateOrder,
-      rateLimitPerMinute: options.rateLimits?.updateOrder,
-      timeoutSeconds: options.timeouts?.updateOrder,
+      bodyLimitBytes: bodyLimits.updateOrder,
+      rateLimitPerMinute: rateLimits.updateOrder,
+      timeoutSeconds: timeouts.updateOrder,
     }
   );
   mountOperation(
@@ -233,9 +240,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ),
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.openReturn,
-      rateLimitPerMinute: options.rateLimits?.openReturn,
-      timeoutSeconds: options.timeouts?.openReturn,
+      bodyLimitBytes: bodyLimits.openReturn,
+      rateLimitPerMinute: rateLimits.openReturn,
+      timeoutSeconds: timeouts.openReturn,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

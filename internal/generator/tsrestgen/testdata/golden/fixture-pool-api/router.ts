@@ -263,6 +263,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-pool-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-pool-api', options);
@@ -284,9 +291,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountPoolPickResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.poolPick,
-      rateLimitPerMinute: options.rateLimits?.poolPick,
-      timeoutSeconds: options.timeouts?.poolPick,
+      bodyLimitBytes: bodyLimits.poolPick,
+      rateLimitPerMinute: rateLimits.poolPick,
+      timeoutSeconds: timeouts.poolPick,
     }
   );
   // Account's Budget checkReserve, a Budget (D103): the
@@ -308,9 +315,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetCheckReserveResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetCheckReserve,
-      rateLimitPerMinute: options.rateLimits?.budgetCheckReserve,
-      timeoutSeconds: options.timeouts?.budgetCheckReserve,
+      bodyLimitBytes: bodyLimits.budgetCheckReserve,
+      rateLimitPerMinute: rateLimits.budgetCheckReserve,
+      timeoutSeconds: timeouts.budgetCheckReserve,
     }
   );
   // Account's Budget observe, a Budget (D103): the
@@ -332,9 +339,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetObserveResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetObserve,
-      rateLimitPerMinute: options.rateLimits?.budgetObserve,
-      timeoutSeconds: options.timeouts?.budgetObserve,
+      bodyLimitBytes: bodyLimits.budgetObserve,
+      rateLimitPerMinute: rateLimits.budgetObserve,
+      timeoutSeconds: timeouts.budgetObserve,
     }
   );
   // Account's Budget recordUsage, a Budget (D103): the
@@ -355,9 +362,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetRecordUsageResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetRecordUsage,
-      rateLimitPerMinute: options.rateLimits?.budgetRecordUsage,
-      timeoutSeconds: options.timeouts?.budgetRecordUsage,
+      bodyLimitBytes: bodyLimits.budgetRecordUsage,
+      rateLimitPerMinute: rateLimits.budgetRecordUsage,
+      timeoutSeconds: timeouts.budgetRecordUsage,
     }
   );
   // Account's Budget recordUsageFor, a Budget (D103): the
@@ -378,9 +385,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetRecordUsageForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetRecordUsageFor,
-      rateLimitPerMinute: options.rateLimits?.budgetRecordUsageFor,
-      timeoutSeconds: options.timeouts?.budgetRecordUsageFor,
+      bodyLimitBytes: bodyLimits.budgetRecordUsageFor,
+      rateLimitPerMinute: rateLimits.budgetRecordUsageFor,
+      timeoutSeconds: timeouts.budgetRecordUsageFor,
     }
   );
   // Account's Budget reserve, a Budget (D103): the
@@ -402,9 +409,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetReserveResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetReserve,
-      rateLimitPerMinute: options.rateLimits?.budgetReserve,
-      timeoutSeconds: options.timeouts?.budgetReserve,
+      bodyLimitBytes: bodyLimits.budgetReserve,
+      rateLimitPerMinute: rateLimits.budgetReserve,
+      timeoutSeconds: timeouts.budgetReserve,
     }
   );
   // Account's Budget reserveFor, a Budget (D103): the
@@ -425,9 +432,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetReserveForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetReserveFor,
-      rateLimitPerMinute: options.rateLimits?.budgetReserveFor,
-      timeoutSeconds: options.timeouts?.budgetReserveFor,
+      bodyLimitBytes: bodyLimits.budgetReserveFor,
+      rateLimitPerMinute: rateLimits.budgetReserveFor,
+      timeoutSeconds: timeouts.budgetReserveFor,
     }
   );
   // Account's Budget setLimit, a Budget (D103): the
@@ -448,9 +455,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetSetLimitResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetSetLimit,
-      rateLimitPerMinute: options.rateLimits?.budgetSetLimit,
-      timeoutSeconds: options.timeouts?.budgetSetLimit,
+      bodyLimitBytes: bodyLimits.budgetSetLimit,
+      rateLimitPerMinute: rateLimits.budgetSetLimit,
+      timeoutSeconds: timeouts.budgetSetLimit,
     }
   );
   // Account's Budget settle, a Budget (D103): the
@@ -472,9 +479,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetSettleResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetSettle,
-      rateLimitPerMinute: options.rateLimits?.budgetSettle,
-      timeoutSeconds: options.timeouts?.budgetSettle,
+      bodyLimitBytes: bodyLimits.budgetSettle,
+      rateLimitPerMinute: rateLimits.budgetSettle,
+      timeoutSeconds: timeouts.budgetSettle,
     }
   );
   // Account's Budget settleFor, a Budget (D103): the
@@ -495,9 +502,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetSettleForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetSettleFor,
-      rateLimitPerMinute: options.rateLimits?.budgetSettleFor,
-      timeoutSeconds: options.timeouts?.budgetSettleFor,
+      bodyLimitBytes: bodyLimits.budgetSettleFor,
+      rateLimitPerMinute: rateLimits.budgetSettleFor,
+      timeoutSeconds: timeouts.budgetSettleFor,
     }
   );
   // Account's Pool markOut, a Pool (D103): the
@@ -519,9 +526,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountPoolMarkOutResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.poolMarkOut,
-      rateLimitPerMinute: options.rateLimits?.poolMarkOut,
-      timeoutSeconds: options.timeouts?.poolMarkOut,
+      bodyLimitBytes: bodyLimits.poolMarkOut,
+      rateLimitPerMinute: rateLimits.poolMarkOut,
+      timeoutSeconds: timeouts.poolMarkOut,
     }
   );
   // Account's Pool reportRoom, a Pool (D103): the
@@ -543,9 +550,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountPoolReportRoomResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.poolReportRoom,
-      rateLimitPerMinute: options.rateLimits?.poolReportRoom,
-      timeoutSeconds: options.timeouts?.poolReportRoom,
+      bodyLimitBytes: bodyLimits.poolReportRoom,
+      rateLimitPerMinute: rateLimits.poolReportRoom,
+      timeoutSeconds: timeouts.poolReportRoom,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at
