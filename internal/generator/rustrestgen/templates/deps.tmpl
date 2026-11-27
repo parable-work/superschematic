@@ -75,6 +75,12 @@ pub struct Deps {
     /// the fields a stack sets for it (`config::load_env_config`).
     pub config: EnvConfig,
 {{- end }}
+{{- if .Providers }}
+    /// The runtime providers the environment configures (D159, D185): the
+    /// provider each slot names, made on first use, which runs as its own
+    /// principal (`providers.principal_of(slot)`).
+    pub providers: Arc<Providers>,
+{{- end }}
 {{- with .Deps }}
 {{- if .Database }}
 {{- if .SQLite }}
@@ -95,9 +101,18 @@ pub struct Deps {
     pub {{ .Field }}: {{ .CrateIdent }}::{{ .Client }},
 {{- end }}
 {{- range .Buckets }}
+{{- if .ContentAddressed }}
+    /// {{ .Service }}, a bucket the API lists that names each object by its
+    /// content (D142): `put` writes a body of at most {{ .MaxBytes }} bytes under
+    /// the SHA-256 of its bytes if no object has that name, and `has`,
+    /// `missing`, `get` and `signed_url` read by hash. `raw` is the plain
+    /// bucket.
+    pub {{ .Field }}: ContentBucket,
+{{- else }}
     /// {{ .Service }}, a bucket the API lists: private object storage it puts,
-    /// gets, deletes and lists objects in, and signs URLs for (D54).
+    /// gets, heads, deletes and lists objects in, and signs URLs for (D54).
     pub {{ .Field }}: Arc<dyn Bucket>,
+{{- end }}
 {{- end }}
 {{- range .MemoryStores }}
     /// {{ .Service }}, a memory store the API lists (D75): channels and keys
@@ -145,7 +160,7 @@ pub struct Handlers {
 
 impl Implementations {
     /// The API's `Implementations`: the handlers the implementation's
-    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations }}, with what the server's entrypoint builds{{ end }}.
+    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasIdempotent }}, with what the server's entrypoint builds{{ end }}.
 {{- if .Identity }}
     ///
     /// `authenticator` is the identity runtime's (D50), which the
@@ -170,6 +185,15 @@ impl Implementations {
     ///
     /// `db` is {{ .TableDatabase }}, from whose repositories the table operations
     /// are served (D106): what `Deps.db` holds.
+{{- else if .HasGraphOperations }}
+    ///
+    /// `db` is the pool of {{ .GraphDatabase }}, on which the graph operations run
+    /// (D138): the pool `Deps.db` holds.
+{{- end }}
+{{- if .HasIdempotent }}
+    ///
+    /// The keys of the @idempotent operations are kept in `db`, {{ .Deps.Database }}, in
+    /// the table `IDEMPOTENCY_TABLE` names (D140): what `Deps.db` holds.
 {{- end }}
 {{- if .TableFieldKeys }}
     ///
@@ -191,11 +215,20 @@ impl Implementations {
 {{- if .HasServiceCallers }}
             service_authenticator,
 {{- end }}
+{{- if .HasIdempotent }}
+            idempotency_store: Arc::new({{ .IdempotencyStoreType }}::new(
+                db{{ if or .HasBehaviorOperations .HasTableOperations .HasGraphOperations }}.clone(){{ end }},
+                &crate::IDEMPOTENCY_TABLE,
+            )),
+{{- end }}
 {{- if .HasBehaviorOperations }}
-            behaviors: crate::behaviors::Behaviors::new(db{{ if .HasTableOperations }}.clone(){{ end }}),
+            behaviors: crate::behaviors::Behaviors::new(db{{ if or .HasTableOperations .HasGraphOperations }}.clone(){{ end }}),
 {{- end }}
 {{- if .HasTableOperations }}
-            tables: crate::tables::tables(db{{ if .TableFieldKeys }}, field_keys{{ end }}),
+            tables: crate::tables::tables(db{{ if .HasGraphOperations }}.clone(){{ end }}{{ if .TableFieldKeys }}, field_keys{{ end }}),
+{{- end }}
+{{- if .HasGraphOperations }}
+            graphs: crate::graphs::Graphs::new(db),
 {{- end }}
         }
     }
@@ -324,9 +357,15 @@ impl<T> DerivedAnswer<T> {
         }
     }
 }
+{{- if .HasTableDerivers }}
+
+/// The deriver loop's answer for what a deriver's method returned: its
+/// value as JSON, or its error as a failure, which counts an attempt.
+{{- else }}
 
 /// The engine's answer for what a deriver's method returned: its value as
 /// JSON, or its error as a failure, which counts an attempt.
+{{- end }}
 pub fn derivation_answer<T: Serialize>(
     answered: Result<DerivedAnswer<T>, BoxError>,
 ) -> DerivationAnswer {

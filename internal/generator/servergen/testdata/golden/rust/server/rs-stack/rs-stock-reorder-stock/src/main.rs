@@ -21,7 +21,11 @@
 //! 2s, drops the rest and gives their messages back, and exits 0. It serves no port, and builds no
 //! identity service and no router (D53, D65). When the environment names an
 //! OTLP endpoint (`OTEL_EXPORTER_OTLP_ENDPOINT`), it exports a span per
-//! message (D67).
+//! message (D67). When the platform runs it in drain mode (WORKER_MODE is
+//! drain, D145), it takes one of WORKER_SLOTS locks named for its queue as
+//! it starts, exiting 0 at once when none is free, and exits 0 once no
+//! message was ready or held for WORKER_IDLE_SECONDS and none falls due
+//! within five minutes.
 //!
 //! The API's implementation is the crate at the naming file's
 //! `[implementation_paths] rust` template, which each build copies into the
@@ -41,7 +45,7 @@ use superschematic_http_runtime::queue::{PostgresQueue, QueueDefinition};
 use superschematic_http_runtime::stackconfig::{self, Database, Service};
 use superschematic_http_runtime::telemetry::{self, Defaults};
 use superschematic_http_runtime::worker::{self, Options};
-use superschematic_http_runtime::Shutdown;
+use superschematic_http_runtime::{wake, Shutdown};
 
 use schemas_rs_pricing_sdk as rs_pricing_sdk;
 use schemas_rs_stock_api as rs_stock_api;
@@ -148,17 +152,24 @@ async fn run() -> Result<(), Failure> {
         concurrency,
         "worker started"
     );
+    // In drain mode, which the platform sets (WORKER_MODE), the worker
+    // takes a slot of its queue and exits once the queue is empty (D145).
+    let drain = worker::drain_from_env()?;
     let options = Options {
         concurrency,
         grace: GRACE,
         idle: worker::DEFAULT_IDLE,
         prune_every: worker::DEFAULT_PRUNE_EVERY,
+        drain,
     };
     let handle = move |message: Message| {
         let workers = Arc::clone(&workers);
         async move { workers.reorder_stock(message).await }
     };
     let worked = worker::run_worker(queue, handle, options, shutdown).await;
+    // The wakes its handlers' enqueues sent are answered before it ends
+    // (D145).
+    wake::settled().await;
     // Each memory store closes once the worker stops.
     rs_cache_store.close().await;
     worked?;

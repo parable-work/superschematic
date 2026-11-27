@@ -48,7 +48,7 @@ into `node_modules`, type-checks the example, and runs `test/jobs.test.ts`
 and `test/jobs.dev.test.ts` with `node --test` and with `bun test`, the
 first serving the example on a free port. The `typescript` job
 in `.github/workflows/ci.yml` runs it after the work-queue package's own
-tests, and so does `make ts`.
+tests in the full tier (D40), not on pull requests, and so does `make ts`.
 
 To run the server after that:
 
@@ -162,7 +162,10 @@ which no token names:
 | none | runner | read and write on the three schemas, and `jobs.override` | in the server's process: expire lapsed leases, miss silent workers and release their leases, and settle batches |
 
 The policy asks `<schema>.work` for the operations that do the work, so a
-worker creates, edits and deletes nothing. The server registers a worker
+worker creates, edits and deletes nothing. A behavior's operation across
+the namespace (D77) is open to read and asks
+`<behavior>.<operation>` to write, and a caller acting for someone else is
+refused: the server honors no `Acting-For` header. The server registers a worker
 instance for each worker, with its subject as its id, when it starts;
 only that principal may beat it.
 

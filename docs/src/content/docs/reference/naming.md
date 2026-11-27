@@ -9,9 +9,10 @@ sidebar:
 `build`, `build-all` and `migrate plan` load it from there, or from
 `--naming`; `migrate plan` loads the previous version's from that
 version's own schemas root when it has one. `format` walks up from the
-file you pass and loads the first one it finds. `json-schema` and
-`behaviors` have no service directory; they use the built-in defaults
-unless you pass `--naming`.
+file you pass and loads the first one it finds, and so does
+`engine-client`, from its first schema file, unless you pass `--naming`.
+`json-schema`, `behaviors` and `catalog` have no service directory; they
+use the built-in defaults unless you pass `--naming`.
 
 A missing file is `Default()`. A key left out keeps its default. An
 unknown top-level key is an error, except keys under `[extension.<name>]`,
@@ -565,6 +566,10 @@ dependency is `*`, and `@superschematic/versiongraph` is unpublished until
 the first tag, so until then set this key whenever a schema declares a
 graph. Without it `bun install` fails with a 404, and since the generated
 types packages form one Bun workspace, it fails for every package in it.
+The image of a TypeScript server that serves a version graph's
+operations (`@graphOperations`) builds the core's WebAssembly module from
+the crate beside this package, `../rust`, so the build context holds
+both; unset, the server gets no Dockerfile.
 
 ### `paths.versiongraph_rust`
 

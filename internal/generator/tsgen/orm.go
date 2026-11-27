@@ -115,6 +115,22 @@ type ORMInfo struct {
 	SQLite *ORMSQLite
 }
 
+// RowFeatureMembers is the type of the members the database's ORM and
+// every transaction it opens hold beside its repositories (D154):
+// ReferencesMembers, AttachmentsMembers or both, joined by &, which orm.ts
+// passes as Orm's and OrmTx's second type argument; "" for a database
+// with neither.
+func (o *ORMInfo) RowFeatureMembers() string {
+	var members []string
+	if o.References != "" {
+		members = append(members, "ReferencesMembers")
+	}
+	if o.Attachments != "" {
+		members = append(members, "AttachmentsMembers")
+	}
+	return strings.Join(members, " & ")
+}
+
 // HearsChanges reports whether a table of the layout keeps a change queue
 // (D103), which orm.ts's comment then describes.
 func (o *ORMInfo) HearsChanges() bool {
@@ -261,6 +277,12 @@ type ORMTable struct {
 	// create, update or unique key type for it.
 	ReadOnly   bool
 	ReleasedOf string
+	// LiveRoot is such a table whose graph's root is soft-deletable
+	// (sqlutil.TableModel.LiveRoot, D139): its definition says softDelete,
+	// so the runtime's reads hold it to its statements' live condition,
+	// which leaves out the rows of a soft-deleted root; a restore of the
+	// root sees them again.
+	LiveRoot bool
 
 	// Uses are the table's behaviors (D103), each one it implements and
 	// each field that is one, each one's operations a member of its
@@ -582,6 +604,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			Key:          t.KeyField,
 			KeyType:      keyTypes[t.Type],
 			SoftDelete:   t.SoftDelete,
+			LiveRoot:     t.LiveRoot != "",
 			HistoryActor: t.HistoryActor != "",
 			Fences:       t.Fences,
 			Audience:     t.Audience,

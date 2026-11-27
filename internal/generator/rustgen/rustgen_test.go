@@ -11,6 +11,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/behaviortypes/behaviortypestest"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/testpaths"
@@ -32,6 +33,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		deps    []string
 		// sqlite is whether the service lists the sqlite dialect.
 		sqlite bool
+		// core is whether the service composes the core's behaviors, which
+		// a registry of its own declares.
+		core bool
 	}{
 		{service: "fixture-db"},
 		{service: "fixture-api", deps: []string{"fixture-db"}},
@@ -64,6 +68,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		// the API's views read the database's union.
 		{service: "fixture-variant-field-db", sqlite: true},
 		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
+		// References and attachments (D154, D185): the Postgres definition in
+		// src/orm.rs carries them, and the repositories open references()
+		// and attachments().
+		{service: "fixture-references-db", core: true},
 	}
 
 	for _, tc := range cases {
@@ -73,6 +81,12 @@ func TestWriteTypesGolden(t *testing.T) {
 			if tc.service == behaviortypestest.Service {
 				reg = behaviortypestest.Registry(t)
 				schema = behaviortypestest.Schema(t, reg)
+			} else if tc.core {
+				reg = registry.New(naming.Default())
+				var err error
+				if schema, err = loader.LoadService(filepath.Join(fixturesDir, tc.service), loader.WithRegistry(reg)); err != nil {
+					t.Fatalf("load %s: %v", tc.service, err)
+				}
 			} else {
 				var err error
 				if schema, err = loader.LoadService(filepath.Join(fixturesDir, tc.service)); err != nil {

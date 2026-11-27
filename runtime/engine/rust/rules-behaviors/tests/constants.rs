@@ -87,6 +87,7 @@ fn the_config_checks_are_the_config_schema() {
         undescribed(&file["configSchema"]),
         json!({
             "additionalProperties": false,
+            "minProperties": 1,
             "properties": {
                 "fields": {"items": text, "maxItems": 64, "minItems": 1, "type": "array", "uniqueItems": true},
                 "oneWay": {
@@ -97,7 +98,6 @@ fn the_config_checks_are_the_config_schema() {
                 },
                 "permission": text
             },
-            "required": ["fields"],
             "type": "object"
         })
     );
@@ -107,10 +107,11 @@ fn the_config_checks_are_the_config_schema() {
     assert_eq!(shaped(json!([])), ["/config: must be object"]);
     assert_eq!(
         shaped(json!({"fieldz": ["key"]})),
-        [
-            "/config: unknown key \"fieldz\"",
-            "/config: must have required property 'fields'"
-        ]
+        ["/config: unknown key \"fieldz\""]
+    );
+    assert_eq!(
+        shaped(json!({})),
+        ["/config: must NOT have fewer than 1 properties"]
     );
     assert_eq!(
         shaped(json!({"fields": []})),
@@ -170,6 +171,16 @@ fn the_config_checks_are_the_config_schema() {
 #[test]
 fn its_fields_are_the_types_own_and_one_way_holds_a_boolean_a_number_or_a_date_time() {
     let ruled = |config: Value| rule(&core(), &run(config), "Constants");
+    // A config keeps a field or moves one: fields may be left out beside
+    // oneWay, a table whose one rule is a field that only moves forward,
+    // and a permission alone keeps nothing.
+    assert_eq!(
+        ruled(json!({"permission": "runs.admin"})),
+        "fields: Constants keeps no field: name one in fields, or in oneWay one that moves one way"
+    );
+    let config = json!({"oneWay": {"attempts": "up"}});
+    define(&core(), &run(config.clone()))
+        .unwrap_or_else(|refusal| panic!("{config} refused: {}", refusal.message));
     let fields = "key, kind, urgent, attempts, budget, opensAt, closesAt, labels";
     assert_eq!(
         ruled(json!({"fields": ["key", "status"]})),

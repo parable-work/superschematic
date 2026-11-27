@@ -44,7 +44,8 @@ const TABLE_FORM: &str = "implements Constants<T, { ... }> on a DB table, D104";
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
 pub struct ConstantsConfig {
     /// The type's own top-level fields, by JSON key, that keep the value
-    /// their create gives them.
+    /// their create gives them; an engine type's lists one at least.
+    #[serde(default)]
     pub fields: Vec<String>,
     /// The permission a caller needs to change them after the create.
     #[serde(default)]
@@ -78,6 +79,13 @@ impl Behavior for Constants {
             )));
         }
         let config: ConstantsConfig = json_config(raw)?;
+        // The configSchema takes no fields beside a table's oneWay, which
+        // an engine type has none of.
+        if config.fields.is_empty() {
+            return Err(Error::config(
+                "fields: Constants keeps no field: name one in fields".to_owned(),
+            ));
+        }
         for field in &config.fields {
             if !target.fields().contains(field) {
                 return Err(Error::config(format!(

@@ -20,18 +20,33 @@ which CI runs on Node.js and Bun.
 
 ## Every behavior at a glance
 
-The core declares twenty-eight behaviors, so every binary's meta-schema
-admits a schema that composes them. The engine implements seventeen
-itself and registers them when it opens. Seven are claimable work, the work
+The core declares thirty-four behaviors, so every binary's meta-schema
+admits a schema that composes them. An engine runs twenty-eight of them,
+which `superschematic catalog behaviors` lists. The engine implements
+seventeen itself and registers them when it opens. Seven are claimable work, the work
 queue's Rust behaviors, which the engine's addon is built with; the
 engine refuses a schema that composes one until a deployment names them
 in the engine's `behaviors` option (`workQueueBehaviors`, from
-`@superschematic/engine-workqueue`). The last four, `Stock`, `Calendar`,
+`@superschematic/engine-workqueue`). Four, `Stock`, `Calendar`,
 `Holds` and `Payments`, are commerce (D70): the core declares them with
 the package `@superschematic/engine-commerce`, the core's addon carries
 them and a project's engine crate links them, and an engine runs them
 once a deployment names them (`commerceBehaviors`), as a generated
-server does.
+server does. The last six, `Seats`, `Reconcile`, `Schedules`, `Pool`,
+`Recurrence` and `Aliased`, no engine runs: the behaviors' core
+implements them for a DB table alone, and the build refuses an engine
+type that composes one, naming the table form.
+
+A DB table that implements a behavior, or types a field as one, stays a
+table (D103): its rules run in the behaviors' core, the Rust library every
+language embeds, which runs twenty-eight of the behaviors. They are the
+six above, every behavior the engine implements but `Links`, `Search`,
+`Variants` and `Branches`, the work queue's but `Assignment` and `Queue`,
+and the four of commerce. A table has a `Relation<>`, a `@searchField`, a
+version graph and a `@queue` in place of `Links`, `Search`, `Branches` and
+`Queue`, and a `Variant<By, Arms>` field in place of `Variants` (D149).
+`Assignment` is not on the core yet
+([Beyond plain tables](/superschematic/guides/database-tables/#beyond-plain-tables)).
 
 | Behavior | What it adds | Requires | Covered in |
 | --- | --- | --- | --- |
@@ -54,6 +69,10 @@ server does.
 | `Provenance` | who set each own field last and through what, with the confidence the writer gave, and a review that holds a source's writes until a person accepts them | `Workflow` for a gate | [Provenance](#provenance) |
 | `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget`, `Retries` | claimable work: leases, claims, worker heartbeats, stamped children, budgets and retries | varies | [Work queues](/superschematic/guides/work-queues/) |
 | `Stock`, `Calendar`, `Holds`, `Payments` | commerce: units a supply counts, time it opens, a claim's holds on either through the supply contract, and what a claim owes and how a provider settles it | `Workflow` for `Holds` | [Selling and booking](/superschematic/guides/commerce/) |
+| `Seats`, `Reconcile` | a DB table's alone: named seats on a row, each holding the subjects seated in it, and the state a provider last reported, which moves the row's Workflow field | `Workflow` for `Reconcile` | [A row's seats](/superschematic/guides/database-tables/#a-rows-seats-and-a-field-that-follows-observations) |
+| `Schedules`, `Pool` | a DB table's alone: runs after a delay, at an interval or on a cron line, and a pool of members `pick` chooses from | | [A row's schedules](/superschematic/guides/database-tables/#a-rows-schedules), [A pool of members](/superschematic/guides/database-tables/#a-pool-of-members) |
+| `Recurrence` | a DB table's alone: a rule that turns into dated occurrences, each opened, reminded, done, missed or skipped, which a calendar and its feed read | | [A row's recurrence](/superschematic/guides/database-tables/#a-rows-recurrence-and-the-calendar) |
+| `Aliased` | a DB table's alone: a name with the names a row was also known by, unique across the table's names and aliases | | [A row's names](/superschematic/guides/database-tables/#a-rows-names) |
 
 A running engine lists the behaviors it runs, an extension's included,
 at `GET /behaviors`, and returns one's declaration at
@@ -763,11 +782,12 @@ it run. Comments' `markRead` and `follow` do.
 
 On a table, `implements Comments<T, C>` runs on the behaviors' core
 (D103): its posts, edits, deletes, purges, reactions, pins, resolves and
-reads, every writing one beside the row, which moves no version of it
-and asks no other behavior's guard. Its namespace operations wait for
-namespace operations on the core, and so do `markRead` and `follow`;
-a streamed reply waits for signals, and attachments and `moveAnchor`
-for the core too
+reads, attachment blocks among them, every writing one beside the row,
+which moves no version of it and asks no other behavior's guard. The core
+runs a streamed reply and read state (`markRead`, `follow`) too, which
+[development mode](/superschematic/guides/development-mode/) serves and a
+table's generated API leaves out. Claiming and settling deliveries, the
+search of messages and `moveAnchor` wait for the core
 ([A row's conversation](/superschematic/guides/database-tables/#a-rows-conversation)).
 
 ## Refusals and preconditions
@@ -886,6 +906,16 @@ engine.runner.stop();      // engine.close() stops it too
 each namespace's floor and the subscription that holds it. It is not served over
 HTTP or MCP, since it spans every namespace; expose it on a health route
 of your own.
+
+A DB table's behaviors have no runner. Their deadlines, the writes they
+hear and the events they emit are messages of the table's deadline,
+change and event queues, which the API's `@behaviorWorker` runs after the
+commit. On Cloudflare Workers a TypeScript behavior worker drains them at
+each firing of a Cron Trigger, and a deadline or an event due before the
+next firing wakes it through its Workflow (D151). An environment that runs
+the database and no worker for a table's queues is refused
+([A table's deadlines](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker),
+[Queue workers on Cron Triggers](/superschematic/guides/stacks/#queue-workers-on-cron-triggers)).
 
 ## Outcomes
 
@@ -1178,6 +1208,11 @@ schemas. A vector needs its `model`, and ranks only the schemas whose
 vectors come from it. A schema the caller may not read is skipped
 silently, not refused.
 
+A DB table has no Search behavior: its text fields take `@searchField`,
+and a `@searchable` table's rows share one index that a single query
+ranks across tables, with each row's access checked inside it
+([Search across tables](/superschematic/guides/database-tables/#search-across-tables)).
+
 ## Reactions
 
 Rules that move Workflow statuses after a change commits. They need
@@ -1404,6 +1439,11 @@ engine.instances.update(me, 'Step', lint.id, { kind: 'review' });
   the create, is a DB table's alone (D104,
   [Fields a table keeps, freezes and signs off](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)):
   the engine refuses it, naming the table form.
+- **No table's Variants.** The behaviors' core does not run `Variants`,
+  so the build refuses a table that implements it. A table types the
+  field as a `Variant<By, Arms>` instead (D149), a discriminated union
+  whose arm a sibling field names
+  ([Modeling types](/superschematic/guides/modeling-types/#a-field-whose-shape-another-field-picks)).
 
 The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#validating-fields)
 shows how a behavior of your own judges the fields a write stores.
@@ -1833,6 +1873,10 @@ engine.instances.get(me, "requests", "jam")?.behaviors;
 - **Lease.** On a leased type, list `"Timers.fireTimer"` in `Lease`'s
   `exempt`, or the holder's lease refuses the runner's fire
   ([Work queues](/superschematic/guides/work-queues/#lease)).
+- **On a table.** A DB table implements Timers too, `implements
+  Timers<Ticket, { ... }>`, its deadlines messages of the table's deadline
+  queue, which the API's behavior worker fires in place of a runner
+  ([A table's deadlines](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker)).
 
 ## Derived
 
@@ -1977,8 +2021,8 @@ are operations of the table as a whole, and the value a field's type
 refuses is held to the field's JSON Schema, which the build writes into
 the table's layout
 ([Fields a model fills, and who set each](/superschematic/guides/database-tables/#fields-a-model-fills-and-who-set-each)).
-A `@deriver` of a TypeScript API fills such a table through its
-repository, with the loop above (D146).
+A `@deriver` of a TypeScript, Rust or Go API fills such a table
+through its repository, with the loop above (D146).
 
 ## Provenance
 
@@ -2065,6 +2109,10 @@ table, `provenance_in_review`, which a list filters on
   worker heartbeats, stamped children, budgets and retries.
 - [Selling and booking](/superschematic/guides/commerce/): stock, time,
   a claim's holds on both, and payments and refunds.
+- [Database tables](/superschematic/guides/database-tables/#beyond-plain-tables):
+  the behaviors a DB table implements on the behaviors' core, and
+  [development mode](/superschematic/guides/development-mode/), which
+  runs them on a schema with no build.
 - The [engine README](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md#behaviors):
   the behavior interface, for writing your own.
 - [Write an extension](/superschematic/extending/write-an-extension/#a-behavior):

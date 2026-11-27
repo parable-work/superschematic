@@ -263,11 +263,18 @@ func (r run) generateServers() error {
 		return err
 	}
 	withImages(derivers)
-	if err := r.checkDerivers(st.Name, derivers, services, tsScaffolding, rustScaffolding); err != nil {
+	if err := r.checkDerivers(st.Name, derivers, services, scaffolding, tsScaffolding, rustScaffolding); err != nil {
 		return err
 	}
 	for _, d := range derivers {
 		switch d.Language {
+		case APILanguageGo:
+			// A Go API's deriver fills tables (D146).
+			deriver, _, err := r.planEntrypoint(st.Name, d, cloudSQL[d.Name], nil)
+			if err != nil {
+				return err
+			}
+			plans = append(plans, planned{server: deriver})
 		case APILanguageTypeScript:
 			deriver, _, err := r.planTypeScriptServer(st.Name, d, cloudSQL[d.Name], nil, facts.bundles[d.Name])
 			if err != nil {
@@ -281,8 +288,7 @@ func (r run) generateServers() error {
 			}
 			rustPlans = append(rustPlans, deriver)
 		default:
-			// stack.Derivers refuses a Go API's deriver.
-			return fmt.Errorf("stack %s: deriver %s is a %s deriver; %s (D74)", st.Name, d.Name, d.Language, stack.DeriverLanguages)
+			r.Logf("  - deriver %s: a %s deriver, which gets no generated entrypoint yet\n", d.Name, d.Language)
 		}
 	}
 
@@ -744,7 +750,12 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				continue
 			}
 			var methods []string
+			dispatched := r.typeScriptDispatcherQueues(services, api)
 			for _, worker := range implemented[api] {
+				if worker.BehaviorWorker == nil && dispatched[worker.Queue] {
+					// The agent dispatcher handles its queues' messages (D183).
+					continue
+				}
 				if worker.BehaviorWorker == nil {
 					methods = append(methods, fmt.Sprintf("    async %s(message, signal) {\n      // handle a message of %s\n    },", tsutil.ToCamelCase(worker.Name), worker.Queue))
 					continue
@@ -752,6 +763,9 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 				for _, event := range worker.Events {
 					methods = append(methods, fmt.Sprintf("    async %s(event, tx, signal) {\n      // handle %s\n    },", tsutil.ToCamelCase(event.Method), handles(worker, event)))
 				}
+			}
+			if len(methods) == 0 {
+				continue
 			}
 			if err := r.checkTypeScriptExport(stackName, api, "workers", tsrestgen.WorkersFunc, "WorkersConstructor", methods, "8.8"); err != nil {
 				return err
@@ -816,12 +830,13 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 }
 
 // checkDerivers refuses a stack one of whose TypeScript APIs declares
-// derivers while its implementation exports no createDerivers, or one of
+// derivers while its implementation exports no createDerivers, one of
 // whose Rust APIs does while its implementation declares no
-// create_derivers (D74), as checkWorkers refuses one without its workers:
-// the implementation is the engineer's, and the build writes into it no
-// more.
-func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, services []stack.Service, tsScaffolding, rustScaffolding map[string]bool) error {
+// create_derivers (D74), or one of whose Go APIs does while its
+// implementation declares no NewDerivers (D146), as checkWorkers refuses
+// one without its workers: the implementation is the engineer's, and the
+// build writes into it no more.
+func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, services []stack.Service, scaffolding, tsScaffolding, rustScaffolding map[string]bool) error {
 	checked := map[string]bool{}
 	for _, d := range derivers {
 		api := d.Deriver.API
@@ -838,6 +853,32 @@ func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, 
 			}
 		}
 		switch d.Language {
+		case APILanguageGo:
+			if scaffolding[api] {
+				continue
+			}
+			impl, _, err := r.implementation(api)
+			if err != nil {
+				return err
+			}
+			exists, err := apigen.ImplementationExists(impl.Dir)
+			if err != nil || !exists {
+				return err
+			}
+			declares, err := apigen.DeclaresFunc(impl.Dir, apigen.DeriversFunc)
+			if err != nil || declares {
+				return err
+			}
+			var fields []string
+			for _, name := range names {
+				fields = append(fields, fmt.Sprintf("\t\t%s: ..., // implements api.%sDeriver", goutil.GoPublicIdentifier(name), goutil.GoPublicIdentifier(name)))
+			}
+			return fmt.Errorf("stack %s: %s declares derivers, and its implementation at %s, which the build no longer writes into, declares no %s; add\n\n"+
+				"\tfunc %s(deps api.Deps) (api.Derivers, error)\n\n"+
+				"returning the derivers, each a value with a method per derived field it fills:\n\n"+
+				"\treturn api.Derivers{\n%s\n\t}, nil\n\n"+
+				"where api is %s, whose api.DeriversConstructor is %s's signature (D146)",
+				stackName, api, impl.Dir, apigen.DeriversFunc, apigen.DeriversFunc, strings.Join(fields, "\n"), r.Options.Naming.GoAPIModule(api), apigen.DeriversFunc)
 		case APILanguageTypeScript:
 			if tsScaffolding[api] {
 				continue
@@ -876,6 +917,45 @@ func (r run) checkDerivers(stackName string, derivers []*ir.ResolvedDeployable, 
 		}
 	}
 	return nil
+}
+
+// typeScriptDispatcherQueues are the queues of api's database whose
+// @worker the agent dispatcher runs in TypeScript (D183): its
+// @agents("requests") queue and its @runRequests queue (D157); none for a
+// database that does not use the agent orchestration, or that cannot be
+// read here, whose workers the API's build reads again.
+func (r run) typeScriptDispatcherQueues(services []stack.Service, api string) map[string]bool {
+	out := map[string]bool{}
+	if r.Options.LoadDependency == nil {
+		return out
+	}
+	for _, svc := range services {
+		if svc.Name != api {
+			continue
+		}
+		var dbs []string
+		if svc.AuthDB != nil {
+			dbs = append(dbs, svc.AuthDB.Name)
+		}
+		for _, dep := range svc.Dependencies {
+			if dep.Kind == ir.SchemaKindDB {
+				dbs = append(dbs, dep.Name)
+			}
+		}
+		for _, db := range dbs {
+			schema, err := r.Options.LoadDependency(db)
+			if err != nil || schema == nil {
+				continue
+			}
+			if requests := schema.AgentsTable(ir.AgentRequests); requests != nil {
+				out[requests.Name] = true
+				if runs := schema.RunRequestsQueue(); runs != nil {
+					out[runs.Name] = true
+				}
+			}
+		}
+	}
+	return out
 }
 
 // checkTypeScriptExport refuses a TypeScript API whose implementation
@@ -1158,6 +1238,9 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 	if s.Worker != nil {
 		in.Worker = &servergen.WorkerInput{Name: s.Worker.Name, GraceSeconds: s.Worker.GraceSeconds}
 	}
+	if s.Deriver != nil {
+		in.Deriver = &servergen.DeriverInput{Name: s.Deriver.Name}
+	}
 	var scaffolds []scaffold
 	var versionGraph, rules bool
 	var modules []servergen.Module
@@ -1313,6 +1396,14 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 			r.warnScaffoldDependencies(fmt.Sprintf("stack %s: the implementation of %s", stackName, ref.Name), dir, output.ImplementationDependencies(), "its scaffold depends on now")
 			if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
 				if err := r.checkTypeScriptManualRoutes(stackName, output); err != nil {
+					return nil, nil, err
+				}
+			}
+			// Every entrypoint of an API whose Deps holds the agent
+			// dispatcher builds it with createAgentOptions (D183).
+			if output.HasAgents() {
+				options := []string{"    endpoint: 'https://<this server>/api/agents',", "    // providers, notifier, inbound, tools: the rest of createAgents' options"}
+				if err := r.checkTypeScriptExport(stackName, output.SchemaName, "a database whose agent dispatcher its Deps holds", tsrestgen.AgentOptionsFunc, "AgentOptionsConstructor", options, "8.6"); err != nil {
 					return nil, nil, err
 				}
 			}
@@ -1730,8 +1821,9 @@ func (r run) goServerModules(o *apigen.APIOutput, job bool) []servergen.Module {
 	}
 	if o.Deps.Rules {
 		// The ORM of a database whose tables' fields are behaviors requires
-		// the rules module, which links the behaviors' core (D103).
-		modules = append(modules, runtimeModule(n.RulesGoModule, paths.RulesGo, false))
+		// the rules module, which links the behaviors' core (D103). A
+		// deriver's main.go names its caller and its refusals (D146).
+		modules = append(modules, runtimeModule(n.RulesGoModule, paths.RulesGo, o.HasDerivers()))
 	}
 	return modules
 }

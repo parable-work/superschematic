@@ -291,6 +291,11 @@ into `retry_after()`, and a refused input's field errors, the problem's
 `errors`, into `validation_errors()`; `problem()` holds them with the
 problem's `details`.
 
+The other SDKs carry the field errors too, by field: Go's
+`APIError.ValidationErrors`, TypeScript's `ApiError.validationErrors` and
+Python's `APIError.validation_errors`, each absent when the problem holds
+none.
+
 In TypeScript and Python the 401, 403 and 429 classes extend the general
 one. In Go they are types of their own that embed `*APIError` and unwrap
 to it, so `errors.As(err, &apiErr)` finds the `*APIError` behind each of
@@ -604,11 +609,12 @@ what the first call was.
 | TypeScript | `sdk.orders.placeOrder(input, { idempotencyKey: "order-7" })`, a member of the method's `RequestOptions` |
 | Go | `client.OrdersNamespace.PlaceOrder(runtime.WithIdempotencyKey(ctx, "order-7"), input)`, from the SDK's `runtime` package |
 | Python | `sdk.orders.place_order(input, idempotency_key="order-7")` |
-| Rust | not built yet: the Rust SDK sends no key |
+| Rust | `sdk.orders.place_order(input, Some(&RequestOptions { idempotency_key: Some("order-7".into()), ..Default::default() }))`, a field of `RequestOptions` |
 
-A method of any other operation sends no key, and the Python one takes no
-`idempotency_key`. The answer of a repeat is the first call's, so a
-method returns it as it returned the first. A key used for another
+A method of any other operation sends no key: the Python one takes no
+`idempotency_key`, and the Rust one reads none from its options. The
+answer of a repeat is the first call's, so a method returns it as it
+returned the first. A key used for another
 request is the API's 422 `idempotency_key_reused`, and a repeat while the
 first call is still running its 409 `idempotency_in_flight`, each the
 SDK's API error with that code.

@@ -1458,6 +1458,17 @@ func applyValidateConfig(cfg map[string]any, fd *ir.FieldDef) {
 	}
 }
 
+// externalFieldDecorators are the decorators of a cross-service @source
+// target that add fields its own load adds, which applySource applies to
+// the external type so the loader's ExpandExternal passes add them too.
+var externalFieldDecorators = map[string]bool{
+	"audience":          true,
+	"accessGrants":      true,
+	"accessLog":         true,
+	"notifier":          true,
+	"channelIdentities": true,
+}
+
 // applySource resolves @source(Target): the cross-layer projection linkage.
 // The walk records the SourceRef and the resolved (flattened) source type;
 // the structural verification -- assignability, the @virtual requirement,
@@ -1510,13 +1521,14 @@ func (w *walker) applySource(td *ir.TypeDef, src *decoratorRef) {
 			uses = append(uses, use.parts...)
 		}
 		ext := &ir.TypeDef{Name: id.name, Fields: sourceFields, Behaviors: uses}
-		// A table's @audience adds columns a view may read (D156), and a
-		// notifier class or the channel identities their fields (D153),
-		// which the loader adds to the external type as the table's own
-		// load does.
+		// A table's @audience adds columns a view may read, and the
+		// @accessGrants and @accessLog classes all their fields (D156), and
+		// a notifier class or the channel identities theirs (D153), which
+		// the loader adds to the external type as the table's own load
+		// does.
 		w.suppressRecording, w.foreignClass = true, true
 		for _, d := range w.decoratorsOf(id.decl) {
-			if d.id.name == "audience" || d.id.name == "notifier" || d.id.name == "channelIdentities" {
+			if externalFieldDecorators[d.id.name] {
 				if serr := w.applyDecorator(d, registry.TargetType, registry.Node{Type: ext}); serr != nil {
 					w.addErr(serr)
 				}

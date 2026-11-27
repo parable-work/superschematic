@@ -23,6 +23,7 @@ import {
   type RulesStatement,
   type RulesStore,
 } from './rules';
+import { setProcessQueueWaker } from './queue-wake';
 import { rulesCore } from './rules.testing';
 import { uuidToDb } from './uuid';
 
@@ -354,6 +355,30 @@ function scripted(steps: CoreStep[]): { core: RulesCore; answers: CoreAnswers[] 
 describe('the host loop on any core', () => {
   const changed = (extra: Record<string, unknown>): CoreStep =>
     ({ done: { changed: { rows: [], subRows: [], events: [], deadlines: [], result: null, ...extra } } }) as CoreStep;
+
+  test("each row a unit writes wakes its table's change queue once, which its trigger writes, and a row a change found gone none (D145)", async () => {
+    const hearing: RulesLayout = {
+      types: { Order: { ...layout.types.Order!, changes: { queue: 'OrderChange', table: 'order_change_queue', rowKey: 'row_key', write: 'write', at: 'at', before: 'before', after: 'after' } } },
+    };
+    const woken: { queue: string; dueAt: number | undefined }[] = [];
+    setProcessQueueWaker({ enqueued: async (queue, dueAt) => void woken.push({ queue, dueAt }), settled: async () => {} });
+    try {
+      const update = { kind: 'update', type: 'Order', key, expectedVersion: 1, own: { title: 'Chair' }, owned: {} };
+      const { core } = scripted([changed({ rows: [update, { ...update, own: { title: 'Stool' } }] })]);
+      await execute({ core, layout: hearing, store: memoryStore('postgres', draftRow).store }, 'Order', transition('paid'));
+      expect(woken).toEqual([{ queue: 'OrderChange', dueAt: undefined }]);
+      woken.length = 0;
+      // A row the change found gone is no write; a unit that does not
+      // apply wakes nothing.
+      await execute({ core: scripted([changed({ rows: [{ kind: 'gone', type: 'Order', key }] })]).core, layout: hearing, store: memoryStore('postgres', draftRow).store }, 'Order', transition('paid'));
+      expect(woken).toEqual([]);
+      const moving = memoryStore('postgres', draftRow, Array(MAX_ATTEMPTS).fill(false)).store;
+      await expect(execute({ core, layout: hearing, store: moving }, 'Order', transition('paid'))).rejects.toMatchObject({ refusal: { code: 'busy' } });
+      expect(woken).toEqual([]);
+    } finally {
+      setProcessQueueWaker(undefined);
+    }
+  });
 
   test('a lock is taken once and each read records the locks held when it was made', async () => {
     const { core, answers } = scripted([{ read: [{ kind: 'row', type: 'Order', key }] }, { lock: ['Stock/s1'] }, { read: [{ kind: 'row', type: 'Order', key }] }, changed({ result: 'ok' })]);

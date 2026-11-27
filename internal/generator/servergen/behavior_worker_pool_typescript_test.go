@@ -105,7 +105,7 @@ func TestTypeScriptPoolBehaviorWorkerEntrypoint(t *testing.T) {
 		"fixturePoolApiImpl.createWorkers(fixturePoolApiDeps)",
 		"fixturePoolApiApi.accountRechecksQueues(fixturePoolDbPool, orm, workers,",
 		"createFixturePoolDbOrm(fixturePoolDbPool)",
-		"runWorker(",
+		"runWorkers(",
 	} {
 		if !strings.Contains(string(main), want) {
 			t.Errorf("main.ts has no %s:\n%s", want, main)

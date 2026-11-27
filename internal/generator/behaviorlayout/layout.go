@@ -131,6 +131,14 @@ func convertOfRef(ref ir.TypeRef) Convert {
 	return ConvertOf(ref.Name)
 }
 
+// columnOf is the column of the field named field, of type ref, which the
+// column named column holds: its type's name, how an adapter converts it,
+// and whether it holds a list of that type (a list of lists is JSON, which
+// the layout does not mark).
+func columnOf(field, column string, ref ir.TypeRef) Column {
+	return Column{Field: field, Column: column, Type: ref.Name, Convert: convertOfRef(ref), List: ref.IsArray && !ref.IsArrayOfArrays && !ref.IsMap}
+}
+
 // Layout is the layout document of a DB schema: each table that composes a
 // behavior as a table (ir.TypeDef.TableBehaviors: implements and field
 // uses), by its type's name. A table with none is not in it, and a schema
@@ -311,6 +319,12 @@ type Column struct {
 	// Convert is how the adapter converts its value; absent for none, and
 	// for a list or a map, whose depth the column does not carry.
 	Convert Convert `json:"convert,omitempty"`
+
+	// List is true for a column that holds a list of Type (a Postgres
+	// array, SQLite's JSON text of one): an @audience table's audience ids,
+	// a uuid[] (D156), which an adapter converts element by element.
+	// Absent for one value, and for a map.
+	List bool `json:"list,omitempty"`
 }
 
 // Use is one use of a behavior on a table: implemented by the table, or
@@ -827,7 +841,7 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 			}
 			use.Fields = append(use.Fields, OwnedField{
 				Name:   declared.Name,
-				Column: Column{Field: fd.Name, Column: column, Type: fd.TypeRef.Name, Convert: convertOfRef(fd.TypeRef)},
+				Column: columnOf(fd.Name, column, fd.TypeRef),
 				Value:  value,
 			})
 		}
@@ -925,7 +939,7 @@ func ownColumnsOf(schema *ir.Schema, model *sqlutil.TableModel) ([]Column, []*Re
 			own = append(own, column)
 			relations = append(relations, &RelationSpec{Name: c.Field, Type: c.Relation})
 		default:
-			own = append(own, Column{Field: c.Field, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: convertOfRef(c.Def.TypeRef)})
+			own = append(own, columnOf(c.Field, c.Name, c.Def.TypeRef))
 			relations = append(relations, nil)
 		}
 	}
@@ -973,7 +987,7 @@ func auditColumns(model *sqlutil.TableModel) []Column {
 	if c == nil || c.Def == nil || c.Relation != "" || c.Def.TypeRef.IsArray || c.Def.TypeRef.IsMap {
 		return nil
 	}
-	return []Column{{Field: sqlutil.AuditCreatedBy, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: convertOfRef(c.Def.TypeRef)}}
+	return []Column{columnOf(sqlutil.AuditCreatedBy, c.Name, c.Def.TypeRef)}
 }
 
 // readAudit are the audit columns of the table model holds that the
@@ -1000,7 +1014,7 @@ func readAudit(td *ir.TypeDef, model *sqlutil.TableModel) []Column {
 		}
 		c := model.AuditColumn(sqlutil.AuditCreatedAt)
 		if c != nil && c.Def != nil && c.Relation == "" && !c.Def.TypeRef.IsArray && !c.Def.TypeRef.IsMap {
-			out = append(out, Column{Field: sqlutil.AuditCreatedAt, Column: c.Name, Type: c.Def.TypeRef.Name, Convert: convertOfRef(c.Def.TypeRef)})
+			out = append(out, columnOf(sqlutil.AuditCreatedAt, c.Name, c.Def.TypeRef))
 		}
 		break
 	}
@@ -1294,7 +1308,7 @@ func subTableOf(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, declared 
 		if fd == nil || !ok {
 			return SubTable{}, fmt.Errorf("behavior %s's table %s, the type %s, has no column of its field %s", ref.Name, declared.Name, sub.Name, field.Name)
 		}
-		owned := OwnedField{Name: field.Name, Column: Column{Field: fd.Name, Column: column, Type: fd.TypeRef.Name, Convert: convertOfRef(fd.TypeRef)}}
+		owned := OwnedField{Name: field.Name, Column: columnOf(fd.Name, column, fd.TypeRef)}
 		if field.Name == declared.Key {
 			out.Key = owned
 			continue
@@ -1341,7 +1355,7 @@ func sharedTableOf(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, declar
 		if fd == nil || !ok {
 			return SharedTable{}, fmt.Errorf("behavior %s's table %s, the type %s, has no column of its field %s", ref.Name, declared.Name, shared.Name, field.Name)
 		}
-		owned := OwnedField{Name: field.Name, Column: Column{Field: fd.Name, Column: column, Type: fd.TypeRef.Name, Convert: convertOfRef(fd.TypeRef)}}
+		owned := OwnedField{Name: field.Name, Column: columnOf(fd.Name, column, fd.TypeRef)}
 		if field.Name == declared.Key {
 			out.Key = owned
 			continue

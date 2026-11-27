@@ -29,6 +29,7 @@ export abstract class RecipeCommitted {
 export abstract class RecipePublished {
   root: Identity.UUID;
   commit: Identity.UUID;
+  sequence: Nullable<Generic.Int64>;
 }
 
 // A recipe: the stable identity its steps and ingredients are versioned

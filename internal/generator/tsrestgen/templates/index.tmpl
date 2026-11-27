@@ -6,6 +6,9 @@ export * from './deps';
 {{- if .HasBehaviorWorkers }}
 export * from './behavior-workers';
 {{- end }}
+{{- if .HasAgents }}
+export * from './agents';
+{{- end }}
 {{- if .HasEnvConfig }}
 export * from './config';
 {{- end }}

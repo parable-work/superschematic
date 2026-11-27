@@ -149,7 +149,12 @@ export abstract class Ticket {
 			"@references on Ticket: tickets-db lists the sqlite dialect and enables the Go types",
 			"@attachments on Ticket: tickets-db lists the sqlite dialect and enables the Go types",
 		}},
-		{"Rust's types", `{"rust": {"enabled": true}}`, []string{"enables the Rust types, whose repositories read Ticket's rows on SQLite without it"}},
+		// The Rust repositories serve them on Postgres alone (D185).
+		{"Rust's types", `{"rust": {"enabled": true}}`, []string{
+			"@audience on Ticket: tickets-db lists the sqlite dialect and enables the Rust types",
+			"@references on Ticket: tickets-db lists the sqlite dialect and enables the Rust types",
+			"@attachments on Ticket: tickets-db lists the sqlite dialect and enables the Rust types",
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := writeService(t, map[string]string{

@@ -74,9 +74,10 @@ func (o *APIOutput) HasTableEndpoints() bool {
 
 // TakesDatabase reports whether the Config of an API that is not public
 // takes the ORM of its database: its behavior operations (D103) and its
-// table operations (D106) run through it.
+// table operations (D106) run through it, and so do its graph operations
+// (D138).
 func (o *APIOutput) TakesDatabase() bool {
-	return o.HasBehaviorEndpoints() || o.HasTableEndpoints()
+	return o.HasBehaviorEndpoints() || o.HasTableEndpoints() || o.HasGraphEndpoints()
 }
 
 // TablesWrite reports whether a table operation of the view creates or
@@ -119,10 +120,10 @@ func tableDatabase(endpoints []EndpointInfo) string {
 // setTableDeps gives Deps what tables.go imports beside the ORM: the Go
 // types module of the API's database, whose rows the handlers read and
 // write, under the name of its service. An API with workers has it already
-// (D53).
+// (D53). graphs.go reads the rows of a version graph's tables too (D138).
 func (o *APIOutput) setTableDeps() {
-	marked := slices.ContainsFunc(o.Endpoints, func(ep EndpointInfo) bool { return ep.TableOperation() != nil })
-	if (!marked && len(o.TableEndpoints) == 0) || o.Deps.Database == "" {
+	marked := slices.ContainsFunc(o.Endpoints, func(ep EndpointInfo) bool { return ep.TableOperation() != nil || ep.GraphOperation() != nil })
+	if (!marked && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0) || o.Deps.Database == "" {
 		return
 	}
 	if o.Deps.DatabaseTypes == "" {
@@ -172,6 +173,12 @@ type TablesInfo struct {
 	UsesRowRules  bool
 	UsesRowLift   bool
 	UsesRowCreate bool
+
+	// Reveals are the functions that open a view's members a reveal
+	// permission holds (D156, D180); UsesRevealKey, one names its row by a
+	// key the row holds as a pointer.
+	Reveals       []TableReveal
+	UsesRevealKey bool
 }
 
 // TableRows is what the refusals of a table's writes name (D106): the
@@ -247,6 +254,12 @@ type tableBuilder struct {
 	info  *TablesInfo
 	views map[string]bool
 	rows  map[string]bool
+
+	// reveals names, by a view's fill function, the function that opens
+	// its members a reveal permission holds (D156); operation is the name
+	// of the operation being modelled, which the access log records.
+	reveals   map[string]string
+	operation string
 }
 
 // UnservedTableOperation is a table operation the Go server writes no
@@ -450,6 +463,7 @@ func (b *tableBuilder) viewOf(owner, what, typeName string, to *ir.TableOperatio
 func (b *tableBuilder) handler(endpoint EndpointInfo) (*TableHandler, error) {
 	to := endpoint.TableOperation()
 	owner := b.owner(endpoint)
+	b.operation = endpoint.Name
 	if !slices.Contains(ir.TableOperationKinds, to.Kind) || to.Type == "" || to.Database == "" {
 		return nil, fmt.Errorf("apigen: operation %s: its @tableOperation has no kind, table and database; the loader fills them from the operation's method, path and views (D106)", owner)
 	}
@@ -564,7 +578,8 @@ func (b *tableBuilder) handler(endpoint EndpointInfo) (*TableHandler, error) {
 		}
 		h.Body = append(h.Body, "repo := "+repo)
 		h.Body = append(h.Body, find...)
-		h.Body = append(h.Body, "view := "+asView+"(row)", "result = &view", "return nil")
+		h.Body = append(h.Body, b.viewLines(asView, "row", "view", true)...)
+		h.Body = append(h.Body, "result = &view", "return nil")
 
 	case ir.TableOperationDelete:
 		if err := b.noArguments(owner, endpoint, to.Kind); err != nil {
@@ -575,8 +590,9 @@ func (b *tableBuilder) handler(endpoint EndpointInfo) (*TableHandler, error) {
 		h.Body = append(h.Body,
 			"if err := repo.DeleteOne(ctx, "+rowKey+"); err != nil {",
 			"return err",
-			"}",
-			"view := "+asView+"(row)", "result = &view", "return nil")
+			"}")
+		h.Body = append(h.Body, b.viewLines(asView, "row", "view", true)...)
+		h.Body = append(h.Body, "result = &view", "return nil")
 
 	case ir.TableOperationList:
 		if err := b.list(owner, endpoint, h, result, to, conditions, asView, repo, &params); err != nil {
@@ -630,7 +646,12 @@ func (b *tableBuilder) reach(owner string, result *tableView, to *ir.TableOperat
 	var named []string
 	for _, name := range to.By {
 		if strings.Contains(name, ".") {
-			return nil, unserved("its row rule names the path %s, and the Go server holds a rule to the row's own members so far (D156)", name)
+			condition, err := b.rulePath(owner, to.Type, name)
+			if err != nil {
+				return nil, err
+			}
+			named = append(named, condition)
+			continue
 		}
 		column := result.column(name)
 		if column == nil {
@@ -656,6 +677,63 @@ func (b *tableBuilder) reach(owner string, result *tableView, to *ir.TableOperat
 	return append(lines, "}",
 		"where.AllOf = append(where.AllOf, "+filter+"{AnyOf: []"+filter+"{"+strings.Join(named, ", ")+"}})",
 		"}"), nil
+}
+
+// rulePath is the filter of the rows of table whose row rule's path, a
+// dotted member such as unit.contract.parties.party, leads to a member that
+// holds the caller (D108, D156, D180), as the repository's filter writes
+// it: one condition of the row's WHERE, a semijoin per step. Each step but
+// the last is a to-one relation of the table the step before reached, or a
+// one-to-many one (a @hasMany field, or another table's relation that
+// points back), whose member of the filter the ORM names after it; the
+// last is a member that holds a UUID.
+func (b *tableBuilder) rulePath(owner, table, path string) (string, error) {
+	steps := strings.Split(path, ".")
+	suffix := b.output.Naming.Go.ORMRelationFilterSuffix
+	at := b.tables[table]
+	var opens []string
+	for _, step := range steps[:len(steps)-1] {
+		if at == nil {
+			return "", fmt.Errorf("apigen: operation %s: its row rule's path %s steps through a table with no repository; the loader checks every step (D108)", owner, path)
+		}
+		next := ""
+		for _, rel := range at.ToOne {
+			if rel.Field == step {
+				next = rel.Target
+			}
+		}
+		if next == "" {
+			for _, rel := range at.ToMany {
+				if rel.Name == step {
+					next = rel.Source
+				}
+			}
+		}
+		if next == "" || b.tables[next] == nil {
+			return "", fmt.Errorf("apigen: operation %s: its row rule's path %s names %s, which is no relation of %s; the loader checks every step (D108)", owner, path, step, at.Type)
+		}
+		opens = append(opens, codegen.ToPascalCase(step)+suffix+": &orm."+next+"Filter{")
+		at = b.tables[next]
+	}
+	last := steps[len(steps)-1]
+	var column *sqlutil.ColumnModel
+	for i := range at.Columns {
+		c := &at.Columns[i]
+		if (c.Relation == "" && c.Field == last) || (c.Relation != "" && (c.Field == last || c.Field+"Id" == last)) {
+			column = c
+		}
+	}
+	if column == nil {
+		return "", fmt.Errorf("apigen: operation %s: its row rule's path %s ends at %s, which is no member of %s; the loader checks every step (D108)", owner, path, last, at.Type)
+	}
+	if column.Filter != sqlutil.FilterUUID {
+		return "", unserved("its row rule's path %s ends at %s, which holds text, and the Go server compares the caller with a member that holds a UUID alone so far (D108)", path, last)
+	}
+	member := codegen.ToPascalCase(column.Field)
+	if column.Relation != "" {
+		member += "ID"
+	}
+	return "{" + strings.Join(opens, "") + member + ": &orm.UUIDFilter{Eq: &caller}" + strings.Repeat("}", len(opens)) + "}", nil
 }
 
 // owner names the endpoint's operation as the loader does, Set.operation,
@@ -900,9 +978,100 @@ func (b *tableBuilder) view(owner string, view *tableView) (string, error) {
 		}
 		fn.Lines = append(fn.Lines, lines...)
 	}
+	if err := b.reveal(owner, view, name); err != nil {
+		return "", err
+	}
 	b.views[view.def.Name] = true
 	b.info.Views = append(b.info.Views, fn)
 	return name, nil
+}
+
+// TableReveal is the function that opens the members of a view a reveal
+// permission holds (@decrypted({ permission }), D156, D180) for a caller
+// who holds it, recording each value it opens in the access log in the
+// operation's transaction, and masks them for any other caller.
+type TableReveal struct {
+	Func    string
+	View    string
+	RowType string
+	Table   string
+	// Key is the Go expression of the row's key as text, which the access
+	// log names the row by.
+	Key    string
+	Fields []TableRevealField
+}
+
+// TableRevealField is one member a reveal permission holds: its Go member
+// of the view, its field's name, the permission, and whether the view
+// holds it as a pointer.
+type TableRevealField struct {
+	Member     string
+	Field      string
+	Permission string
+	Pointer    bool
+}
+
+// reveal models the reveal of view, whose fill function is asView, when a
+// field of it is held by a reveal permission: each such member is text, the
+// table's key a UUID, and the database has an @accessLog table to record
+// each reveal in, or the build is refused, since a value is never opened
+// unrecorded.
+func (b *tableBuilder) reveal(owner string, view *tableView, asView string) error {
+	out := TableReveal{Func: "reveal" + view.def.Name, View: view.def.Name, RowType: b.alias + "." + view.model.Type, Table: view.model.Type}
+	for _, field := range view.def.Fields {
+		if field == nil || field.RevealPermission == "" {
+			continue
+		}
+		to, ok := goMemberOf(b.source.types, field)
+		if !ok || field.TypeRef.Name != "string" || field.TypeRef.IsArray {
+			return unserved("its result %s reveals %s under %s, and the Go server masks a revealed field that holds text alone so far (D156)", view.def.Name, field.Name, field.RevealPermission)
+		}
+		out.Fields = append(out.Fields, TableRevealField{Member: codegen.ToPascalCase(field.Name), Field: field.Name, Permission: field.RevealPermission, Pointer: to.pointer})
+	}
+	if len(out.Fields) == 0 {
+		return nil
+	}
+	if b.db.AccessLogTable() == nil {
+		return fmt.Errorf("apigen: operation %s: its result %s reveals %s under %s, and %s has no @accessLog table to record each reveal in (D156); declare one", owner, view.def.Name, out.Fields[0].Field, out.Fields[0].Permission, b.dbName)
+	}
+	key := view.model.KeyColumn()
+	if key == nil || key.Filter != sqlutil.FilterUUID {
+		return unserved("its result %s reveals %s, and the Go server records a reveal of a row whose key is a UUID alone so far (D156)", view.def.Name, out.Fields[0].Field)
+	}
+	expr := "row." + codegen.ToPascalCase(key.Field)
+	pointer := true
+	if key.Def != nil {
+		if held, ok := goMemberOf(b.dbTypes, key.Def); ok {
+			pointer = held.pointer
+		}
+	}
+	if pointer {
+		out.Key = "tableRevealKey(" + expr + ")"
+		b.info.UsesRevealKey = true
+	} else {
+		out.Key = expr + ".String()"
+	}
+	if b.reveals == nil {
+		b.reveals = map[string]string{}
+	}
+	b.reveals[asView] = out.Func
+	b.info.Reveals = append(b.info.Reveals, out)
+	return nil
+}
+
+// viewLines are the statements that set target to the view asView fills
+// from row, opened for the operation's caller where it may reveal them
+// (D156): declare declares target.
+func (b *tableBuilder) viewLines(asView, row, target string, declare bool) []string {
+	assign := " = "
+	if declare {
+		assign = " := "
+	}
+	lines := []string{target + assign + asView + "(" + row + ")"}
+	if reveal := b.reveals[asView]; reveal != "" {
+		lines = append(lines, "if err := "+reveal+"(ctx, tx, "+strconv.Quote(b.operation)+", "+row+", &"+target+"); err != nil {", "return err", "}")
+	}
+	return lines
 }
 
 // tableRows models what the refusals of the writes of view's table name,
@@ -1030,8 +1199,9 @@ func (b *tableBuilder) list(owner string, endpoint EndpointInfo, h *TableHandler
 		"return err",
 		"}",
 		"result.Items = make([]types."+endpoint.OutputType+", len(rows.Rows))",
-		"for i, row := range rows.Rows {",
-		"result.Items[i] = "+asView+"(row)",
+		"for i, row := range rows.Rows {")
+	body = append(body, b.viewLines(asView, "row", "result.Items[i]", false)...)
+	body = append(body,
 		"}",
 		"if rows.Next != nil {",
 		"next, err := paging.EncodeCursor(rows.Next)",
@@ -1390,8 +1560,9 @@ func (b *tableBuilder) create(owner string, h *TableHandler, body *tableView, pa
 		"created, err := repo.CreateOne(ctx, row)",
 		"if err != nil {",
 		"return err",
-		"}",
-		"view := "+asView+"(created)", "result = &view", "return nil")
+		"}")
+	h.Body = append(h.Body, b.viewLines(asView, "created", "view", true)...)
+	h.Body = append(h.Body, "result = &view", "return nil")
 	return nil
 }
 
@@ -1519,8 +1690,9 @@ func (b *tableBuilder) update(owner string, h *TableHandler, body *tableView, ro
 		"if row, err = repo.UpdateOne(ctx, "+rowKey+", update); err != nil {",
 		"return err",
 		"}",
-		"}",
-		"view := "+asView+"(row)", "result = &view", "return nil")
+		"}")
+	h.Body = append(h.Body, b.viewLines(asView, "row", "view", true)...)
+	h.Body = append(h.Body, "result = &view", "return nil")
 	return nil
 }
 

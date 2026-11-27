@@ -1,0 +1,201 @@
+{
+  "comment": "Per-record access (D156, D180): tokenHashes is a grant token's stored hash (Go's access.GrantTokenHash, TypeScript's grantTokenHash); reaches is a role's reaches read by type (ReachesOf, reachesOf); callEntries is the access-log entry of a call, null for none (CallEntry, callEntry). runtime/schema/go/access writes the wants with go test -run TestAccessParityVectors -update.",
+  "tokenHashes": [
+    {
+      "token": "grant_",
+      "want": "acd902a074fe18d80f855a56b696d475ec52538e3130ad17a0e941cea15b743d"
+    },
+    {
+      "token": "grant_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "want": "50382faa59e593a1175d088f5dc50fa528c96a34c37a0e49a15bb18119bb1d39"
+    },
+    {
+      "token": "grant_unknown",
+      "want": "f4a620481df646e29a81f14c90dbc2944207449d44b627940054d6066dc339f6"
+    }
+  ],
+  "reaches": [
+    {
+      "name": "none",
+      "entries": [],
+      "want": {}
+    },
+    {
+      "name": "paths by type",
+      "entries": [
+        "Unit:contract",
+        "Request:unit.contract",
+        "Request:unit.contract.parties"
+      ],
+      "want": {
+        "Request": [
+          "unit.contract",
+          "unit.contract.parties"
+        ],
+        "Unit": [
+          "contract"
+        ]
+      }
+    },
+    {
+      "name": "every row",
+      "entries": [
+        "Document:*"
+      ],
+      "want": {
+        "Document": [
+          "*"
+        ]
+      }
+    },
+    {
+      "name": "entries with no type or no path are skipped",
+      "entries": [
+        ":contract",
+        "Unit:",
+        "Unit",
+        "Request:unit"
+      ],
+      "want": {
+        "Request": [
+          "unit"
+        ]
+      }
+    }
+  ],
+  "callEntries": [
+    {
+      "name": "the anonymous caller",
+      "principal": {},
+      "operation": "listDocuments",
+      "method": "GET",
+      "want": null
+    },
+    {
+      "name": "a session's user",
+      "principal": {
+        "subject": "u1",
+        "kind": "user"
+      },
+      "operation": "listDocuments",
+      "method": "GET",
+      "want": null
+    },
+    {
+      "name": "a user with an API key",
+      "principal": {
+        "subject": "u1",
+        "credential": {
+          "kind": "apiKey",
+          "id": "k1"
+        }
+      },
+      "operation": "createDocument",
+      "method": "POST",
+      "want": {
+        "kind": "keyCall",
+        "principal": "u1",
+        "principalKind": "user",
+        "credential": "k1",
+        "operation": "createDocument"
+      }
+    },
+    {
+      "name": "a party with a grant",
+      "principal": {
+        "subject": "p1",
+        "kind": "party",
+        "credential": {
+          "kind": "grant",
+          "id": "g1"
+        }
+      },
+      "operation": "listRequests",
+      "method": "GET",
+      "want": {
+        "kind": "grantCall",
+        "principal": "p1",
+        "principalKind": "party",
+        "credential": "g1",
+        "operation": "listRequests"
+      }
+    },
+    {
+      "name": "an agent run's read",
+      "principal": {
+        "subject": "r1",
+        "kind": "agent",
+        "actingFor": {
+          "kind": "user",
+          "subject": "u1"
+        }
+      },
+      "operation": "getDocument",
+      "method": "GET",
+      "want": {
+        "kind": "agentRead",
+        "principal": "r1",
+        "principalKind": "agent",
+        "actingFor": "u1",
+        "operation": "getDocument"
+      }
+    },
+    {
+      "name": "an agent run's HEAD",
+      "principal": {
+        "subject": "r1",
+        "kind": "agent",
+        "credential": {
+          "kind": "grant",
+          "id": "g2"
+        }
+      },
+      "operation": "getDocument",
+      "method": "HEAD",
+      "want": {
+        "kind": "agentRead",
+        "principal": "r1",
+        "principalKind": "agent",
+        "credential": "g2",
+        "operation": "getDocument"
+      }
+    },
+    {
+      "name": "an agent run's write with no credential",
+      "principal": {
+        "subject": "r1",
+        "kind": "agent",
+        "actingFor": {
+          "subject": "u1"
+        }
+      },
+      "operation": "updateDocument",
+      "method": "PATCH",
+      "want": null
+    },
+    {
+      "name": "an agent run's write with a grant",
+      "principal": {
+        "subject": "r1",
+        "kind": "agent",
+        "actingFor": {
+          "subject": "u1"
+        },
+        "credential": {
+          "kind": "grant",
+          "id": "g2"
+        }
+      },
+      "operation": "updateDocument",
+      "method": "PATCH",
+      "want": {
+        "kind": "grantCall",
+        "principal": "r1",
+        "principalKind": "agent",
+        "actingFor": "u1",
+        "credential": "g2",
+        "operation": "updateDocument"
+      }
+    }
+  ]
+}

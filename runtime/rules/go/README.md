@@ -308,6 +308,15 @@ The layout is the document `internal/generator/behaviorlayout` writes; a
 generated Go ORM embeds it as `RulesLayout` and runs its repositories
 through this package.
 
+`Host.Wake`, when set, wakes a behavior worker's queues (D145, D151):
+once a command's unit has applied, before the transaction commits, the
+adapter calls it once per queue with the `@queue` class of the event
+queue of each event, the deadline queue of each deadline armed due within
+`WakeHorizon` (five minutes) of the command's time, and the change queue
+of each row written, whose trigger writes the message. A generated ORM
+gives it what its `OnEnqueue` was given, the HTTP runtime's
+`wake.Notifier`'s `Enqueued`.
+
 A behavior's owned columns are read-only in a generated repository's
 inputs, but nothing here, and no trigger or check, refuses a raw SQL write
 of one: an operator who needs to repair a row can (D103), and the next

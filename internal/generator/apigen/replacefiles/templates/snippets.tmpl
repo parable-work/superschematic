@@ -28,4 +28,4 @@
 {{ define "moduleRequires" }}{{ end }}
 {{ define "moduleReplaces" }}{{ end }}
 {{ define "callerImports" }}{{ end }}
-{{ define "callerPrincipal" }}callerID(ctx){{ end }}
+{{ define "callerPrincipal" }}runtimesession.Caller{Subject: callerID(ctx)}{{ end }}

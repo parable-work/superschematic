@@ -265,6 +265,11 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if def.Queue != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("queue"), queueArgs(def.Queue))
 	}
+	if def.Agents != nil {
+		// One of the agent orchestration's tables (D158), whose part's
+		// fields the loader adds again on reading it back.
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("agents"), quote(def.Agents.Part))
+	}
 	for _, change := range def.EnqueueOnChange {
 		// The queue may be declared in another file of the schema.
 		e.recordHeritageImports(change.Queue)

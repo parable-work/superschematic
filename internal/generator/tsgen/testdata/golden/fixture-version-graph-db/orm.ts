@@ -29,10 +29,11 @@ decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
 
 The table of a graph member's released rows (D139), <Member>Released, has
-a repository of reads alone, a table's reads and none of its writes: the
-graph's release owns the rows and rewrites them, so the repository has no
-create, update, upsert or delete, and the table no create, update or
-unique key type. A raw SQL write of its rows is never refused.
+a repository of reads alone, in its type and in the object the ORM holds:
+a table's reads and none of its writes. The graph's release owns the rows
+and rewrites them, so the repository has no create, update, upsert or
+delete, and the table no create, update or unique key type. A raw SQL
+write of its rows is never refused.
 */
 import { ormOf } from '@superschematic/http-runtime/postgres';
 import type { BoolFilter, DateFilter, DateTimeFilter, DurationFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReadRepository, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
@@ -741,6 +742,7 @@ export const partReleasedTable: TableDefinition = {
     delete: "DELETE FROM part_released WHERE id = $1",
     deleteMany: "DELETE FROM part_released%s",
   },
+  readOnly: true,
   uniqueKeys: {
     "id": { conflict: "(id)", keep: "id = part_released.id", rows: "SELECT \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\" FROM part_released WHERE (id) IN (%s)" },
     "recipe,entityKey": { conflict: "(recipe_id, entity_key)", keep: "recipe_id = part_released.recipe_id", rows: "SELECT \"id\", \"recipe_id\", \"entity_key\", \"parent_key\", \"rank\", \"heading\", \"commit_id\", \"sequence\" FROM part_released WHERE (recipe_id, entity_key) IN (%s)" },

@@ -59,8 +59,9 @@ examples/acme-schematic/scripts/check_second_decorator.sh
 The smoke builds the module and both binaries, runs `build-all` over the
 schemas root, and asserts each surface did its job (the list is at the top of
 the script). The check applies `scripts/second_decorator.patch`, reruns the
-smoke, and fails if any path outside this directory changed. Both are the
-`acme` job in `.github/workflows/ci.yml`.
+smoke, and fails if any path outside this directory changed. Both are
+steps of the `acme` job in `.github/workflows/ci.yml`, which runs in the
+full tier, not on pull requests (D40).
 
 To poke at it by hand:
 
@@ -500,7 +501,7 @@ which provider supplies them. The core ships `session`. `ext/auth` ships
 | `Endpoint(field, set, info)` | nothing; API keys scope no endpoint |
 | `Templates()` | the embedded `templates/auth_snippets.tmpl` |
 | `Funcs()` | nil |
-| `Files(out)` | none; every addition is a snippet |
+| `Files(out)` | none; every addition is a snippet (a provider's file named as a core file, `middleware.go` say, would replace it) |
 | `OpenAPIParameters(out)` | the `X-API-Key` header parameter on every authenticated route |
 
 `Analyze` runs against the schema `authDb` names in `schema.config`. It
@@ -521,11 +522,17 @@ The snippet file defines one `{{ define }}` per hook point the core
 templates call: `contextImports`, `contextAuth`, `middlewareStdImports`,
 `middlewareImports`, `middlewareAliases`, `middlewareAuthz`,
 `middlewareStores`, `routesImports`, `routesConfigStores`,
-`routesConfigMiddlewares`, `routesConfigValidate`, `routesConfigExample`,
-`routesSetupPre`, `routesSetup`, `routesProtectedMiddleware`,
-`routePermissions`, `moduleRequires`, `moduleReplaces`. The api generator
-checks the set is complete when it parses the templates, before it renders
-a file; `registry.AuthSnippetFunc(provider)` in a provider test
+`routesConfigMiddlewares`, `routesConfigFields`, `routesConfigValidate`,
+`routesConfigExample`, `routesConfigPrepare`, `routesSetupPre`,
+`routesSetup`, `routesProtectedMiddleware`, `routeMiddlewaresFirst`,
+`routePermissions`, `routesDeclarations`, `routeMiddlewaresAfterDecrypt`,
+`routeUploadBody`, `routeQueryList`, `moduleRequires`, `moduleReplaces`,
+`callerImports` and `callerPrincipal`, twelve of them empty in acme's
+file. Its `callerPrincipal` is `runtimesession.GetPrincipalID(ctx)`, the
+principal the API key resolved to, which a `Deps` database binds as its
+caller (D87). The api generator checks the set is complete when it
+parses the templates, before it renders a file;
+`registry.AuthSnippetFunc(provider)` in a provider test
 (`ext/auth/provider_test.go`) catches a missing one at `go test`. The acme
 snippets build on `runtime/http/go/session`
 (`Principal`, `PrincipalStore`, `RequirePermissions`, `ErrNotFound`) and add
@@ -595,7 +602,7 @@ r.RegisterOpenAPIHook(registry.OpenAPIHook{
 The check runs after the core checks on every schema the binary loads,
 core kinds included, in every authoring form. The hook edits the OpenAPI
 document the api generator builds before it is written. `shop-api` declares
-`@docs` on two operations and `shop-config` declares field `@docs`,
+`@docs` on three operations and `shop-config` declares field `@docs`,
 `@purpose` and `@icon`; `ext/docs_test.go` checks the record lands under
 `x-acme-docs` and that an audience or icon outside acme's sets fails the
 load while the core registry accepts it. The smoke checks the generated
@@ -617,10 +624,10 @@ r.RegisterCheck(registry.CheckSpec{
 })
 ```
 
-`shop-api` classifies its three operations: `getProduct` and
-`createProduct` are visible tools with an `@icon` from acme's set,
-`listProducts` is hidden with a reason. `acmeIcons` covers operation
-icons as well as field icons.
+`shop-api` classifies its four operations: `getProduct`,
+`createProduct` and `replaceVariants` are visible tools with an `@icon`
+from acme's set, `listProducts` is hidden with a reason. `acmeIcons`
+covers operation icons as well as field icons.
 
 The SDK generators write the tools of `shop-api` to `tools/schema.json`,
 `tools/mcp-audit.json` and the provider lists. How those documents spell
@@ -906,8 +913,10 @@ TypeScript server on acme.Rating so).
 
 ## A command
 
-`cli.New` returns the root cobra command with `build`, `build-all`,
-`json-schema`, `format` and `behaviors`. An extension that implements
+`cli.New` returns the root cobra command with the core's commands:
+`check`, `build`, `build-all`, `migrate`, `queries`, `json-schema`,
+`format`, `behaviors`, `engine-client`, `stack`, `identity`, `env`,
+`catalog`, `init` and `new`. An extension that implements
 `cli.CommandProvider` contributes more:
 
 ```go

@@ -78,11 +78,12 @@ src/notes.schema.ts:16:9: invalid @mcp config: handle "getNote" must be lowercas
 ```
 
 The record is `FieldDef.mcp` (`ir.OperationMCP`) in the IR: `handle`,
-`hidden` (always written), `hiddenReason`, the invocation policy and
-`_meta`, in that order. The JSON and YAML forms write the same object
-under the operation's `mcp` key and the loader applies the same rules to
-them. `mcp` on a data field is an error. The record's `name`,
-`description` and `icon` are generated and cannot be declared.
+`hidden` (always written), `hiddenReason`, the invocation policy,
+`additive` and `_meta`, in that order. The JSON and YAML forms write the
+same object under the operation's `mcp` key and the loader applies the
+same rules to them. `mcp` on a data field is an error. The record's
+`name`, `description`, `icon` and `annotations` are generated and cannot
+be declared.
 
 ## The invocation policy
 
@@ -98,7 +99,7 @@ operation has none.
 
 | Where | Position | Hidden or unclassified operation |
 | --- | --- | --- |
-| IR and the data forms, `mcp` record | after `hiddenReason` (after `hidden` when there is no reason), before `_meta` | absent |
+| IR and the data forms, `mcp` record | after `hiddenReason` (after `hidden` when there is no reason), before `additive` and `_meta` | absent |
 | `tools/schema.json`, `mcp` object | after `description`, before `_meta` | absent |
 | `tools/mcp-audit.json`, each record | after `hiddenReason`, before `requiresAuth` | `""` |
 | `tools/index.ts`, `ToolDefinition.mcp` | member `invocationPolicy?: 'auto' \| 'ask';` after `description?: string;` | |
@@ -176,11 +177,34 @@ only `holder` and `notRenewedAfter` (D104,
 [An operation of the table as a whole](/superschematic/guides/api-routes/#an-operation-of-the-table-as-a-whole)).
 A pool member's recheck events reach no tool.
 
-A TypeScript API's endpoint lists the tool and runs it through its route,
-so the set's `@requirePermission` and the core's own permission checks
-apply to a call as to a request, and a tool whose policy is `"ask"` asks
-first. An API's own policy or hiding of a behavior's tool, and a handle of
-its own, are not available yet.
+An API's MCP endpoint, a TypeScript or a Rust one, lists the tool and
+runs it through its route, so the set's `@requirePermission` and the
+core's own permission checks apply to a call as to a request, and a tool
+whose policy is `"ask"` asks first. An API's own policy or hiding of a
+behavior's tool, and a handle of its own, are not available yet.
+
+## A version graph's operations and table operations
+
+An operation the build adds for a `@graphOperations` set
+([A version graph's operations](/superschematic/guides/api-routes/#a-version-graphs-operations))
+is a visible tool too (D138), with no `@mcp` or `@docs` of yours:
+`Recipe`'s `branch` is the tool `recipe_branch`, the graph's name and the
+operation in snake case, titled `Recipe graph: branch`, capability
+`recipe.graph.branch`, with the policy's default invocation, and each
+read, a `GET`, replays as `read_only`. A set whose `@requireService`
+admits only calling services hides them with that reason, as above. A
+handle that another tool of the API takes, or one longer than 48
+characters, fails the load.
+
+A `@tableOperation` that declares no `@mcp` is a visible tool whose handle
+is its method's name in snake case, `list_issues`, and one that declares
+no `@docs` is given them, a read and a list replaying as `read_only`
+(D111). A name another operation of the API holds takes its set's name
+first: `teams_list`, `Teams: list`. One that only a calling service
+reaches is hidden with that reason, and so is one whose payload is
+encrypted. What the method declares is kept, so its own
+`@mcp({ hidden: true, reason })` keeps it out
+([Docs and tools](/superschematic/guides/api-routes/#docs-and-tools)).
 
 ## `@icon` on an operation
 
@@ -546,7 +570,7 @@ whose `@mcp` is visible, as the engine lists its tools.
 | `name` | the `@mcp` handle |
 | `title`, `description` | the `@docs` title and description |
 | `inputSchema` | the tool's `parameters` in `tools/schema.json` |
-| `annotations.readOnlyHint` | `true` when the `@docs` replay mode is `read_only` |
+| `annotations` | the tool's resolved record in `tools/schema.json` (D123): `readOnlyHint`, `destructiveHint` and `idempotentHint`, as [above](#what-the-api-generator-checks) |
 | `_meta` | the declared `_meta`, the guidance under `superschematic/operation-guidance`, and the invocation policy under its key |
 
 A hidden or unclassified operation is no tool: it is not listed, and a
@@ -582,7 +606,13 @@ does, so without a session it answers 401 with the problem document; an
 API whose routes are all public serves it to anyone. Each caller's list
 holds the tools whose routes it may call: a tool whose operation needs a
 permission the caller lacks is not listed, and a call of it is the
-invalid-params error.
+invalid-params error. Each call goes through its route's authenticator,
+so a tool runs as the principal a request to the route would: a user, a
+party holding a grant, or an agent run with its token, acting for the
+user whose request it serves
+(D156, [Who calls](/superschematic/guides/api-routes/#who-calls)).
+An agent run's token reaches only its run's rows, so no tool widens its
+scope ([The run's token](/superschematic/guides/agent-runs/#the-runs-token)).
 
 `tools/call` runs in process through the router, as a request to the
 route of the tool's operation that carries the endpoint request's
@@ -637,6 +667,7 @@ document states (`openAPIVersion`, `1.0.0` unless set). The router's
 | `confirmationKey` | the key the endpoint signs its confirmations with: required when a tool asks, at least 32 bytes, the same on every replica; the generated entrypoint passes the secret `outputs.api.mcpConfirmationKey` names |
 | `confirmationTtlSeconds` | how long a confirmation is good for, 600 unless set |
 | `confirmationStore` | where a confirmation is claimed so it redeems once: an `McpConfirmationStore`, in process memory unless given |
+| `callGate` | a check of every call before its route runs, after the person's confirmation: the problem the call answers instead, or none to run it. `createAgents`'s `mcpGate` holds an agent run's calls to its autonomy policy, answering `428 approval_required` until the call's approval is approved (D158, [Autonomy](/superschematic/guides/agent-runs/#autonomy)) |
 
 ### Confirming a tool that asks
 
@@ -780,11 +811,10 @@ operation takes the key of the call as an argument, `idempotencyKey`
 An `Idempotency-Key` header on the endpoint's own request is not a
 call's, and does not reach the route. An operation with an argument of
 its own named `idempotencyKey` keeps it as its argument: its tool then
-carries no key. The argument is the endpoint's, which the TypeScript
-server serves: the tool documents (`tools/schema.json`) do not list it
-yet, and an operation's `@docs` does not get `replayMode: "idempotent"`
-from the decorator. A Rust API with an `@idempotent` operation is not
-generated.
+carries no key. The argument is the endpoint's, which the TypeScript and
+the Rust servers serve: the tool documents (`tools/schema.json`) do not
+list it yet, and an operation's `@docs` does not get
+`replayMode: "idempotent"` from the decorator.
 
 ### A Rust API's endpoint
 

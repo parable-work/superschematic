@@ -8,11 +8,13 @@ sidebar:
 An extension is a Go package that implements `registry.Extension` and,
 optionally, `cli.CommandProvider`. You pass it to `cli.New`. The installed
 binary (`cmd/superschematic`) passes the official ones (the gcp target, the
-Cloudflare DNS platform and target, and the Pulumi provisioner), and the core alone
+Cloudflare DNS platform and target, the `embedded` target and the Pulumi
+provisioner), and the core alone
 (`internal/cmd/superschematic-core`) passes none. Everything project-specific
-registers here: kinds, decorators, scalar catalogs, documents, generators,
-build-all hooks, auth providers, checks, OpenAPI hooks, tool hooks,
-behaviors, deploy targets and extra commands.
+registers here: kinds, decorators, scalar catalogs, documents, generators
+and their package directories, build-all hooks, auth providers and
+rate-limit keys, checks, OpenAPI hooks, tool hooks, behaviors, runtime
+features, deploy targets and extra commands.
 
 `examples/acme-schematic` is the acceptance test of this model. It adds one
 of each surface but the deploy ones, which the official extensions show,
@@ -550,7 +552,16 @@ functions, types and values of `routes.go` they call.
 `routeUploadBody` and `routeQueryList` replace the core's reading of an
 upload route's body and of one list in the query string when they are
 not empty: the first declares `input` and `files`, the second the list's
-variable.
+variable. `callerImports` and `callerPrincipal` give `caller.go` its
+imports and the principal `WithCaller` binds to the ORM's context, so a
+provider that does not build on the core's session runtime still
+compiles; an empty principal leaves the context as it is.
+
+An extension's own word for what its Go routers count a `@rateLimit` per,
+such as an organization, registers with `RegisterRateLimitKey` (D131): a
+`registry.RateLimitKey` with its `Name` and `GoPrincipal`, a Go
+expression of type `func(*http.Request) string`
+([A rate limit per principal](/superschematic/guides/api-routes/#a-rate-limit-per-principal)).
 
 ## Policy on what the core writes
 
@@ -628,6 +639,12 @@ r.RegisterToolHook(registry.ToolHook{
     },
 })
 ```
+
+`tools.Keys` holds every vendor key the documents spell, and
+`DigestInternalTypes`, which makes the input schema digest hash a
+`Generic.JSON` property's internal type, for a distribution that stores
+digests another compiler wrote (D135)
+([Rules an extension adds](/superschematic/reference/mcp-tools/#rules-an-extension-adds)).
 
 A visible tool's invocation policy, whether an MCP client runs it when a
 model calls it or asks the person first, is a core field whose key,
@@ -1074,8 +1091,9 @@ let engine = Engine::open(options)?;
 An engine without the behavior refuses a schema that composes it. The
 engine registers the core's own behaviors, `Workflow`, `Comments`,
 `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`,
-`Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`
-and `Approvals`, when it opens, and the core's addon also carries the
+`Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`,
+`Approvals`, `Derived` and `Provenance`, when it opens, and the core's
+addon also carries the
 [work-queue behaviors](/superschematic/guides/work-queues/), which run
 once a host names them (`workQueueBehaviors` from
 `@superschematic/engine-workqueue`). No core operation names an
@@ -1324,13 +1342,14 @@ through a provisioner (D30 in the [decision log](https://github.com/parable-work
 examples: `extensions/gcp` registers the `gcp` target with its platforms,
 connectors and Cloud DNS platform, `extensions/cloudflare` the
 `cloudflare` target with its platforms and connectors and a DNS platform,
-and `extensions/pulumi` the provisioner. Six registrations make up the
-surface, each spec carrying the extension's `Name()`:
+`extensions/embedded` the `embedded` target, which builds an environment
+as one binary, and `extensions/pulumi` the provisioner. Six registrations
+make up the surface, each spec carrying the extension's `Name()`:
 
 | Registration | Adds |
 | --- | --- |
-| `RegisterPlatform(registry.PlatformSpec)` | one deployable kind (`server` or `database`) on one runtime, such as Cloud Run or Cloud SQL: the server languages or SQL dialects it runs, the JSON Schema of a deployable's settings there, its name and address in an environment, and a pure `Lower` to its resources |
-| `RegisterConnector(registry.ConnectorSpec)` | one edge kind (`sql` or `http`) between two platforms: a pure `Connect` that returns the edge's resources, such as an IAM grant, and the value of the config field the edge derives |
+| `RegisterPlatform(registry.PlatformSpec)` | one deployable kind (`server`, `database`, `job`, `worker`, `site`, `bucket`, `memoryStore`, `runner`, `deriver` or `app`) on one runtime, such as Cloud Run or Cloud SQL: the server languages or SQL dialects it runs, the JSON Schema of a deployable's settings there, its name and address in an environment, and a pure `Lower` to its resources |
+| `RegisterConnector(registry.ConnectorSpec)` | one edge kind (`sql`, `http`, `site`, `bucket` or `memoryStore`) between two platforms: a pure `Connect` that returns the edge's resources, such as an IAM grant, and the value of the config field the edge derives |
 | `RegisterTarget(registry.TargetSpec)` | a platform per deployable kind, the JSON Schema of an environment's values, the default DNS platform, the provisioner, the properties schema of each resource type its platforms emit, and policy rules over the resolved resource graph |
 | `RegisterDNSPlatform(registry.DNSPlatformSpec)` | a DNS provider for an environment's domain records, which need not be the target's provider: its values schema, a pure `Lower` from records to resources, the schemas of the resource types it brings, and the credentials its provider reads |
 | `RegisterProvisioner(registry.ProvisionerSpec)` | a tool that applies a resolved environment: `Render` writes the tool's program where a person can read it, and `Plan`, `Apply`, `Destroy` and `Outputs` run it; `Tools` lists the command-line tools it runs, which a generated CI job installs |
@@ -1339,19 +1358,35 @@ surface, each spec carrying the extension's `Name()`:
 Resolution checks every resource against the schema of its type, so a
 target checks in the provider schemas it emits from a pinned provider
 version, as the gcp target does with pulumi-gcp's. A target that deploys
-also fills seven seams on its `TargetSpec`, `State`, `Secrets`,
+also fills the deploy seams on its `TargetSpec`: `State`, `Secrets`,
 `Bootstrap`, `Migrations`, `Builder`, `CI`, which says how a generated
-CI job signs in to an environment, and `Jobs`, which runs a deployed job
-on demand, and the core registers one
-target of its own, `local`, for `stack dev`.
+CI job signs in to an environment, `Jobs`, which runs a deployed job
+on demand, `Queues`, `Sites`, `Bundles` and `PreDestroy`. The core
+registers one target of its own, `local`, for `stack dev`.
 [Stack targets](/superschematic/extending/stack-targets/) walks each
 registration, its seams and its offline tests.
 
+## A runtime provider
+
+What a running app calls, a channel adapter, a credential provider, a
+sandbox, a model or a file processor, is not registered with the binary.
+A runtime provider is a package of its own that declares the interface it
+implements in its `package.json`, under `superschematic.provider`; an
+API's config lists the packages, and each environment names one per slot
+(D159). The interfaces are TypeScript only for now. What an extension
+registers is a feature that needs one: `RegisterRuntimeFeature` with a
+`registry.RuntimeFeature`, its `Name`, the `Interface` it needs and a
+`Uses` over the API's schema and its databases, so the stack refuses an
+environment that runs such an API with no provider of that interface.
+[Runtime providers](/superschematic/guides/runtime-providers/) has both.
+
 ## A command
 
-`cli.New` returns `build`, `build-all`, `migrate`, `json-schema`, `format`
-and `behaviors`. An extension that implements `cli.CommandProvider`
-contributes more:
+`cli.New` returns the core's commands: `check`, `build`, `build-all`,
+`migrate`, `queries`, `json-schema`, `format`, `behaviors`,
+`engine-client`, `stack`, `identity`, `env`, `catalog`, `init` and `new`
+([CLI](/superschematic/reference/cli/)). An extension that implements
+`cli.CommandProvider` contributes more:
 
 ```go
 func (Extension) Commands() []*cobra.Command {

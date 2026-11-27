@@ -100,9 +100,9 @@ and revision, so the key survives a commit that changes no Go code.
 `examples/acme-shop/scripts/check.sh` is a complete CI script for a
 project like this one:
 
-1. `build-all` with the installed binary, which links the cloudflare
-   target that the example's `storefront-stack` and `wishlist-stack`
-   name;
+1. `build-all` with `superschematic-topcoat`, the installed binary with
+   Topcoat linked, which links the cloudflare target that the example's
+   `storefront-stack` and `wishlist-stack` name;
 2. `go build` and `go vet` on every generated Go module;
 3. `tsc` on the generated TypeScript router and SDKs, an import of the
    generated Python packages, and a Rust build against the generated Rust
@@ -110,7 +110,7 @@ project like this one:
 4. the Go services' tests, which call the generated server through the
    generated Go SDK, then run the TypeScript, Python and Rust clients
    against the same server and compare what they print; with Docker,
-   one runs `superschematic-topcoat stack dev` and calls both APIs on the
+   one runs `superschematic-topcoat stack dev` and calls the APIs on the
    generated entrypoints, over Postgres;
 5. a build of `shop-orders` with its server in Rust
    (`build --api-language RUST --out schemas/dist-rust`), and the same four
@@ -120,8 +120,8 @@ project like this one:
 7. the TypeScript service's tests, which call the router through the
    generated TypeScript SDK;
 8. `build-all --cache`, which must skip every service on a second run and,
-   once `dist` is gone, restore every service but the stack, which builds
-   once more;
+   once `dist` is gone, restore every service but the five
+   [above](#reuse-outputs-with-the-cache), which build once more;
 9. a byte comparison of the generated files and command output these pages
    quote against their committed copies under `testdata/generated/`.
 

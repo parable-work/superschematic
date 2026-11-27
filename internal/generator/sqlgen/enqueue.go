@@ -48,10 +48,13 @@ type EnqueueTrigger struct {
 	// Columns are the quoted queue columns the insert sets, in the
 	// message's field order, and Values what each takes: a quoted column
 	// of the row, or a literal where Literal says so (an enum's schema
-	// default for a field the message leaves out).
+	// default for a field the message leaves out). Where Through holds a
+	// value, the row's column is a relation's key, and the value is the
+	// column of the row it names.
 	Columns []string
 	Values  []string
 	Literal []bool
+	Through []*EnqueueThrough
 
 	// Conflict and SQLiteConflict end the insert in each dialect; empty
 	// for a queue that appends.
@@ -69,6 +72,24 @@ type EnqueueTrigger struct {
 	// the key's order, -1 for one the message leaves to its column's
 	// default; nil for any other queue.
 	ReplaceKeys []int
+}
+
+// EnqueueThrough is a message's value read through a to-one relation of
+// the row: the quoted column of the related table's row that the row's
+// key column names, by that table's quoted key. A version graph's release
+// pointer takes its commit's sequence so (D138); the loader's expansion
+// writes such a value as <relation>.<field>, and a declaration of the
+// schema's own names the row's fields alone.
+type EnqueueThrough struct {
+	Table  string
+	Key    string
+	Column string
+}
+
+// value is the subquery that reads the related row's column, for the row's
+// key column at col, its identifiers quoted by quote.
+func (v *EnqueueThrough) value(col string, quote func(string) string) string {
+	return "(SELECT " + quote(v.Column) + " FROM " + quote(v.Table) + " WHERE " + quote(v.Key) + " = " + col + ")"
 }
 
 // EnqueueWhen is one condition of an EnqueueTrigger on the row's quoted
@@ -100,7 +121,7 @@ func buildEnqueueTriggers(tableTypes []*ir.TypeDef, tables []Table, schema *ir.S
 			if queue == nil {
 				return nil, fmt.Errorf("@enqueueOnChange(%s) on %s: queue %s has no table", def.Queue, td.Name, def.Queue)
 			}
-			trigger, err := enqueueTrigger(td, def, source, queueDef, queue, schema)
+			trigger, err := enqueueTrigger(td, def, source, queueDef, queue, schema, byName)
 			if err != nil {
 				return nil, fmt.Errorf("@enqueueOnChange(%s) on %s: %w", def.Queue, td.Name, err)
 			}
@@ -113,7 +134,7 @@ func buildEnqueueTriggers(tableTypes []*ir.TypeDef, tables []Table, schema *ir.S
 	return out, nil
 }
 
-func enqueueTrigger(td *ir.TypeDef, def *ir.EnqueueOnChange, source *Table, queueDef *ir.TypeDef, queue *Table, schema *ir.Schema) (EnqueueTrigger, error) {
+func enqueueTrigger(td *ir.TypeDef, def *ir.EnqueueOnChange, source *Table, queueDef *ir.TypeDef, queue *Table, schema *ir.Schema, tables map[string]*Table) (EnqueueTrigger, error) {
 	// The names follow the tables' (sqlutil.TableName, QueueTableName):
 	// the queue's is its table's without the suffix.
 	base := strings.TrimSuffix(queue.Name, ir.QueueTableSuffix)
@@ -167,9 +188,22 @@ func enqueueTrigger(td *ir.TypeDef, def *ir.EnqueueOnChange, source *Table, queu
 		}
 		columns = append(columns, qc.QuotedName)
 		if from, mapped := def.Message[f.Name]; mapped {
-			c, err := column(from)
+			relation, field, through := strings.Cut(from, ".")
+			c, err := column(relation)
 			if err != nil {
 				return t, err
+			}
+			var via *EnqueueThrough
+			if through {
+				if via, err = enqueueThrough(td, relation, field, schema, tables); err != nil {
+					return t, err
+				}
+			}
+			if via != nil {
+				// Through holds a value, at its index, only once one is read
+				// through a relation.
+				t.Through = append(t.Through, make([]*EnqueueThrough, len(t.Values)-len(t.Through))...)
+				t.Through = append(t.Through, via)
 			}
 			t.Columns, t.Values, t.Literal = append(t.Columns, qc.QuotedName), append(t.Values, c.QuotedName), append(t.Literal, false)
 			continue
@@ -202,6 +236,34 @@ func enqueueTrigger(td *ir.TypeDef, def *ir.EnqueueOnChange, source *Table, queu
 	return t, nil
 }
 
+// enqueueThrough is the value of field read through relation, a to-one
+// relation of td: the related table's column of the field, by its key.
+func enqueueThrough(td *ir.TypeDef, relation, field string, schema *ir.Schema, tables map[string]*Table) (*EnqueueThrough, error) {
+	var rel *ir.FieldDef
+	for _, f := range td.Fields {
+		if f != nil && f.Name == relation {
+			rel = f
+		}
+	}
+	target := (*ir.TypeDef)(nil)
+	if rel != nil && !rel.TypeRef.IsArray && !rel.TypeRef.IsMap {
+		target = schema.Types[rel.TypeRef.Name]
+	}
+	if target == nil || target.Role != ir.RoleDBTable {
+		return nil, fmt.Errorf("the message reads %s.%s, and %s is no to-one relation of %s to a table", relation, field, relation, td.Name)
+	}
+	table := tables[target.Name+"/"+sqlutil.TableName(target)]
+	if table == nil || table.PrimaryKey == "" {
+		return nil, fmt.Errorf("the message reads %s.%s, and %s has no table with a key", relation, field, target.Name)
+	}
+	for _, c := range table.Columns {
+		if c.Origin == target.Name+"."+field {
+			return &EnqueueThrough{Table: table.QuotedName, Key: table.PrimaryKey, Column: c.QuotedName}, nil
+		}
+	}
+	return nil, fmt.Errorf("the message reads %s.%s, and %s has no column of field %s", relation, field, target.Name, field)
+}
+
 // BackfillSQL is the backfill's statement on Postgres (D88): one insert
 // of a message for each row of the table that meets the conditions, as
 // the trigger's insert of the row would write it, ending with the
@@ -228,15 +290,7 @@ func (t EnqueueTrigger) SQLiteBackfillSQL(quote func(string) string) string {
 // one row per key under replace with DISTINCT ON.
 func (t EnqueueTrigger) backfillSQL(quote func(string) string, table, queue, yes, no, conflict string, distinct bool) string {
 	const row = "src"
-	columns := make([]string, len(t.Columns))
-	values := make([]string, len(t.Values))
-	for i := range t.Columns {
-		columns[i] = quote(t.Columns[i])
-		values[i] = t.Values[i]
-		if !t.Literal[i] {
-			values[i] = row + "." + quote(t.Values[i])
-		}
-	}
+	columns, values := t.columnsAndValues(row, quote)
 	conds := []string{yes}
 	if len(t.When) > 0 {
 		conds = conds[:0]
@@ -351,20 +405,33 @@ func indentLines(s, indent string) string {
 // insert is the INSERT of the message from row, its identifiers quoted by
 // quote, ended on a line of its own with conflict.
 func (t EnqueueTrigger) insert(row, table string, quote func(string) string, conflict string) string {
-	columns := make([]string, len(t.Columns))
-	values := make([]string, len(t.Values))
-	for i := range t.Columns {
-		columns[i] = quote(t.Columns[i])
-		values[i] = t.Values[i]
-		if !t.Literal[i] {
-			values[i] = row + "." + quote(t.Values[i])
-		}
-	}
+	columns, values := t.columnsAndValues(row, quote)
 	s := "INSERT INTO " + table + " (" + strings.Join(columns, ", ") + ") VALUES (" + strings.Join(values, ", ") + ")"
 	if conflict != "" {
 		s += "\n  " + conflict
 	}
 	return s
+}
+
+// columnsAndValues are the queue columns the insert sets and the value of
+// each from row, its identifiers quoted by quote: a literal as it is, a
+// column of the row, and a value through a relation as the subquery that
+// reads the related row's column.
+func (t EnqueueTrigger) columnsAndValues(row string, quote func(string) string) ([]string, []string) {
+	columns := make([]string, len(t.Columns))
+	values := make([]string, len(t.Values))
+	for i := range t.Columns {
+		columns[i] = quote(t.Columns[i])
+		values[i] = t.Values[i]
+		if t.Literal[i] {
+			continue
+		}
+		values[i] = row + "." + quote(t.Values[i])
+		if i < len(t.Through) && t.Through[i] != nil {
+			values[i] = t.Through[i].value(values[i], quote)
+		}
+	}
+	return columns, values
 }
 
 // changed is true of an update that changes one of the fields, compared

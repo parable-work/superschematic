@@ -114,9 +114,11 @@ does, and hands each request straight to the Hono app:
 
 <Aside>
   The SDK sends `auth.token` as `Authorization: Bearer <token>`, which
-  `authenticate` reads as `ctx.bearerToken`. The config sets neither
-  `public` nor `authDb`: they wire the Go server's auth provider to its
-  stores, and this router reads no store.
+  `authenticate` reads as `ctx.bearerToken`. The config names no
+  `authDb`, so the router takes the app's own `authenticate`. An API whose
+  `authDb` has a `User` table, as `shop-cart`'s does, authenticates with
+  the identity runtime over that database's tables instead
+  ([Auth and permissions](/superschematic/guides/auth-and-permissions/#turn-it-on-the-user-model)).
 </Aside>
 
 Then each namespace is a property of the SDK, and each method takes the

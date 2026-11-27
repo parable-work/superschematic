@@ -11,9 +11,11 @@ type Named = JsonSchema<string, { minLength: 1 }>;
 interface ConstantsConfig {
   /**
    * The type's own top-level fields, by JSON key, that keep the value their
-   * create gives them.
+   * create gives them. A table's Constants may leave it out beside oneWay,
+   * its one rule a field that moves one way; a config keeps or moves one
+   * field at least.
    */
-  fields: JsonSchema<Named[], { minItems: 1; maxItems: 64; uniqueItems: true }>;
+  fields?: JsonSchema<Named[], { minItems: 1; maxItems: 64; uniqueItems: true }>;
   /**
    * The permission a caller needs to change them after the create; nobody may
    * when absent.
@@ -57,5 +59,5 @@ enum ConstantsVeto {
   // use's config: the core runs Constants from this declaration.
   rules: { constant: { config: "fields" }, oneWay: { config: "oneWay" }, permission: { config: "permission" } },
 })
-export abstract class Constants<C extends ConstantsConfig> {
+export abstract class Constants<C extends JsonSchema<ConstantsConfig, { minProperties: 1 }>> {
 }

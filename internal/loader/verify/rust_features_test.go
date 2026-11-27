@@ -59,8 +59,6 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 		"type Article: @searchable (D155)",
 		"type Identity: @channelIdentities (D153)",
 		"type Notice: @notifier (D153)",
-		"type Page: @references (D154)",
-		"type Report: @attachments (D154)",
 		"type RunRequest: @runRequests (D157)",
 		"type Tenant: @party (D157)",
 		"type Thread: @conversations (D157)",
@@ -79,9 +77,9 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 		}
 	}
 	// The Rust types write Recurrence through the core, and serve an
-	// audience.
+	// audience, references and attachments (D185).
 	for _, finding := range got {
-		if strings.Contains(finding, "Chore") || strings.Contains(finding, "Folder") {
+		if strings.Contains(finding, "Chore") || strings.Contains(finding, "Folder") || strings.Contains(finding, "Page") || strings.Contains(finding, "Report") {
 			t.Errorf("the Rust types refuse %q", finding)
 		}
 	}
@@ -89,10 +87,15 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 		t.Errorf("RefuseRustTypes = %v, want the calendar source refused", err)
 	}
 
-	// A Rust server: the API's providers and autonomy, and its database's
-	// table features with Recurrence among them.
+	// A Rust server: a provider of no Rust crate and autonomy, and its
+	// database's table features with Recurrence among them. Its slots and
+	// a provider crate are served (D185).
 	api := ir.NewSchema("platform-api", ir.SchemaKindAPI)
 	api.Types["Config"] = &ir.TypeDef{Name: "Config", EnvVars: true, ProviderSlots: map[string]string{"SMS": "channel"}}
+	api.Providers = []*ir.RuntimeProvider{
+		{Name: "relay-a", Implements: "channel", Package: "@example/relay-a", Path: "providers/relay-a"},
+		{Name: "relay-b", Implements: "channel", Crate: "relay-b", Path: "providers/relay-b"},
+	}
 	api.Types["Tickets"] = &ir.TypeDef{Name: "Tickets", Fields: []*ir.FieldDef{
 		{Name: "closeTicket", Autonomy: &ir.OperationAutonomy{}},
 		{Name: "listTickets"},
@@ -100,16 +103,16 @@ func TestRustOutputsRefuseThePlatformFeaturesTheyDoNotServe(t *testing.T) {
 	server := rustFindings(api, Input{RustOutput: "outputs.api.language: rust", Database: db})
 	joined := strings.Join(server, "\n")
 	for _, want := range []string{
-		"type Config: @providers slots (D159)",
+		"type provider relay-a: a provider of no Rust crate (providers/relay-a declares it in its package.json alone",
 		"type Tickets.closeTicket: @autonomy (D158)",
 		"type platform-db.Chore: Recurrence (D152)",
 		"type platform-db.Visit: @calendarSource (D152)",
 	} {
-		if !strings.Contains(joined, want+" is served by the TypeScript runtime alone so far, and platform-api builds Rust (outputs.api.language: rust)") {
+		if !strings.Contains(joined, want) || !strings.Contains(joined, "is served by the TypeScript runtime alone so far, and platform-api builds Rust (outputs.api.language: rust)") {
 			t.Errorf("the Rust server's findings lack %s:\n%s", want, joined)
 		}
 	}
-	if strings.Contains(joined, "listTickets") || strings.Contains(joined, "Folder") {
+	if strings.Contains(joined, "listTickets") || strings.Contains(joined, "Folder") || strings.Contains(joined, "Config") || strings.Contains(joined, "relay-b") {
 		t.Errorf("the Rust server refuses what it serves:\n%s", joined)
 	}
 	if err := RefuseRustServer(api, db); err == nil || !strings.Contains(err.Error(), "type platform-db.Chore: Recurrence (D152)") {
