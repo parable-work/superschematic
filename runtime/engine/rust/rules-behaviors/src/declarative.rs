@@ -1592,7 +1592,10 @@ impl Behavior for Declarative {
         // gives.
         let fields = rules.constant.as_ref().and_then(|given| given.of(raw));
         let one_way = rules.one_way.as_ref().and_then(|given| given.of(raw));
-        let constants = if fields.is_some() || one_way.is_some() {
+        // A declaration that states a constant or oneWay rule keeps or
+        // moves one field at least, as Constants does: a use whose config
+        // gives neither is refused, not run with no rule.
+        let constants = if rules.constant.is_some() || rules.one_way.is_some() {
             let mut stated = Map::new();
             if let Some(fields) = fields {
                 stated.insert("fields".into(), fields);
