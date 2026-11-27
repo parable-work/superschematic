@@ -323,3 +323,43 @@ fn a_plan_in_progress_serves_no_request() {
         .expect("the plan done");
     common::ok(&mut runtime, json!({"kind": "list", "type": "Task"}));
 }
+
+scenario!(
+    general_documents_publish_as_their_tables,
+    "general",
+    common::moves::general_documents_publish_as_their_tables
+);
+scenario!(
+    general_documents_publish_as_the_service_named,
+    "named",
+    common::moves::named_general_documents_publish
+);
+
+/// A development store in a Postgres schema of a database of its own moves
+/// to an empty runtime database with its rows (decision 5).
+#[test]
+fn a_development_store_moves_with_its_rows() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let (Some(development), Some(database)) = (Database::new("move_dev"), Database::new("move"))
+    else {
+        return;
+    };
+    let mut dev = superschematic_rules_dev::Dev::postgres(&development.url, "superschematic_dev")
+        .expect("a development store");
+    common::moves::development_moves_with_its_rows(&database.open(), &binaries, &mut dev);
+}
+
+/// A runtime database exports as a compiled DB service whose first plan
+/// from the recorded model is empty.
+#[test]
+fn a_runtime_database_exports_to_compiled() {
+    let Some(binaries) = binaries() else {
+        return skipped();
+    };
+    let Some(database) = Database::new("export") else {
+        return;
+    };
+    common::moves::exports_to_compiled(&database.open(), &binaries, &database.url, "postgres");
+}
