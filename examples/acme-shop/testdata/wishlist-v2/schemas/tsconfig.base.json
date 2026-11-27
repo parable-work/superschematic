@@ -12,7 +12,6 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    "baseUrl": ".",
     "paths": {
       "@superschematic/api": ["../../../../../packages/api/src/index.ts"],
       "@superschematic/db": ["../../../../../packages/db/src/index.ts"],

@@ -46,7 +46,7 @@ const (
 	// must match the runtime's peer range.
 	HonoVersion = "4.13.8"
 	// TypeScriptVersion pins the compiler the generated package is checked with.
-	TypeScriptVersion = "5.9.3"
+	TypeScriptVersion = tsutil.TypeScriptVersion
 )
 
 // ParamInfo is one path, query, or body argument as the generated
