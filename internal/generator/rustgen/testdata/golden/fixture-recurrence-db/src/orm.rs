@@ -278,7 +278,7 @@ pub struct FilingRecurrenceSetRecurrenceResult {
     pub planned: Vec<String>,
     /// The row's recurrence as set.
     pub recurrence: orm::Value,
-    /// True when the row's recurrence was the same, so nothing was written; absent otherwise.
+    /// True when the row's recurrence was the same and dated what the row holds, so nothing was written; absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unchanged: Option<bool>,
 }
@@ -1137,7 +1137,7 @@ pub mod postgres {
     pub struct FilingRecurrenceOperations<'a, C>(FilingRepository<'a, C>);
 
     impl<C: GenericClient + Sync> FilingRecurrenceOperations<'_, C> {
-        /// Sets the row's recurrence: an anchor the config's anchors take, with its rule and start (calendar), every and start (afterDone), or offset and every (relative), read in timeZone and moved off weekend days and holidays as adjust says. The occurrences that have not opened are planned again from it; the open and finished ones stay. The same recurrence is answered unchanged.
+        /// Sets the row's recurrence: an anchor the config's anchors take, with its rule and start (calendar), every and start (afterDone), or offset and every (relative), read in timeZone and moved off weekend days and holidays as adjust says. The occurrences that have not opened are planned again from it; the open and finished ones stay. The same recurrence is answered unchanged, but for a relative one whose date has moved: it is planned again from the date, and stays as it was set.
         pub async fn set_recurrence(
             &self,
             key: &IdentityUUID,
@@ -1819,7 +1819,7 @@ pub mod sqlite {
     pub struct FilingRecurrenceOperations<'a>(FilingRepository<'a>);
 
     impl FilingRecurrenceOperations<'_> {
-        /// Sets the row's recurrence: an anchor the config's anchors take, with its rule and start (calendar), every and start (afterDone), or offset and every (relative), read in timeZone and moved off weekend days and holidays as adjust says. The occurrences that have not opened are planned again from it; the open and finished ones stay. The same recurrence is answered unchanged.
+        /// Sets the row's recurrence: an anchor the config's anchors take, with its rule and start (calendar), every and start (afterDone), or offset and every (relative), read in timeZone and moved off weekend days and holidays as adjust says. The occurrences that have not opened are planned again from it; the open and finished ones stay. The same recurrence is answered unchanged, but for a relative one whose date has moved: it is planned again from the date, and stays as it was set.
         pub fn set_recurrence(
             &self,
             key: &IdentityUUID,

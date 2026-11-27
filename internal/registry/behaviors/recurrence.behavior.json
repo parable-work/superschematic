@@ -266,7 +266,7 @@
   "operations": [
     {
       "name": "setRecurrence",
-      "description": "Sets the row's recurrence: an anchor the config's anchors take, with its rule and start (calendar), every and start (afterDone), or offset and every (relative), read in timeZone and moved off weekend days and holidays as adjust says. The occurrences that have not opened are planned again from it; the open and finished ones stay. The same recurrence is answered unchanged.",
+      "description": "Sets the row's recurrence: an anchor the config's anchors take, with its rule and start (calendar), every and start (afterDone), or offset and every (relative), read in timeZone and moved off weekend days and holidays as adjust says. The occurrences that have not opened are planned again from it; the open and finished ones stay. The same recurrence is answered unchanged, but for a relative one whose date has moved: it is planned again from the date, and stays as it was set.",
       "paramsSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -353,7 +353,7 @@
             "type": "integer"
           },
           "unchanged": {
-            "description": "True when the row's recurrence was the same, so nothing was written; absent otherwise.",
+            "description": "True when the row's recurrence was the same and dated what the row holds, so nothing was written; absent otherwise.",
             "type": "boolean"
           }
         }

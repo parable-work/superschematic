@@ -51,6 +51,14 @@ name: ci
 # GitHub retargets it after its parent merges, push or close and reopen it to
 # start the run.
 #
+# gofmt, golangci-lint and the drift checks run in a job of their own,
+# go-lint, so they report in minutes and not behind the go job's tests.
+#
+# Every Postgres a job starts runs with fsync, synchronous_commit and
+# full_page_writes off. The container goes with the runner, so nothing in it
+# has to survive a crash, and the tests, which create and drop a schema or a
+# database each, do not wait on the disk.
+#
 # superscalar has no release yet, so every job that links it checks the
 # pinned commit out under third_party/superscalar and builds the static
 # archive from source (scripts/superscalar-dep.sh). The checkout is cached on
@@ -124,7 +132,7 @@ jobs:
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   go:
-    name: go (build / vet / test / gofmt / lint / catalog / cli smoke)
+    name: go (build / vet / test / cli smoke)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     # The quick tier finishes in about fifty minutes. The full tier compiles
@@ -143,9 +151,29 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Setup Go
+        # A build cache of this job's own. setup-go keys its cache on these
+        # files alone and never saves over a key that exists, so with the
+        # default, the root go.sum, this job shared one key with jobs that
+        # set Go up and compile nothing: one of those finished first, saved
+        # an empty cache, and every run after it built and vetted the root
+        # module from nothing. Each job that compiles Go names a set of
+        # files no other job names; one that only reads `go env` turns the
+        # cache off.
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            ir/go.sum
+            runtime/schema/go/go.sum
+            runtime/http/go/go.sum
+            runtime/migrate/go/go.sum
+            extensions/gcp/go.sum
+            extensions/cloudflare/go.sum
+            extensions/embedded/go.sum
+            extensions/pulumi/go.sum
+            extensions/topcoat/go.sum
+            cmd/superschematic/go.sum
 
       - name: Setup Bun
         # The superscalar TypeScript binding is built alongside the Go
@@ -292,7 +320,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           # Over TCP: the image's first-start server listens only on its
           # socket and restarts once initialised.
           ready=""
@@ -327,7 +356,8 @@ jobs:
           docker run --detach --name superschematic-pgvector \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5433:5432 \
-            "pgvector/pgvector:${PGVECTOR_VERSION}-pg${POSTGRES_VERSION}"
+            "pgvector/pgvector:${PGVECTOR_VERSION}-pg${POSTGRES_VERSION}" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           ready=""
           for _ in $(seq 1 60); do
             if docker exec superschematic-pgvector pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then ready=1; break; fi
@@ -432,10 +462,90 @@ jobs:
             (cd "$m" && go build ./... && go vet ./... && go test -count=1 -timeout "$GO_TEST_TIMEOUT" -short="$GO_TEST_SHORT" ./...)
           done
 
+      - name: CLI smoke (the core with no extension builds DB, API and General fixtures)
+        if: github.event_name != 'pull_request'
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: |
+          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
+          make cli-smoke
+
+      # The docs site's schema migrations page quotes examples/migrations.
+      # This plans its DB service from v1 to v2 for Postgres and SQLite with
+      # the core alone, gates the plans on their hazards, applies them with
+      # superschematic-migrate to a SQLite file and to a database of its own
+      # on the Postgres above, and fails when an output the page quotes
+      # (examples/migrations/testdata/generated/) is stale.
+      - name: examples/migrations (plan, gate and apply a migration on SQLite and Postgres)
+        if: github.event_name != 'pull_request'
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
+        run: examples/migrations/scripts/check.sh
+
+  go-lint:
+    # The lints and the drift checks, apart from the go job: they need no
+    # test to have run, and behind that job's tests a gofmt or lint failure
+    # showed after forty minutes. gofmt runs first, before anything is
+    # built. The drift checks link superscalar's static archive, so the job
+    # stages it as engine-rust does; the checkout is restored and never
+    # saved from here, since this job builds the archive alone and finishes
+    # before the jobs that build the whole dependency.
+    name: go-lint (gofmt / golangci-lint / catalog, schema-file types, provider schemas and behavior declarations drift)
+    if: github.event.pull_request.draft != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Load pinned tool versions
+        run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
+
+      - name: Setup Go
+        # A build cache of this job's own (the go job's Setup Go says why):
+        # the lint configuration is in the key to keep it apart from that
+        # job's.
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            .golangci.yml
+            go.sum
+            ir/go.sum
+            runtime/schema/go/go.sum
+            runtime/http/go/go.sum
+            runtime/migrate/go/go.sum
+            extensions/gcp/go.sum
+            extensions/cloudflare/go.sum
+            extensions/embedded/go.sum
+            extensions/pulumi/go.sum
+            extensions/topcoat/go.sum
+            cmd/superschematic/go.sum
+
       - name: gofmt
         run: |
           out="$(gofmt -l $(git ls-files '*.go'))"
           if [ -n "$out" ]; then echo "gofmt: files need formatting:"; echo "$out"; exit 1; fi
+
+      - name: Restore the superscalar checkout
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            third_party/superscalar
+            !third_party/superscalar/target
+          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
+
+      - name: Install Rust toolchain
+        # Builds superscalar's static archive when the checkout above was
+        # not restored with it.
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+
+      - name: Build the superscalar archive
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        run: scripts/superscalar-dep.sh --archive >/dev/null
 
       - name: Scalar catalog drift (TypeScript + Python catalogs and the docs' scalar page match the pinned superscalar)
         env:
@@ -483,27 +593,6 @@ jobs:
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
           make behaviors-check
-
-      - name: CLI smoke (the core with no extension builds DB, API and General fixtures)
-        if: github.event_name != 'pull_request'
-        env:
-          GOTOOLCHAIN: go${{ env.GO_VERSION }}
-        run: |
-          export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print)"
-          make cli-smoke
-
-      # The docs site's schema migrations page quotes examples/migrations.
-      # This plans its DB service from v1 to v2 for Postgres and SQLite with
-      # the core alone, gates the plans on their hazards, applies them with
-      # superschematic-migrate to a SQLite file and to a database of its own
-      # on the Postgres above, and fails when an output the page quotes
-      # (examples/migrations/testdata/generated/) is stale.
-      - name: examples/migrations (plan, gate and apply a migration on SQLite and Postgres)
-        if: github.event_name != 'pull_request'
-        env:
-          GOTOOLCHAIN: go${{ env.GO_VERSION }}
-          SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
-        run: examples/migrations/scripts/check.sh
 
       - name: golangci-lint (root module)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -703,7 +792,8 @@ jobs:
           docker run --detach --name acme-engine-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 55433:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec acme-engine-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -769,9 +859,12 @@ jobs:
 
       - name: Setup Go
         # scripts/superscalar-dep.sh reads go env for the archive directory.
+        # Nothing here compiles Go, so there is no build cache to keep (the
+        # go job's Setup Go says why an empty one must not be saved).
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -829,7 +922,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -978,9 +1072,13 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Setup Go
+        # scripts/superscalar-dep.sh reads go env for the archive directory.
+        # Nothing here compiles Go, so there is no build cache to keep (the
+        # go job's Setup Go says why an empty one must not be saved).
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache: false
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -1239,7 +1337,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -1248,9 +1347,14 @@ jobs:
           exit 1
 
       - name: Setup Go
+        # A build cache of this job's own, for the two binaries below (the
+        # go job's Setup Go says why).
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            runtime/migrate/go/go.sum
 
       # Runtime mode's scenarios (rules-runtime, D117) run the two binaries
       # a runtime environment carries: the compiler's planner, here the
@@ -1366,7 +1470,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -1468,7 +1573,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -1546,9 +1652,14 @@ jobs:
         run: grep -E '^[A-Za-z_][A-Za-z0-9_]*=' tools.env >> "$GITHUB_ENV"
 
       - name: Setup Go
+        # A build cache of this job's own (the go job's Setup Go says why).
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.sum
+            runtime/http/go/go.sum
+            runtime/engine/go/go.sum
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
@@ -1624,7 +1735,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -1700,7 +1812,8 @@ jobs:
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
             --publish 5432:5432 \
-            "postgres:${POSTGRES_VERSION}-alpine"
+            "postgres:${POSTGRES_VERSION}-alpine" \
+            -c fsync=off -c synchronous_commit=off -c full_page_writes=off
           for _ in $(seq 1 60); do
             if docker exec superschematic-pg pg_isready --host 127.0.0.1 --username postgres >/dev/null 2>&1; then exit 0; fi
             sleep 1
@@ -1851,6 +1964,7 @@ jobs:
       - dco
       - scrub
       - go
+      - go-lint
       - acme
       - typescript
       - python

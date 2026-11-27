@@ -144,8 +144,8 @@ interface SetRecurrenceResult {
    */
   nextDueAt?: Integer;
   /**
-   * True when the row's recurrence was the same, so nothing was written;
-   * absent otherwise.
+   * True when the row's recurrence was the same and dated what the row
+   * holds, so nothing was written; absent otherwise.
    */
   unchanged?: boolean;
 }
@@ -458,7 +458,8 @@ export abstract class Recurrence<C extends RecurrenceConfig> {
    * every (relative), read in timeZone and moved off weekend days and
    * holidays as adjust says. The occurrences that have not opened are planned
    * again from it; the open and finished ones stay. The same recurrence is
-   * answered unchanged.
+   * answered unchanged, but for a relative one whose date has moved: it is
+   * planned again from the date, and stays as it was set.
    * @writes
    */
   abstract setRecurrence(params: SetRecurrenceParams): SetRecurrenceResult;

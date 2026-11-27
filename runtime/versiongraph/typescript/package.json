@@ -52,7 +52,7 @@
     "@types/node": "22.19.9",
     "@types/pg": "8.23.1",
     "pg": "8.23.0",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   },
   "license": "Apache-2.0",
   "repository": {

@@ -436,6 +436,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-agents-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-agents-api', options);
@@ -458,9 +465,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetCheckReserveResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetCheckReserve,
-      rateLimitPerMinute: options.rateLimits?.budgetCheckReserve,
-      timeoutSeconds: options.timeouts?.budgetCheckReserve,
+      bodyLimitBytes: bodyLimits.budgetCheckReserve,
+      rateLimitPerMinute: rateLimits.budgetCheckReserve,
+      timeoutSeconds: timeouts.budgetCheckReserve,
     }
   );
   // Account's Budget observe, a Budget (D103): the
@@ -482,9 +489,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetObserveResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetObserve,
-      rateLimitPerMinute: options.rateLimits?.budgetObserve,
-      timeoutSeconds: options.timeouts?.budgetObserve,
+      bodyLimitBytes: bodyLimits.budgetObserve,
+      rateLimitPerMinute: rateLimits.budgetObserve,
+      timeoutSeconds: timeouts.budgetObserve,
     }
   );
   // Account's Budget recordUsage, a Budget (D103): the
@@ -505,9 +512,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetRecordUsageResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetRecordUsage,
-      rateLimitPerMinute: options.rateLimits?.budgetRecordUsage,
-      timeoutSeconds: options.timeouts?.budgetRecordUsage,
+      bodyLimitBytes: bodyLimits.budgetRecordUsage,
+      rateLimitPerMinute: rateLimits.budgetRecordUsage,
+      timeoutSeconds: timeouts.budgetRecordUsage,
     }
   );
   // Account's Budget recordUsageFor, a Budget (D103): the
@@ -528,9 +535,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetRecordUsageForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetRecordUsageFor,
-      rateLimitPerMinute: options.rateLimits?.budgetRecordUsageFor,
-      timeoutSeconds: options.timeouts?.budgetRecordUsageFor,
+      bodyLimitBytes: bodyLimits.budgetRecordUsageFor,
+      rateLimitPerMinute: rateLimits.budgetRecordUsageFor,
+      timeoutSeconds: timeouts.budgetRecordUsageFor,
     }
   );
   // Account's Budget reserve, a Budget (D103): the
@@ -552,9 +559,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetReserveResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetReserve,
-      rateLimitPerMinute: options.rateLimits?.budgetReserve,
-      timeoutSeconds: options.timeouts?.budgetReserve,
+      bodyLimitBytes: bodyLimits.budgetReserve,
+      rateLimitPerMinute: rateLimits.budgetReserve,
+      timeoutSeconds: timeouts.budgetReserve,
     }
   );
   // Account's Budget reserveFor, a Budget (D103): the
@@ -575,9 +582,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetReserveForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetReserveFor,
-      rateLimitPerMinute: options.rateLimits?.budgetReserveFor,
-      timeoutSeconds: options.timeouts?.budgetReserveFor,
+      bodyLimitBytes: bodyLimits.budgetReserveFor,
+      rateLimitPerMinute: rateLimits.budgetReserveFor,
+      timeoutSeconds: timeouts.budgetReserveFor,
     }
   );
   // Account's Budget setLimit, a Budget (D103): the
@@ -598,9 +605,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetSetLimitResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetSetLimit,
-      rateLimitPerMinute: options.rateLimits?.budgetSetLimit,
-      timeoutSeconds: options.timeouts?.budgetSetLimit,
+      bodyLimitBytes: bodyLimits.budgetSetLimit,
+      rateLimitPerMinute: rateLimits.budgetSetLimit,
+      timeoutSeconds: timeouts.budgetSetLimit,
     }
   );
   // Account's Budget settle, a Budget (D103): the
@@ -622,9 +629,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetSettleResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetSettle,
-      rateLimitPerMinute: options.rateLimits?.budgetSettle,
-      timeoutSeconds: options.timeouts?.budgetSettle,
+      bodyLimitBytes: bodyLimits.budgetSettle,
+      rateLimitPerMinute: rateLimits.budgetSettle,
+      timeoutSeconds: timeouts.budgetSettle,
     }
   );
   // Account's Budget settleFor, a Budget (D103): the
@@ -645,9 +652,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountBudgetSettleForResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.budgetSettleFor,
-      rateLimitPerMinute: options.rateLimits?.budgetSettleFor,
-      timeoutSeconds: options.timeouts?.budgetSettleFor,
+      bodyLimitBytes: bodyLimits.budgetSettleFor,
+      rateLimitPerMinute: rateLimits.budgetSettleFor,
+      timeoutSeconds: timeouts.budgetSettleFor,
     }
   );
   // Account's status transition, a Workflow (D103): the
@@ -669,9 +676,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<AccountStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.accountStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.accountStatusTransition,
-      timeoutSeconds: options.timeouts?.accountStatusTransition,
+      bodyLimitBytes: bodyLimits.accountStatusTransition,
+      rateLimitPerMinute: rateLimits.accountStatusTransition,
+      timeoutSeconds: timeouts.accountStatusTransition,
     }
   );
   // Job's Lease expireHolder, a Lease's operation of the table as a
@@ -692,9 +699,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobLeaseExpireHolderResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.leaseExpireHolder,
-      rateLimitPerMinute: options.rateLimits?.leaseExpireHolder,
-      timeoutSeconds: options.timeouts?.leaseExpireHolder,
+      bodyLimitBytes: bodyLimits.leaseExpireHolder,
+      rateLimitPerMinute: rateLimits.leaseExpireHolder,
+      timeoutSeconds: timeouts.leaseExpireHolder,
     }
   );
   // Job's Lease acknowledge, a Lease (D103): the
@@ -719,9 +726,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<GenericJSON>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.leaseAcknowledge,
-      rateLimitPerMinute: options.rateLimits?.leaseAcknowledge,
-      timeoutSeconds: options.timeouts?.leaseAcknowledge,
+      bodyLimitBytes: bodyLimits.leaseAcknowledge,
+      rateLimitPerMinute: rateLimits.leaseAcknowledge,
+      timeoutSeconds: timeouts.leaseAcknowledge,
     }
   );
   // Job's Lease acquire, a Lease (D103): the
@@ -746,9 +753,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobLeaseAcquireResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.leaseAcquire,
-      rateLimitPerMinute: options.rateLimits?.leaseAcquire,
-      timeoutSeconds: options.timeouts?.leaseAcquire,
+      bodyLimitBytes: bodyLimits.leaseAcquire,
+      rateLimitPerMinute: rateLimits.leaseAcquire,
+      timeoutSeconds: timeouts.leaseAcquire,
     }
   );
   // Job's Lease direct, a Lease (D103): the
@@ -773,9 +780,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobLeaseDirectResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.leaseDirect,
-      rateLimitPerMinute: options.rateLimits?.leaseDirect,
-      timeoutSeconds: options.timeouts?.leaseDirect,
+      bodyLimitBytes: bodyLimits.leaseDirect,
+      rateLimitPerMinute: rateLimits.leaseDirect,
+      timeoutSeconds: timeouts.leaseDirect,
     }
   );
   // Job's Lease expire, a Lease (D103): the
@@ -800,9 +807,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobLeaseExpireResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.leaseExpire,
-      rateLimitPerMinute: options.rateLimits?.leaseExpire,
-      timeoutSeconds: options.timeouts?.leaseExpire,
+      bodyLimitBytes: bodyLimits.leaseExpire,
+      rateLimitPerMinute: rateLimits.leaseExpire,
+      timeoutSeconds: timeouts.leaseExpire,
     }
   );
   // Job's Lease heartbeat, a Lease (D103): the
@@ -827,9 +834,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobLeaseHeartbeatResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.leaseHeartbeat,
-      rateLimitPerMinute: options.rateLimits?.leaseHeartbeat,
-      timeoutSeconds: options.timeouts?.leaseHeartbeat,
+      bodyLimitBytes: bodyLimits.leaseHeartbeat,
+      rateLimitPerMinute: rateLimits.leaseHeartbeat,
+      timeoutSeconds: timeouts.leaseHeartbeat,
     }
   );
   // Job's Lease release, a Lease (D103): the
@@ -854,9 +861,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<GenericJSON>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.leaseRelease,
-      rateLimitPerMinute: options.rateLimits?.leaseRelease,
-      timeoutSeconds: options.timeouts?.leaseRelease,
+      bodyLimitBytes: bodyLimits.leaseRelease,
+      rateLimitPerMinute: rateLimits.leaseRelease,
+      timeoutSeconds: timeouts.leaseRelease,
     }
   );
   // Job's Lease resetExpiries, a Lease (D103): the
@@ -881,9 +888,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobLeaseResetExpiriesResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.leaseResetExpiries,
-      rateLimitPerMinute: options.rateLimits?.leaseResetExpiries,
-      timeoutSeconds: options.timeouts?.leaseResetExpiries,
+      bodyLimitBytes: bodyLimits.leaseResetExpiries,
+      rateLimitPerMinute: rateLimits.leaseResetExpiries,
+      timeoutSeconds: timeouts.leaseResetExpiries,
     }
   );
   // Job's Retries recordAttempt, a Retries (D103): the
@@ -908,9 +915,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobRetriesRecordAttemptResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.retriesRecordAttempt,
-      rateLimitPerMinute: options.rateLimits?.retriesRecordAttempt,
-      timeoutSeconds: options.timeouts?.retriesRecordAttempt,
+      bodyLimitBytes: bodyLimits.retriesRecordAttempt,
+      rateLimitPerMinute: rateLimits.retriesRecordAttempt,
+      timeoutSeconds: timeouts.retriesRecordAttempt,
     }
   );
   // Job's status transition, a Workflow (D103): the
@@ -935,9 +942,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<JobStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.jobStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.jobStatusTransition,
-      timeoutSeconds: options.timeouts?.jobStatusTransition,
+      bodyLimitBytes: bodyLimits.jobStatusTransition,
+      rateLimitPerMinute: rateLimits.jobStatusTransition,
+      timeoutSeconds: timeouts.jobStatusTransition,
     }
   );
   // Session's Presence beat, a Presence (D103): the
@@ -957,9 +964,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<SessionPresenceBeatResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.presenceBeat,
-      rateLimitPerMinute: options.rateLimits?.presenceBeat,
-      timeoutSeconds: options.timeouts?.presenceBeat,
+      bodyLimitBytes: bodyLimits.presenceBeat,
+      rateLimitPerMinute: rateLimits.presenceBeat,
+      timeoutSeconds: timeouts.presenceBeat,
     }
   );
   // Session's Presence miss, a Presence (D103): the
@@ -979,9 +986,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<SessionPresenceMissResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.presenceMiss,
-      rateLimitPerMinute: options.rateLimits?.presenceMiss,
-      timeoutSeconds: options.timeouts?.presenceMiss,
+      bodyLimitBytes: bodyLimits.presenceMiss,
+      rateLimitPerMinute: rateLimits.presenceMiss,
+      timeoutSeconds: timeouts.presenceMiss,
     }
   );
   // Session's status transition, a Workflow (D103): the
@@ -1003,9 +1010,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<SessionStatusTransitionResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.sessionStatusTransition,
-      rateLimitPerMinute: options.rateLimits?.sessionStatusTransition,
-      timeoutSeconds: options.timeouts?.sessionStatusTransition,
+      bodyLimitBytes: bodyLimits.sessionStatusTransition,
+      rateLimitPerMinute: rateLimits.sessionStatusTransition,
+      timeoutSeconds: timeouts.sessionStatusTransition,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at

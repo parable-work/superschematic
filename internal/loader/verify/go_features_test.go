@@ -129,14 +129,34 @@ func TestGoServerSQLiteErrRefusesRecurrenceAndTheCalendar(t *testing.T) {
 	db.Types["Filing"] = &ir.TypeDef{Name: "Filing", Role: ir.RoleDBTable, Behaviors: []ir.BehaviorRef{{Name: "Recurrence", Implements: true}}, CalendarSources: []ir.CalendarSourceDef{{Occurrences: true}}}
 	db.Types["Note"] = &ir.TypeDef{Name: "Note", Role: ir.RoleDBTable, Searchable: &ir.SearchableDef{}}
 	err := GoServerSQLiteErr(api, db, []string{"sqlite", "postgres"})
-	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Filing: Recurrence, Filing: @calendarSource on Postgres alone so far (D152, D187)") {
+	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Filing: Recurrence, Filing: @calendarSource, Note: @searchable on Postgres alone so far (D152, D155, D187)") {
 		t.Fatalf("sqlite first: %v", err)
 	}
 	if err := GoServerSQLiteErr(api, db, []string{"postgres", "sqlite"}); err != nil {
 		t.Fatalf("postgres first: %v", err)
 	}
 	delete(db.Types, "Filing")
+	delete(db.Types, "Note")
 	if err := GoServerSQLiteErr(api, db, []string{"sqlite"}); err != nil {
-		t.Fatalf("a database with neither: %v", err)
+		t.Fatalf("a database with none: %v", err)
+	}
+}
+
+// TestGoServerSQLiteErrRefusesSearch: a Go server over a database that
+// lists sqlite first and has a @searchable table, and nothing else the
+// refusal names, is refused search, which the crosstable package runs by
+// Postgres statements alone (D155, D187), now that the loader lets the
+// database's Go types declare it on SQLite (D186); over a database that
+// lists postgres first it is served.
+func TestGoServerSQLiteErrRefusesSearch(t *testing.T) {
+	api := ir.NewSchema("app-api", ir.SchemaKindAPI)
+	db := ir.NewSchema("app-db", ir.SchemaKindDB)
+	db.Types["Note"] = &ir.TypeDef{Name: "Note", Role: ir.RoleDBTable, Searchable: &ir.SearchableDef{}}
+	err := GoServerSQLiteErr(api, db, []string{"sqlite", "postgres"})
+	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Note: @searchable on Postgres alone so far (D152, D155, D187)") {
+		t.Fatalf("sqlite first: %v", err)
+	}
+	if err := GoServerSQLiteErr(api, db, []string{"postgres", "sqlite"}); err != nil {
+		t.Fatalf("postgres first: %v", err)
 	}
 }

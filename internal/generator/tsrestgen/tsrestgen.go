@@ -46,7 +46,7 @@ const (
 	// must match the runtime's peer range.
 	HonoVersion = "4.13.8"
 	// TypeScriptVersion pins the compiler the generated package is checked with.
-	TypeScriptVersion = "5.9.3"
+	TypeScriptVersion = tsutil.TypeScriptVersion
 )
 
 // ParamInfo is one path, query, or body argument as the generated
@@ -785,6 +785,20 @@ func (o *APIOutput) DropsUndeclaredKeys() bool {
 func (o *APIOutput) HasDownloadsAny() bool {
 	for _, endpoint := range o.Endpoints {
 		if endpoint.Download != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// ReadsBodyLimits reports whether buildRouter reads an operation's
+// RouterOptions.bodyLimits entry: every mounted operation's but a
+// @manualRouteRegistration one's, whose handler reads its own body. The
+// router declares the constant it reads them through only then, so a
+// consumer's noUnusedLocals finds none unused.
+func (o *APIOutput) ReadsBodyLimits() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.IdentityOperation != "" || !endpoint.ManualRouteRegistration {
 			return true
 		}
 	}
