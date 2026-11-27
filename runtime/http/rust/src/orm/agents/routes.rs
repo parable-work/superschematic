@@ -79,7 +79,25 @@ impl Agents {
     }
 }
 
+/// Runs a route's work to its end in a task of its own: an instance that
+/// is cancelled while its turn runs (a pause, a budget's cap) closes its
+/// connection, and the work it asked for, which cancels it, must not stop
+/// half done with it.
+async fn detached<F>(work: F) -> Response
+where
+    F: std::future::Future<Output = Response> + Send + 'static,
+{
+    match tokio::spawn(work).await {
+        Ok(response) => response,
+        Err(err) => refusal(500, "failed", &format!("the agent route failed: {err}")),
+    }
+}
+
 async fn run_route(State(routes): State<Arc<AgentRoutes>>, request: Request) -> Response {
+    detached(serve_run(routes, request)).await
+}
+
+async fn serve_run(routes: Arc<AgentRoutes>, request: Request) -> Response {
     let agents = &routes.agents;
     let rest = request
         .uri()
@@ -211,6 +229,10 @@ async fn recorded(
 }
 
 async fn approval_route(State(routes): State<Arc<AgentRoutes>>, request: Request) -> Response {
+    detached(serve_approval(routes, request)).await
+}
+
+async fn serve_approval(routes: Arc<AgentRoutes>, request: Request) -> Response {
     if request.method() != Method::POST {
         return refusal(405, "method_not_allowed", "a decision is a POST");
     }

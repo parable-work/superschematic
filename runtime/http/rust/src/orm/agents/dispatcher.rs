@@ -219,12 +219,25 @@ pub struct AgentRunRequest {
     /// The party's active grant, whose target is the run's scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub grant: Option<String>,
-    /// The run a watch, a retry, a follow-up or an approved start is of.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// The run a watch, a retry, a follow-up or an approved start is of,
+    /// its key in base62 as the repositories write it, whatever form the
+    /// queue's column read in.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "wire_id"
+    )]
     pub run: Option<String>,
     /// An ask's deadline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ask: Option<AskDeadline>,
+}
+
+/// A key read from a queue's `UUID` column, hyphenated there, in the form
+/// the repositories write it: base62.
+fn wire_id<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<String>, D::Error> {
+    let text = Option::<String>::deserialize(deserializer)?;
+    Ok(text.map(|id| super::super::notify::same_id(&id)))
 }
 
 impl From<RunRequest> for AgentRunRequest {
@@ -1501,6 +1514,7 @@ impl Agents {
         let Some(run) = self.run_row(run_id).await? else {
             return Ok(());
         };
+        let run_id = &string(&run, "id");
         if ended(&string(&run, "status")) {
             return Ok(());
         }
