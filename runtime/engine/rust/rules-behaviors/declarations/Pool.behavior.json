@@ -108,7 +108,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "permission"
+      ]
     },
     {
       "name": "reportRoom",
@@ -175,7 +178,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "permission"
+      ]
     },
     {
       "name": "pick",
@@ -279,22 +285,8 @@
       "kind": "recheck",
       "description": "An out member past its outUntil with no check since was due a recheck: the project's handler asks the member's provider and reports what it says with reportRoom. Delivery is at least once, so a handler is idempotent by the row's key and dueAt, which no two rechecks of a row share.",
       "payloadSchema": {
-        "type": "object",
         "additionalProperties": false,
-        "required": [
-          "outUntil",
-          "dueAt",
-          "firedAt"
-        ],
         "properties": {
-          "outUntil": {
-            "description": "Until when the member was out, in epoch milliseconds.",
-            "type": "integer"
-          },
-          "outReason": {
-            "description": "Why it was out; absent when it has no reason.",
-            "type": "string"
-          },
           "checkedAt": {
             "description": "When the last check of it was reported, in epoch milliseconds; absent before the first.",
             "type": "integer"
@@ -306,8 +298,22 @@
           "firedAt": {
             "description": "When it fired, in epoch milliseconds: the later of its due time and the worker's clock.",
             "type": "integer"
+          },
+          "outReason": {
+            "description": "Why it was out; absent when it has no reason.",
+            "type": "string"
+          },
+          "outUntil": {
+            "description": "Until when the member was out, in epoch milliseconds.",
+            "type": "integer"
           }
-        }
+        },
+        "required": [
+          "outUntil",
+          "dueAt",
+          "firedAt"
+        ],
+        "type": "object"
       }
     }
   ],

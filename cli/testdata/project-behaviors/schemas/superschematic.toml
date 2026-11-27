@@ -1,0 +1,4 @@
+# A project that declares a behavior of its own (D103's step 5): the
+# classes and declarations of the behaviors directory, which every command
+# registers before it reads a schema.
+behaviors = "behaviors"

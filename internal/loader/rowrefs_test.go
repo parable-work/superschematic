@@ -121,9 +121,11 @@ export abstract class Ticket {
 }
 
 // TestRowFeaturesOnSQLite: a service that lists the sqlite dialect keeps
-// references and files when TypeScript's types alone read them, and is
-// refused, naming the language, when it enables Go's or Rust's, whose
-// repositories do not serve them on SQLite yet (D182).
+// an audience, references and files when TypeScript's types read them,
+// with Go's too, whose repositories refuse their calls on SQLite at run
+// time (the DB kind writes the Go ORM always), and is refused, naming the
+// language, when it enables Rust's, whose repositories do not serve them
+// on SQLite yet (D182, D185).
 func TestRowFeaturesOnSQLite(t *testing.T) {
 	const schema = `
 import { Identity } from "superscalar";
@@ -144,11 +146,8 @@ export abstract class Ticket {
 		want        []string
 	}{
 		{"TypeScript's types alone", `{"typescript": {"enabled": true}}`, nil},
-		{"Go's types too", `{"typescript": {"enabled": true}, "go": {"enabled": true}}`, []string{
-			"@audience on Ticket: tickets-db lists the sqlite dialect and enables the Go types",
-			"@references on Ticket: tickets-db lists the sqlite dialect and enables the Go types",
-			"@attachments on Ticket: tickets-db lists the sqlite dialect and enables the Go types",
-		}},
+		{"Go's types too", `{"typescript": {"enabled": true}, "go": {"enabled": true}}`, nil},
+		{"Go's types alone", `{"go": {"enabled": true}}`, nil},
 		// The Rust repositories serve them on Postgres alone (D185).
 		{"Rust's types", `{"rust": {"enabled": true}}`, []string{
 			"@audience on Ticket: tickets-db lists the sqlite dialect and enables the Rust types",

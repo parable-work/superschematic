@@ -346,6 +346,9 @@ impl From<Error> for ApiError {
             Error::Invalid(message) => ApiError::bad_request(message),
             Error::Constraint(constraint) => ApiError::conflict(constraint.message),
             Error::Busy(_) => ApiError::service_unavailable("The database is busy; try again"),
+            // A merge of a row into itself, or into a row that references
+            // it (D147), conflicts with the rows as they are.
+            Error::Merge { message, .. } => ApiError::conflict(message),
             // A party's or an agent run's write that leaves a row its
             // grants do not reach (D156).
             Error::AccessRefused(message) => ApiError::forbidden(message),

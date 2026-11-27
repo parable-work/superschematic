@@ -50,10 +50,102 @@ fn {{.DefaultFnName}}() -> {{.RustType}} {
 {{.}}
 {{- end}}
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+{{- if .WireName}}
+#[serde(try_from = "{{.WireName}}")]
+{{- end}}
 {{- if .DenyUnknownFields}}
 #[serde(deny_unknown_fields)]
 {{- end}}
 pub struct {{.Name}} {
+{{- template "structFields" (structFields $ .Fields)}}
+}
+{{- if .WireName}}
+
+/// `{{.Name}}` as it is read: each variant field (D149) held as JSON, which
+/// `TryFrom` decodes as the member its sibling names.
+#[derive(Deserialize)]
+{{- if .DenyUnknownFields}}
+#[serde(deny_unknown_fields)]
+{{- end}}
+struct {{.WireName}} {
+{{- template "structFields" (structFields $ .WireFields)}}
+}
+
+impl TryFrom<{{.WireName}}> for {{.Name}} {
+    type Error = serde_json::Error;
+
+    fn try_from(wire: {{.WireName}}) -> Result<Self, Self::Error> {
+{{- range .Variants}}
+{{- if .Required}}
+        let {{.Field}} = {{.Union}}::from_variant(variant_by(&wire.{{.By}}).as_deref(), wire.{{.Field}})?;
+{{- else}}
+        let {{.Field}} = match wire.{{.Field}} {
+            Some(value) if !value.is_null() => Some({{.Union}}::from_variant(variant_by(&wire.{{.By}}).as_deref(), value)?),
+            _ => None,
+        };
+{{- end}}
+{{- end}}
+        Ok(Self {
+{{- $type := .}}
+{{- range .Fields}}
+{{- if $type.IsVariant .RustName}}
+            {{.RustName}},
+{{- else}}
+            {{.RustName}}: wire.{{.RustName}},
+{{- end}}
+{{- end}}
+        })
+    }
+}
+{{- end}}
+
+{{if .HasDefaults}}
+impl Default for {{.Name}} {
+    fn default() -> Self {
+        Self {
+{{- range .Fields}}
+            {{.RustName}}: {{if .HasDefault}}{{.DefaultFnName}}(){{else if not .Required}}None{{else}}Default::default(){{end}},
+{{- end}}
+        }
+    }
+}
+
+{{end}}
+{{- end -}}
+
+{{- if .HasVariants}}
+/// The string a variant field's sibling holds (D149), which names the
+/// field's member: an enum's value or the text itself, and None for any
+/// other value or none.
+fn variant_by<T: Serialize>(by: &T) -> Option<String> {
+    match serde_json::to_value(by) {
+        Ok(serde_json::Value::String(text)) => Some(text),
+        _ => None,
+    }
+}
+
+{{end}}
+{{- if .HasOptionalJSONFields}}
+/// Reads a present optional Generic.JSON field through the lossless adapter.
+/// JSON null is a value there, `Some(Value::Null)`, apart from an absent
+/// field, which `default` leaves `None`.
+fn {{.OptionalJSONFieldAdapter}}<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    {{.JSONFieldAdapter}}(deserializer).map(Some)
+}
+
+{{end}}
+{{- range .CompositeDefaults}}
+/// Returns a fresh [`{{.Type}}`] platform default.
+pub fn {{.FunctionName}}() -> {{.Type}} {
+    serde_json::from_str({{.JSONLiteral}})
+        .expect("invalid generated {{.Type}} platform default")
+}
+{{end}}
+
+{{- define "structFields"}}
 {{- range .Fields}}
 {{- with rustDoc .Doc 1}}
 {{.}}
@@ -82,38 +174,4 @@ pub struct {{.Name}} {
 {{- end}}
     pub {{.RustName}}: {{.RustType}},
 {{- end}}
-}
-
-{{if .HasDefaults}}
-impl Default for {{.Name}} {
-    fn default() -> Self {
-        Self {
-{{- range .Fields}}
-            {{.RustName}}: {{if .HasDefault}}{{.DefaultFnName}}(){{else if not .Required}}None{{else}}Default::default(){{end}},
 {{- end}}
-        }
-    }
-}
-
-{{end}}
-{{- end -}}
-
-{{- if .HasOptionalJSONFields}}
-/// Reads a present optional Generic.JSON field through the lossless adapter.
-/// JSON null is a value there, `Some(Value::Null)`, apart from an absent
-/// field, which `default` leaves `None`.
-fn {{.OptionalJSONFieldAdapter}}<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    {{.JSONFieldAdapter}}(deserializer).map(Some)
-}
-
-{{end}}
-{{- range .CompositeDefaults}}
-/// Returns a fresh [`{{.Type}}`] platform default.
-pub fn {{.FunctionName}}() -> {{.Type}} {
-    serde_json::from_str({{.JSONLiteral}})
-        .expect("invalid generated {{.Type}} platform default")
-}
-{{end}}

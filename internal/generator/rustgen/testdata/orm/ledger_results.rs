@@ -83,6 +83,8 @@ fn refusal(err: &Error) -> Value {
         Error::Busy(_) => json!("busy"),
         Error::AccessRefused(_) => json!("access refused"),
         Error::Refused(refusal) => json!({"refused": refusal.code}),
+        Error::Merge { code, .. } => json!({"merge": code}),
+        Error::AccessRefused(_) => json!("access refused"),
         Error::Encryption(_) => json!("encryption"),
         Error::Definition(message) => json!({"definition": message}),
         Error::Database(message) => json!({"database": message}),

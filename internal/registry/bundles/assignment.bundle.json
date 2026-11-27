@@ -1,0 +1,30 @@
+{
+  "name": "Assignment",
+  "description": "Whom a row is assigned to (D104): Seats with one seat, assignee, that seats one subject at most and refuses a take while it is full, so a caller assigns an unassigned row to itself and leaves it, and a caller holding assign seats or unseats another. A Workflow transition's or a StateRules state's by names the seat as seat:assignee. D104's guard on another principal's Lease acquire, which reads the seat, waits for the declarative vocabulary's caller operand.",
+  "settingsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "take": {
+        "description": "The permission a caller needs to assign the row to itself; any caller may when absent.",
+        "type": "string",
+        "minLength": 1
+      },
+      "assign": {
+        "description": "The permission a caller needs to assign the row to another subject or unassign another; no caller may when absent.",
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  },
+  "parts": [
+    {
+      "behavior": "Seats",
+      "config": {
+        "seats": {
+          "assignee": { "max": 1, "onFull": "refuse", "take": { "$setting": "take" }, "assign": { "$setting": "assign" } }
+        }
+      }
+    }
+  ]
+}

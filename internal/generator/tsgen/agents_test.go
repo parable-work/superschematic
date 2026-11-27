@@ -50,6 +50,7 @@ var agentsCases = []string{
 	"an agent asks in the row's thread and makes a follow-up row when nobody answers by the deadline",
 	"a sandbox that fails is started again by Retries, and the run holds its Lease while it runs",
 	"administering agents is permissions, and an agent cannot start a run",
+	"a run's token is refused by the plain grant authenticator, and the dispatcher's authenticator resolves it as the run, narrowed to whom it acts for",
 }
 
 // agentsSQLiteCheck is what tsc checks the package against on SQLite

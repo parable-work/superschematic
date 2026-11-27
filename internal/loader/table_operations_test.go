@@ -543,3 +543,40 @@ func TestTableOperationsDocumentThemselves(t *testing.T) {
 		t.Errorf("an encrypted operation: %q", got)
 	}
 }
+
+// TestAMergeFoldsOneRowIntoAnother: a POST whose path holds the table's
+// key and {into}, of a table that implements Mergeable, is a merge (D147),
+// which the loader fills with the key and no body; the same route over a
+// table that does not implement Mergeable stays a POST with the key, which
+// is refused, and a merge with a row rule is refused.
+func TestAMergeFoldsOneRowIntoAnother(t *testing.T) {
+	loaded, tracker := loadTracker(t)
+	uuid := ir.TypeRef{Name: "Identity.UUID"}
+	check := func(mergeable bool, by []string) (*ir.FieldDef, []string) {
+		db := copyOf(t, tracker)
+		db.Types["Team"].Mergeable = mergeable
+		api := copyOf(t, loaded)
+		op := trackerOperation(t, api, "getTeam")
+		op.HTTPMethod, op.RestPath = "POST", "teams/{id}/merge/{into}"
+		op.Arguments = append(op.Arguments, &ir.ArgumentDef{Name: "into", TypeRef: uuid, Required: true})
+		op.TableOperation = &ir.TableOperation{By: by}
+		var got []string
+		for _, d := range verify.CheckTableOperations(api, verify.Input{Database: db}).Errors {
+			got = append(got, d.Error())
+		}
+		return op, got
+	}
+	op, errs := check(true, nil)
+	if len(errs) != 0 {
+		t.Fatalf("a merge of a Mergeable table: %q", errs)
+	}
+	if to := op.TableOperation; to.Kind != ir.TableOperationMerge || to.Key != "id" || to.Type != "Team" || to.Input != "" || !to.Writes() {
+		t.Errorf("the merge's tableOperation = %+v", to)
+	}
+	if _, errs := check(false, nil); len(errs) != 1 || !strings.Contains(errs[0], "a POST creates a row of Team, and its path holds {id}") {
+		t.Errorf("a merge of a table that does not implement Mergeable: %q", errs)
+	}
+	if _, errs := check(true, []string{"createdBy"}); len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "it takes no row rule (by) and no parent in its path") {
+		t.Errorf("a merge with a row rule: %q", errs)
+	}
+}

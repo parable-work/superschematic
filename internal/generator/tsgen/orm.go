@@ -10,6 +10,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -366,7 +367,10 @@ type ORMColumn struct {
 	// Owned is a column of a field a behavior owns (D103), which a row
 	// holds and only the behavior's operations change: a create, an
 	// update and an upsert leave it out.
-	Owned    bool
+	Owned bool
+	// Given is an owned column a create gives (D147: Aliased's name),
+	// which the create input holds and the core hands the behavior.
+	Given    bool
 	Audit    string
 	Relation string
 	// Default is the JSON of the schema's default, which a create that
@@ -449,6 +453,7 @@ type ORMMergeStep struct {
 	Source        string
 	Field         string
 	SelfReference string
+	Before        []ORMMergeStatement
 	Collisions    []ORMMergeStatement
 	Repoint       ORMMergeStatement
 }
@@ -491,6 +496,9 @@ func ormMerge(schema *ir.Schema, models []sqlutil.TableModel, tables []ORMTable,
 	out := &ORMMerge{Lock: plan.Lock, HistoryActor: plan.HistoryActor, RequiresUser: plan.RequiresUser}
 	for _, step := range plan.Steps {
 		s := ORMMergeStep{Source: step.Source, Field: step.Field, SelfReference: step.SelfReference, Repoint: statement(step.Source, step.Repoint)}
+		for _, before := range step.Before {
+			s.Before = append(s.Before, statement(step.Source, before))
+		}
 		for _, collision := range step.Collisions {
 			s.Collisions = append(s.Collisions, statement(step.Source, collision))
 		}
@@ -651,9 +659,10 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 				table.NoUpserts = table.Deadlines
 				for _, use := range layout.Uses {
 					// A create that writes a sub-table's or a shared
-					// table's rows (Numbering's counts, D103's step 4) is
-					// no upsert's insert.
-					if len(use.Tables) > 0 || len(use.Shared) > 0 {
+					// table's rows (Numbering's counts, D103's step 4), or
+					// another table's (Blueprint's children, D149), is no
+					// upsert's insert.
+					if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 						table.NoUpserts = true
 					}
 				}
@@ -885,6 +894,7 @@ func ormColumn(c sqlutil.ColumnModel, info *TypeInfo, known map[string]bool, uui
 		Internal:  c.Internal,
 		Encrypted: c.Encrypted,
 		Owned:     c.Def.Owned(),
+		Given:     c.Def.GivenAtCreate(),
 		Audit:     c.Audit,
 		Relation:  c.Relation,
 		Filter:    sqlutil.FilterOps(c.Filter),
@@ -1232,11 +1242,12 @@ func (t ORMTable) TableOperations() bool {
 
 // CreateColumns are the columns a create may set: every column but the
 // audit fields, which the repository stamps, internal metadata, and the
-// fields a behavior owns, which its core sets (D103).
+// fields a behavior owns, which its core sets (D103), but for one a create
+// gives (D147), which the core hands the behavior.
 func (t ORMTable) CreateColumns() []ORMColumn {
 	var out []ORMColumn
 	for _, c := range t.Columns {
-		if c.Internal || c.Audit != "" || c.Owned {
+		if c.Internal || c.Audit != "" || (c.Owned && !c.Given) {
 			continue
 		}
 		out = append(out, c)

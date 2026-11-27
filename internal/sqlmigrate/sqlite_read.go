@@ -589,6 +589,11 @@ func (r *databaseReader) table(t *InspectedTable) (*Table, error) {
 	checked := map[string]bool{}
 	for _, ck := range def.checks {
 		check, ok := parseSQLiteCheck(ck.expr, names)
+		if !ok {
+			// A variant field's check (D149) is read as the schema's when
+			// the file holds it as the plan writes it.
+			check, ok = peerVariantCheck(peer, ck.expr)
+		}
 		if !ok || checked[check.Column] {
 			unmodeled = append(unmodeled, "CHECK ("+ck.expr+")")
 			continue
@@ -1012,4 +1017,27 @@ func (r *databaseReader) dropSteps(drops []Drop) ([]*Step, error) {
 		return nil, errors.New(b.String())
 	}
 	return steps, nil
+}
+
+// peerVariantCheck is the check of peer, the schema's table, over a variant
+// field's column (D149) whose SQLite predicate expr is, token for token: a
+// copy of it, which the file then holds. ok is false for any other expr.
+func peerVariantCheck(peer *Table, expr string) (*Check, bool) {
+	if peer == nil {
+		return nil, false
+	}
+	read := lexSQLite(expr)
+	for _, pc := range peer.Checks {
+		if pc.Variant == nil {
+			continue
+		}
+		want := lexSQLite(pc.spec().SQLiteExpression(qs))
+		if slices.EqualFunc(read, want, func(a, b sqlToken) bool {
+			return a.kind == b.kind && (a.value == b.value || a.kind == sqlWord && strings.EqualFold(a.value, b.value))
+		}) {
+			check := *pc
+			return &check, true
+		}
+	}
+	return nil, false
 }

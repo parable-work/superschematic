@@ -91,5 +91,16 @@
       "code": "required_fields",
       "description": "An update, a caller's or one an operation applies, that clears a field the instance's state requires; details names the state and the fields."
     }
-  ]
+  ],
+  "rules": {
+    "permission": {
+      "config": "permission"
+    },
+    "states": {
+      "config": "states"
+    },
+    "status": {
+      "config": "status"
+    }
+  }
 }

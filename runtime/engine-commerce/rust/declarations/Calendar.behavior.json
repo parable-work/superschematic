@@ -595,7 +595,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "permission"
+      ]
     },
     {
       "name": "addClosure",
@@ -656,7 +659,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "permission"
+      ]
     },
     {
       "name": "removeClosure",
@@ -702,7 +708,10 @@
         ],
         "type": "object"
       },
-      "writes": true
+      "writes": true,
+      "permissions": [
+        "permission"
+      ]
     },
     {
       "name": "holdFor",

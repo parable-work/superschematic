@@ -21,6 +21,7 @@ use crate::jsnum::js_number;
 use crate::scalars;
 use crate::schema::{
     is_any_json_scalar, structured_json_type, FieldDef, JsonShape, ScalarDef, Schema, TypeDef,
+    UnionDef,
 };
 use superschematic_schema_runtime::{code_points, translate_pattern, ValidationError};
 
@@ -484,8 +485,49 @@ impl Validator<'_> {
         }
     }
 
+    /// Validates the value of a field of a variant union (D149) at key as
+    /// the member its sibling names, as every generated validator does:
+    /// "variant" while the sibling, `union.by`'s field of type_def, holds
+    /// no string the union's arms map, "type" for a value that is no
+    /// object, and otherwise the member's errors under key.
+    fn validate_variant_value(
+        &self,
+        type_def: &TypeDef,
+        union: &UnionDef,
+        key: &str,
+        data: &Map<String, Value>,
+        value: &Value,
+        errors: &mut FieldErrors,
+    ) {
+        let by_key = type_def
+            .fields
+            .iter()
+            .find(|sibling| sibling.name == union.by)
+            .map_or(union.by.as_str(), FieldDef::key);
+        let Some(member) = data
+            .get(by_key)
+            .and_then(Value::as_str)
+            .and_then(|by| union.arms.get(by))
+        else {
+            errors.add(
+                key,
+                "variant",
+                format!("holds a value its {by_key} names no member for"),
+            );
+            return;
+        };
+        let Some(object) = value.as_object() else {
+            errors.add(key, "type", "expected an object");
+            return;
+        };
+        if let Some(nested) = self.schema.types.get(member) {
+            errors.nest(key, self.validate_type_def(nested, object));
+        }
+    }
+
     fn validate_field(
         &self,
+        type_def: &TypeDef,
         field: &FieldDef,
         data: &Map<String, Value>,
         errors: &mut FieldErrors,
@@ -500,6 +542,13 @@ impl Validator<'_> {
             }
             Some(value) => value,
         };
+
+        if let Some(union) = self.schema.unions.get(&field.type_ref.name) {
+            if !union.by.is_empty() && !field.type_ref.is_array {
+                self.validate_variant_value(type_def, union, key, data, value, errors);
+                return;
+            }
+        }
 
         if field.type_ref.is_array {
             // A required list means present, not non-empty: [] is a value,
@@ -552,7 +601,7 @@ impl Validator<'_> {
     ) -> FieldErrors {
         let mut errors = FieldErrors::new();
         for field in &type_def.fields {
-            self.validate_field(field, data, &mut errors);
+            self.validate_field(type_def, field, data, &mut errors);
         }
         errors
     }

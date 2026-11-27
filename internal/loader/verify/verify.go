@@ -131,6 +131,20 @@ type Input struct {
 	// feature the Go server does not serve yet (D180).
 	GoServer bool
 
+	// TypeScriptServer is an API whose server is TypeScript (outputs.api
+	// enabled, language TYPESCRIPT), which the loader reads from the
+	// config. A merge it serves over a sqlite-first database is refused
+	// (D147, D182, sqlite_features.go).
+	TypeScriptServer bool
+
+	// DatabaseDialects are the SQL dialects the config of the API's
+	// database lists (outputs.sql.dialects), postgres alone when it lists
+	// none, which the loader reads from the config of the DB service beside
+	// the API's. The first one is the database a TypeScript server opens
+	// (D64). Nil when the loader has no such config to read, which leaves
+	// the rules over them unchecked.
+	DatabaseDialects []string
+
 	// TypesLanguages are the languages whose types a DB service's config
 	// enables (outputs.types), sorted, which the loader reads from the
 	// config. The features whose SQLite tables only some languages'
@@ -336,6 +350,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkSorts(schema, in, r)
 	checkFilters(schema, in, r)
 	checkTableOperations(schema, in, r)
+	checkVariants(schema, in, r)
 	if kind, ok := reg.Kind(string(schema.Kind)); ok && kind.Verify != nil {
 		kind.Verify(schema, r)
 	}

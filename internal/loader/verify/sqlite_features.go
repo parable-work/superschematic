@@ -10,36 +10,41 @@ import (
 
 // The features whose tables only some languages read on SQLite (D182). On
 // SQLite an @audience table's rows keep to an audience the TypeScript
-// repositories alone compare their callers with, and only they read and
-// write references and attachments: the Go and Rust repositories on SQLite
-// would read every row and none of the sub-tables. So a DB service that
-// lists sqlite and declares one of them takes the types of TypeScript
-// alone, until the Go and Rust repositories serve them there. The Rust
-// repositories serve an audience (D181) and references and attachments
-// (D185) on Postgres alone, so Rust is held to all three on SQLite.
+// repositories alone compare their callers with, only they read and write
+// references and attachments, and only they keep a party's or an agent
+// run's reads to its grants (D156); the Go ORM serves these and the access
+// log on Postgres alone (D180, D184).
 //
-// The grants and the access log (D156) are the same: on SQLite only the
-// TypeScript repositories keep a party's or an agent run's reads to its
-// grants (D182). The Go ORM serves them on Postgres alone (D180), its
-// repositories on SQLite reading every row for a caller with grants and its
-// server recording its calls in no log there, and the Rust server's grants
-// and access log and its repositories' grant reach are Postgres's (D181's
-// left). So a DB service that lists sqlite and declares either takes the
-// types of TypeScript alone too.
+// A DB service that lists sqlite and declares one of them builds with Go's
+// types: the DB kind writes the Go ORM always, which imports them
+// (refuseORMWithoutGoTypes), so refusing them would leave such a database
+// no build at all. The Go repositories on SQLite refuse each call those
+// features touch at run time instead, naming why with ErrSQLiteUnsupported:
+// every table's repository of a database whose reads keep to a caller, the
+// access log's, and the SQLite database's References and Attachments
+// (ormgen's sqliteAccessRefusal and sqliteRowFeaturesHost).
+//
+// Rust's types are opt-in, and its repositories would read the rows
+// without them: they serve an audience (D181) and references and
+// attachments (D185) on Postgres alone, and D181 leaves grant reach and
+// the access log on the Rust server's SQLite. So a DB service that lists
+// sqlite, declares one of the five and enables Rust's types is refused.
 
 // sqliteReaders are the languages each feature is not refused for here on
-// SQLite: those whose repositories serve it there, and those another check
-// refuses it for on every dialect.
+// SQLite: TypeScript, whose repositories serve it there, and Go, whose
+// repositories refuse its calls there at run time, or, for @searchable,
+// whose writes the index's triggers keep (D186).
 var sqliteReaders = map[string][]string{
-	"@audience":     {registry.LangTypeScript},
-	"@references":   {registry.LangTypeScript},
-	"@attachments":  {registry.LangTypeScript},
-	"@accessGrants": {registry.LangTypeScript},
-	"@accessLog":    {registry.LangTypeScript},
+	"@audience":     {registry.LangTypeScript, registry.LangGo},
+	"@references":   {registry.LangTypeScript, registry.LangGo},
+	"@attachments":  {registry.LangTypeScript, registry.LangGo},
+	"@accessGrants": {registry.LangTypeScript, registry.LangGo},
+	"@accessLog":    {registry.LangTypeScript, registry.LangGo},
 	// The search index on SQLite (D186): its triggers keep a row's index
-	// row whichever ORM writes it, and the TypeScript runtime searches it;
-	// the Rust search runs on Postgres alone (D188), and a Go server serves
-	// none (D180).
+	// row whichever ORM writes it, and the TypeScript runtime searches it.
+	// Rust's search runs on Postgres alone (D188), and a Go server is
+	// refused search over a SQLite database (go_features.go), so Go's
+	// types, which the DB kind builds always, are served beside it.
 	"@searchable": {registry.LangTypeScript, registry.LangGo},
 }
 
@@ -93,4 +98,23 @@ func checkSQLiteVersioned(schema *ir.Schema, in Input, r *Result) {
 		r.errorf(td.Owner, "@versioned on %s: %s lists the sqlite dialect and enables the %s types, whose repositories read a history with Postgres's statements alone; on SQLite only the TypeScript repositories serve a @versioned table so far (D189). Build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]), or leave its %s types out",
 			td.Name, schema.Name, strings.Join(others, " and "), schema.Name, strings.Join(others, " and "))
 	}
+}
+
+// refuseSQLiteMergeRoutes refuses a @tableOperation merge (D147) of a
+// TypeScript server whose database lists sqlite first: the server then
+// opens its database on SQLite (its Deps.db a SqlDatabase), where the
+// TypeScript repositories refuse mergeInto (D182), so the route would
+// answer only that refusal. The Go and Rust servers serve no merge route,
+// and the Rust repositories' merge_into runs on SQLite, so neither is
+// refused here. An API whose config, or whose database's, the loader did
+// not read (in.DatabaseDialects nil) is left unchecked.
+func refuseSQLiteMergeRoutes(schema *ir.Schema, in Input, db string, owner string, op *ir.FieldDef, r *Result) {
+	if !in.TypeScriptServer || len(in.DatabaseDialects) == 0 || in.DatabaseDialects[0] != registry.SQLDialectSQLite {
+		return
+	}
+	if op.TableOperation == nil || op.TableOperation.Kind != ir.TableOperationMerge {
+		return
+	}
+	r.errorf("", "%s: a merge of %s (D147) on %s, whose first dialect is sqlite, so %s's TypeScript server opens it on SQLite, where the TypeScript repositories refuse mergeInto so far (D182). List postgres first in %s's outputs.sql.dialects, or leave the merge out of %s",
+		owner, op.TableOperation.Type, db, schema.Name, db, schema.Name)
 }

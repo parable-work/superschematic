@@ -6,7 +6,6 @@
       "name": "tickets.timers",
       "identity": false,
       "operations": [
-        "TicketTimersFireTimerHandler",
         "TicketTimersResetTimerHandler",
         "TicketTimersSnoozeTimerHandler"
       ]

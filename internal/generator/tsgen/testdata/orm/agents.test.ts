@@ -16,6 +16,7 @@ import {
   createAgents,
   createInbound,
   createNotifier,
+  grantAuthenticator,
   indexSearch,
   issueGrant,
   paramsHash,
@@ -902,5 +903,23 @@ describe.skipIf(!available)('agent runs', () => {
     await expect(w.agents.pause(principal, null)).rejects.toMatchObject({ status: 403 });
     await exited(w, id);
     await watch(w);
+  });
+
+  test("a run's token is refused by the plain grant authenticator, and the dispatcher's authenticator resolves it as the run, narrowed to whom it acts for", async () => {
+    w = await world();
+    const { a, boss } = w.ids;
+    const id = await ask(w, 'payer', a, 'nothing to do');
+    const ctx = { headers: new Headers({ authorization: `Bearer ${w.started.get(id)!.token}` }) } as never;
+    // As its grant's bare holder the run would hold the agent role's every
+    // permission, parties.message among them, ungated (D194).
+    await expect(grantAuthenticator({ orm: w.orm })(ctx)).rejects.toMatchObject({ status: 401 });
+    const principal = (await w.agents.authenticator()(ctx))!;
+    expect(principal).toMatchObject({ subject: id, kind: 'agent', actingFor: { kind: 'user', subject: boss }, claims: { run: id } });
+    expect([...principal.permissions].sort()).toEqual(['invoices.pay', 'tasks.read', 'tasks.write']);
+    expect(principal.grants!.map(g => [g.targetType, g.targetId])).toEqual([['Task', a]]);
+    await exited(w, id);
+    await watch(w);
+    // The run ended: its token is refused by the dispatcher's too.
+    await expect(w.agents.authenticator()(ctx)).rejects.toMatchObject({ status: 401 });
   });
 });

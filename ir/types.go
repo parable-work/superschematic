@@ -85,6 +85,13 @@ type TypeDef struct {
 	// [BehaviorRef].
 	Behaviors []BehaviorRef `json:"behaviors,omitempty" yaml:"behaviors,omitempty"`
 
+	// Bundles lists the bundles this table implements, in the order its
+	// schema names them (D103, step 5): each presets the wiring of existing
+	// behaviors, which the loader adds to Behaviors after the table's own
+	// uses, each marked with the bundle ([BehaviorRef.Bundle]). See
+	// [BundleRef].
+	Bundles []BundleRef `json:"bundles,omitempty" yaml:"bundles,omitempty"`
+
 	// Display is what a UI reads to render the type's instances, declared
 	// with @display: what to call one and many, the title field, the
 	// summary fields and the labels of its Workflow's states and

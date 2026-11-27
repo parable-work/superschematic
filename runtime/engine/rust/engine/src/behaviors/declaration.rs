@@ -64,10 +64,11 @@ pub const BUILTIN_OPERATIONS: [&str; 6] = ["create", "get", "list", "update", "d
 /// characters.
 pub const VETO_CODE: &str = "^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$";
 
-const DECLARATION_KEYS: [&str; 16] = [
+const DECLARATION_KEYS: [&str; 18] = [
     "name",
     "description",
     "configSchema",
+    "references",
     "createParamsSchema",
     "requires",
     "conflicts",
@@ -81,6 +82,7 @@ const DECLARATION_KEYS: [&str; 16] = [
     "contracts",
     "preconditionSchema",
     "vetoes",
+    "rules",
 ];
 const SIGNAL_KEYS: [&str; 4] = ["name", "description", "paramsSchema", "access"];
 const FIELD_KEYS: [&str; 6] = [
@@ -94,7 +96,7 @@ const FIELD_KEYS: [&str; 6] = [
 const TABLE_KEYS: [&str; 5] = ["name", "description", "key", "scope", "fields"];
 const VETO_KEYS: [&str; 2] = ["code", "description"];
 const CONTRACT_KEYS: [&str; 3] = ["name", "role", "description"];
-const OPERATION_KEYS: [&str; 10] = [
+const OPERATION_KEYS: [&str; 11] = [
     "name",
     "description",
     "paramsSchema",
@@ -105,6 +107,7 @@ const OPERATION_KEYS: [&str; 10] = [
     "log",
     "asks",
     "invocationPolicy",
+    "permissions",
 ];
 
 /// Whether a name is one a behavior may take ([`BEHAVIOR_NAME`]):
@@ -431,10 +434,13 @@ impl BehaviorDeclaration {
 /// A declaration without the members only a table's layout reads (D103):
 /// its `value`, its `tables`, `armsDeadlines` and `hearsChanges`, and each
 /// field's `type` and whether a value field is `optional` (D103's step 4),
-/// which the engine, keeping no table, never answers with, and its
-/// `contracts` (D104), which only the behaviors' core reads. It shifts them
-/// out, so the members after them keep the order the declaration writes
-/// them in.
+/// which the engine, keeping no table, never answers with, its
+/// `contracts` (D104) and a declarative behavior's `rules` (D103's step 5),
+/// which only the behaviors' core reads (an extension's crate implements
+/// the behavior for the engine), and its `references` and each operation's
+/// `permissions` (D103's step 5), which only the build reads. It shifts
+/// them out, so the members after them keep the order the declaration
+/// writes them in.
 fn without_layout_members(mut value: Value) -> Value {
     if let Value::Object(members) = &mut value {
         members.shift_remove("value");
@@ -442,6 +448,15 @@ fn without_layout_members(mut value: Value) -> Value {
         members.shift_remove("armsDeadlines");
         members.shift_remove("hearsChanges");
         members.shift_remove("contracts");
+        members.shift_remove("rules");
+        members.shift_remove("references");
+        if let Some(Value::Array(operations)) = members.get_mut("operations") {
+            for operation in operations {
+                if let Value::Object(operation) = operation {
+                    operation.shift_remove("permissions");
+                }
+            }
+        }
         if let Some(Value::Array(fields)) = members.get_mut("fields") {
             for field in fields {
                 if let Value::Object(field) = field {
@@ -1134,6 +1149,19 @@ mod tests {
             .map(String::as_str)
             .collect();
         assert_eq!(field, ["name", "description"]);
+    }
+
+    /// A declarative behavior's rules (D103's step 5) are the behaviors'
+    /// core's to read: the engine takes the member, whose behavior an
+    /// extension's crate implements for it, and answers with none of it.
+    #[test]
+    fn a_declarative_behaviors_rules_are_left_out_of_its_json() {
+        let rated = BehaviorDeclaration::parse(
+            r#"{"name": "test.Rated", "fields": [{"name": "count", "type": "Generic.Int64"}], "rules": {"derived": {}}}"#,
+        )
+        .expect("a declaration with rules is sound");
+        assert!(rated.json.get("rules").is_none());
+        assert_eq!(rated.json["fields"], json!([{"name": "count"}]));
     }
 
     /// A declaration may declare the sub-tables a table's row keeps, whether

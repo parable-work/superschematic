@@ -340,6 +340,36 @@ type UnionInfo struct {
 	// (from @default on the @internalMetadata field). Members[i].Name
 	// matches Types[i].
 	Members []UnionMemberInfo
+
+	// By and Arms make the union a variant union (ir.UnionDef.By, D149): a
+	// field of it holds the member its sibling By names, through Arms, in
+	// ir.UnionDef.ArmList order. Empty for any other union.
+	By   string
+	Arms []ir.UnionArm
+}
+
+// IsVariant reports whether the union is a variant union (D149).
+func (u UnionInfo) IsVariant() bool { return u.By != "" }
+
+// ArmIndexes maps each arm's value to the index of its member in Types.
+func (u UnionInfo) ArmIndexes() []UnionArmIndex {
+	out := make([]UnionArmIndex, 0, len(u.Arms))
+	for _, arm := range u.Arms {
+		for i, member := range u.Types {
+			if member == arm.Type {
+				out = append(out, UnionArmIndex{Value: arm.Value, Type: arm.Type, Index: i})
+				break
+			}
+		}
+	}
+	return out
+}
+
+// UnionArmIndex is one arm of a variant union with its member's index.
+type UnionArmIndex struct {
+	Value string
+	Type  string
+	Index int
 }
 
 // Doc returns the documentation text for the union.

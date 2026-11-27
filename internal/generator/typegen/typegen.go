@@ -139,6 +139,21 @@ type FieldInfo struct {
 	// LimitConsts are the constants of the limits the field declares with
 	// Validate<>, written with go.limit_constants = "on" (D160).
 	LimitConsts []LimitConst
+
+	// Variant is set on a field of a variant union (D149): UnmarshalJSON
+	// decodes its value as the member its sibling names, and Validate
+	// reports "variant" when the value is not that member.
+	Variant *GoVariant
+}
+
+// GoVariant is a variant field as UnmarshalJSON and Validate read it
+// (codegen.VariantField): its sibling's JSON key, and Go expressions over
+// t, the type's receiver, for whether the sibling holds a value and for
+// that value as a string.
+type GoVariant struct {
+	ByKey     string
+	ByPresent string
+	ByValue   string
 }
 
 // ArrayDepth is 0 for T, 1 for T[] and 2 for T[][].
@@ -185,6 +200,31 @@ type UnionInfo struct {
 	// member. Otherwise the generated wrapper falls back to shape-based
 	// dispatch over each member's Fields and Tags.
 	DispatchByDiscriminator bool
+
+	// By and Arms make the union a variant union (D149): its wrapper's
+	// UnmarshalVariantJSON decodes the member a sibling's value names, and
+	// HoldsArm reports whether it holds that member.
+	By   string
+	Arms []codegen.UnionArmIndex
+}
+
+// StrayType is the unexported member type a variant union's wrapper decodes
+// a payload into while its sibling names no member (D149).
+func (u UnionInfo) StrayType() string { return "stray" + u.Name }
+
+// ArmCondition is the Go condition, over a string named by, that by names
+// member: by == "verify" || by == "check".
+func (u UnionInfo) ArmCondition(member string) string {
+	var terms []string
+	for _, arm := range u.Arms {
+		if arm.Type == member {
+			terms = append(terms, "by == "+strconv.Quote(arm.Value))
+		}
+	}
+	if len(terms) == 0 {
+		return "false"
+	}
+	return strings.Join(terms, " || ")
 }
 
 // UnionMemberInfo carries per-member metadata used by the unions template.
@@ -518,6 +558,9 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	shapes := codegen.GoOptionalShapes{KeepZero: opts.Naming.Go.KeepsOptionalZero()}
 	output.Types = convertTypes(objectTypes, output.Scalars, false, enumLookup, importAliases, unionNames, shapes)
 	output.Types = append(output.Types, convertTypes(inputTypes, output.Scalars, true, enumLookup, importAliases, unionNames, shapes)...)
+	if err := annotateVariantFields(output.Types, schema, opts.Dependencies); err != nil {
+		return nil, err
+	}
 	if opts.Naming.Go.WritesLimitConstants() {
 		setLimitConsts(output.Types[:len(objectTypes)], objectTypes)
 		setLimitConsts(output.Types[len(objectTypes):], inputTypes)
@@ -845,9 +888,61 @@ func convertUnions(codegenUnions []codegen.UnionInfo) []UnionInfo {
 			Discriminator:           cu.Discriminator,
 			Members:                 members,
 			DispatchByDiscriminator: dispatchByDiscriminator,
+			By:                      cu.By,
+			Arms:                    cu.ArmIndexes(),
 		}
 	}
 	return unions
+}
+
+// annotateVariantFields marks each field of a variant union (D149) in types
+// with its sibling, read from the schema's type or input of the same name.
+// A field whose sibling breaks the rules, which only a dependency's union
+// can reach past the loader, fails the build.
+func annotateVariantFields(types []TypeInfo, schema *ir.Schema, dependencies map[string]*ir.Schema) error {
+	for i := range types {
+		t := &types[i]
+		td := schema.Types[t.Name]
+		if t.IsInput || td == nil {
+			if input := schema.Inputs[t.Name]; input != nil {
+				td = input
+			}
+		}
+		variants, err := codegen.VariantFieldsOf(td, schema, dependencies)
+		if err != nil {
+			return fmt.Errorf("typegen: %w", err)
+		}
+		for _, v := range variants {
+			var by *FieldInfo
+			for j := range t.Fields {
+				if t.Fields[j].Name == v.By.Name {
+					by = &t.Fields[j]
+				}
+			}
+			if by == nil {
+				return fmt.Errorf("typegen: %s.%s: the field %s that names its member is not generated", t.Name, v.Field.Name, v.By.Name)
+			}
+			variant := &GoVariant{ByKey: v.ByKey()}
+			ref := "t." + by.GoName
+			switch {
+			case by.UsesWrapper:
+				variant.ByPresent = ref + ".IsSet() && !" + ref + ".IsNull()"
+				variant.ByValue = "string(" + ref + ".Value)"
+			case strings.HasPrefix(by.GoType, "*"):
+				variant.ByPresent = ref + " != nil"
+				variant.ByValue = "string(*" + ref + ")"
+			default:
+				variant.ByPresent = "true"
+				variant.ByValue = "string(" + ref + ")"
+			}
+			for j := range t.Fields {
+				if t.Fields[j].Name == v.Field.Name {
+					t.Fields[j].Variant = variant
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // convertTypes converts codegen.TypeInfo to typegen.TypeInfo.

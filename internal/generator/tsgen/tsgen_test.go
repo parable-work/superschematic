@@ -145,6 +145,11 @@ func TestWriteTypesGolden(t *testing.T) {
 		// shared table with no repository, no upserts, and the tables in
 		// the layout.
 		{service: "fixture-payments-db", behaviors: true},
+		// Tables of Blueprint (D149): Batch's create through the core, which
+		// stamps its jobs, with no upserts; Job's Dependencies' operations
+		// under dependencies, its blockers in a sub-table with no repository;
+		// Blueprint, with no operation, under none; no queue.
+		{service: "fixture-blueprint-db", behaviors: true},
 		// An enum another service's state machine governs a field of, in a
 		// package with no machine and so no state-machines.ts.
 		{service: "fixture-state-machine-enums"},
@@ -161,6 +166,16 @@ func TestWriteTypesGolden(t *testing.T) {
 		// MergeableRepository, and each one's definition in orm.ts holds
 		// its merge, the statements of every relation that references it.
 		{service: "fixture-merge-db", behaviors: true},
+		// A table with a variant field (D149): validators/unions.ts's
+		// validateStepResultBy and parseStepResultFromJSONBy, which Step's
+		// validator and parser read its result with, by its kind; and the
+		// API's views, which read the database's.
+		{service: "fixture-variant-field-db", sqlite: true},
+		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
+		// Aliased (D147): the name a create gives in each create input,
+		// rename, addAlias, removeAlias and resolve under each field, and
+		// Company's merge, whose steps move its aliases and names.
+		{service: "fixture-aliased-db", behaviors: true},
 	}
 
 	for _, tc := range cases {

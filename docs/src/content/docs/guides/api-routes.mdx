@@ -1353,6 +1353,23 @@ The HTTP method and the shape say what the handler does:
 | `POST`, one body argument, no key | create | creates a row from the body's members | the view of the row as the write left it |
 | `PATCH`, the key, one body argument | update | sets the members the body sets | the view of the row as the write left it |
 | `DELETE`, the key | delete | deletes the row | the view of the row as it was before |
+| `POST`, the key and `{into}`, no body, of a table that implements `Mergeable` | merge | folds the row into the row of `{into}` with the repository's `mergeInto` (D147) | the view of the row that stays |
+
+A merge (`@rest(HttpMethod.POST, "labels/{id}/merge/{into}")`, `mergeLabel(id:
+Identity.UUID, into: Identity.UUID): LabelView`) reads both live rows, 404
+for either that holds none, and runs [the
+merge](/superschematic/guides/database-tables/#merging-rows) in the route's
+transaction. A merge of a row into itself, or into a row that references
+it through a relation of the table to itself, is 409. It takes no row rule
+and no parent in its path, since it reaches both rows by their keys. The
+TypeScript server serves it; the Go and Rust servers write no handler of
+it yet, so the operation stays in the implementation's interface, to write
+over `MergeInto` and `merge_into`. A TypeScript server whose database
+lists sqlite first opens it on SQLite, where its repositories merge no
+rows yet, so the build refuses the merge there (D182). The route reads
+both rows as its caller, and the Go and Rust repositories' merges find
+only the rows their caller may write
+([Who may read a row](/superschematic/guides/database-tables/#who-may-read-a-row)).
 
 A success is the envelope a hand-written route answers, with the status it
 answers, 200. A shape that fits no kind fails the load, and the message
@@ -1969,9 +1986,11 @@ already running, so its triggers count on no other to finish their work:
 | `trg_<table>_audience_update` | after each update whose resolved columns are not what its audience resolves to | the same; its condition stops it once they are, whether or not a connection turns recursive triggers on |
 | `trg_<table>_audience_cascade` | on a table another inherits from, after an update that changes a row's resolved columns | sets each inheriting child's from the parent; a table that inherits from itself sets every inheriting row below the parent through a recursive query, and then the children of each in other tables |
 
-Go's and Rust's repositories on SQLite do not keep to an audience yet, so a
-service that lists `sqlite` and enables their types is refused, naming the
-language.
+Go's and Rust's repositories on SQLite do not keep to an audience yet. A
+service that lists `sqlite` builds with Go's types, whose repositories
+there refuse each call with `ErrSQLiteUnsupported`
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)), and
+is refused with Rust's, naming the language.
 
 ### Grants
 
@@ -2013,7 +2032,12 @@ characters, once. `grantAuthenticator({ orm, inner })` runs a request that
 presents one as the holder, with the role's permissions and the grant's
 reach, and hands every other request to `inner`. It reads the grant on
 every call, so a grant that ended or that `revokeGrant` revoked is the 401
-of the very next call. `activeGrants(orm, { holder?, targetType?,
+of the very next call. A grant an agent run holds is the run's token,
+which it answers 401 too: only the agent dispatcher's
+`agents.authenticator(inner)` resolves it, narrowed to whom the run acts
+for and held to its autonomy
+([agent runs](/superschematic/guides/agent-runs/#the-runs-token)).
+`activeGrants(orm, { holder?, targetType?,
 targetId? })` lists the grants active now.
 
 A party's or an agent run's reads and writes keep to the rows its grants
@@ -2134,20 +2158,27 @@ there is no option to pass. A revealed field holds text, and the database
 needs an `@accessLog` table, or the build is refused.
 
 A Go server refuses at build time the platform features it does not
-serve yet, on its database's tables and its own: `@calendarSource` and
-Recurrence, `@event`, `@notifier` and `@channelIdentities`, `@references`
-and `@attachments`, `@searchable`, `@party`, `@conversations` and
-`@runRequests`, `@agents`, provider slots and `@autonomy`. Serve such an
-API in TypeScript (`outputs.api.language: "TYPESCRIPT"`). A database keeps
-its Go types, which its Go ORM, always generated, needs.
+serve yet, on its database's tables and its own: `@party`,
+`@conversations` and `@runRequests`, `@agents`, a provider with no Go
+module and `@autonomy`. References, attachments and provider slots are
+served (D184), and so are Recurrence, the calendar and search across
+tables, on Postgres (D187): a Go server whose database lists `sqlite`
+first is refused Recurrence and a calendar source. Events, the notifier's
+tables and the channel identities are served on Postgres too (D190),
+through the HTTP runtime's `notify` package over the ORM's
+`Notifications()`. Serve such an API in TypeScript (`outputs.api.language:
+"TYPESCRIPT"`). A database keeps its Go types, which its Go ORM, always
+generated, needs.
 
 The Go ORM's repositories on SQLite keep to no audience, grants or access
 log yet: they would read every row for a caller with grants, and the
 server would record its calls in no log. So a DB service that lists
-`sqlite` and enables the Go types is refused for an `@audience`,
-`@accessGrants` or `@accessLog` table, naming the decorator and the table.
-The TypeScript repositories serve all three on SQLite (D182); the Rust
-types are refused for them there as the Go types are.
+`sqlite` and declares an `@audience`, `@accessGrants` or `@accessLog`
+table builds, and on SQLite each of its Go repositories that the access
+reaches refuses every call with `ErrSQLiteUnsupported`, naming why. The
+TypeScript repositories serve all three on SQLite (D182); a service that
+enables the Rust types there is refused, naming the decorator and the
+table.
 
 ### In the Rust server
 
@@ -2196,8 +2227,8 @@ too (D191), through the runtime's `orm::notify`.
 
 | Not built | Until then |
 | --- | --- |
-| the Go and Rust repositories' audience on SQLite | a service that lists `sqlite` and declares an audience builds TypeScript's types alone |
-| the Go and Rust repositories' grants and access log on SQLite | a service that lists `sqlite` and declares either builds TypeScript's types alone; the Go and Rust servers serve them on Postgres |
+| the Go and Rust repositories' audience on SQLite | the TypeScript repositories serve it there; the Go ones refuse each call with `ErrSQLiteUnsupported`, and a service that lists `sqlite` and declares an audience builds no Rust types |
+| the Go and Rust repositories' grants and access log on SQLite | the TypeScript repositories serve them there; the Go ones refuse each call, a service that lists `sqlite` and declares either builds no Rust types, and the Go and Rust servers serve them on Postgres |
 | a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists only the active grants, and a declared query of them | `activeGrants` in the TypeScript runtime, or a `@tableOperation` over a view of every grant |

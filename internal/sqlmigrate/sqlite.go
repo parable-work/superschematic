@@ -244,7 +244,7 @@ func sqliteColumnSQL(t *Table, col *Column) string {
 	if t != nil {
 		for _, c := range t.Checks {
 			if c.Column == col.Name {
-				def += " CHECK (" + c.spec().Expression(qs) + ")"
+				def += " CHECK (" + c.spec().SQLiteExpression(qs) + ")"
 			}
 		}
 	}

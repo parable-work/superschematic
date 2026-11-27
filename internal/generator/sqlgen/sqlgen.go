@@ -862,6 +862,19 @@ func convertTypeToTable(
 				Expression: check.Expression(sqlutil.QuoteIdentifier),
 			})
 		}
+		// A variant field's column holds the member its sibling's column
+		// names (D149), under the same policy.
+		check, ok, err := variantCheck(typeDef, field, columnName, schema, deps, policy)
+		if err != nil {
+			return table, err
+		}
+		if ok {
+			table.Checks = append(table.Checks, Check{
+				Column:     columnName,
+				Spec:       check,
+				Expression: check.Expression(sqlutil.QuoteIdentifier),
+			})
+		}
 
 		// Explicit @relation: FK constraint on this scalar column.
 		if !field.JsonField && !field.TypeRef.IsMap && field.Relation != nil {
@@ -1460,4 +1473,24 @@ func OrderKeyColumn(schema *ir.Schema, typeDef *ir.TypeDef, field *ir.FieldDef) 
 func isTextColumnType(t string) bool {
 	upper := strings.ToUpper(t)
 	return upper == "TEXT" || strings.HasPrefix(upper, "VARCHAR")
+}
+
+// variantCheck is the CHECK of a variant field's column (D149,
+// sqlutil.VariantColumnCheck), named column, under the policy: ok is false
+// for any other field, and with the naming file's column_checks off.
+func variantCheck(typeDef *ir.TypeDef, field *ir.FieldDef, column string, schema *ir.Schema, deps map[string]*ir.Schema, policy sqlutil.DDLPolicy) (sqlutil.Check, bool, error) {
+	if policy.NoColumnChecks {
+		return sqlutil.Check{}, false, nil
+	}
+	v, err := codegen.ResolveVariant(typeDef, field,
+		func(name string) *ir.UnionDef { return codegen.LookupUnion(schema, deps, name) },
+		func(name string) *ir.EnumDef { return codegen.LookupEnum(schema, deps, name) })
+	if err != nil || v == nil {
+		return sqlutil.Check{}, false, err
+	}
+	model, err := codegen.BuildReadModel(schema, deps)
+	if err != nil {
+		return sqlutil.Check{}, false, err
+	}
+	return sqlutil.VariantColumnCheck(v, column, sqlutil.ColumnName(v.By), model)
 }

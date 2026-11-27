@@ -215,6 +215,10 @@ class UnionDef:
     name: str
     description: str = ""
     types: list[str] = field(default_factory=list)
+    # A variant union (D149): the sibling field that names the member, and
+    # each of its values' member. Empty for a union picked by shape.
+    by: str = ""
+    arms: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

@@ -89,6 +89,9 @@ func (s *Schema) Validate(opts ...ValidateOption) []error {
 				errs = append(errs, fmt.Errorf("union %s references unknown member type %q", u.Name, memberName))
 			}
 		}
+		if err := u.ValidateVariant(); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	for _, name := range sortedStringMapKeys(s.CompositeDefaults) {

@@ -36,7 +36,7 @@ use superschematic_rules_testkit::{
 
 /// The transcripts and the floors `superschematic-rules-adapter`'s replay
 /// holds them to: each store replays every one.
-const TRANSCRIPTS: [(&str, usize); 34] = [
+const TRANSCRIPTS: [(&str, usize); 39] = [
     ("core-workflow", 96),
     ("core-timers", 139),
     ("core-reactions", 618),
@@ -71,6 +71,11 @@ const TRANSCRIPTS: [(&str, usize); 34] = [
     ("core-calendar", 47),
     ("core-refunds", 52),
     ("core-payments", 73),
+    ("core-blueprint", 151),
+    ("core-aliased", 46),
+    ("core-bundles", 90),
+    ("core-declarative", 49),
+    ("acme-rating", 26),
 ];
 
 fn transcript(name: &str) -> Transcript {
@@ -78,6 +83,27 @@ fn transcript(name: &str) -> Transcript {
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     serde_json::from_str(&text).expect("the transcript reads")
+}
+
+/// The declaration files of the declarative behaviors (D103's step 5) the
+/// transcripts declare, each once: what a store's shared sub-tables and the
+/// core are made from beside the core's own.
+fn declared() -> Vec<Value> {
+    let mut out: Vec<Value> = Vec::new();
+    for (name, _) in TRANSCRIPTS {
+        for declaration in transcript(name).declarations {
+            if !out.contains(&declaration) {
+                out.push(declaration);
+            }
+        }
+    }
+    out
+}
+
+/// The declarations of the core's behaviors and of the declarative ones
+/// the transcripts declare.
+fn declarations() -> Declarations {
+    Declarations::ported_with(&declared()).expect("the declaration files read")
 }
 
 /// What a store does for the replay beyond the handler's contract: a row's
@@ -593,8 +619,9 @@ impl<'s, S: Inspect> Scenario<'s, S> {
 /// one per scenario's database, failing on any mismatch or on fewer steps
 /// than a transcript's floor.
 fn replay_all<S: Inspect>(store: &str, names: &[&str], make: &dyn Fn() -> S) {
-    let core = superschematic_rules_behaviors::core();
-    let declarations = Declarations::ported();
+    let core = superschematic_rules_behaviors::core_declaring(&declared())
+        .unwrap_or_else(|reason| panic!("{reason}"));
+    let declarations = declarations();
     for (name, floor) in TRANSCRIPTS
         .iter()
         .filter(|(name, _)| names.is_empty() || names.contains(name))
@@ -650,7 +677,7 @@ fn replay_all<S: Inspect>(store: &str, names: &[&str], make: &dyn Fn() -> S) {
 
 #[test]
 fn the_transcripts_replay_over_sqlite_in_memory() {
-    let declarations = Declarations::ported();
+    let declarations = declarations();
     replay_all("SQLite in memory", &[], &|| {
         SqliteStore::memory(&declarations).expect("SQLite opens")
     });
@@ -663,7 +690,7 @@ fn the_transcripts_replay_over_memory() {
 
 #[test]
 fn the_transcripts_replay_over_a_sqlite_file() {
-    let declarations = Declarations::ported();
+    let declarations = declarations();
     let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("rules-dev-transcripts");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("the test's directory");
@@ -711,7 +738,7 @@ fn the_transcripts_replay_over_postgres() {
         );
         return;
     };
-    let declarations = Declarations::ported();
+    let declarations = declarations();
     let prefix = format!("rules_dev_{}", std::process::id());
     let n = std::cell::Cell::new(0usize);
     replay_all("Postgres", &[], &|| {

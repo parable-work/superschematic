@@ -28,9 +28,9 @@ func TestGoServerDatabaseErrRefusesTheDatabasesFeatures(t *testing.T) {
 	if err := GoServerDatabaseErr(api, db); err != nil {
 		t.Fatalf("a plain database: %v", err)
 	}
-	db.Types["Ticket"].Searchable = &ir.SearchableDef{}
-	if err := GoServerDatabaseErr(api, db); err == nil || !strings.Contains(err.Error(), "the Go server of app-api, over app-db, does not serve @searchable on Ticket yet (D155, D180)") {
-		t.Fatalf("a searchable table: %v", err)
+	db.Types["Ticket"].Party = &ir.PartyDef{}
+	if err := GoServerDatabaseErr(api, db); err == nil || !strings.Contains(err.Error(), "the Go server of app-api, over app-db, does not serve @party on Ticket yet (D157, D180)") {
+		t.Fatalf("a party table: %v", err)
 	}
 }
 
@@ -53,14 +53,6 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 		edit    func(*ir.TypeDef)
 		want    string
 	}{
-		{"@calendarSource", func(td *ir.TypeDef) { td.CalendarSources = []ir.CalendarSourceDef{{Field: "dueOn"}} }, "@calendarSource on Duty yet (D152, D180)"},
-		{"Recurrence", func(td *ir.TypeDef) {
-			td.Behaviors = []ir.BehaviorRef{{Name: "Recurrence", Implements: true}}
-		}, "Recurrence on Duty yet (D152, D180)"},
-		{"@event", func(td *ir.TypeDef) { td.Events = []*ir.EventDef{{Kind: "duty.due"}} }, "@event on Duty yet (D153, D180)"},
-		{"@notifier", func(td *ir.TypeDef) { td.Notifier = &ir.NotifierDef{} }, "@notifier on Duty yet (D153, D180)"},
-		{"@channelIdentities", func(td *ir.TypeDef) { td.ChannelIdentities = &ir.ChannelIdentitiesDef{} }, "@channelIdentities on Duty yet (D153, D180)"},
-		{"@searchable", func(td *ir.TypeDef) { td.Searchable = &ir.SearchableDef{} }, "@searchable on Duty yet (D155, D180)"},
 		{"@party", func(td *ir.TypeDef) { td.Party = &ir.PartyDef{} }, "@party on Duty yet (D157, D180)"},
 		{"@conversations", func(td *ir.TypeDef) { td.Conversations = &ir.ConversationsDef{} }, "@conversations on Duty yet (D157, D180)"},
 		{"@runRequests", func(td *ir.TypeDef) { td.RunRequests = &ir.RunRequestsDef{} }, "@runRequests on Duty yet (D157, D180)"},
@@ -84,17 +76,31 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 		})
 	}
 
-	// Per-record access is served (D180), and references and attachments
-	// (D184).
+	// Per-record access is served (D180), references and attachments
+	// (D184), Recurrence, the calendar and search (D187), and events, the
+	// notifier and channel identities (D190).
 	served := table("Document", func(td *ir.TypeDef) {
 		td.Audience = &ir.AudienceDef{}
 		td.RowReferences = &ir.RowReferencesDef{}
 		td.Attachments = &ir.AttachmentsDef{Released: "FileReleased"}
+		td.CalendarSources = []ir.CalendarSourceDef{{Field: "dueOn", Title: "title"}}
+		td.Behaviors = []ir.BehaviorRef{{Name: "Recurrence", Implements: true}}
+		td.Searchable = &ir.SearchableDef{}
+		td.Events = []*ir.EventDef{{Kind: "document.filed"}}
+		td.Fields = []*ir.FieldDef{{Name: "title", TypeRef: ir.TypeRef{Name: "string"}}}
 	})
 	served.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
 	served.Types["AccessEntry"] = &ir.TypeDef{Name: "AccessEntry", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
+	served.Types["Notice"] = &ir.TypeDef{Name: "Notice", Role: ir.RoleDBTable, Notifier: &ir.NotifierDef{Part: ir.NotifierInbox}}
+	served.Types["ChannelIdentity"] = &ir.TypeDef{Name: "ChannelIdentity", Role: ir.RoleDBTable, ChannelIdentities: &ir.ChannelIdentitiesDef{}}
 	if got := goFeatureFindings(ir.NewSchema("app-api", ir.SchemaKindAPI), Input{GoServer: true, Database: served}); len(got) != 0 {
-		t.Fatalf("an audience, grants, the access log, references and attachments in Go: %v", got)
+		t.Fatalf("an audience, grants, the access log, references, attachments, Recurrence, the calendar, search, events, the notifier and channel identities in Go: %v", got)
+	}
+	// A calendar source titled by a sealed field is not: the Go calendar
+	// reads a title from its column.
+	served.Types["Document"].Fields[0].EncryptedAtRest = true
+	if got := goFeatureFindings(ir.NewSchema("app-api", ir.SchemaKindAPI), Input{GoServer: true, Database: served}); len(got) != 1 || !strings.Contains(got[0], "does not serve @calendarSource document titled by title, an Encrypted<T> field (D152, D187)") {
+		t.Fatalf("a sealed title: %v", got)
 	}
 
 	// An API's provider slots are served, over providers of Go modules
@@ -110,5 +116,27 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 	got := goFeatureFindings(api, Input{GoServer: true})
 	if len(got) != 2 || !strings.Contains(got[0], "the Go server of app-api cannot link runtime provider relay-b (providers/relay-b): its directory holds no Go module") || !strings.Contains(got[1], "@autonomy on Duties.closeDuty yet (D158, D180)") {
 		t.Fatalf("a provider of no Go module and autonomy: %v", got)
+	}
+}
+
+// TestGoServerSQLiteErrRefusesRecurrenceAndTheCalendar: a Go server whose
+// database lists sqlite first is refused Recurrence and a calendar source,
+// each by its table, which it serves on Postgres alone (D187); one that
+// lists postgres first, or a database with neither, is not.
+func TestGoServerSQLiteErrRefusesRecurrenceAndTheCalendar(t *testing.T) {
+	api := ir.NewSchema("app-api", ir.SchemaKindAPI)
+	db := ir.NewSchema("app-db", ir.SchemaKindDB)
+	db.Types["Filing"] = &ir.TypeDef{Name: "Filing", Role: ir.RoleDBTable, Behaviors: []ir.BehaviorRef{{Name: "Recurrence", Implements: true}}, CalendarSources: []ir.CalendarSourceDef{{Occurrences: true}}}
+	db.Types["Note"] = &ir.TypeDef{Name: "Note", Role: ir.RoleDBTable, Searchable: &ir.SearchableDef{}}
+	err := GoServerSQLiteErr(api, db, []string{"sqlite", "postgres"})
+	if err == nil || !strings.Contains(err.Error(), "lists sqlite first, and serves Filing: Recurrence, Filing: @calendarSource on Postgres alone so far (D152, D187)") {
+		t.Fatalf("sqlite first: %v", err)
+	}
+	if err := GoServerSQLiteErr(api, db, []string{"postgres", "sqlite"}); err != nil {
+		t.Fatalf("postgres first: %v", err)
+	}
+	delete(db.Types, "Filing")
+	if err := GoServerSQLiteErr(api, db, []string{"sqlite"}); err != nil {
+		t.Fatalf("a database with neither: %v", err)
 	}
 }

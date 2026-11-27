@@ -11,9 +11,9 @@
 mod support;
 
 use serde_json::{json, Value};
-use superschematic_rules::{Behavior, Declaration, FieldSpec, TypeSpec, UseSpec};
+use superschematic_rules::{Declaration, FieldSpec, TypeSpec, UseSpec};
 use superschematic_rules_behaviors::{
-    constants, core, Constants, ConstantsConfig, ConstantsOneWay, OneWayDirection, OneWayKind,
+    constants, core, ConstantsConfig, ConstantsOneWay, OneWayDirection, OneWayKind,
     ONE_WAY_BOOLEANS, ONE_WAY_NUMBERS,
 };
 use support::{caller, changed, define, refused, rule, shape, undescribed, veto_of, Host, START};
@@ -58,11 +58,19 @@ fn one_way(field: &str, direction: &str, current: Value, attempted: Value) -> (S
 
 // ---- the declaration and its schema ----
 
+/// The core runs Constants from its registered declaration, whose rules
+/// the vocabulary interprets (D103's step 5), and declares it as the file
+/// does.
 #[test]
 fn the_declaration_is_the_files() {
     assert_eq!(
-        Constants.declaration(),
-        Declaration::new("Constants").veto("one_way")
+        core().declaration("Constants"),
+        Some(&Declaration::new("Constants").veto("one_way"))
+    );
+    let file: Value = serde_json::from_str(constants::DECLARATION).unwrap();
+    assert_eq!(
+        file["rules"],
+        json!({"constant": {"config": "fields"}, "oneWay": {"config": "oneWay"}, "permission": {"config": "permission"}})
     );
 }
 

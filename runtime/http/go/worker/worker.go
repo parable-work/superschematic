@@ -500,11 +500,20 @@ func (w *loop) claimLoop(ctx context.Context) error {
 			}
 			continue
 		}
-		msgs, err := w.q.Claim(ctx, free, w.q.Lease)
-		if err != nil {
-			if ctx.Err() != nil {
-				return nil
+		// The claim runs to its answer, within its own timeout, and is not
+		// cancelled at a stop: a claim the database had made would hold
+		// its messages until their lease ran out, with no handler (D187,
+		// as D188 found in Rust). Claimed at a stop, they go back at once.
+		claimCtx, cancelClaim := context.WithTimeout(context.WithoutCancel(ctx), opTimeout)
+		msgs, err := w.q.Claim(claimCtx, free, w.q.Lease)
+		cancelClaim()
+		if ctx.Err() != nil {
+			if err == nil {
+				w.releaseClaimed(msgs)
 			}
+			return nil
+		}
+		if err != nil {
 			if failingSince.IsZero() {
 				failingSince = time.Now()
 			}
@@ -811,6 +820,20 @@ func (w *loop) stop() error {
 	w.logger.Info("worker stopped: the grace is over, and the unfinished messages are released",
 		zap.Int("released", released), zap.Int("unfinished", len(unfinished)))
 	return nil
+}
+
+// releaseClaimed releases the messages a claim answered with after the
+// stop, whose handlers never start, so they are due again at once rather
+// than when their lease runs out.
+func (w *loop) releaseClaimed(msgs []Message) {
+	for _, msg := range msgs {
+		ctx, cancel := context.WithTimeout(context.Background(), opTimeout)
+		err := w.q.Release(ctx, msg.ID, msg.Token)
+		cancel()
+		if err != nil {
+			w.logger.Error("release failed: the message is due again when its claim expires", zap.String("message", msg.ID), zap.Error(err))
+		}
+	}
 }
 
 // sleep waits d, or until ctx ends, and reports whether ctx is still live.

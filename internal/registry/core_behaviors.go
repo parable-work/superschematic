@@ -80,6 +80,7 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"schedules", RulesPackage},
 	{"pool", RulesPackage},
 	{"recurrence", RulesPackage},
+	{"aliased", RulesPackage},
 }
 
 // EngineImplements reports whether an engine implements the behavior:
@@ -135,6 +136,27 @@ var RulesBehaviors = []string{"Workflow", "Reactions", "Constants", "StateRules"
 	"Stock", "Holds", "Calendar", "Payments",
 	// D152: dated occurrences of a recurrence, the core's alone.
 	"Recurrence",
+	// Blueprint (D149), the one behavior ported with no state of its own:
+	// a create stamps the template's rows in another table.
+	"Blueprint",
+	// D147's Aliased, the core's alone.
+	"Aliased",
+}
+
+// tableCreatesRows are the behaviors a table's create of a row runs that
+// create rows of another table in the create's change set, each with why:
+// Blueprint's children (D149). Such a create is no upsert's insert, so a
+// table that implements one has no upserts in any ORM. Per-behavior code,
+// as tableLeavesOut is, until step 5 derives it from the behavior's class
+// (D103).
+var tableCreatesRows = map[string]string{
+	"Blueprint": "a create of the row stamps a row of the child table per step of its template, in the create's change set (D149)",
+}
+
+// TableCreatesRows reports whether a table's use of the behavior name
+// creates rows of another table when a row is created (tableCreatesRows).
+func TableCreatesRows(name string) bool {
+	return tableCreatesRows[name] != ""
 }
 
 // tableLeavesOut are the operations of a behavior's declaration that a
@@ -234,6 +256,17 @@ func RunsOnTheCore(name string) bool {
 	return slices.Contains(RulesBehaviors, name)
 }
 
+// RunsOnTheCore reports whether a core runs the behavior: the stock core,
+// one of RulesBehaviors; a project's, the core's behaviors and the crates
+// of the behaviors a class or an extension declares with a Rust crate that
+// implements the core's hooks (D103's step 5), which the project's rules
+// crate assembles; or any core, a declarative behavior, whose declaration
+// states its rules in the vocabulary the core interprets and which a host
+// hands its core whole (D103's step 5).
+func (b Behavior) RunsOnTheCore() bool {
+	return RunsOnTheCore(b.Name) || b.Rules.Declared() || b.Declarative()
+}
+
 // BehaviorReads are the tables a use of the behavior name with config
 // reads beside its own row's, which a table that composes no behavior may
 // be (D152): Recurrence's holiday table (holidays.table) and its relative
@@ -276,39 +309,45 @@ type BehaviorListen struct {
 }
 
 // BehaviorListens are the tables a use of the behavior name with config
-// listens to, in rule order, each once: Reactions' allTerminal and
-// anyTerminal rules ({ schema, link }); none for any other behavior or a
-// config that does not read. Per-behavior code, as Timers' check is, until
-// step 5 derives it from the behavior's class (D103).
-func BehaviorListens(name string, config json.RawMessage) []BehaviorListen {
-	if name != "Reactions" || len(config) == 0 {
+// listens to, each once, in the config's order: the objects its
+// declaration's listen references reach (ReferenceListen), each one's
+// schema and link, which D103's step 5 derives from the declaration where
+// per-behavior code read Reactions' config before. Reactions' are its
+// allTerminal and anyTerminal rules ({ schema, link }), rule by rule. None
+// for a behavior that is not registered or names no listen, or a config
+// that does not read.
+func (r *Registry) BehaviorListens(name string, config json.RawMessage) []BehaviorListen {
+	behavior, ok := r.Behavior(name)
+	if !ok || len(config) == 0 {
 		return nil
 	}
-	type terminal struct {
-		Schema string `json:"schema"`
-		Link   string `json:"link"`
-	}
-	var parsed struct {
-		Rules []struct {
-			When struct {
-				AllTerminal *terminal `json:"allTerminal"`
-				AnyTerminal *terminal `json:"anyTerminal"`
-			} `json:"when"`
-		} `json:"rules"`
-	}
-	if json.Unmarshal(config, &parsed) != nil {
+	listens := behavior.ReferencesOf(ReferenceListen)
+	if len(listens) == 0 {
 		return nil
 	}
+	var decoded any
+	if json.Unmarshal(config, &decoded) != nil {
+		return nil
+	}
+	// Each reference's values, in the config's order: a list's item by
+	// item, with every reference's values within one item before the
+	// next, as a rule's allTerminal then its anyTerminal.
+	var heard []orderedValue
+	for _, ref := range listens {
+		heard = append(heard, configValuesOrdered(decoded, ref.Path)...)
+	}
+	slices.SortStableFunc(heard, func(a, b orderedValue) int { return slices.Compare(a.order, b.order) })
 	var out []BehaviorListen
-	for _, rule := range parsed.Rules {
-		for _, heard := range []*terminal{rule.When.AllTerminal, rule.When.AnyTerminal} {
-			if heard == nil || heard.Schema == "" || heard.Link == "" {
-				continue
-			}
-			listen := BehaviorListen{Type: heard.Schema, Link: heard.Link}
-			if !slices.Contains(out, listen) {
-				out = append(out, listen)
-			}
+	for _, h := range heard {
+		object, _ := h.value.(map[string]any)
+		schema, _ := object["schema"].(string)
+		link, _ := object["link"].(string)
+		if schema == "" || link == "" {
+			continue
+		}
+		listen := BehaviorListen{Type: schema, Link: link}
+		if !slices.Contains(out, listen) {
+			out = append(out, listen)
 		}
 	}
 	return out

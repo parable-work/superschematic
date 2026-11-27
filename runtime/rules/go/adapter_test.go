@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -452,6 +453,76 @@ func TestALayoutSpecTheCoreRefusesRefusesEveryCommandCheckedOncePerCore(t *testi
 		refused(execute(core))
 		if core.checks != 1 || taking.checks != 1 {
 			t.Errorf("checks = %d and %d, want 1 each", core.checks, taking.checks)
+		}
+	})
+}
+
+// declaringCore is the archive's core that records each declaration a
+// command hands it (rules.Declarer) before it checks a layout's specs.
+type declaringCore struct {
+	rules.Core
+	mu     sync.Mutex
+	handed [][]json.RawMessage
+}
+
+func (c *declaringCore) Declare(files ...json.RawMessage) ([]string, error) {
+	c.mu.Lock()
+	c.handed = append(c.handed, files)
+	c.mu.Unlock()
+	return rules.Declare(files...)
+}
+
+// A layout's declarations (D103's step 5) are handed to the core before
+// its specs are checked, once per core, and the declarative behavior they
+// declare then runs on the table: test.Tally's add adjusts its count.
+func TestALayoutsDeclarationsAreHandedToTheCoreBeforeItsCheck(t *testing.T) {
+	tally := json.RawMessage(`{"name": "test.Tally", "fields": [{"name": "count", "type": "Generic.Int64"}],
+		"operations": [{"name": "add", "paramsSchema": {"type": "object", "additionalProperties": false}, "resultSchema": {"type": "object"}, "writes": true}],
+		"rules": {"operations": {"add": {"effects": [{"adjust": {"count": 1}}], "result": {"count": {"field": "count"}}}}}}`)
+	rulestest.Each(t, func(t *testing.T, db *rulestest.DB) {
+		types := db.ColumnTypes()
+		db.Exec(t, fmt.Sprintf(`CREATE TABLE "counter" (id %s, test_tally_count %s, _version %s)`, types.Key, types.Integer, types.Version))
+		for _, ddl := range db.BumpVersion("counter") {
+			db.Exec(t, ddl)
+		}
+		db.Exec(t, fmt.Sprintf(`INSERT INTO "counter" (id, test_tally_count) VALUES (%s, %s)`, db.P(1), db.P(2)), uuidColumn, 2)
+		layout := &rules.Layout{
+			Types: map[string]*rules.Table{"Counter": {
+				Type:    "Counter",
+				Table:   "counter",
+				Key:     rules.Column{Field: "id", Column: "id", Type: "Identity.UUID"},
+				Version: "_version",
+				Own:     []rules.Column{},
+				Uses: []rules.Use{{
+					ID:         "test.Tally",
+					Behavior:   "test.Tally",
+					Member:     "testTally",
+					Fields:     []rules.OwnedField{{Name: "count", Column: rules.Column{Field: "testTallyCount", Column: "test_tally_count", Type: "Generic.Int64"}}},
+					Operations: []rules.Operation{{Name: "add", Writes: true}},
+				}},
+				Spec: rules.TypeSpec{Name: "Counter", Uses: []rules.UseSpec{{Behavior: "test.Tally"}}},
+			}},
+			Declarations: []json.RawMessage{tally},
+		}
+		core := &declaringCore{Core: rules.Native()}
+		add := rules.Command{Caller: alice, Now: 2000, Request: "r2", Action: rules.Action{Kind: rules.ActionOperation, Key: uuidKey, UseID: "test.Tally", Operation: "add", Params: json.RawMessage(`{}`)}}
+		for want := 3; want <= 4; want++ {
+			err := inTx(t, db, rules.Host{Core: core, Layout: layout}, nil, func(host rules.Host, _ *rulestest.Tx) error {
+				result, err := rules.Execute(context.Background(), host, "Counter", add, nil)
+				if err != nil {
+					return err
+				}
+				if !sameJSON(result.Result, []byte(fmt.Sprintf(`{"count":%d}`, want))) {
+					t.Errorf("add = %s, want count %d", result.Result, want)
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(core.handed) != 1 || len(core.handed[0]) != 1 || !sameJSON(core.handed[0][0], tally) {
+			t.Errorf("the core was handed %v, want the layout's declarations once", core.handed)
 		}
 	})
 }

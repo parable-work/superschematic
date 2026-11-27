@@ -180,7 +180,7 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 		}
 		planned = append(planned, plannedSet{set: set, td: td, plan: plan})
 		warnQueuesUnrun(schema, set, td, in.Database, reg, r)
-		warnListensUnrun(schema, set, td, in.Database, r)
+		warnListensUnrun(schema, set, td, in.Database, reg, r)
 		warnOverrideCovered(set, td, r)
 	}
 	checkBehaviorOperationNames(schema, planned, r)
@@ -348,12 +348,12 @@ func warnQueuesUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db
 // It names each such table once, with its links, and is a warning for the
 // reasons warnQueuesUnrun's is. A table td hears through a relation of its
 // own is warnQueuesUnrun's.
-func warnListensUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db *ir.Schema, r *Result) {
+func warnListensUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db *ir.Schema, reg *registry.Registry, r *Result) {
 	var heard []string
 	behaviors := map[string][]string{}
 	links := map[string][]string{}
 	for _, ref := range td.TableBehaviors() {
-		for _, listen := range registry.BehaviorListens(ref.Name, ref.Config) {
+		for _, listen := range reg.BehaviorListens(ref.Name, ref.Config) {
 			if listen.Type == td.Name || db.BehaviorQueueOf(listen.Type, ir.BehaviorQueueChanges) == nil {
 				continue
 			}
