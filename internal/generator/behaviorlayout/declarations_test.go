@@ -57,7 +57,7 @@ func TestTheLayoutHoldsEachDeclarativeBehaviorsDeclaration(t *testing.T) {
 			use = &layout.Types["Proposal"].Uses[i]
 		}
 	}
-	if use == nil || use.Member != "testVotes" || len(use.Tables) != 1 || use.Tables[0].Table != "proposal_test_votes_votes" {
+	if use == nil || use.Member != "testVotes" || len(use.Tables) != 2 || use.Tables[0].Table != "proposal_test_votes_votes" || use.Tables[1].Table != "proposal_test_votes_comments" {
 		t.Errorf("Proposal's test.Votes use = %+v", use)
 	}
 
