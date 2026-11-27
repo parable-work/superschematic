@@ -91,7 +91,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-pub use host::Host;
+pub use host::{Host, WAKE_HORIZON_MS};
 pub use layout::{
     Changes, Column, Convert, Deadlines, Events, Layout, Live, Operation, OwnedField, SharedTable,
     SubTable, Table, Use,

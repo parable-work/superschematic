@@ -38,11 +38,15 @@
 //! `put` is one multipart upload, streamed when its body is a stream, as
 //! the Go client sends an object smaller than its chunk: a large object
 //! goes to the bucket from the browser, through a signed URL, rather than
-//! through the server. `get` reads the object's metadata, then the bytes of
+//! through the server. A put with `if_absent` sends `ifGenerationMatch=0`,
+//! generation 0 being no object, so GCS writes only when the name is free
+//! and answers 412 when it is not; the put then reads the object that is
+//! there and answers it with `created: false` (D142). `head` reads an
+//! object's metadata alone. `get` reads the object's metadata, then the bytes of
 //! the generation the metadata names, so a write between the two mixes no
-//! two objects. A read (`get`, `list` and the metadata server's answers)
-//! that fails with 408, 429 or a 5xx, or reaches no one, is tried twice
-//! more, a quarter second and a half second later; a write is not.
+//! two objects. A read (`get`, `head`, `list` and the metadata server's
+//! answers) that fails with 408, 429 or a 5xx, or reaches no one, is tried
+//! twice more, a quarter second and a half second later; a write is not.
 
 use std::fmt::{self, Write as _};
 use std::pin::Pin;
@@ -64,8 +68,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::bucket::{
-    check_name, Body, Bucket, BucketError, ListOptions, Object, Page, PutOptions, Reader,
-    SignedUrlOptions,
+    check_name, Body, Bucket, BucketError, ListOptions, Object, Page, PutOptions, PutResult,
+    Reader, SignedUrlOptions,
 };
 use crate::stackconfig;
 use crate::BoxError;
@@ -425,6 +429,11 @@ impl SendError {
     fn is_not_found(&self) -> bool {
         matches!(self, Self::Status(status, _) if *status == reqwest::StatusCode::NOT_FOUND)
     }
+
+    /// A write whose `ifGenerationMatch` found another generation: 412.
+    fn is_precondition_failed(&self) -> bool {
+        matches!(self, Self::Status(status, _) if *status == reqwest::StatusCode::PRECONDITION_FAILED)
+    }
 }
 
 impl fmt::Display for SendError {
@@ -525,7 +534,7 @@ impl Bucket for GcsBucket {
         name: &str,
         body: Body,
         options: PutOptions,
-    ) -> Result<Object, BucketError> {
+    ) -> Result<PutResult, BucketError> {
         check_name(name)?;
         let operation = format!("put {name}");
         let media_type = options.content_type.as_deref().unwrap_or(OCTET_STREAM);
@@ -558,11 +567,16 @@ impl Bucket for GcsBucket {
                 tail: Some(Bytes::from(tail)),
             })),
         };
-        let url = format!(
+        let mut url = format!(
             "{}/upload/storage/v1/b/{}/o?uploadType=multipart",
             self.api_base(),
             encode(&self.name, false)
         );
+        if options.if_absent {
+            // Generation 0 is no object: GCS writes only when the name is
+            // free, and answers 412 when it is not (D142).
+            url.push_str("&ifGenerationMatch=0");
+        }
         let request = self
             .shared
             .http
@@ -572,14 +586,44 @@ impl Bucket for GcsBucket {
                 format!("multipart/related; boundary={boundary}"),
             )
             .body(upload);
-        let response = self
-            .send_once(request)
-            .await
-            .map_err(|err| self.failure(&operation, err))?;
+        let response = match self.send_once(request).await {
+            Ok(response) => response,
+            Err(err) if options.if_absent && err.is_precondition_failed() => {
+                // Another put wrote the name first: answer what is there.
+                return match self.head(name).await? {
+                    Some(object) => Ok(PutResult {
+                        object,
+                        created: false,
+                    }),
+                    None => Err(self.failure(
+                        &operation,
+                        "the object was there when the put looked and gone when it read it; put it again",
+                    )),
+                };
+            }
+            Err(err) => return Err(self.failure(&operation, err)),
+        };
         let resource: ObjectResource = read_json(response)
             .await
             .map_err(|err| self.failure(&operation, err))?;
-        Ok(resource.into_object())
+        Ok(PutResult {
+            object: resource.into_object(),
+            created: true,
+        })
+    }
+
+    async fn head(&self, name: &str) -> Result<Option<Object>, BucketError> {
+        check_name(name)?;
+        let operation = format!("head {name}");
+        let response = match self.send_read(&self.object_url(name)).await {
+            Ok(response) => response,
+            Err(err) if err.is_not_found() => return Ok(None),
+            Err(err) => return Err(self.failure(&operation, err)),
+        };
+        let resource: ObjectResource = read_json(response)
+            .await
+            .map_err(|err| self.failure(&operation, err))?;
+        Ok(Some(resource.into_object()))
     }
 
     async fn get(&self, name: &str) -> Result<Reader, BucketError> {

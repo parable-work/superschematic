@@ -198,7 +198,8 @@ describe('the MCP endpoint of fixture-workflow-api', () => {
     expect(Object.keys(tool.inputSchema.properties).sort()).toEqual(['from', 'id', 'to']);
     expect(tool.inputSchema.properties.to.enum).toEqual(['draft', 'paid', 'shipped']);
     expect([...tool.inputSchema.required].sort()).toEqual(['id', 'to']);
-    expect(tool.annotations).toEqual({ readOnlyHint: false });
+    // A behavior operation that writes, with no @mcp additive (D123).
+    expect(tool.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, idempotentHint: false });
 
     const order = (await orm.order.createOne({ title: 'by tool' })).id;
     // A null from, which the tool's schema takes as every optional member's

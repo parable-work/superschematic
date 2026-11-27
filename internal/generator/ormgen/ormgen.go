@@ -330,6 +330,12 @@ type Repository struct {
 	// ReadOnly<T>RepositoryInterface every repository has.
 	Released   bool
 	ReleasedOf string
+	// LiveRoot is a released rows' table whose graph's root is
+	// soft-deletable (sqlutil.TableModel.LiveRoot, D139): its reads leave
+	// out the rows of a soft-deleted root, as a soft-deleted row's, by the
+	// statements' Live condition, unless IncludeDeleted asks for them, and a
+	// restore of the root sees them again.
+	LiveRoot bool
 
 	// Merge is what MergeInto of a table that implements Mergeable runs
 	// (D147): the statements sqlutil writes from the relations and the
@@ -502,6 +508,14 @@ type UniqueKey struct {
 	Const         string
 	QuotedColumns []string
 	KeyParts      []string
+}
+
+// ReadsLive reports whether the repository's reads leave rows out by the
+// statements' Live condition, unless IncludeDeleted asks for them: a
+// soft-deletable table's deleted rows, or the released rows of a
+// soft-deleted root (LiveRoot, D139).
+func (r Repository) ReadsLive() bool {
+	return r.HasSoftDelete || r.LiveRoot
 }
 
 // ReleasedRepositories are the repositories that only read, those of a
@@ -1931,6 +1945,7 @@ func attachTable(repo *Repository, table *sqlutil.TableModel) error {
 	repo.Table = table
 	repo.Fences = table.Fences
 	repo.SQL = sqlutil.TableStatementsOf(table)
+	repo.LiveRoot = table.LiveRoot != ""
 	if err := repo.SQL.CheckFormats(); err != nil {
 		return err
 	}

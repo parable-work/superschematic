@@ -107,7 +107,26 @@ type Host struct {
 	// Request is a request id unique per command; a random UUID's
 	// hyphenated text when nil.
 	Request func() string
+	// Wake wakes the worker of a behavior queue (D145, D151): once a
+	// command's unit has applied, before the caller's transaction commits,
+	// Execute calls it with the `@queue` class of each queue the unit gave
+	// a message its worker should not wait for its next start to find,
+	// each once: the event queue of each event, the deadline queue of each
+	// deadline armed due within WakeHorizon of the command's time, and the
+	// change queue of each row it wrote, whose trigger writes the message.
+	// The generated ORM gives the function its OnEnqueue was given, the
+	// HTTP runtime's wake.Notifier's Enqueued, which sends a queue's at
+	// most once in five seconds. It returns at once and fails nothing. Nil
+	// wakes nothing.
+	Wake func(queue string)
 }
+
+// WakeHorizon is how far ahead of a command's time a deadline it arms
+// wakes its worker (Host.Wake, D145): a worker in drain mode that found its
+// queue idle waits for a message due within this long, the HTTP runtime's
+// worker.DrainHorizon, and its tick finds one due later. Rust's adapter and
+// the TypeScript runtime's HTTP wake look as far.
+const WakeHorizon = 5 * time.Minute
 
 func (h Host) core() Core {
 	if h.Core == nil {
@@ -292,6 +311,7 @@ func execute(ctx context.Context, host Host, typeName string, command Command, o
 			return nil, busyOr(err, typeName, run, attempt)
 		}
 		if applied {
+			wakeQueues(host, changes, run.Now)
 			result := changes.Result
 			if len(result) == 0 {
 				result = json.RawMessage(`null`)
@@ -314,6 +334,47 @@ func execute(ctx context.Context, host Host, typeName string, command Command, o
 		}
 	}
 	return nil, BusyRefusal(typeName, run, MaxAttempts)
+}
+
+// wakeQueues tells the host's Wake of what a unit that applied left a
+// behavior worker (D145, D151): each event, on its row's table's event
+// queue; each deadline it armed due within WakeHorizon of now, on its
+// table's deadline queue; and each row it wrote, on its table's change
+// queue, which the table's trigger writes. A queue is named once.
+func wakeQueues(host Host, changes *ChangeSet, now int64) {
+	if host.Wake == nil {
+		return
+	}
+	table := func(typeName string) *Table { return host.Layout.Types[typeName] }
+	var queues []string
+	for _, event := range changes.Events {
+		if t := table(event.Row.Type); t != nil && t.Events != nil {
+			queues = append(queues, t.Events.Queue)
+		}
+	}
+	for _, deadline := range changes.Deadlines {
+		if deadline.Kind != DeadlineArm || deadline.At-now > WakeHorizon.Milliseconds() {
+			continue
+		}
+		if t := table(deadline.Row.Type); t != nil && t.Deadlines != nil {
+			queues = append(queues, t.Deadlines.Queue)
+		}
+	}
+	for _, row := range changes.Rows {
+		if row.Kind == RowGone {
+			continue
+		}
+		if t := table(row.Type); t != nil && t.Changes != nil {
+			queues = append(queues, t.Changes.Queue)
+		}
+	}
+	var woken []string
+	for _, queue := range queues {
+		if !slices.Contains(woken, queue) {
+			host.Wake(queue)
+			woken = append(woken, queue)
+		}
+	}
 }
 
 // busyOr is a store's error as a command returns it: the busy refusal,

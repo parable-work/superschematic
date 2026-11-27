@@ -1,0 +1,22 @@
+# A file processor with no dependency (D159, D185): the Rust port of
+# providers/text-preview.
+[package]
+name = "text-preview"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[package.metadata.superschematic.provider]
+name = "text-preview"
+implements = "files"
+
+[package.metadata.superschematic.provider.config]
+MAX_CHARS = { optional = true, description = "The longest text extract returns; 100000 when unset." }
+
+[dependencies]
+async-trait = "0.1.89"
+superschematic-http-runtime = { path = "../../../../runtime/http/rust" }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

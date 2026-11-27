@@ -17,15 +17,16 @@ depends on none of them.
 | `credentials` | `list` (titles and sites only), `resolve` into a sealed injection the runner applies | `CredentialProvider` |
 | `channel` | `send`, `health`, and the delivery statuses (`status`) and inbound messages (`inbound`) a `@webhook` route received | `ChannelAdapter` |
 | `sandbox` | `start`, `cancel`, `status` and `cost` of a run's instance | `SandboxProvider` |
-| `model` | `complete` a turn with tools, with its usage | `ModelProvider` |
+| `model` | `complete` a turn with tools, with its usage, and the `providerState` each completion keeps for the turns after it ([agent runs](/superschematic/guides/agent-runs/#each-turn)) | `ModelProvider` |
 | `files` | `extractText` and `preview` | `FileProcessor` |
 
 | Built | Not built yet |
 | --- | --- |
-| the five interfaces in the TypeScript HTTP runtime, `defineProvider`, and `providersFrom`, which reads the providers an environment configures | the interfaces in the Rust runtime |
-| the same in the Go HTTP runtime's `providers` package, and a generated Go server that imports each provider's Go module and builds `Providers` in its `Deps` ([In Go](#in-go)) | a generated TypeScript server that links the packages and builds `Providers` in its `Deps` |
+| the five interfaces in the TypeScript HTTP runtime, `defineProvider`, and `providersFrom`, which reads the providers an environment configures | |
+| the same in the Rust HTTP runtime, and a provider crate whose `Cargo.toml` declares it ([In Rust](#in-rust)) | |
+| the same in the Go HTTP runtime's `providers` package, and a Go module in the provider's directory ([In Go](#in-go)) | |
 | a provider package's manifest in its `package.json`, which the build checks against its interface's contract | a provider package named by its npm name; the config lists directories |
-| `@providers` on an API's `@envVars` class, and the API config's `providers` | provider packages in `build-all`'s dependency graph and its build cache key |
+| `@providers` on an API's `@envVars` class, and the API config's `providers` | a generated TypeScript server that links the packages and builds `Providers` in its `Deps`; a Rust server and a Go server do |
 | the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | a check for `files` (attachments) and `credentials` (agent runs' credentials): those features register as they are built |
 | credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
 
@@ -220,6 +221,60 @@ const use = await useCredential({
 
 An injection for another reference or another target is refused before
 the runner sees it.
+
+## In Rust
+
+The Rust HTTP runtime's `providers` module has the same five interfaces,
+as traits, and the same `providers_from`, `use_credential` and
+`ExtensionAuthenticator`. A provider is a crate. Its `Cargo.toml` declares
+the provider under `[package.metadata.superschematic.provider]`, with the
+keys a `package.json` declares, and its root exports `definition()`:
+
+```toml
+[package.metadata.superschematic.provider]
+name = "sms-relay-a"
+implements = "channel"
+operations = ["send", "health", "status", "inbound"]
+role = ["messages.relay"]
+
+[package.metadata.superschematic.provider.config]
+URL = { description = "The relay's base URL." }
+TOKEN = { secret = true }
+```
+
+```rust
+pub fn definition() -> ProviderDefinition {
+    ProviderDefinition::new("sms-relay-a", RuntimeInterface::Channel, |settings, _context| {
+        Ok(ProviderInstance::Channel(Arc::new(Adapter {
+            base: settings.text("URL")?.to_owned(),
+            token: settings.secret("TOKEN")?,
+        })))
+    })
+    .with_setting("URL", ProviderSettingSpec::plain())
+    .with_setting("TOKEN", ProviderSettingSpec::secret())
+    .with_role(["messages.relay"])
+    .with_operations(["status", "inbound"])
+}
+```
+
+The API's config lists the crate's directory, as it lists a package's;
+a directory may hold both, which then declare one provider. A Rust server
+refuses a listed provider with no crate. The generated server depends on
+each listed crate by path, its `src/providers.rs` holds the slots and
+`from_config`, and its entrypoint fills `Deps.providers`, holding each
+crate's definition to the manifest the build read:
+
+```rust
+let sms = deps.providers.channel("SMS")?;
+sms.send(&OutboundMessage { to: "+15550100".into(), body: "Review moved to Thursday".into(), ..Default::default() }).await?;
+```
+
+Rust has no ambient caller, so a provider does not run within its
+principal: its context carries it, and `deps.providers.principal_of(slot)`
+gives it to the app. A provider that writes through the app's
+repositories opens them `with_access(AccessCaller::of(Some(&principal)))`.
+`examples/runtime-providers/rust` ports a stub of each interface. D185
+records the Rust design.
 
 ## In Go
 

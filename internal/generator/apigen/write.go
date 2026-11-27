@@ -108,6 +108,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{Condition: output.Deps.Database != "", Template: "caller.tmpl", Filename: "caller.go"},
 		{Condition: output.HasBehaviorEndpoints() || output.HasBehaviorWorkers(), Template: "behaviors.tmpl", Filename: "behaviors.go"},
 		{Condition: output.Tables != nil, Template: "tables.tmpl", Filename: "tables.go"},
+		{Condition: output.Graphs != nil, Template: "graphs.tmpl", Filename: "graphs.go"},
 		{Condition: output.Deps.Providers != nil, Template: "providers.tmpl", Filename: "providers.go"},
 	}
 	// A provider file with the name of a core file replaces it when its

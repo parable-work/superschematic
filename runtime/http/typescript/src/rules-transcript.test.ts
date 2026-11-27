@@ -361,6 +361,11 @@ function usesOf(type: Scenario['types'][number], table: string): { uses: RulesUs
 const SQLITE_UUID =
   "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))";
 
+// How long one scenario may take. A scenario creates its own tables and
+// runs each step as a round trip, which on Postgres a loaded runner takes
+// past bun's 5-second default for; the steps decide, not the clock.
+const SCENARIO_TIMEOUT_MS = 60_000;
+
 const dialects: { name: string; skip: boolean; open: () => Promise<TestDatabase> }[] = [
   { name: 'bun:sqlite', skip: packageCore === undefined, open: async () => sqliteDatabase() },
   { name: 'Postgres', skip: packageCore === undefined || rulesDsn === '', open: postgresDatabase },
@@ -643,7 +648,7 @@ for (const { file, floor } of TRANSCRIPTS) {
             if (strays.length > 0) compare(step, 'events', strays, []);
           }
           expect(mismatches).toEqual([]);
-        });
+        }, SCENARIO_TIMEOUT_MS);
       });
 
       test('replays every step the transcript holds, at least the floor', () => {

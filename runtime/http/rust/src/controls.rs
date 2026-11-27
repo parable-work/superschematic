@@ -30,13 +30,18 @@
 //!    `rate_limit_principal_missing` without one, 503
 //!    `rate_limit_unavailable` when its store fails, 429
 //!    `too_many_requests` with `Retry-After` past the limit.
-//! 6. `@timeout`, around the handler and its extractors: 504
+//! 6. `@idempotent` (D140), after the permission check whose caller its
+//!    key belongs to and around the timeout, whose 504 stores nothing: a
+//!    repeat under a key is answered what the first request was
+//!    ([`crate::idempotency`]).
+//! 7. `@timeout`, around the handler and its extractors: 504
 //!    `gateway_timeout`, and the handler's future is dropped.
 //!
 //! A webhook verifier (`@hmacVerified`) runs before all of them; the
 //! generated `webhook_verified` wraps a route [`RouteControls::apply`]
 //! returned. Each refusal is the problem of [`error_response`].
 
+use crate::idempotency::{self, Idempotent};
 use crate::principal_ratelimit::PrincipalLimit;
 use crate::service_auth::service_step;
 use crate::{
@@ -55,6 +60,10 @@ use std::time::Duration;
 
 const MEBIBYTE: usize = 1024 * 1024;
 
+/// The most of a body axum's extractors read when the route sets no
+/// `@bodyLimit`: what the idempotency step reads of one, too.
+const DEFAULT_BODY_LIMIT: usize = 2 * MEBIBYTE;
+
 /// The controls of one route, applied with [`RouteControls::apply`]. The
 /// generated `build_router` builds one for each route that declares any; a
 /// service adds the controls of a `@manualRouteRegistration` route it
@@ -66,6 +75,7 @@ pub struct RouteControls {
     service: Option<ServiceStep>,
     authorization: Option<Authorization>,
     principal_limit: Option<PrincipalLimit>,
+    idempotent: Option<Idempotent>,
     timeout: Option<Duration>,
     /// The operation the route serves, which its authenticator is told of
     /// each call of (D156, `Authenticator::called`).
@@ -251,6 +261,34 @@ impl RouteControls {
         self
     }
 
+    /// `@idempotent({ ttl, required })` (D140): the route keeps the key a
+    /// request sends in `store`, for the operation `operation`
+    /// (`<namespace>.<name>`), for `ttl_seconds` and at least the route's
+    /// time limit, its `@timeout` or 60 seconds; with `required`, a request
+    /// without one is refused 400. It runs after the permission check and
+    /// around the timeout, under a host too: the host keeps no keys.
+    #[must_use]
+    pub fn idempotent(
+        mut self,
+        store: Arc<dyn idempotency::Store>,
+        operation: &str,
+        ttl_seconds: u64,
+        required: bool,
+    ) -> Self {
+        let ttl = if ttl_seconds == 0 {
+            idempotency::DEFAULT_TTL
+        } else {
+            Duration::from_secs(ttl_seconds)
+        };
+        self.idempotent = Some(Idempotent {
+            store,
+            operation: operation.into(),
+            ttl,
+            required,
+        });
+        self
+    }
+
     /// `@timeout({ seconds })`.
     #[must_use]
     pub fn timeout_seconds(mut self, seconds: u64) -> Self {
@@ -270,6 +308,19 @@ impl RouteControls {
         if let Some(timeout) = self.timeout.filter(|_| !self.hostless) {
             route = route.route_layer(from_fn(move |request: Request, next: Next| {
                 time_out(timeout, request, next)
+            }));
+        }
+        if let Some(idempotent) = self.idempotent {
+            // A running row holds its key for the route's time limit, which
+            // a host keeps under no transport, as long as the route's
+            // timeout says.
+            let in_flight = self.timeout.unwrap_or(idempotency::DEFAULT_IN_FLIGHT);
+            let body_limit = match (self.hostless, self.body_limit) {
+                (true, _) => usize::MAX,
+                (false, limit) => limit.unwrap_or(DEFAULT_BODY_LIMIT),
+            };
+            route = route.route_layer(from_fn(move |request: Request, next: Next| {
+                idempotent.clone().run(in_flight, body_limit, request, next)
             }));
         }
         if let Some(limit) = self.principal_limit {
@@ -341,7 +392,7 @@ async fn limit_body(limit: usize, request: Request, next: Next) -> Response {
     }
 }
 
-fn is_length_limit(err: &axum::Error) -> bool {
+pub(crate) fn is_length_limit(err: &axum::Error) -> bool {
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(err);
     while let Some(current) = source {
         if current.is::<http_body_util::LengthLimitError>() {
@@ -352,7 +403,7 @@ fn is_length_limit(err: &axum::Error) -> bool {
     false
 }
 
-fn too_large() -> Response {
+pub(crate) fn too_large() -> Response {
     error_response(ApiError::payload_too_large(
         "Request body exceeds the accepted size",
     ))

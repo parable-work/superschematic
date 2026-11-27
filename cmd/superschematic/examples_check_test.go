@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -19,26 +20,26 @@ var otherBinaryExamples = map[string]string{
 	"acme-schematic": "cmd/acme-schematic builds it, linking the apikey auth provider",
 }
 
-// checkReport is the part of `check --json`'s document the test reads.
-type checkReport struct {
-	OK       bool             `json:"ok"`
-	Services []checkedService `json:"services"`
+// buildElsewhere are the examples whose build needs a binary other than
+// this one, with why: the test checks them, and builds the rest.
+var buildElsewhere = map[string]string{
+	"acme-shop": "its Backoffice app needs superschematic-topcoat, which the acme job builds it with",
 }
 
-// checkedService is a service `check --json` reports.
-type checkedService struct {
-	Name string `json:"name"`
-	Kind string `json:"kind"`
+// checkReport is the part of `check --json`'s document the test reads.
+type checkReport struct {
+	OK bool `json:"ok"`
 }
 
 // TestExamplesCheck runs `superschematic check` over every example's
 // services, as a reader of its README does, so a schema config this binary
 // refuses cannot land while the loader tests, which load each service
 // directly, pass. Each sentinel the check writes must be the one committed.
-// An example with no Stack service is also built with build-all, into an
-// output root of the test's: its server imports the packages build-all
-// writes. A stack's build writes an API's missing implementation scaffold
-// into the example, so the stack examples build in tests of their own.
+// Each example is also built with build-all, into an output root of the
+// test's: its server imports the packages build-all writes. The build must
+// write nothing else into the example, as a stack's build does when an API
+// it serves has no implementation where the naming file's
+// [implementation_paths] puts one: it scaffolds one there.
 func TestExamplesCheck(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -52,7 +53,8 @@ func TestExamplesCheck(t *testing.T) {
 		t.Fatal("no examples/*/schemas/services found")
 	}
 	for _, services := range roots {
-		example := filepath.Base(filepath.Dir(filepath.Dir(services)))
+		exampleDir := filepath.Dir(filepath.Dir(services))
+		example := filepath.Base(exampleDir)
 		t.Run(example, func(t *testing.T) {
 			if why, ok := otherBinaryExamples[example]; ok {
 				t.Skip(why)
@@ -70,14 +72,22 @@ func TestExamplesCheck(t *testing.T) {
 			}
 			checkSentinels(t, sentinels, "check")
 
-			if slices.ContainsFunc(report.Services, func(s checkedService) bool { return s.Kind == "Stack" }) {
+			if why, ok := buildElsewhere[example]; ok {
+				t.Logf("not built: %s", why)
 				return
 			}
+			before := untracked(t, exampleDir)
+			t.Cleanup(func() { removeWritten(t, exampleDir, before) })
 			stdout, stderr, err = execute("build-all", services, "--out", t.TempDir())
 			if err != nil {
 				t.Fatalf("superschematic build-all %s: %v\n%s%s", services, err, stdout, stderr)
 			}
 			checkSentinels(t, sentinels, "build-all")
+			for _, path := range untracked(t, exampleDir) {
+				if !slices.Contains(before, path) {
+					t.Errorf("build-all wrote %s into the example: commit it if it is the example's, as an implementation scaffold is", filepath.Join(exampleDir, path))
+				}
+			}
 		})
 	}
 }
@@ -136,6 +146,46 @@ func restoreSentinels(t *testing.T, sentinels map[string][]byte) {
 	for path, data := range sentinels {
 		if err := os.WriteFile(path, data, 0o644); err != nil {
 			t.Error(err)
+		}
+	}
+}
+
+// untracked lists the files under dir, relative to it, that git neither
+// tracks nor ignores.
+func untracked(t *testing.T, dir string) []string {
+	t.Helper()
+	cmd := exec.Command("git", "ls-files", "--others", "--exclude-standard", "-z", "--", ".")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git ls-files in %s: %v", dir, err)
+	}
+	var paths []string
+	for path := range strings.SplitSeq(string(out), "\x00") {
+		if path != "" {
+			paths = append(paths, filepath.FromSlash(path))
+		}
+	}
+	return paths
+}
+
+// removeWritten removes each untracked file under dir that before does not
+// list, and the directories it empties, so a failing run leaves the example
+// as it found it.
+func removeWritten(t *testing.T, dir string, before []string) {
+	t.Helper()
+	for _, path := range untracked(t, dir) {
+		if slices.Contains(before, path) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, path)); err != nil {
+			t.Error(err)
+			continue
+		}
+		for parent := filepath.Dir(path); parent != "."; parent = filepath.Dir(parent) {
+			if os.Remove(filepath.Join(dir, parent)) != nil {
+				break
+			}
 		}
 	}
 }

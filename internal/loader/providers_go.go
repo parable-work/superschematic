@@ -19,21 +19,24 @@ import (
 // lists it, holds a Go module when it has a go.mod: the module a Go server
 // imports, whose root package exports Definition() (runtime/http/go
 // providers). The directory declares the provider once, in its
-// package.json (D159), or, for a provider of Go alone, in its
+// package.json (D159) or its Cargo.toml (D185), or, for a provider of Go
+// alone, in its
 // superschematic.json, whose "provider" object is the package.json's
 // "superschematic": {"provider": ...}: a go.mod has no place for it.
 
 // readProvider reads the runtime provider dir holds: the one its
-// superschematic.json declares, the one its package.json declares
-// (ReadRuntimeProvider), which then declare the same, and the Go module
-// its go.mod names.
+// superschematic.json declares, the one its package.json or Cargo.toml
+// declares (ReadRuntimeProvider, D185), which then declare the same, and
+// the Go module its go.mod names.
 func readProvider(dir string) (*ir.RuntimeProvider, error) {
 	fromGo, err := readGoProviderDeclaration(dir)
 	if err != nil {
 		return nil, err
 	}
 	var p *ir.RuntimeProvider
-	if _, statErr := os.Stat(filepath.Join(dir, "package.json")); fromGo == nil || statErr == nil {
+	_, noPackage := os.Stat(filepath.Join(dir, "package.json"))
+	_, noCrate := os.Stat(filepath.Join(dir, "Cargo.toml"))
+	if fromGo == nil || noPackage == nil || noCrate == nil {
 		if p, err = ReadRuntimeProvider(dir); err != nil {
 			if fromGo == nil {
 				return nil, err
@@ -46,11 +49,11 @@ func readProvider(dir string) (*ir.RuntimeProvider, error) {
 		p = fromGo
 	case fromGo != nil:
 		same := *fromGo
-		same.Package = p.Package
+		same.Package, same.Crate = p.Package, p.Crate
 		a, _ := json.Marshal(p)
 		b, _ := json.Marshal(&same)
 		if !bytes.Equal(a, b) {
-			return nil, fmt.Errorf("%s: package %s and superschematic.json declare different providers (%s and %s); a directory that holds both declares one provider in each (D184)", dir, p.Package, a, b)
+			return nil, fmt.Errorf("%s: %s and superschematic.json declare different providers (%s and %s); a directory that holds both declares one provider in each (D184)", dir, strings.TrimSpace(p.Package+" "+p.Crate), a, b)
 		}
 	}
 	module, err := goModulePath(dir)

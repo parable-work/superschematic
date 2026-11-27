@@ -93,7 +93,7 @@ func TestRustPoolBehaviorWorkerEntrypoint(t *testing.T) {
 		"fixture_pool_api_api::behaviors::account_rechecks_deadlines(&fixture_pool_db_pool)?",
 		"fixture_pool_api_api::behaviors::account_rechecks_events(&fixture_pool_db_pool)?",
 		"let workers = Arc::clone(&workers);",
-		"worker::run_worker(events, run_events, options, shutdown.clone()),",
+		"group.run(events, run_events, options),",
 	} {
 		if !strings.Contains(string(main), want) {
 			t.Errorf("main.rs does not contain %q:\n%s", want, main)

@@ -82,7 +82,8 @@ pub use json::canonical_json;
 pub use mount::{reached, ConfirmationKey, EndpointOptions, Mount};
 pub use route::{
     caller_of, check_route_tools, outcome_of, problem_of, tool_request, with_confirmation_argument,
-    ArgumentLocation, RouteTool, ToolArgument,
+    with_idempotency_argument, ArgumentLocation, RouteTool, ToolArgument, ToolIdempotency,
+    IDEMPOTENCY_ARGUMENT,
 };
 pub use transport::serve;
 

@@ -182,7 +182,7 @@ use API_CRATE::behaviors::{
 };
 use API_CRATE::runtime::postgres::{deadpool_postgres, tokio_postgres, Pool};
 use API_CRATE::runtime::queue::QueueError;
-use API_CRATE::runtime::worker::{run_worker, Options};
+use API_CRATE::runtime::worker::{run_worker, Drain, Options};
 use API_CRATE::runtime::{bearer_token, ApiError, Authenticator, Principal, Shutdown};
 use API_CRATE::{build_router, types, Handlers, Implementations};
 use SDK_CRATE::{ClientConfig, FixtureReactionsApiSdk};
@@ -355,7 +355,11 @@ fn sdk(base_url: &str, token: Option<&str>) -> FixtureReactionsApiSdk {
 /// ProjectReactions' and TaskReactions' change queues, each in a claim
 /// loop of its own, as their mains run them, until shutdown.
 fn start_workers(pool: &Pool, shutdown: &Shutdown) -> Vec<tokio::task::JoinHandle<Result<(), QueueError>>> {
-    let options = Options { concurrency: 2, idle: Duration::from_millis(100), ..Options::default() };
+    start_workers_with(pool, shutdown, Options { concurrency: 2, idle: Duration::from_millis(100), ..Options::default() })
+}
+
+/// start_workers with options of the test's own: a drain's (D145).
+fn start_workers_with(pool: &Pool, shutdown: &Shutdown, options: Options) -> Vec<tokio::task::JoinHandle<Result<(), QueueError>>> {
     let (on_projects, on_tasks) = (pool.clone(), pool.clone());
     vec![
         tokio::spawn(run_worker(
@@ -481,9 +485,58 @@ async fn cases(db: Arc<Database>) {
     }
     assert_eq!(db.status("task", &t5_text).await, "done");
 
+    println!("in drain mode each worker takes a slot, drains what a raw write left, and stops of itself");
+    let (p7, p7_text) = db.project("p7").await;
+    let (t7, _) = db.task("t7", &p7).await;
+    let t7_text = hyphenated(&t7);
+    let started = Instant::now();
+    while db.queued("task_change_queue", Some(&t7_text)).await + db.queued("project_change_queue", Some(&p7_text)).await > 0 {
+        assert!(started.elapsed() < Duration::from_secs(10), "p7's and t7's creates were not heard within 10 s");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
     shutdown.cancel();
     for worker in workers {
         worker.await.unwrap().unwrap();
     }
+    let changed = db
+        .client
+        .execute("UPDATE task SET status = 'doing', status_entered_at = now() WHERE id::text = $1", &[&t7_text])
+        .await
+        .unwrap();
+    assert_eq!(changed, 1);
+    let slots = || async {
+        db.client
+            .query_one(
+                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND granted AND classid::int IN (hashtext('superschematic.drain.project_change_queue'), hashtext('superschematic.drain.task_change_queue'))",
+                &[],
+            )
+            .await
+            .unwrap()
+            .get::<_, i64>(0)
+    };
+    let drain = Options {
+        concurrency: 2,
+        idle: Duration::from_millis(50),
+        drain: Some(Drain { idle: Duration::from_millis(500), ..Drain::default() }),
+        ..Options::default()
+    };
+    let draining = start_workers_with(&db.pool, &Shutdown::new(), drain);
+    let mut held = 0;
+    let started = Instant::now();
+    while held < 2 && started.elapsed() < Duration::from_secs(2) {
+        held = held.max(slots().await);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(held, 2, "the two workers in drain mode hold a slot each");
+    for worker in draining {
+        tokio::time::timeout(Duration::from_secs(20), worker)
+            .await
+            .expect("a worker in drain mode stops of itself once its queue is idle")
+            .unwrap()
+            .unwrap();
+    }
+    assert_eq!(db.status("project", &p7_text).await, "active", "the raw write, drained, moves the project");
+    assert_eq!(db.queued("task_change_queue", Some(&t7_text)).await, 0);
+    assert_eq!(slots().await, 0, "each worker gives its slot back as it stops");
 }
 `

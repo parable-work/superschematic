@@ -1,0 +1,25 @@
+# A second SMS channel adapter, for a relay of another shape (D159, D185):
+# the Rust port of providers/sms-relay-b.
+[package]
+name = "sms-relay-b"
+version = "0.0.0"
+edition = "2021"
+publish = false
+license = "Apache-2.0"
+
+[package.metadata.superschematic.provider]
+name = "sms-relay-b"
+implements = "channel"
+
+[package.metadata.superschematic.provider.config]
+URL = { description = "The relay's base URL." }
+ACCOUNT = { description = "The account messages are sent under." }
+TOKEN = { secret = true, description = "The account's auth token." }
+
+[dependencies]
+async-trait = "0.1.89"
+base64 = "0.22.1"
+superschematic-http-runtime = { path = "../../../../runtime/http/rust" }
+
+# Its own workspace, so no Cargo.toml above this directory claims it.
+[workspace]

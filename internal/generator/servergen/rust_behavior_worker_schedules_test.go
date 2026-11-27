@@ -95,7 +95,7 @@ func TestRustSchedulesBehaviorWorkerEntrypoint(t *testing.T) {
 		"fixture_schedules_api_api::behaviors::problem_wake_ups_events(&fixture_schedules_db_pool)?",
 		"let workers = Arc::clone(&workers);",
 		"fixture_schedules_api_api::behaviors::run_problem_wake_ups_event(\n                &pool, &*workers, claimed,\n            )",
-		"worker::run_worker(events, run_events, options, shutdown.clone()),",
+		"group.run(events, run_events, options),",
 	} {
 		if !strings.Contains(string(main), want) {
 			t.Errorf("main.rs does not contain %q:\n%s", want, main)

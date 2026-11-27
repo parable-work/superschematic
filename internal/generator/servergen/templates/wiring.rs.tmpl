@@ -150,11 +150,14 @@ fn open_bucket(
 
     // {{ $api.Service }}: its {{ .Kind }}s, built from its Deps.
     let {{ $api.Deps }} = {{ $api.Alias }}::Deps {
+{{- if $api.Providers }}
+        providers: std::sync::Arc::new(configure({{ rustString $api.Service }}, {{ $api.Alias }}::providers::from_config(&{{ $api.Config }}))?),
+{{- end }}
 {{- if $api.Config }}
         config: {{ $api.Config }},
 {{- end }}
 {{- if $api.Database }}
-        db: {{ $api.Database.Var }}{{ if .Worker }}.clone(){{ end }},
+        db: {{ $api.Database.Var }}{{ if or .Worker .DeriverOfTables }}.clone(){{ end }},
 {{- end }}
 {{- with $api.Engine }}
         engine: {{ .Var }}.clone(),
@@ -163,7 +166,7 @@ fn open_bucket(
         {{ .Field }}: {{ .Client.Var }},
 {{- end }}
 {{- range $api.Buckets }}
-        {{ .Field }}: {{ .Bucket.Var }},
+{{ .Init "        " false }}
 {{- end }}
 {{- range $api.MemoryStores }}
         {{ .Field }}: Arc::clone(&{{ .Store.Var }}),

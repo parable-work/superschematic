@@ -239,6 +239,7 @@ export interface RecipePatch {
 export interface RecipePublished {
   root: IdentityUUID;
   commit: IdentityUUID;
+  sequence?: GenericInt64 | null;
 }
 
 /**

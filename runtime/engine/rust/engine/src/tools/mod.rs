@@ -565,8 +565,9 @@ impl<'e> Tools<'e> {
     }
 
     /// The namespace's visible tools as MCP lists them: the handle as the
-    /// name, the title and description, the argument schema, whether it
-    /// only reads, and `_meta` with the guidance and the invocation policy.
+    /// name, the title and description, the argument schema, its
+    /// annotations ([`annotations`]), and `_meta` with the guidance and the
+    /// invocation policy.
     pub fn mcp_tools(&self, principal: &Principal, target: ToolTarget<'_>) -> Result<Vec<Value>> {
         let manifest = self.manifest(principal, target)?;
         let policy_key = &self.invocation_policy().key;
@@ -587,10 +588,7 @@ impl<'e> Tools<'e> {
             entry.insert("title".into(), mcp["name"].clone());
             entry.insert("description".into(), mcp["description"].clone());
             entry.insert("inputSchema".into(), tool["parameters"].clone());
-            entry.insert(
-                "annotations".into(),
-                json!({"readOnlyHint": tool["replay"]["mode"] == "read_only"}),
-            );
+            entry.insert("annotations".into(), annotations(tool));
             entry.insert("_meta".into(), Value::Object(meta));
             tools.push(Value::Object(entry));
         }
@@ -2152,6 +2150,28 @@ fn no_schema() -> Error {
     Error::internal("a schema's tool without its schema")
 }
 
+// annotations are a visible tool's MCP annotations (D123): its record's
+// resolved `mcp.annotations` when the document holds them, as an API's
+// tools/schema.json does, else what ir.ResolveMCPToolAnnotations resolves
+// from its replay mode and its `mcp.additive`: it only reads when the mode
+// is read_only, is destructive when it may write and does not say it only
+// adds, and is idempotent when the mode is idempotent. The engine's own
+// tools declare no additive, so a tool that writes is destructive, the
+// MCP specification's default.
+fn annotations(tool: &Value) -> Value {
+    if let Some(resolved) = tool["mcp"]["annotations"].as_object() {
+        return Value::Object(resolved.clone());
+    }
+    let mode = tool["replay"]["mode"].as_str();
+    let read_only = mode == Some("read_only");
+    let additive = tool["mcp"]["additive"] == Value::Bool(true);
+    json!({
+        "readOnlyHint": read_only,
+        "destructiveHint": !read_only && !additive,
+        "idempotentHint": mode == Some("idempotent"),
+    })
+}
+
 // returns is a tool's return shape as tools/schema.json writes it
 // (ir.ToolReturnSchema).
 fn returns(tool: &ToolSpec) -> Value {
@@ -2782,5 +2802,26 @@ fn preconditions_of<'a>(
             tool.handle
         ))
         .into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::annotations;
+    use serde_json::json;
+
+    // A tool's hints are its resolved record's when it has one, else what
+    // its replay mode and its additive resolve to (D123).
+    #[test]
+    fn a_tools_hints_are_its_resolved_record() {
+        let hints = |read_only: bool, destructive: bool, idempotent: bool| json!({"readOnlyHint": read_only, "destructiveHint": destructive, "idempotentHint": idempotent});
+        let reads = json!({"mcp": {"hidden": false}, "replay": {"mode": "read_only"}});
+        assert_eq!(annotations(&reads), hints(true, false, false));
+        let writes = json!({"mcp": {"hidden": false}, "replay": null});
+        assert_eq!(annotations(&writes), hints(false, true, false));
+        let adds = json!({"mcp": {"additive": true}, "replay": {"mode": "idempotent"}});
+        assert_eq!(annotations(&adds), hints(false, false, true));
+        let resolved = json!({"mcp": {"annotations": hints(false, false, true)}, "replay": null});
+        assert_eq!(annotations(&resolved), hints(false, false, true));
     }
 }

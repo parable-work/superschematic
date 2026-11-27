@@ -34,6 +34,9 @@ pub mod filter;
 // A bucket on Google Cloud Storage (D54), with the `gcs` feature.
 #[cfg(feature = "gcs")]
 pub mod gcs;
+// What a generated router's graph operations share (D138): the refusals'
+// problems, the bodies, and the rows of a tree as the API's types hold them.
+pub mod graph_routes;
 #[cfg(feature = "http-client")]
 mod http_client;
 /// The user model's runtime (D50), with the `identity` feature.
@@ -42,6 +45,9 @@ pub mod identity;
 // A call from one API of a process to another through the callee's handle
 // (D116), with the `http-client` feature, whose client the SDKs build
 // their requests with.
+/// Idempotency keys (D140): the route step of an `@idempotent` operation
+/// and the stores of its keys.
+pub mod idempotency;
 #[cfg(feature = "http-client")]
 pub mod in_process;
 mod jws;
@@ -83,6 +89,13 @@ mod response;
 // feature.
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod orm;
+// A deriver's loop over tables that implement Derived (D146), over the
+// repositories, with the `postgres` or `sqlite` feature.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod deriver;
+// The runtime extension points (D159, D185): the five provider interfaces
+// and the providers an environment configures.
+pub mod providers;
 // The words, LIKE patterns and case folding of a SearchQuery (D62).
 pub mod search;
 mod service_auth;
@@ -95,8 +108,12 @@ pub mod stackconfig;
 #[cfg(feature = "otel")]
 pub mod telemetry;
 mod token_source;
+// The wake a queue client sends after an enqueue (D145), with the
+// `postgres` feature.
 #[cfg(any(feature = "identity", feature = "postgres", feature = "sqlite"))]
 mod uuid62;
+#[cfg(feature = "postgres")]
+pub mod wake;
 // A webhook verifier over a JWT carrying the body's SHA-256 (D81).
 mod webhook;
 // A worker's claim loop (D53, D65), with the `postgres` or `sqlite`

@@ -202,12 +202,18 @@ pub struct QueueStatements {
     pub prune: String,
     /// On Postgres alone: takes slot `$1` of the locks a worker in drain
     /// mode holds while it runs (D145), a session advisory lock named for
-    /// the queue's table, and returns whether it took it. The Go and
-    /// TypeScript workers take one; this crate's worker does not drain
-    /// yet, and holds the statement so that it takes the same lock when
-    /// it does. Empty on SQLite, and in a descriptor written before.
+    /// the queue's table, and returns whether it took it, the lock the Go
+    /// and TypeScript workers take ([`PostgresQueue::slot`]). Empty on
+    /// SQLite, and in a descriptor written before.
     #[serde(default)]
     pub slot: String,
+    /// On Postgres alone: the seconds until the first ready message that
+    /// is not due yet falls due, by the database's clock, or NULL when
+    /// none waits (D145), which a worker in drain mode that found its
+    /// queue idle reads before it stops ([`PostgresQueue::next_due`]).
+    /// Empty on SQLite, and in a descriptor written before.
+    #[serde(default, rename = "nextDue")]
+    pub next_due: String,
     /// On SQLite alone: whether a message is due, which a claim reads
     /// before it takes the write lock; empty on Postgres.
     #[serde(default)]
@@ -337,6 +343,37 @@ impl QueueDefinition {
     /// How long a done message stays before a prune deletes it.
     pub fn retain(&self) -> Duration {
         Duration::from_secs(self.retain_seconds)
+    }
+}
+
+/// One of the locks a worker in drain mode holds while it runs (D145),
+/// which [`PostgresQueue::slot`] takes: dropping it gives the lock back.
+/// [`Slot::none`] holds nothing, for a queue that has no such lock, on
+/// which every worker started drains.
+pub struct Slot {
+    _held: Option<Box<dyn Send + Sync>>,
+}
+
+impl Slot {
+    /// A slot that holds nothing.
+    pub fn none() -> Self {
+        Self { _held: None }
+    }
+
+    /// A slot that holds `held` until it is dropped: what gives the lock
+    /// back as it drops, a connection that closes or a guard of a test's.
+    pub fn holding(held: impl Send + Sync + 'static) -> Self {
+        Self {
+            _held: Some(Box::new(held)),
+        }
+    }
+}
+
+impl fmt::Debug for Slot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Slot")
+            .field("held", &self._held.is_some())
+            .finish()
     }
 }
 
@@ -528,6 +565,9 @@ where
         .execute(&statement, &refs)
         .await
         .map_err(|err| QueueError::failed(&context(), &err))?;
+    // The wake of the queue's drain worker, after the statement and before
+    // the caller's transaction commits (D145): a hint that fails nothing.
+    crate::wake::enqueued(&queue.name, delay);
     Ok(())
 }
 
@@ -763,6 +803,71 @@ impl<M: DeserializeOwned> PostgresQueue<M> {
             )
             .await
             .map_err(|err| QueueError::failed(&context, &err))
+    }
+
+    /// Takes one of `slots` locks named for the queue, the first that is
+    /// free, which a worker in drain mode holds while it runs (D145), so no
+    /// more than `slots` of them drain the queue at once: `None` when every
+    /// one is taken. The lock is the session's, on a connection the slot
+    /// takes out of the pool and keeps, so dropping the slot closes the
+    /// connection and gives the lock back, and a worker that dies gives it
+    /// back as its connection ends. A descriptor written before the
+    /// statement existed takes none: every worker started then drains.
+    pub async fn slot(&self, slots: usize) -> Result<Option<Slot>, QueueError> {
+        let sql = &self.definition.statements.slot;
+        if sql.trim().is_empty() {
+            return Ok(Some(Slot::none()));
+        }
+        let context = format!("take a slot of {}", self.definition.table);
+        let client = self.client(&context).await?;
+        let statement = client
+            .prepare(sql)
+            .await
+            .map_err(|err| QueueError::failed(&context, &err))?;
+        for slot in 1..=slots.max(1) {
+            let row = client
+                .query_one(&statement, &[&Text::of(slot)])
+                .await
+                .map_err(|err| QueueError::failed(&context, &err))?;
+            let held: bool = row
+                .try_get(0)
+                .map_err(|err| QueueError::failed(&context, &err))?;
+            if held {
+                return Ok(Some(Slot::holding(deadpool_postgres::Object::take(client))));
+            }
+        }
+        // The connection goes back to the pool holding no lock.
+        Ok(None)
+    }
+
+    /// How long until the first ready message that is not due yet falls
+    /// due, by the database's clock, or `None` when none waits (D145): a
+    /// worker in drain mode that found the queue idle waits for one due
+    /// within its horizon instead of stopping. A descriptor written before
+    /// the statement existed reads none.
+    pub async fn next_due(&self) -> Result<Option<Duration>, QueueError> {
+        let sql = &self.definition.statements.next_due;
+        if sql.trim().is_empty() {
+            return Ok(None);
+        }
+        let context = format!(
+            "read when the next message of {} is due",
+            self.definition.table
+        );
+        let client = self.client(&context).await?;
+        let statement = client
+            .prepare_cached(sql)
+            .await
+            .map_err(|err| QueueError::failed(&context, &err))?;
+        let row = client
+            .query_one(&statement, &[])
+            .await
+            .map_err(|err| QueueError::failed(&context, &err))?;
+        let seconds: Option<f64> = row
+            .try_get(0)
+            .map_err(|err| QueueError::failed(&context, &err))?;
+        Ok(seconds
+            .map(|seconds| Duration::try_from_secs_f64(seconds.max(0.0)).unwrap_or(Duration::MAX)))
     }
 
     /// A connection of the pool.

@@ -17,6 +17,7 @@
 //! it.
 
 use std::sync::OnceLock;
+use std::time::Duration;
 
 use axum::http::StatusCode;
 use serde::de::DeserializeOwned;
@@ -25,7 +26,7 @@ use serde_json::Value;
 use superschematic_http_runtime::postgres::Pool;
 use superschematic_http_runtime::queue::{PostgresQueue, QueueDefinition};
 use superschematic_http_runtime::worker::{Claimed, SelfCompleting};
-use superschematic_http_runtime::{ApiError, BoxError, RequestContext};
+use superschematic_http_runtime::{wake, ApiError, BoxError, RequestContext};
 use superschematic_rules_adapter::{
     postgres, Caller, Claim, Core, Deadline, DeadlineRun, Error, Host, Layout, Refusal,
 };
@@ -516,6 +517,14 @@ fn layout() -> &'static Layout {
     })
 }
 
+/// The host a command runs with: the core and the layout, and the wake of
+/// the behavior workers' queues (D145, D151), the HTTP runtime's, which
+/// sends a queue's wake where the environment gives one (QUEUE_WAKES) for
+/// each event, each deadline due soon and each row write of a command.
+fn host() -> Host<'static> {
+    Host::new(core(), layout()).with_wake(|queue| wake::enqueued(queue, Duration::ZERO))
+}
+
 /// The caller the core runs an operation as (D103): the route's principal
 /// with the permissions it holds, each once; else a calling service
 /// standing in for an end user, which holds none (D37); else no one.
@@ -565,7 +574,7 @@ where
     let params = serde_json::to_value(params).map_err(internal)?;
     let mut client = behaviors.pool.get().await.map_err(internal)?;
     let tx = client.transaction().await.map_err(internal)?;
-    let host = Host::new(core(), layout());
+    let host = host();
     let ran = postgres::run_operation(
         &host,
         &*tx,
@@ -655,7 +664,7 @@ pub async fn run_sandbox_deadlines_deadline(
     };
     let mut client = pool.get().await?;
     let tx = client.transaction().await?;
-    let host = Host::new(core(), layout());
+    let host = host();
     let run = postgres::run_deadline(
         &host,
         &*tx,

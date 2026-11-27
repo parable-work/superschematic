@@ -251,8 +251,10 @@ describe('tools/list', () => {
       assert.equal(tool.description, entry.description);
     }
     const byName = new Map(tools.map((tool) => [tool.name, tool]));
-    assert.deepEqual(byName.get('item_history')?.annotations, { readOnlyHint: true });
-    assert.deepEqual(byName.get('item_increment')?.annotations, { readOnlyHint: false });
+    // The hints are the tool's resolved record (D123): a tool that only
+    // reads is no destructive one, and one that writes is.
+    assert.deepEqual(byName.get('item_history')?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: false });
+    assert.deepEqual(byName.get('item_increment')?.annotations, { readOnlyHint: false, destructiveHint: true, idempotentHint: false });
     assert.deepEqual(byName.get('item_flag')?._meta, {
       'superschematic/operation-guidance': { useWhen: '', doNotUseWhen: '', success: '', errors: [] },
       invocationPolicy: 'ask',
@@ -349,7 +351,7 @@ describe('schema-level operations', () => {
     assert.deepEqual([Object.keys(holders.inputSchema.properties ?? {}), holders.inputSchema.required, holders.annotations], [
       ['params'],
       ['params'],
-      { readOnlyHint: true },
+      { readOnlyHint: true, destructiveHint: false, idempotentHint: false },
     ]);
     assert.deepEqual(Object.keys(byName.get('item_hold')?.inputSchema.properties ?? {}), ['expectedSeq', 'id', 'params']);
 
@@ -385,7 +387,7 @@ describe('namespace operations', () => {
     const byName = new Map((await client.listTools()).tools.map((tool) => [tool.name, tool]));
     const notes = byName.get('test_inbox_notes');
     assert.ok(notes);
-    assert.deepEqual([notes.title, Object.keys(notes.inputSchema.properties ?? {}), notes.annotations], ['test.Inbox: notes', ['params'], { readOnlyHint: true }]);
+    assert.deepEqual([notes.title, Object.keys(notes.inputSchema.properties ?? {}), notes.annotations], ['test.Inbox: notes', ['params'], { readOnlyHint: true, destructiveHint: false, idempotentHint: false }]);
     assert.ok(byName.has('test_inbox_clear'));
     const listed = (await client.callTool({ name: 'test_inbox_notes', arguments: {} })) as CallToolResult;
     assert.deepEqual(listed.structuredContent, {
@@ -418,7 +420,7 @@ describe("Comments' namespace operations", () => {
     const tools = new Map((await reader.listTools()).tools.map((tool) => [tool.name, tool]));
     const inbox = tools.get('comments_inbox');
     assert.ok(inbox);
-    assert.deepEqual([inbox.title, inbox.annotations], ['Comments: inbox', { readOnlyHint: true }]);
+    assert.deepEqual([inbox.title, inbox.annotations], ['Comments: inbox', { readOnlyHint: true, destructiveHint: false, idempotentHint: false }]);
     assert.ok(!tools.has('comments_claim_deliveries') && !tools.has('comments_settle_deliveries'), JSON.stringify([...tools.keys()]));
     const listed = (await reader.callTool({ name: 'comments_inbox', arguments: { params: { unread: true } } })) as CallToolResult;
     assert.deepEqual(listed.structuredContent, {
@@ -537,7 +539,7 @@ describe('tools/call', () => {
       ['list_schemas', 'describe_schema', 'list_behaviors', 'describe_behavior', 'get_value'],
       'reader may read no schema, and still lists the engine tools that only read; define and manage the policy refuses it'
     );
-    assert.deepEqual(byName.get('list_behaviors')?.annotations, { readOnlyHint: true });
+    assert.deepEqual(byName.get('list_behaviors')?.annotations, { readOnlyHint: true, destructiveHint: false, idempotentHint: false });
     assert.deepEqual(byName.get('describe_behavior')?.inputSchema.required, ['name']);
     const call = async (name: string, args: Record<string, unknown>) => (await client.callTool({ name, arguments: args })) as CallToolResult;
 

@@ -7,7 +7,7 @@ APIs.
 */ -}}
 
 {{- define "ts-deps" -}}
-  const {{ .Deps }}: {{ .Module }}.Deps = {
+  const {{ if .Agents }}{{ .AgentsBase }}: Omit<{{ .Module }}.Deps, 'agents'>{{ else }}{{ .Deps }}: {{ .Module }}.Deps{{ end }} = {
 {{- if .Config }}
     config: {{ .Config }},
 {{- end }}
@@ -35,6 +35,14 @@ APIs.
 {{- end }}
     logger: logger.child({ api: {{ tsQuote .Service }} }),
   };
+{{- if .Agents }}
+  // Its agent dispatcher (D158, D183), over its repositories and its
+  // requests queue, with the options the implementation answers.
+  const {{ .Deps }}: {{ .Module }}.Deps = {{ .Module }}.withAgents(
+    {{ .AgentsBase }},
+    await construct({{ tsQuote .Service }}, 'agent options', () => {{ .Impl }}.createAgentOptions({{ .AgentsBase }}))
+  );
+{{- end }}
 {{- end }}
 
 {{- define "ts-orm-imports" -}}
@@ -351,9 +359,9 @@ function main(): void {
 {{- if .Engines }}
     for (const engine of engines) engine.close();
 {{- end }}
-{{- if and .Job .PostgresDatabases }}
-    // The wakes the job's enqueues sent go out before it exits (D145, D151):
-    // only a queue on Postgres sends one.
+{{- if and (or .Job (and .Worker .Worker.Behavior)) .PostgresDatabases }}
+    // The wakes its enqueues and its commands sent go out before it exits
+    // (D145, D151): only a queue on Postgres sends one.
     void Promise.allSettled([queueWakesSettled(), ...pools.map(pool => pool.end())]).then(() => process.exit(code));
 {{- else }}
     void Promise.allSettled(pools.map(pool => pool.end())).then(() => process.exit(code));

@@ -151,6 +151,10 @@ func TicketTimersQueues(db *orm.Database, logger *zap.Logger) []worker.Queue {
 		Fail:     deadlines.Fail,
 		Release:  deadlines.Release,
 		Prune:    deadlines.Prune,
+		// In drain mode the worker takes one slot, its first queue's, and
+		// waits for a message due soon (D145).
+		Slot:    deadlines.Slot,
+		NextDue: deadlines.NextDue,
 	})
 	changes := db.TicketChangeQueue()
 	queues = append(queues, worker.Queue{
@@ -187,6 +191,8 @@ func TicketTimersQueues(db *orm.Database, logger *zap.Logger) []worker.Queue {
 		Fail:     changes.Fail,
 		Release:  changes.Release,
 		Prune:    changes.Prune,
+		Slot:     changes.Slot,
+		NextDue:  changes.NextDue,
 	})
 	return queues
 }

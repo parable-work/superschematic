@@ -28,19 +28,29 @@
 // implementation's constructor of the handlers of its
 // @manualRouteRegistration operations (D51; section 8.5).
 {{- end }}
+{{- if .HasDerivers }}
+//
+// It also defines Derivers, a field per deriver of {{ .SchemaName }}, each an
+// interface with a method per derived field it fills, typed by the field
+// through the database's Go types, and DeriversConstructor, the signature
+// of the implementation's constructor of its derivers (D146; section 8.6).
+{{- end }}
 
 package {{ toPackageName .SchemaName }}
 
 import (
-{{- if .HasBackgroundWork }}
+{{- if or .HasBackgroundWork .HasDerivers }}
 	"context"
 
 {{ end }}
 {{- if .Deps.Database }}
 	orm "{{ .Deps.ORMModule }}"
 {{- end }}
-{{- if .HasOrdinaryWorkers }}
+{{- if or .HasOrdinaryWorkers .DeriversNameDatabaseTypes }}
 	{{ .Deps.DatabaseTypesAlias }} "{{ .Deps.DatabaseTypes }}"
+{{- end }}
+{{- if .HasDerivers }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/deriver"
 {{- end }}
 {{- if .HasWorkerEvents }}
 	types "{{ .TypesModule }}"
@@ -191,4 +201,48 @@ type Workers interface {
 // entrypoint calls with the API's Deps. The scaffolded implementation
 // asserts it: var _ {{ toPackageName .SchemaName }}.WorkersConstructor = NewWorkers.
 type WorkersConstructor func(deps Deps) (Workers, error)
+{{- end }}
+{{- if .HasDerivers }}
+
+// Derivers are the derivers of {{ .SchemaName }}, a field per @deriver class,
+// which the implementation's NewDerivers builds (D146). A deriver's
+// entrypoint pulls the stale derived fields of its tables and calls the
+// method of each with a context that ends when the deriver stops. A value
+// settles the field through the behaviors' core, which holds it to the
+// field's type; a failure, or a method that returns an error or panics,
+// counts an attempt, and the field waits once its attempts are spent until
+// its inputs move.
+type Derivers struct {
+{{- range .GoDerivers }}
+	// {{ .Field }} is the deriver {{ .Name }}, which fills the derived fields of {{ join .Schemas ", " }}.
+	{{ .Field }} {{ .Interface }}
+{{- end }}
+}
+{{- range .GoDerivers }}
+
+// {{ .Interface }} are the methods of the deriver {{ .Name }}, one per
+// derived field it fills.
+type {{ .Interface }} interface {
+{{- range .Methods }}
+	// {{ .Method }} derives {{ .Schema }}.{{ .Field }} from {{ .FromList }}, with the model {{ .Model }}.
+	{{ .Method }}(ctx context.Context, item deriver.DerivedItem[{{ .Inputs }}]) (deriver.DerivedAnswer[{{ .Value }}], error)
+{{- end }}
+}
+{{- end }}
+{{- range .DerivedInputs }}
+
+// {{ .Inputs }} are the inputs of {{ .Schema }}.{{ .Field }}: each field it is derived
+// from, nil when it holds no value.
+type {{ .Inputs }} struct {
+{{- range .From }}
+	{{ .GoName }} {{ .Type }} `json:"{{ .Name }},omitempty"`
+{{- end }}
+}
+{{- end }}
+
+// DeriversConstructor is the signature of the implementation's constructor
+// of its derivers, NewDerivers(deps Deps) (Derivers, error), which a
+// deriver's entrypoint calls with the API's Deps. The scaffolded
+// implementation asserts it: var _ {{ toPackageName .SchemaName }}.DeriversConstructor = NewDerivers.
+type DeriversConstructor func(deps Deps) (Derivers, error)
 {{- end }}

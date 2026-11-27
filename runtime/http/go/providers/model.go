@@ -20,12 +20,22 @@ const (
 	RoleTool      = "tool"
 )
 
-// ModelMessage is one message of a turn.
+// ModelMessage is one message of a turn. An assistant message is an
+// earlier completion of the run, replayed: its content, the tool calls it
+// made, which the tool messages after it answer, and the provider's own
+// state of it, as the provider returned them. A provider builds its API's
+// conversation from these alone.
 type ModelMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 	// ToolCallID is, for a tool message, the call it answers.
 	ToolCallID string `json:"toolCallId,omitempty"`
+	// ToolCalls are, for an assistant message, the tool calls its
+	// completion made, in order.
+	ToolCalls []ModelToolCall `json:"toolCalls,omitempty"`
+	// ProviderState is, for an assistant message, the ProviderState its
+	// completion returned, unchanged.
+	ProviderState json.RawMessage `json:"providerState,omitempty"`
 	// Untrusted marks content from outside the app, which is data and
 	// never instructions.
 	Untrusted bool `json:"untrusted,omitempty"`
@@ -77,6 +87,11 @@ type ModelCompletion struct {
 	ToolCalls []ModelToolCall `json:"toolCalls"`
 	Stop      string          `json:"stop"`
 	Usage     ModelUsage      `json:"usage"`
+	// ProviderState is the provider's own record of the turn, as JSON,
+	// which no one but the provider reads; the dispatcher passes it back,
+	// unchanged, on that assistant message in every later turn. A provider
+	// that keeps none leaves it nil.
+	ProviderState json.RawMessage `json:"providerState,omitempty"`
 }
 
 // ModelEmbedRequest is texts to embed (D155): each becomes one vector,

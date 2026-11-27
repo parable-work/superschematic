@@ -375,6 +375,12 @@
             "name": "Identity.UUID"
           },
           "required": true
+        },
+        {
+          "name": "sequence",
+          "typeRef": {
+            "name": "Generic.Int64"
+          }
         }
       ],
       "queue": {

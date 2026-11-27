@@ -304,6 +304,17 @@ async function main(): Promise<void> {
   // router mounts behind each one's auth gate (D51).
   const {{ .ManualRoutes }} = await construct({{ tsQuote .Service }}, 'manual routes', () => {{ .Impl }}.createManualRoutes({{ .Deps }}));
 {{- end }}
+{{- if .AgentRoutes }}
+  // The agent routes a run's sandbox instance calls (D158, D183): its
+  // turns, its MCP endpoint, its credential reports and its finish, under
+  // the dispatcher's endpoint, which a run's token alone reaches.
+  const {{ .AgentRoutes }} = {{ .Deps }}.agents.routes();
+  app.use('*', async (c, next) => {
+    const answered = await {{ .AgentRoutes }}(c.req.raw);
+    if (answered) return answered;
+    await next();
+  });
+{{- end }}
   app.route('/', {{ .Module }}.buildRouter({{ .Implementations }}{{ if .RouterOptions }}, { {{ join .RouterOptions ", " }} }{{ end }}));
 {{- if .MountsEngine }}
   // The engine's routes, its event stream and its MCP endpoint (D58),

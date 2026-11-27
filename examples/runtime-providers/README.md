@@ -24,6 +24,7 @@ guide covers them in full.
 | `src/app.ts` | The server's wiring: `notesProviders`, which reads the providers a loaded config names with `providersFrom`, and `sendNotice` and `receiveReplies`, which send through and read from whichever adapter `SMS` names |
 | `test/providers.test.ts` | Each provider against a stub service behind a fetch the test gives: the same notice through either relay with only the config changed, signed replies read as the adapter's own principal, the broker's list and a browser fill with no value in any log or record, a sandbox run and a cancel, a tool call, and text and previews from `fixtures/` |
 | `test/injection.typecheck.ts` | What the credential types hold, which tsc checks: an `Injection` has no value to read, and no object literal passes for one |
+| `typescript/notes-api` | notes-api's implementation, where the naming file's `[implementation_paths]` puts it: the scaffold the stack's build writes when it is missing, committed so the build writes nothing into the example. Its one route is a `@tableOperation`, which the build serves, so it implements no method |
 | `providers/*/provider.go` | Each provider but mail-relay in Go too (D184): a Go module beside the TypeScript package, whose `Definition()` a Go server links; `package.json` declares the provider for both, and each module's test holds it to the Go code |
 
 ## What it shows

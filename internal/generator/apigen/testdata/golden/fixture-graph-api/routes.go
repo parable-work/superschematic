@@ -11,6 +11,7 @@ import (
 	gohttp "net/http"
 	"strconv"
 
+	orm "example.com/schemas/orm/fixture-version-graph-db"
 	types "example.com/schemas/types/go/fixture-graph-api"
 	"github.com/go-chi/chi/v5"
 	"github.com/parable-work/superschematic/runtime/http/go/bodyargs"
@@ -29,6 +30,13 @@ const (
 // Config holds all dependencies needed to register API routes.
 // Pass this to RegisterRoutes() to wire up your business logic.
 type Config struct {
+	// DB is the ORM of fixture-version-graph-db, the API's database: the graph
+	// operations read the root, its refs and its commits through it (D138).
+	DB orm.DatabaseInterface
+
+	// Graphs are the facades of the version graphs the graph operations
+	// run through (D138): GraphsOf(db) builds them from the ORM.
+	Graphs Graphs
 
 	// Logger is the base logger for request-scoped logging
 	Logger *zap.Logger
@@ -56,6 +64,12 @@ type Config struct {
 // Validate checks that all required dependencies are provided.
 // Returns an error if any required field is nil.
 func (c *Config) Validate() error {
+	if c.DB == nil {
+		return fmt.Errorf("Config.DB is required: the graph operations of fixture-graph-api read through it (D138)")
+	}
+	if err := c.Graphs.validate(); err != nil {
+		return err
+	}
 	if c.Logger == nil {
 		return fmt.Errorf("Config.Logger is required")
 	}
@@ -76,6 +90,7 @@ func (c *Config) Validate() error {
 //	r.Use(middleware.Recoverer)
 //
 //	fixturegraphapi.RegisterRoutes(r, fixturegraphapi.Config{
+//		DB:     db,
 //		Logger: logger,
 //		Implementations: fixturegraphapi.Implementations{
 //			Recipe: &myRecipeImpl{},
@@ -140,7 +155,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "GET",
 			Path:    "/recipes/{id}/commits/{commit}",
-			Handler: createRecipeMaterializeHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeMaterializeHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -149,7 +164,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "GET",
 			Path:    "/recipes/{id}/diff",
-			Handler: createRecipeDiffHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeDiffHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -158,7 +173,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "GET",
 			Path:    "/recipes/{id}/entities/{kind}/{key}/history",
-			Handler: createRecipeEntityHistoryHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeEntityHistoryHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -167,7 +182,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "POST",
 			Path:    "/recipes/{id}/refs",
-			Handler: createRecipeBranchHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeBranchHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -176,7 +191,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "POST",
 			Path:    "/recipes/{id}/refs/{ref}/arrange",
-			Handler: createRecipeArrangeHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeArrangeHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -185,7 +200,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "POST",
 			Path:    "/recipes/{id}/refs/{ref}/commit",
-			Handler: createRecipeCommitHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeCommitHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -194,7 +209,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "POST",
 			Path:    "/recipes/{id}/refs/{ref}/discard",
-			Handler: createRecipeDiscardHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeDiscardHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -203,7 +218,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "PUT",
 			Path:    "/recipes/{id}/refs/{ref}/edits",
-			Handler: createRecipeSaveHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeSaveHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -212,7 +227,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "GET",
 			Path:    "/recipes/{id}/refs/{ref}/history",
-			Handler: createRecipeHistoryHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeHistoryHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -221,7 +236,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "POST",
 			Path:    "/recipes/{id}/refs/{ref}/merge",
-			Handler: createRecipeMergeHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeMergeHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -230,7 +245,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "POST",
 			Path:    "/recipes/{id}/refs/{ref}/rebase",
-			Handler: createRecipeRebaseHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeRebaseHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -239,7 +254,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "POST",
 			Path:    "/recipes/{id}/refs/{ref}/revert",
-			Handler: createRecipeRevertHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeRevertHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -248,7 +263,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "POST",
 			Path:    "/recipes/{id}/refs/{ref}/seal",
-			Handler: createRecipeSealHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeSealHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -257,7 +272,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "GET",
 			Path:    "/recipes/{id}/refs/{ref}/tree",
-			Handler: createRecipeComposeHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeComposeHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -266,7 +281,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "POST",
 			Path:    "/recipes/{id}/release",
-			Handler: createRecipeReleaseHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeReleaseHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.release"),
 			},
@@ -275,7 +290,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 		{
 			Method:  "GET",
 			Path:    "/recipes/{id}/released",
-			Handler: createRecipeReleasedHandler(cfg.Implementations.Recipe),
+			Handler: createRecipeReleasedHandler(&recipeOperationsRoutes{db: cfg.DB, graph: cfg.Graphs.Recipe}),
 			Middlewares: []runtimerouting.Middleware{
 				runtimesession.RequirePermissions("recipes.write"),
 			},
@@ -316,7 +331,7 @@ func createRecipeGetRecipeHandler(impl RecipeImplementation) gohttp.HandlerFunc 
 		}
 
 		// Call implementation
-		result, err := impl.GetRecipe(r.Context(), Id)
+		result, err := impl.GetRecipe(callerContext(r.Context()), Id)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -332,7 +347,11 @@ func createRecipeGetRecipeHandler(impl RecipeImplementation) gohttp.HandlerFunc 
 // createRecipeMaterializeHandler creates a handler for GET /api/recipes/{id}/commits/{commit}
 //
 // Reads a commit's tree.
-func createRecipeMaterializeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's materialize, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeMaterializeHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -372,7 +391,7 @@ func createRecipeMaterializeHandler(impl RecipeImplementation) gohttp.HandlerFun
 		}
 
 		// Call implementation
-		result, err := impl.Materialize(r.Context(), Id, Commit)
+		result, err := impl.Materialize(callerContext(r.Context()), Id, Commit)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -388,7 +407,11 @@ func createRecipeMaterializeHandler(impl RecipeImplementation) gohttp.HandlerFun
 // createRecipeDiffHandler creates a handler for GET /api/recipes/{id}/diff
 //
 // Lists the entities the trees of two commits differ on.
-func createRecipeDiffHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's diff, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeDiffHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -435,7 +458,7 @@ func createRecipeDiffHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Diff(r.Context(), Id, From, To)
+		result, err := impl.Diff(callerContext(r.Context()), Id, From, To)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -451,7 +474,11 @@ func createRecipeDiffHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeEntityHistoryHandler creates a handler for GET /api/recipes/{id}/entities/{kind}/{key}/history
 //
 // Lists the commits of the root's primary line that changed one entity, newest first, each with what it did to it.
-func createRecipeEntityHistoryHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's entityHistory, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeEntityHistoryHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -501,7 +528,7 @@ func createRecipeEntityHistoryHandler(impl RecipeImplementation) gohttp.HandlerF
 		}
 
 		// Call implementation
-		result, err := impl.EntityHistory(r.Context(), Id, Kind, Key)
+		result, err := impl.EntityHistory(callerContext(r.Context()), Id, Kind, Key)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -517,7 +544,11 @@ func createRecipeEntityHistoryHandler(impl RecipeImplementation) gohttp.HandlerF
 // createRecipeBranchHandler creates a handler for POST /api/recipes/{id}/refs
 //
 // Creates a change set of the ref from names, or of the root's primary line without one, which it creates, named main, for a root that has none.
-func createRecipeBranchHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's branch, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeBranchHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -565,7 +596,7 @@ func createRecipeBranchHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Branch(r.Context(), Id, &input)
+		result, err := impl.Branch(callerContext(r.Context()), Id, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -581,7 +612,11 @@ func createRecipeBranchHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeArrangeHandler creates a handler for POST /api/recipes/{id}/refs/{ref}/arrange
 //
 // Puts one parent's children of a kind in the order keys gives, on a change set at version.
-func createRecipeArrangeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's arrange, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeArrangeHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -643,7 +678,7 @@ func createRecipeArrangeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Arrange(r.Context(), Id, Ref, &input)
+		result, err := impl.Arrange(callerContext(r.Context()), Id, Ref, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -659,7 +694,11 @@ func createRecipeArrangeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeCommitHandler creates a handler for POST /api/recipes/{id}/refs/{ref}/commit
 //
 // Commits a change set at version: a commit with a patch for each entity it changed.
-func createRecipeCommitHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's commit, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeCommitHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -721,7 +760,7 @@ func createRecipeCommitHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Commit(r.Context(), Id, Ref, &input)
+		result, err := impl.Commit(callerContext(r.Context()), Id, Ref, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -737,7 +776,11 @@ func createRecipeCommitHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeDiscardHandler creates a handler for POST /api/recipes/{id}/refs/{ref}/discard
 //
 // Discards a ref at version, which frees its name.
-func createRecipeDiscardHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's discard, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeDiscardHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -799,7 +842,7 @@ func createRecipeDiscardHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Discard(r.Context(), Id, Ref, &input)
+		result, err := impl.Discard(callerContext(r.Context()), Id, Ref, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -815,7 +858,11 @@ func createRecipeDiscardHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeSaveHandler creates a handler for PUT /api/recipes/{id}/refs/{ref}/edits
 //
 // Applies edits to a change set at version: each kind's upserts, then its deletes, then its unsets.
-func createRecipeSaveHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's save, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeSaveHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -877,7 +924,7 @@ func createRecipeSaveHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Save(r.Context(), Id, Ref, &input)
+		result, err := impl.Save(callerContext(r.Context()), Id, Ref, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -893,7 +940,11 @@ func createRecipeSaveHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeHistoryHandler creates a handler for GET /api/recipes/{id}/refs/{ref}/history
 //
 // Lists the commits a ref wrote, newest first.
-func createRecipeHistoryHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's history, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeHistoryHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -933,7 +984,7 @@ func createRecipeHistoryHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.History(r.Context(), Id, Ref)
+		result, err := impl.History(callerContext(r.Context()), Id, Ref)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -949,7 +1000,11 @@ func createRecipeHistoryHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeMergeHandler creates a handler for POST /api/recipes/{id}/refs/{ref}/merge
 //
 // Merges the change set's head into the ref into names, or into its parent, at that ref's version. With conflicts left after resolutions it answers them and writes nothing.
-func createRecipeMergeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's merge, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeMergeHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -1011,7 +1066,7 @@ func createRecipeMergeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Merge(r.Context(), Id, Ref, &input)
+		result, err := impl.Merge(callerContext(r.Context()), Id, Ref, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -1027,7 +1082,11 @@ func createRecipeMergeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeRebaseHandler creates a handler for POST /api/recipes/{id}/refs/{ref}/rebase
 //
 // Moves a change set at version onto its parent's head. With conflicts left after resolutions it answers them and writes nothing.
-func createRecipeRebaseHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's rebase, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeRebaseHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -1089,7 +1148,7 @@ func createRecipeRebaseHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Rebase(r.Context(), Id, Ref, &input)
+		result, err := impl.Rebase(callerContext(r.Context()), Id, Ref, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -1105,7 +1164,11 @@ func createRecipeRebaseHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeRevertHandler creates a handler for POST /api/recipes/{id}/refs/{ref}/revert
 //
 // Writes the rows that make a change set at version compose to the tree of toCommit, and commits them.
-func createRecipeRevertHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's revert, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeRevertHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -1167,7 +1230,7 @@ func createRecipeRevertHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Revert(r.Context(), Id, Ref, &input)
+		result, err := impl.Revert(callerContext(r.Context()), Id, Ref, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -1183,7 +1246,11 @@ func createRecipeRevertHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeSealHandler creates a handler for POST /api/recipes/{id}/refs/{ref}/seal
 //
 // Commits a change set at version when it has changes, and seals it: the ref then refuses writes.
-func createRecipeSealHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's seal, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeSealHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -1245,7 +1312,7 @@ func createRecipeSealHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Seal(r.Context(), Id, Ref, &input)
+		result, err := impl.Seal(callerContext(r.Context()), Id, Ref, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -1261,7 +1328,11 @@ func createRecipeSealHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeComposeHandler creates a handler for GET /api/recipes/{id}/refs/{ref}/tree
 //
 // Reads a ref's tree: its base commit's tree with the ref's own rows laid over it, with its content hash and the problems found in it.
-func createRecipeComposeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's compose, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeComposeHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -1301,7 +1372,7 @@ func createRecipeComposeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Compose(r.Context(), Id, Ref)
+		result, err := impl.Compose(callerContext(r.Context()), Id, Ref)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -1317,7 +1388,11 @@ func createRecipeComposeHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeReleaseHandler creates a handler for POST /api/recipes/{id}/release
 //
 // Points the root's release at a tagged commit, at the pointer's version: 0 for the root's first release.
-func createRecipeReleaseHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's release, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeReleaseHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -1365,7 +1440,7 @@ func createRecipeReleaseHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Release(r.Context(), Id, &input)
+		result, err := impl.Release(callerContext(r.Context()), Id, &input)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())
@@ -1381,7 +1456,11 @@ func createRecipeReleaseHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 // createRecipeReleasedHandler creates a handler for GET /api/recipes/{id}/released
 //
 // Reads the root's release pointer and the tree of the commit it names.
-func createRecipeReleasedHandler(impl RecipeImplementation) gohttp.HandlerFunc {
+//
+// It runs Recipe's released, an operation of a version graph of
+// fixture-version-graph-db (D138), through the method of graphs.go that serves it:
+// no implementation method serves it.
+func createRecipeReleasedHandler(impl *recipeOperationsRoutes) gohttp.HandlerFunc {
 	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
 		// Extract path parameters, each percent-decoded once
 		IdStr, err := runtimerouting.PathParam(r, "id")
@@ -1407,7 +1486,7 @@ func createRecipeReleasedHandler(impl RecipeImplementation) gohttp.HandlerFunc {
 		}
 
 		// Call implementation
-		result, err := impl.Released(r.Context(), Id)
+		result, err := impl.Released(callerContext(r.Context()), Id)
 		if err != nil {
 			// Get logger from context and use proper error handling
 			logger := LoggerFromContext(r.Context())

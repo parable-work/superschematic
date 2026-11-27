@@ -261,6 +261,9 @@ async fn run() -> Result<(), Failure> {
 
     // {{ .Service }}: its implementation, built from its Deps, and its routes.
     let {{ .Deps }} = {{ .Alias }}::Deps {
+{{- if .Providers }}
+        providers: std::sync::Arc::new(configure({{ rustString .Service }}, {{ .Alias }}::providers::from_config(&{{ .Config }}))?),
+{{- end }}
 {{- if .Config }}
         config: {{ .Config }}.clone(),
 {{- end }}
@@ -274,7 +277,7 @@ async fn run() -> Result<(), Failure> {
         {{ .Field }}: {{ .Client.Var }}.clone(),
 {{- end }}
 {{- range .Buckets }}
-        {{ .Field }}: Arc::clone(&{{ .Bucket.Var }}),
+{{ .Init "        " true }}
 {{- end }}
 {{- range .MemoryStores }}
         {{ .Field }}: Arc::clone(&{{ .Store.Var }}),

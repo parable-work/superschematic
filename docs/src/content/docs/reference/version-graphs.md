@@ -236,12 +236,22 @@ repair rows written by hand. `Sweep` leaves the table alone.
 To the ORM it is a table that is read: a repository with gets, finds, lists
 and pages, and no create, update, upsert or delete. The Go repository and
 the Rust one have no write. The TypeScript one has none in its type
-(`ReadRepository`), though the object the runtime builds still carries
-them, so do not reach past the type. A `@tableOperation` may read and list
-the table; one that writes it is refused. A raw SQL write is not refused;
-do not make one, since the next release that touches the entity overwrites
-it and no release repairs a row it does not touch, short of a release of
-the commit already released.
+(`ReadRepository`) and none in the object the ORM holds: the table's
+definition in `orm.ts` says `readOnly: true`, and the runtime gives it the
+reads alone. A `@tableOperation` may read and list the table; one that
+writes it is refused. A raw SQL write is not refused; do not make one,
+since the next release that touches the entity overwrites it and no
+release repairs a row it does not touch, short of a release of the commit
+already released.
+
+When the graph's root has a `deletedAt`, a soft delete of the root leaves
+its released rows in the table, and every read of the repository leaves
+them out, in each of the three ORMs: a read holds each row to a live row of
+its root, as a read of a soft-deletable table holds each row to its own
+`deletedAt`. A read that asks for deleted rows (`IncludeDeleted`,
+`includeDeleted`, `include_deleted`) reads them. A restore of the root,
+which clears its `deletedAt`, sees the same rows again, since nothing
+deleted them. A hard delete of the root deletes them with it.
 
 The descriptor names the table as the kind's `releasedTable`, which the
 core does not read and each storage adapter does. On SQLite, whose layout
@@ -269,6 +279,7 @@ export abstract class RecipeCommitted {
 export abstract class RecipePublished {
   root: Identity.UUID;
   commit: Identity.UUID;
+  sequence: Nullable<Generic.Int64>;
 }
 
 @versionGraph({ enqueueOnCommit: RecipeCommitted, enqueueOnRelease: RecipePublished })
@@ -285,7 +296,7 @@ write, whatever made it:
 | Option | Enqueues | Sets |
 | --- | --- | --- |
 | `enqueueOnCommit` | For every row written to the commit table: a change set's commit and a merge's alike, tagged or not. | `root` and `commit`, and `ref` and `sequence` when the message declares them. `sequence` is null on a commit that is not tagged. |
-| `enqueueOnRelease` | When a root's release pointer is first written, and when it moves to another commit, a rollback included. A release of the commit it already names enqueues nothing. | `root` and `commit`. |
+| `enqueueOnRelease` | When a root's release pointer is first written, and when it moves to another commit, a rollback included. A release of the commit it already names enqueues nothing. | `root` and `commit`, and `sequence` when the message declares it: the released commit's, which the trigger reads from the commit table, since the pointer holds none. |
 
 Verification refuses a queue that is not a `@queue` class of the schema,
 one whose message has no required `root` and `commit` of the root key's
@@ -1182,7 +1193,12 @@ The Rust facade differs from the Go one where the languages do:
 
 The facade turns a typed edit into a canonical row from each field's serde
 JSON, and a canonical row back into a typed value, so a field comes back in
-its canonical form, as through the Go facade.
+its canonical form, as through the Go facade. `save_values` saves edits
+held as JSON: each kind's under its kind (`"step"`), each upsert an object
+of the kind's fields by their serde names. A caller that holds the rows as
+JSON, such as the Rust server's graph routes, saves with it, since a typed
+value needs members, such as the audit fields, that such a row does not
+carry.
 
 ## Use the core from Python
 
@@ -1400,7 +1416,7 @@ SQLite ones among them, on the default Python and on 3.9.
 - A graph's operations are served as routes, with no handler to write, by
   `@graphOperations(Root)` in an API schema
   ([API routes](/superschematic/guides/api-routes/#a-version-graphs-operations));
-  the TypeScript server serves them.
+  the TypeScript, Go and Rust servers serve them, on Postgres.
 - Who may commit, seal, merge, tag or release is the application's policy.
   `Sweep` collects discarded drafts and prunes history, but nothing runs it
   unless a service calls it or `RunSweeper`, or the engine's runner does

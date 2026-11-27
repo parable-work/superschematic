@@ -101,6 +101,10 @@ func TestIdempotentIsRefused(t *testing.T) {
 		{"a file", reservedKeys, strings.Replace(idempotentOperation("POST", `, "fileDownload": {"contentType": "text/csv"}`), `"typeRef": {"name": "Order"}`, `"typeRef": {"name": ""}`, 1),
 			"Orders.createOrder: @idempotent on a FileDownload result"},
 		{"a manual route", reservedKeys, idempotentOperation("POST", `, "manualRouteRegistration": true`), "Orders.createOrder: @idempotent on a @manualRouteRegistration operation"},
+		// A stream the SDKs would read as runtime::BinaryStream (D167), so no
+		// SDK sends a key on one, the Rust SDK's request_stream among them.
+		{"a binary stream", reservedKeys, idempotentOperation("POST", `, "httpBinaryStream": {"contentType": "application/vnd.apache.arrow.stream"}, "manualRouteRegistration": true`),
+			"Orders.createOrder: @idempotent on an httpBinaryStream result, whose answer is a stream, not the JSON envelope a repeat is answered"},
 		{"a ttl past the longest", reservedKeys, strings.Replace(idempotentOperation("POST", ""), `"ttlSeconds": 3600`, `"ttlSeconds": 7776001`, 1), "Orders.createOrder: @idempotent ttl is 7776001 seconds"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -35,6 +35,7 @@ import (
 	"fmt"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -301,6 +302,11 @@ func Concurrency(def int) (int, error) {
 // options' concurrency. It returns the first error of a queue it could
 // not run, after the others stopped, which a queue it cannot run makes
 // them do at once.
+//
+// In drain mode (D145) the queues are one worker's: RunAll takes one slot
+// for them all, of the first queue that has a Slot, and returns nil at
+// once when every one is taken, and the queues stop together, once none
+// of them was busy for the drain's idle time.
 func RunAll(ctx context.Context, queues []Queue, opts Options) error {
 	if len(queues) == 0 {
 		return errors.New("worker: no queue to run")
@@ -311,6 +317,17 @@ func RunAll(ctx context.Context, queues []Queue, opts Options) error {
 		// The queues are idle together or not at all.
 		opts.quiet = &quiet{}
 		opts.quiet.busy()
+		queues = slices.Clone(queues)
+		if i := slices.IndexFunc(queues, func(q Queue) bool { return q.Slot != nil }); i >= 0 {
+			release, ok, err := takeSlot(ctx, queues[i], drainOf(opts.Drain), loggerOf(opts, queues[i]))
+			if err != nil || !ok {
+				return err
+			}
+			defer release()
+		}
+		for i := range queues {
+			queues[i].Slot = nil
+		}
 	}
 	errs := make([]error, len(queues))
 	var wg sync.WaitGroup
@@ -356,40 +373,19 @@ func Run(ctx context.Context, q Queue, opts Options) error {
 	if opts.PruneEvery <= 0 {
 		opts.PruneEvery = DefaultPruneEvery
 	}
-	logger := opts.Logger
-	if logger == nil {
-		logger = zap.NewNop()
-	}
-	logger = logger.With(zap.String("queue", q.Name))
+	logger := loggerOf(opts, q)
 	if opts.Drain != nil {
-		drain := *opts.Drain
-		if drain.Idle <= 0 {
-			drain.Idle = DefaultDrainIdle
-		}
-		if drain.Slots < 1 {
-			drain.Slots = 1
-		}
-		if drain.Horizon <= 0 {
-			drain.Horizon = DrainHorizon
-		}
+		drain := drainOf(opts.Drain)
 		opts.Drain = &drain
 		if opts.quiet == nil {
 			opts.quiet = &quiet{}
 			opts.quiet.busy()
 		}
-		if q.Slot != nil {
-			release, ok, err := q.Slot(ctx, drain.Slots)
-			switch {
-			case err != nil && ctx.Err() != nil:
-				return nil
-			case err != nil:
-				return fmt.Errorf("worker: take a slot of queue %s: %w", q.Name, err)
-			case !ok:
-				logger.Info("every slot of the queue is taken: the workers that hold them drain it", zap.Int("slots", drain.Slots))
-				return nil
-			}
-			defer release()
+		release, ok, err := takeSlot(ctx, q, drain, logger)
+		if err != nil || !ok {
+			return err
 		}
+		defer release()
 	}
 	w := &loop{q: q, opts: opts, logger: logger, running: map[string]*handling{}, done: make(chan struct{}, opts.Concurrency)}
 	// The handlers' context outlives ctx by the grace: a stopping worker
@@ -413,6 +409,52 @@ func Run(ctx context.Context, q Queue, opts Options) error {
 		return claimErr
 	}
 	return err
+}
+
+// loggerOf is the logger of q's loop: the options', or none, naming the
+// queue.
+func loggerOf(opts Options, q Queue) *zap.Logger {
+	logger := opts.Logger
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return logger.With(zap.String("queue", q.Name))
+}
+
+// drainOf is d with each zero replaced by its default.
+func drainOf(d *Drain) Drain {
+	drain := *d
+	if drain.Idle <= 0 {
+		drain.Idle = DefaultDrainIdle
+	}
+	if drain.Slots < 1 {
+		drain.Slots = 1
+	}
+	if drain.Horizon <= 0 {
+		drain.Horizon = DrainHorizon
+	}
+	return drain
+}
+
+// takeSlot takes one of q's drain slots (D145), returning the function
+// that gives it back, or false, which it logs, when every one is taken. A
+// queue with no Slot takes none, and drains. An error is the worker's,
+// unless ctx ended first: the worker then stops, as one with no slot.
+func takeSlot(ctx context.Context, q Queue, drain Drain, logger *zap.Logger) (release func(), ok bool, err error) {
+	if q.Slot == nil {
+		return func() {}, true, nil
+	}
+	release, ok, err = q.Slot(ctx, drain.Slots)
+	switch {
+	case err != nil && ctx.Err() != nil:
+		return nil, false, nil
+	case err != nil:
+		return nil, false, fmt.Errorf("worker: take a slot of queue %s: %w", q.Name, err)
+	case !ok:
+		logger.Info("every slot of the queue is taken: the workers that hold them drain it", zap.Int("slots", drain.Slots))
+		return nil, false, nil
+	}
+	return release, true, nil
 }
 
 // loop is one Run.
