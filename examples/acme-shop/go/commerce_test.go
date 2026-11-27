@@ -3,15 +3,16 @@ package shop_test
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -27,9 +28,13 @@ import (
 	types "example.com/acme/types/go/shop-orders"
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
-	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5"
+	_ "github.com/jackc/pgx/v5/stdlib"
 	scalars "github.com/parable-work/superscalar/go"
-	engine "github.com/parable-work/superschematic/runtime/engine/go"
+	"github.com/parable-work/superschematic/runtime/http/go/identity"
+	rules "github.com/parable-work/superschematic/runtime/rules/go"
+	rulespostgres "github.com/parable-work/superschematic/runtime/rules/go/postgres"
+	rulessqlite "github.com/parable-work/superschematic/runtime/rules/go/sqlite"
 	"go.uber.org/zap"
 )
 
@@ -37,140 +42,142 @@ import (
 const (
 	acmepayKey    = "ak_test_shop"
 	acmepaySecret = "whsec_test_shop"
-	// shopNamespace is the engine namespace shop-db's types live in.
-	shopNamespace = "shop-db"
 )
 
-// commerceShop is shop-orders served in-process over shop-db's engine,
-// open on a SQLite file with the project's engine archive, which runs the
-// commerce behaviors (D70), and with the policy shop-stack's generated
-// servers open it with; acmepay, the fake provider, posting its webhooks
-// to it; a stand-in for shop-stock, which records the sales it is told
-// of; and the shop's users.
+// commerceShop is shop-orders served in-process over shop-db's tables,
+// whose behaviors the generated ORM runs through the behaviors' core (D70,
+// D103), in a database of the test's own: shop-db's SQLite schema in a
+// file, or its Postgres schema in a database of the server
+// ACME_SHOP_DATABASE_URL names. acmepay, the fake provider, posts its
+// webhooks to it; a stand-in for shop-stock records the sales it is told
+// of; and the shop's users are rows of the same database.
 type commerceShop struct {
-	engine  *engine.Engine
-	orders  *httptest.Server
-	pay     *acmepay.Provider
-	payAPI  *acmepay.Client
-	rows    *commerceRows
-	sold    *soldLines
-	deps    shoporders.Deps
-	users   *users
-	shopper string
-	token   string
+	database orm.DatabaseInterface
+	orders   *httptest.Server
+	pay      *acmepay.Provider
+	payAPI   *acmepay.Client
+	sold     *soldLines
+	deps     shoporders.Deps
+	users    *users
+	shopper  string
+	token    string
 }
 
-// shopPolicy is the access policy shop-stack's generated server for
-// shop-orders opens shop-db's engine with: shop-db's outputs.engine.policy.
-func shopPolicy(t *testing.T) engine.Policy {
+// commerceDatabase opens a new shop-db database and its users.
+type commerceDatabase func(t *testing.T) (orm.DatabaseInterface, *users)
+
+// commerceDatabases are the databases the commerce tests run on: a SQLite
+// file always, and Postgres when ACME_SHOP_DATABASE_URL names a server.
+func commerceDatabases(t *testing.T) map[string]commerceDatabase {
 	t.Helper()
-	main, err := os.ReadFile(filepath.Join("..", "schemas", "dist", "server", "shop-stack", "shop-orders", "main.go"))
-	if err != nil {
-		t.Fatalf("shop-stack's build wrote no server for shop-orders: %v", err)
+	databases := map[string]commerceDatabase{"sqlite": sqliteShop}
+	if os.Getenv("ACME_SHOP_DATABASE_URL") != "" {
+		databases["postgres"] = postgresShop
 	}
-	policy := regexp.MustCompile("EngineDocument, `(\\{\"rules\".*?)`").FindSubmatch(main)
-	if policy == nil {
-		t.Fatalf("shop-orders' server opens the engine with no rules policy:\n%s", main)
-	}
-	return engine.Policy(policy[1])
+	return databases
 }
 
-// openShopEngine opens shop-db's engine on a SQLite file of the test's
-// own and deploys shop-db's engine types, as a server does when it starts;
-// its runner acts as shop-db's engine runner does, holding each engine
-// type's name. It skips when the linked archive is the core's, which runs
-// no commerce behavior, unless ACME_SHOP_ENGINE is set, as
-// scripts/check.sh sets it with the project's archive linked.
-func openShopEngine(t *testing.T) (*engine.Background, *engine.Engine) {
+// sqliteShop is shop-db in a SQLite file of the test's own, created from
+// its SQLite DDL, with the repositories on it (D116) and the shop's users
+// in its identity tables.
+func sqliteShop(t *testing.T) (orm.DatabaseInterface, *users) {
 	t.Helper()
-	var doc struct {
-		Namespace  string            `json:"namespace"`
-		Tools      json.RawMessage   `json:"tools"`
-		Schemas    []json.RawMessage `json:"schemas"`
-		MetaSchema json.RawMessage   `json:"metaSchema"`
-	}
-	if err := json.Unmarshal([]byte(db.EngineDocument), &doc); err != nil {
-		t.Fatal(err)
-	}
-	cfg := engine.Config{
-		Path:       filepath.Join(t.TempDir(), "shop.engine.db"),
-		Policy:     shopPolicy(t),
-		Namespaces: &engine.Namespaces{Names: []string{doc.Namespace}},
-		Tools:      doc.Tools,
-		MetaSchema: doc.MetaSchema,
-		Runner: &engine.Runner{Principal: engine.Principal{
-			Subject:     "shop-db-engine-runner",
-			Permissions: []string{"Checkout", "CollectionPoint", "Inventory", "Refund"},
-		}},
-	}
-	probe, err := engine.Open(cfg)
+	ddl, err := os.ReadFile(filepath.Join("..", "schemas", "dist", "sql", "shop-db", "sqlite", "create.sql"))
 	if err != nil {
-		t.Fatalf("open shop-db's engine: %v", err)
+		t.Fatalf("the build wrote no SQLite DDL of shop-db: %v", err)
 	}
-	has, err := probe.Call(context.Background(), "behaviors.has", nil, "Stock")
-	_ = probe.Close()
+	conn, err := sql.Open("sqlite", orm.SQLiteDSN(filepath.Join(t.TempDir(), "shop.db")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(has) != "true" {
-		if os.Getenv("ACME_SHOP_ENGINE") != "" {
-			t.Fatal("the linked engine archive runs no commerce behavior: link shop-db's project archive (scripts/engine-archive.sh --crate schemas/dist/engine/rust/shop-db/ffi)")
+	t.Cleanup(func() { _ = conn.Close() })
+	if _, err := conn.Exec(string(ddl)); err != nil {
+		t.Fatalf("create shop-db's tables: %v", err)
+	}
+	database, err := orm.OpenSQLite(context.Background(), conn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return database, usersIn(t, conn, identity.SQLite)
+}
+
+// postgresShop is shop-db in a database of its own on the Postgres server
+// ACME_SHOP_DATABASE_URL names, created from its Postgres DDL and dropped
+// when the test ends.
+func postgresShop(t *testing.T) (orm.DatabaseInterface, *users) {
+	t.Helper()
+	ctx := context.Background()
+	server := os.Getenv("ACME_SHOP_DATABASE_URL")
+	admin, err := pgx.Connect(ctx, server)
+	if err != nil {
+		t.Fatalf("connect to ACME_SHOP_DATABASE_URL: %v", err)
+	}
+	defer admin.Close(ctx)
+	name := fmt.Sprintf("acme_commerce_%d", time.Now().UnixNano())
+	if _, err := admin.Exec(ctx, "CREATE DATABASE "+name); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if admin, err := pgx.Connect(context.Background(), server); err == nil {
+			_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+			_ = admin.Close(context.Background())
 		}
-		t.Skip("the linked engine archive is the core's, which runs no commerce behavior; scripts/check.sh links shop-db's")
-	}
-	background := engine.OpenInBackground(cfg, engine.BackgroundOptions{
-		Setup: func(ctx context.Context, e *engine.Engine) error {
-			_, err := e.Deploy(ctx, doc.Schemas, engine.DeployOptions{Namespace: doc.Namespace})
-			return err
-		},
 	})
-	t.Cleanup(func() { _ = background.Close() })
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	e, err := background.Wait(ctx)
+	at, err := url.Parse(server)
 	if err != nil {
-		t.Fatalf("shop-db's engine did not open: %v", err)
+		t.Fatal(err)
 	}
-	return background, e
-}
-
-// principal is a caller of the engine: a member of staff through
-// /engine/shop-db with their permissions, or one of the shop's services
-// in-process, as their implementations call it.
-func staffPrincipal(subject string, permissions ...string) *engine.Principal {
-	return &engine.Principal{Subject: subject, Permissions: permissions}
-}
-
-func servicePrincipal(service, subject string, permissions ...string) *engine.Principal {
-	return &engine.Principal{
-		Subject: subject, Permissions: permissions,
-		Service: &engine.PrincipalService{Deployable: service, Serves: []string{service}, Subject: service},
-	}
-}
-
-// engineCall makes an engine call and decodes its result.
-func engineCall(t *testing.T, e *engine.Engine, out any, op string, principal *engine.Principal, args ...any) {
-	t.Helper()
-	result, err := e.Call(context.Background(), op, principal, args...)
+	at.Path = "/" + name
+	ddl, err := os.ReadFile(filepath.Join("..", "schemas", "dist", "sql", "shop-db", "create.sql"))
 	if err != nil {
-		t.Fatalf("%s: %v", op, err)
+		t.Fatalf("the build wrote no Postgres DDL of shop-db: %v", err)
 	}
-	if out != nil {
-		if err := json.Unmarshal(result, out); err != nil {
-			t.Fatalf("%s answered %s: %v", op, result, err)
-		}
+	conn, err := pgx.Connect(ctx, at.String())
+	if err != nil {
+		t.Fatal(err)
 	}
+	if _, err := conn.Exec(ctx, string(ddl)); err != nil {
+		t.Fatalf("create shop-db's tables: %v", err)
+	}
+	_ = conn.Close(ctx)
+	database, err := orm.Connect(ctx, at.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(database.Close)
+	identityDB, err := sql.Open("pgx", at.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = identityDB.Close() })
+	return database, usersIn(t, identityDB, identity.Postgres)
 }
 
-var inShop = map[string]any{"namespace": shopNamespace}
-
-// newCommerceShop stands the shop up: the engine, acmepay, shop-stock's
-// stand-in, shop-orders over the engine and an ORM of orders in memory,
-// and a shopper signed in through shop-api's login.
-func newCommerceShop(t *testing.T) *commerceShop {
+// usersIn are the shop's users in shop-db's identity tables on conn.
+func usersIn(t *testing.T, conn *sql.DB, dialect identity.Dialect) *users {
 	t.Helper()
-	background, e := openShopEngine(t)
-	s := &commerceShop{engine: e, rows: &commerceRows{NoOpDatabase: orm.NewNoOpDatabase()}, sold: &soldLines{}}
+	store, err := identity.NewSQLStore(conn, dialect, []byte(db.IdentityDescriptor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	u := newUsers(t)
+	u.store = store
+	return u
+}
+
+// asStaff is ctx with the behaviors' commands run as a member of staff
+// holding permissions, as a behavior operation's route runs them.
+func asStaff(ctx context.Context, subject string, permissions ...string) context.Context {
+	return orm.WithBehaviorCaller(ctx, rules.Caller{Subject: subject, Permissions: permissions})
+}
+
+// newCommerceShop stands the shop up on a database: acmepay, shop-stock's
+// stand-in, shop-orders over the database's repositories, and a shopper
+// signed in through shop-api's login.
+func newCommerceShop(t *testing.T, open commerceDatabase) *commerceShop {
+	t.Helper()
+	database, u := open(t)
+	s := &commerceShop{database: database, sold: &soldLines{}, users: u}
 
 	stock := httptest.NewServer(s.sold)
 	t.Cleanup(stock.Close)
@@ -179,8 +186,6 @@ func newCommerceShop(t *testing.T) *commerceShop {
 		t.Fatal(err)
 	}
 
-	u := newUsers(t)
-	s.users = u
 	shopper := u.add(t, shopperLogin, "Grace Hopper", shopperPassword, shopperPermissions...)
 	s.shopper = shopper.ID
 	s.token = signIn(t, productsClient(t, productsServer(t, u)), shopperLogin, shopperPassword)
@@ -190,7 +195,7 @@ func newCommerceShop(t *testing.T) *commerceShop {
 	t.Cleanup(payServer.Close)
 	s.payAPI = &acmepay.Client{BaseURL: payServer.URL, APIKey: acmepayKey}
 
-	s.deps = shoporders.Deps{DB: s.rows, Engine: background, ShopStock: stockClient, Logger: zap.NewNop()}
+	s.deps = shoporders.Deps{DB: database, ShopStock: stockClient, Logger: zap.NewNop()}
 	s.deps.Config.AcmepayUrl = payServer.URL
 	s.deps.Config.AcmepayApiKey = acmepayKey
 	s.deps.Config.AcmepayWebhookSecret = acmepaySecret
@@ -209,80 +214,88 @@ func newCommerceShop(t *testing.T) *commerceShop {
 	return s
 }
 
-// stock gives a product an Inventory as shop-stock's setStock does, at a
-// price, with units on the shelf and the level it is low at.
-func (s *commerceShop) stock(t *testing.T, product string, price, units, reorderAt int64) {
+// stock adds a product and gives it an Inventory row as shop-stock's
+// setStock does, at its price, with units on the shelf and the level it is
+// low at.
+func (s *commerceShop) stock(t *testing.T, sku string, price, units, reorderAt int64) db.IdentityUUID {
 	t.Helper()
-	keeper := servicePrincipal("shop-stock", "ada", "stock.write")
-	engineCall(t, s.engine, nil, "instances.create", keeper, "Inventory", map[string]any{"sku": "anvil", "priceCents": price, "reorderAt": reorderAt}, map[string]any{"namespace": shopNamespace, "id": product})
-	engineCall(t, s.engine, nil, "instances.invoke", keeper, "Inventory", product, "countStock", map[string]any{"onHand": units, "reason": "counted"}, inShop)
+	ctx := context.Background()
+	product, err := s.database.GetProductRepository().CreateOne(ctx, &db.Product{Sku: db.IdentitySlug(sku), Name: "Anvil", PriceCents: db.GenericInt64(price), InStock: true})
+	if err != nil {
+		t.Fatalf("add product %s: %v", sku, err)
+	}
+	keeper := asStaff(ctx, "ada", "stock.write")
+	level := db.GenericInt64(reorderAt)
+	err = s.database.Transaction(keeper, func(tx orm.TxInterface) error {
+		if _, err := tx.GetInventoryRepository().CreateOne(keeper, &orm.InventoryCreate{Id: *product.Id, Sku: sku, PriceCents: db.GenericInt64(price), ReorderAt: &level}); err != nil {
+			return err
+		}
+		_, err := tx.GetInventoryRepository().Stock().CountStock(keeper, *product.Id, orm.InventoryStockCountStockParams{OnHand: units, Reason: "counted"})
+		return err
+	})
+	if err != nil {
+		t.Fatalf("stock %s: %v", sku, err)
+	}
+	return *product.Id
 }
 
 // cart fills a checkout in cart as shop-cart does for the shopper: lines
 // of the product and, with a counter, a pickup slot there.
-func (s *commerceShop) cart(t *testing.T, product string, quantity int, counter string, pickup time.Time) string {
+func (s *commerceShop) cart(t *testing.T, product db.IdentityUUID, quantity int64, counter *db.IdentityUUID, pickup time.Time) db.IdentityUUID {
 	t.Helper()
-	id := scalars.NewUUID().String()
-	data := map[string]any{"customerId": s.shopper, "lines": []map[string]any{{"inventoryId": product, "quantity": quantity}}}
-	options := map[string]any{"namespace": shopNamespace, "id": id}
-	if counter != "" {
-		data["pickupAt"] = pickup.UTC().Format(time.RFC3339)
-		options["behaviors"] = map[string]any{"Links": map[string]any{"counter": counter}}
-	}
-	engineCall(t, s.engine, nil, "instances.create", servicePrincipal("shop-cart", s.shopper), "Checkout", data, options)
-	return id
-}
-
-type inventoryRecord struct {
-	Behaviors struct {
-		Stock struct {
-			OnHand    int64 `json:"onHand"`
-			Held      int64 `json:"held"`
-			Available int64 `json:"available"`
-			Low       bool  `json:"low"`
-		} `json:"Stock"`
-	} `json:"behaviors"`
-}
-
-func (s *commerceShop) inventory(t *testing.T, product string) inventoryRecord {
-	t.Helper()
-	var record inventoryRecord
-	engineCall(t, s.engine, &record, "instances.get", servicePrincipal("shop-stock", "shop-stock"), "Inventory", product, inShop)
-	return record
-}
-
-// runDue runs what the runner has due: the Reactions rules a payment or a
-// refund's settlement set off.
-func (s *commerceShop) runDue(t *testing.T) {
-	t.Helper()
-	ran, err := s.engine.Runner().RunDue(context.Background())
+	shopper, err := scalars.ParseUUID(s.shopper)
 	if err != nil {
-		t.Fatalf("the runner: %v", err)
+		t.Fatal(err)
 	}
-	if strings.Contains(string(ran), `"failed":`) && !strings.Contains(string(ran), `"failed":0`) {
-		status, _ := s.engine.Runner().Status(context.Background())
-		t.Fatalf("the runner failed: %s; %s", ran, status)
+	create := &orm.CheckoutCreate{
+		Customer: db.User{Id: &shopper},
+		Lines:    []db.CheckoutLine{{InventoryId: product, Quantity: db.GenericInt64(quantity)}},
 	}
+	if counter != nil {
+		at := db.TemporalDateTime(pickup.UTC())
+		create.Counter = &db.CollectionPoint{Id: counter}
+		create.PickupAt = &at
+	}
+	checkout, err := s.database.GetCheckoutRepository().CreateOne(orm.WithCaller(context.Background(), s.shopper), create)
+	if err != nil {
+		t.Fatalf("fill a cart: %v", err)
+	}
+	return *checkout.Id
 }
 
-// A shopper's checkout holds the units it asks and a pickup slot, all or
-// none, and another checkout cannot take what it holds; acmepay's payment,
-// reported by its signed webhook, places it through the Reactions rule,
-// which commits the units and the slot, and shop-orders writes its order
-// once and tells shop-stock what it sold; a webhook whose signature does
-// not verify is refused before anything reads it, and one acmepay sends
-// again changes nothing; a refund two members of staff sign off is made
-// at acmepay by SettlePayments and issued (D70).
-func TestACheckoutHoldsPaysPlacesAndRefunds(t *testing.T) {
-	s := newCommerceShop(t)
-	ctx := context.Background()
-	product := mustUUID(t, "00000000-0000-4000-8000-0000000000a1").String()
-	s.stock(t, product, 4500, 3, 1)
+type stockLevel struct {
+	OnHand, Held, Available int64
+	Low                     bool
+}
 
-	// A counter, which staff who hold calendar.manage open, and a slot at
-	// 10:00 London time two weekdays or more ahead.
-	counter := scalars.NewUUID().String()
-	engineCall(t, s.engine, nil, "instances.create", staffPrincipal("ada", "calendar.manage"), "CollectionPoint", map[string]any{"name": "Front counter"}, map[string]any{"namespace": shopNamespace, "id": counter})
+// inventory is a product's Stock as shop-stock reads it: what is on hand,
+// what checkouts hold, what is free, and whether it is low.
+func (s *commerceShop) inventory(t *testing.T, product db.IdentityUUID) stockLevel {
+	t.Helper()
+	row, err := s.database.GetInventoryRepository().GetOne(context.Background(), product, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	level := stockLevel{}
+	if row.StockOnHand != nil {
+		level.OnHand = int64(*row.StockOnHand)
+	}
+	if row.StockHeld != nil {
+		level.Held = int64(*row.StockHeld)
+	}
+	level.Available = level.OnHand - level.Held
+	level.Low = row.ReorderAt != nil && level.Available <= int64(*row.ReorderAt)
+	return level
+}
+
+// counter opens a counter, which staff who hold calendar.manage open, and
+// a slot at 10:00 London time two weekdays or more ahead.
+func (s *commerceShop) counter(t *testing.T) (db.IdentityUUID, time.Time) {
+	t.Helper()
+	point, err := s.database.GetCollectionPointRepository().CreateOne(asStaff(context.Background(), "ada", "calendar.manage"), &orm.CollectionPointCreate{Name: "Front counter"})
+	if err != nil {
+		t.Fatalf("open a counter: %v", err)
+	}
 	london, err := time.LoadLocation("Europe/London")
 	if err != nil {
 		t.Fatal(err)
@@ -291,30 +304,62 @@ func TestACheckoutHoldsPaysPlacesAndRefunds(t *testing.T) {
 	for day.Weekday() < time.Tuesday || day.Weekday() > time.Friday {
 		day = day.AddDate(0, 0, 1)
 	}
-	slot := time.Date(day.Year(), day.Month(), day.Day(), 10, 0, 0, 0, london)
+	return *point.Id, time.Date(day.Year(), day.Month(), day.Day(), 10, 0, 0, 0, london)
+}
+
+// staffSDK is shop-orders' SDK with a member of staff's session, who holds
+// permissions.
+func (s *commerceShop) staffSDK(t *testing.T, login, name string, permissions ...string) *sdk.ShopOrdersSDK {
+	t.Helper()
+	s.users.add(t, login, name, name+"'s password", permissions...)
+	return sdkFor(t, s.orders.URL, signIn(t, productsClient(t, productsServer(t, s.users)), login, name+"'s password"))
+}
+
+// A shopper's checkout holds the units it asks and a pickup slot, all or
+// none, and another checkout cannot take what it holds; acmepay's payment,
+// reported by its signed webhook, places it, which commits the units and
+// the slot, and shop-orders writes its order once and tells shop-stock what
+// it sold; a webhook whose signature does not verify is refused before
+// anything reads it, and one acmepay sends again changes nothing; a refund
+// two members of staff sign off through RefundActions' routes is made at
+// acmepay by SettlePayments and issued (D70, D103).
+func TestACheckoutHoldsPaysPlacesAndRefunds(t *testing.T) {
+	for name, open := range commerceDatabases(t) {
+		t.Run(name, func(t *testing.T) { aCheckoutHoldsPaysPlacesAndRefunds(t, open) })
+	}
+}
+
+func aCheckoutHoldsPaysPlacesAndRefunds(t *testing.T, open commerceDatabase) {
+	s := newCommerceShop(t, open)
+	ctx := context.Background()
+	product := s.stock(t, "anvil", 4500, 3, 1)
+	counter, slot := s.counter(t)
 
 	orders := sdkFor(t, s.orders.URL, s.token)
-	checkout := s.cart(t, product, 2, counter, slot)
-	id := checkout
+	checkout := s.cart(t, product, 2, &counter, slot)
+	id := checkout.String()
 	started, err := orders.CheckoutsNamespace.StartCheckout(ctx, id, types.StartCheckoutInput{ShippingAddress: address})
 	if err != nil {
 		t.Fatalf("StartCheckout: %v", err)
 	}
 	if started.Status != types.CheckoutStatus_Held || started.DueCents != 9000 || started.Currency != "GBP" || len(started.Lines) != 1 || started.Lines[0].State != "held" ||
-		started.Lines[0].UnitPriceCents == nil || *started.Lines[0].UnitPriceCents != 4500 || started.PickupAt == nil {
+		started.Lines[0].UnitPriceCents == nil || *started.Lines[0].UnitPriceCents != 4500 || started.PickupAt == nil || !strings.HasPrefix(started.Number, "ORD-") {
 		t.Fatalf("StartCheckout answered %+v", started)
 	}
-	if level := s.inventory(t, product).Behaviors.Stock; level.Held != 2 || level.Available != 1 {
+	if level := s.inventory(t, product); level.Held != 2 || level.Available != 1 {
 		t.Fatalf("the checkout holds %+v of the anvils", level)
 	}
 
 	// Another shopper's checkout asks for two anvils, and one is free: none
 	// of it is held, and the refusal names what is free.
-	other := s.cart(t, product, 2, "", time.Time{})
-	_, err = orders.CheckoutsNamespace.StartCheckout(ctx, other, types.StartCheckoutInput{ShippingAddress: address})
+	other := s.cart(t, product, 2, nil, time.Time{})
+	_, err = orders.CheckoutsNamespace.StartCheckout(ctx, other.String(), types.StartCheckoutInput{ShippingAddress: address})
 	var refused *sdk.APIError
-	if !errors.As(err, &refused) || refused.StatusCode != http.StatusConflict || !strings.Contains(refused.Message, "unavailable") && !strings.Contains(fmt.Sprint(refused.Details), "unavailable") {
+	if !errors.As(err, &refused) || refused.StatusCode != http.StatusConflict || !strings.Contains(refused.Message, "unavailable") && !strings.Contains(fmt.Sprint(refused.Details), "unavailable") && !strings.Contains(string(refused.Body), "unavailable") {
 		t.Fatalf("a checkout of more than is free answered %v, want 409 unavailable", err)
+	}
+	if level := s.inventory(t, product); level.Held != 2 {
+		t.Fatalf("the refused checkout left %+v of the anvils", level)
 	}
 
 	// The shopper pays on acmepay's page, with a test token: acmepay posts
@@ -355,9 +400,7 @@ func TestACheckoutHoldsPaysPlacesAndRefunds(t *testing.T) {
 		t.Fatalf("the capture sent again answered %d, %v", status, err)
 	}
 
-	// The runner's Reactions rule places the paid checkout, and reading it
-	// writes its order, once.
-	s.runDue(t)
+	// The capture placed the paid checkout, and its order is written once.
 	placed, err := orders.CheckoutsNamespace.GetCheckout(ctx, id)
 	if err != nil {
 		t.Fatalf("GetCheckout: %v", err)
@@ -369,24 +412,36 @@ func TestACheckoutHoldsPaysPlacesAndRefunds(t *testing.T) {
 	if err != nil || again.OrderId == nil || *again.OrderId != *placed.OrderId {
 		t.Fatalf("a second read answered %+v, %v", again, err)
 	}
-	order := s.rows.only(t)
-	if order.CheckoutId == nil || order.CheckoutId.String() != checkout || order.TotalCents != 9000 || len(order.Lines) != 1 ||
-		order.Lines[0].UnitPriceCents != 4500 || order.Lines[0].Quantity != 2 || order.Customer.Id.String() != s.shopper || s.rows.enqueued() != 1 {
-		t.Fatalf("the checkout wrote %+v, enqueuing %d", order, s.rows.enqueued())
+	order, err := s.database.GetOrderRepository().GetOne(ctx, *placed.OrderId, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines, _, err := s.database.GetOrderLineRepository().FindMany(ctx, &orm.OrderLineFilter{OrderID: &orm.UUIDFilter{Eq: order.Id}}, &orm.OrderLineFindOptions{Fields: orm.OrderLineFields{}.All()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if order.CheckoutId == nil || *order.CheckoutId != checkout || order.TotalCents != 9000 || len(lines) != 1 ||
+		lines[0].UnitPriceCents != 4500 || lines[0].Quantity != 2 || order.Customer.Id.String() != mustUUID(t, s.shopper).String() {
+		t.Fatalf("the checkout wrote %+v", order)
+	}
+	if _, n, err := s.database.GetOrderRepository().FindMany(ctx, &orm.OrderFilter{CheckoutId: &orm.UUIDFilter{Eq: &checkout}}, &orm.OrderFindOptions{Fields: orm.OrderFields{}.All()}); err != nil || n != 1 {
+		t.Fatalf("the checkout wrote %d orders, %v", n, err)
 	}
 	// The anvils are sold: off the shelf, held by no one, and the one left
 	// is the level the product is low at, which shop-stock is told of.
-	if level := s.inventory(t, product).Behaviors.Stock; level.OnHand != 1 || level.Held != 0 || !level.Low {
+	if level := s.inventory(t, product); level.OnHand != 1 || level.Held != 0 || !level.Low {
 		t.Fatalf("after the sale the anvils are %+v", level)
 	}
-	if got := s.sold.lines(); len(got) != 1 || got[0] != product+"x2" {
+	if got := s.sold.lines(); len(got) != 1 || got[0] != product.String()+"x2" {
 		t.Fatalf("shop-stock was told of %v", got)
 	}
-	var bookings json.RawMessage
-	engineCall(t, s.engine, &bookings, "instances.invoke", staffPrincipal("ada", "calendar.manage"), "CollectionPoint", counter, "listBookings",
-		map[string]any{"startMs": slot.Add(-time.Hour).UnixMilli(), "endMs": slot.Add(time.Hour).UnixMilli()}, inShop)
-	if !strings.Contains(string(bookings), `"`+checkout+`"`) || !strings.Contains(string(bookings), `"committed"`) {
-		t.Fatalf("the counter's bookings are %s, want the checkout's slot committed", bookings)
+	bookings, err := s.database.GetCollectionPointRepository().Calendar().ListBookings(asStaff(ctx, "ada", "calendar.manage"), counter,
+		orm.CollectionPointCalendarListBookingsParams{StartMs: slot.Add(-time.Hour).UnixMilli(), EndMs: slot.Add(time.Hour).UnixMilli()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := json.Marshal(bookings); len(bookings.Items) != 1 || !strings.Contains(string(raw), `"committed"`) {
+		t.Fatalf("the counter's bookings are %s, want the checkout's slot committed", raw)
 	}
 
 	// A refund past what was paid is refused; one within it waits for two
@@ -399,17 +454,30 @@ func TestACheckoutHoldsPaysPlacesAndRefunds(t *testing.T) {
 		t.Fatalf("RequestRefund answered %+v, %v", refund, err)
 	}
 	refundID := refund.Id.String()
-	approve := map[string]any{"state": "approved"}
-	engineCall(t, s.engine, nil, "instances.invoke", staffPrincipal("bob", "refunds.approve"), "Refund", refundID, "signOff", approve, inShop)
-	_, err = s.engine.Call(ctx, "instances.invoke", staffPrincipal("bob", "refunds.approve"), "Refund", refundID, "transition", map[string]any{"to": "approved"}, inShop)
-	if !engine.IsCode(err, engine.CodeVetoed) {
+	approve := types.RefundApprovalsSignOffInput{State: types.RefundApprovalsGate_Approved}
+	toApproved := types.RefundStatusTransitionInput{To: types.RefundStatusState_Approved}
+	// The shopper who asked for it holds no refunds.approve, and the
+	// routes refuse them.
+	if _, err := orders.RefundNamespace.Approvals.SignOff(ctx, refundID, approve); !errors.As(err, &refused) || refused.StatusCode != http.StatusForbidden {
+		t.Fatalf("the shopper's sign-off answered %v, want 403", err)
+	}
+	bob := s.staffSDK(t, "bob@example.com", "Bob", "refunds.approve")
+	if _, err := bob.RefundNamespace.Approvals.SignOff(ctx, refundID, approve); err != nil {
+		t.Fatalf("Bob's sign-off: %v", err)
+	}
+	if _, err := bob.RefundNamespace.Status.Transition(ctx, refundID, toApproved); !errors.As(err, &refused) || refused.StatusCode != http.StatusConflict {
 		t.Fatalf("a refund one member of staff signed off moved on: %v", err)
 	}
-	engineCall(t, s.engine, nil, "instances.invoke", staffPrincipal("carol", "refunds.approve"), "Refund", refundID, "signOff", approve, inShop)
-	engineCall(t, s.engine, nil, "instances.invoke", staffPrincipal("carol", "refunds.approve"), "Refund", refundID, "transition", map[string]any{"to": "approved"}, inShop)
+	carol := s.staffSDK(t, "carol@example.com", "Carol", "refunds.approve")
+	if _, err := carol.RefundNamespace.Approvals.SignOff(ctx, refundID, approve); err != nil {
+		t.Fatalf("Carol's sign-off: %v", err)
+	}
+	if _, err := carol.RefundNamespace.Status.Transition(ctx, refundID, toApproved); err != nil {
+		t.Fatalf("approve the refund: %v", err)
+	}
 
-	// SettlePayments makes the refund at acmepay and records it; the
-	// runner issues the Refund.
+	// SettlePayments makes the refund at acmepay, records it on the
+	// checkout, which settles it on the Refund, and issues the Refund.
 	jobs, err := shopordersimpl.NewJobs(s.deps)
 	if err != nil {
 		t.Fatal(err)
@@ -417,18 +485,13 @@ func TestACheckoutHoldsPaysPlacesAndRefunds(t *testing.T) {
 	if err := jobs.SettlePayments(ctx); err != nil {
 		t.Fatalf("SettlePayments: %v", err)
 	}
-	s.runDue(t)
-	var issued struct {
-		Behaviors struct {
-			Workflow struct {
-				Status string `json:"status"`
-			} `json:"Workflow"`
-		} `json:"behaviors"`
+	issued, err := s.database.GetRefundRepository().GetOne(ctx, refund.Id, nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	engineCall(t, s.engine, &issued, "instances.get", servicePrincipal("shop-orders", "shop-orders"), "Refund", refundID, inShop)
 	refunded, err := orders.CheckoutsNamespace.GetCheckout(ctx, id)
-	if err != nil || issued.Behaviors.Workflow.Status != "issued" || refunded.Payment != "partiallyRefunded" {
-		t.Fatalf("after SettlePayments the refund is %s and the checkout %+v (%v)", issued.Behaviors.Workflow.Status, refunded, err)
+	if err != nil || issued.Status != "issued" || refunded.Payment != "partiallyRefunded" {
+		t.Fatalf("after SettlePayments the refund is %s and the checkout %+v (%v)", issued.Status, refunded, err)
 	}
 	if intent, _ := s.pay.Intent(payment.IntentId); intent.Refunded != 4500 {
 		t.Fatalf("acmepay refunded %d", intent.Refunded)
@@ -440,21 +503,127 @@ func TestACheckoutHoldsPaysPlacesAndRefunds(t *testing.T) {
 	if intent, _ := s.pay.Intent(payment.IntentId); intent.Refunded != 4500 {
 		t.Fatalf("a second run refunded again: %d", intent.Refunded)
 	}
+}
 
-	// shop-db's policy refuses a service it does not name, such as shop-api.
-	_, err = s.engine.Call(ctx, "instances.get", servicePrincipal("shop-api", "ada"), "Checkout", checkout, inShop)
-	if !engine.IsCode(err, engine.CodeForbidden) {
-		t.Fatalf("shop-api read a checkout: %v", err)
+// A checkout still held fifteen minutes on expires: its hold's deadline,
+// which shop-orders' behavior worker CheckoutTimers runs when it falls due,
+// moves it to expired, which lets go of the units and the pickup slot it
+// holds and voids the payment it opened (D70, D103).
+func TestAHeldCheckoutExpires(t *testing.T) {
+	for name, open := range commerceDatabases(t) {
+		t.Run(name, func(t *testing.T) { aHeldCheckoutExpires(t, open) })
 	}
+}
+
+func aHeldCheckoutExpires(t *testing.T, open commerceDatabase) {
+	s := newCommerceShop(t, open)
+	ctx := context.Background()
+	product := s.stock(t, "kettle", 3000, 2, 0)
+	counter, slot := s.counter(t)
+	orders := sdkFor(t, s.orders.URL, s.token)
+	checkout := s.cart(t, product, 2, &counter, slot)
+	if _, err := orders.CheckoutsNamespace.StartCheckout(ctx, checkout.String(), types.StartCheckoutInput{ShippingAddress: address}); err != nil {
+		t.Fatalf("StartCheckout: %v", err)
+	}
+	if _, err := orders.CheckoutsNamespace.PayCheckout(ctx, checkout.String()); err != nil {
+		t.Fatalf("PayCheckout: %v", err)
+	}
+	if level := s.inventory(t, product); level.Held != 2 || level.Available != 0 {
+		t.Fatalf("the checkout holds %+v of the kettles", level)
+	}
+
+	// The worker runs the hold's deadline when it falls due, as of its due
+	// time; the shopper never paid.
+	armed := deadlinesOf(t, s.database, checkout)
+	var expiry *rules.ArmedDeadline
+	for i := range armed {
+		if armed[i].Name == "holdExpiry" {
+			expiry = &armed[i]
+		}
+	}
+	if expiry == nil {
+		t.Fatalf("the held checkout's deadlines are %+v, without holdExpiry", armed)
+	}
+	if due := time.UnixMilli(expiry.At); due.Before(time.Now().Add(14*time.Minute)) || due.After(time.Now().Add(16*time.Minute)) {
+		t.Fatalf("holdExpiry falls due at %s, want fifteen minutes on", due)
+	}
+	worker := orm.WithBehaviorCaller(ctx, rules.Caller{Subject: "shop-orders/CheckoutTimers"})
+	run, err := s.database.GetCheckoutRepository().RunDeadline(worker, db.CheckoutDeadline{RowKey: checkout, UseId: expiry.UseID, Name: expiry.Name, At: db.GenericInt64(expiry.At)}, nil)
+	if err != nil || !run.Ran {
+		t.Fatalf("the hold's deadline ran %+v, %v", run, err)
+	}
+	expired, err := orders.CheckoutsNamespace.GetCheckout(ctx, checkout.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.Status != types.CheckoutStatus_Expired || len(expired.Lines) != 1 || expired.Lines[0].State != "released" || expired.OrderId != nil {
+		t.Fatalf("the expired checkout is %+v", expired)
+	}
+	if level := s.inventory(t, product); level.OnHand != 2 || level.Held != 0 || level.Available != 2 {
+		t.Fatalf("after the expiry the kettles are %+v, want both free", level)
+	}
+	bookings, err := s.database.GetCollectionPointRepository().Calendar().ListBookings(asStaff(ctx, "ada", "calendar.manage"), counter,
+		orm.CollectionPointCalendarListBookingsParams{StartMs: slot.Add(-time.Hour).UnixMilli(), EndMs: slot.Add(time.Hour).UnixMilli()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw, _ := json.Marshal(bookings); strings.Contains(string(raw), `"held"`) {
+		t.Fatalf("the counter's bookings are %s, want the slot let go", raw)
+	}
+	// The payment it opened is voided: SettlePayments cancels it at
+	// acmepay.
+	jobs, err := shopordersimpl.NewJobs(s.deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := jobs.SettlePayments(ctx); err != nil {
+		t.Fatalf("SettlePayments: %v", err)
+	}
+	for _, event := range s.pay.Events() {
+		if event.Type == acmepay.EventIntentSucceeded {
+			t.Fatalf("acmepay captured %+v of an expired checkout", event)
+		}
+	}
+	if !hasEvent(s.pay.Events(), acmepay.EventIntentCanceled) {
+		t.Fatalf("acmepay's events are %+v, want the intent cancelled", s.pay.Events())
+	}
+}
+
+func hasEvent(events []acmepay.Event, eventType string) bool {
+	for _, event := range events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+// deadlinesOf are the deadlines armed on a checkout, as its behavior
+// worker's queue holds them.
+func deadlinesOf(t *testing.T, database orm.DatabaseInterface, checkout db.IdentityUUID) []rules.ArmedDeadline {
+	t.Helper()
+	var armed []rules.ArmedDeadline
+	err := database.Transaction(context.Background(), func(tx orm.TxInterface) error {
+		store := rulespostgres.NewStore(tx)
+		if lite, ok := tx.(*orm.SQLiteTx); ok {
+			store = rulessqlite.NewStore(lite.SQL())
+		}
+		var err error
+		armed, err = rules.ReadDeadlines(context.Background(), rules.Host{Layout: orm.RulesLayout, Store: store}, "Checkout", checkout.String())
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return armed
 }
 
 // A shopper's checkout is theirs: another shopper, or no one, finds none.
 func TestACheckoutIsItsShoppersOwn(t *testing.T) {
-	s := newCommerceShop(t)
+	s := newCommerceShop(t, sqliteShop)
 	ctx := context.Background()
-	product := mustUUID(t, "00000000-0000-4000-8000-0000000000a2").String()
-	s.stock(t, product, 100, 5, 0)
-	checkout := s.cart(t, product, 1, "", time.Time{})
+	product := s.stock(t, "anvil", 100, 5, 0)
+	checkout := s.cart(t, product, 1, nil, time.Time{}).String()
 
 	if _, err := sdkFor(t, s.orders.URL, "").CheckoutsNamespace.GetCheckout(ctx, checkout); err == nil {
 		t.Fatal("an anonymous caller read a checkout")
@@ -535,118 +704,4 @@ func (s *soldLines) lines() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.seen...)
-}
-
-// commerceRows is shop-db's ORM with its orders in memory: a checkout's
-// order and its lines, written in a transaction, the unique checkoutId
-// refusing a second, and the OrderPlaced messages it enqueues counted.
-type commerceRows struct {
-	*orm.NoOpDatabase
-	mu       sync.Mutex
-	orders   []db.Order
-	messages int
-}
-
-func (r *commerceRows) GetOrderRepository() orm.OrderRepositoryInterface {
-	return &commerceOrders{rows: r}
-}
-
-func (r *commerceRows) Transaction(_ context.Context, fn func(orm.TxInterface) error) error {
-	tx := &commerceTx{rows: r}
-	if err := fn(tx); err != nil {
-		return err
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	for _, order := range r.orders {
-		if order.CheckoutId != nil && tx.order.CheckoutId != nil && *order.CheckoutId == *tx.order.CheckoutId {
-			return &pgconn.PgError{Code: "23505", Message: "duplicate key value violates unique constraint"}
-		}
-	}
-	r.orders = append(r.orders, tx.order)
-	r.messages += tx.messages
-	return nil
-}
-
-func (r *commerceRows) only(t *testing.T) db.Order {
-	t.Helper()
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if len(r.orders) != 1 {
-		t.Fatalf("the shop holds %d orders, want 1", len(r.orders))
-	}
-	return r.orders[0]
-}
-
-func (r *commerceRows) enqueued() int {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.messages
-}
-
-type commerceOrders struct {
-	orm.NoOpOrderRepository
-	rows *commerceRows
-}
-
-func (o *commerceOrders) FindOne(_ context.Context, filter *orm.OrderFilter, _ *orm.OrderFindOptions) (*db.Order, error) {
-	o.rows.mu.Lock()
-	defer o.rows.mu.Unlock()
-	for _, order := range o.rows.orders {
-		if filter.CheckoutId != nil && filter.CheckoutId.Eq != nil && order.CheckoutId != nil && *order.CheckoutId == *filter.CheckoutId.Eq {
-			found := order
-			return &found, nil
-		}
-	}
-	return nil, orm.ErrNotFound
-}
-
-// commerceTx is a transaction: the order it creates, its lines, and the
-// messages it enqueues, which commit together.
-type commerceTx struct {
-	orm.NoOpTx
-	rows     *commerceRows
-	order    db.Order
-	messages int
-}
-
-func (tx *commerceTx) GetOrderRepository() orm.OrderRepositoryInterface {
-	return &txOrders{tx: tx}
-}
-
-func (tx *commerceTx) GetOrderLineRepository() orm.OrderLineRepositoryInterface {
-	return &txLines{tx: tx}
-}
-
-func (tx *commerceTx) Exec(_ context.Context, sql string, _ ...any) (pgconn.CommandTag, error) {
-	if strings.Contains(sql, "order_placed") {
-		tx.messages++
-	}
-	return pgconn.NewCommandTag("INSERT 0 1"), nil
-}
-
-type txOrders struct {
-	orm.NoOpOrderRepository
-	tx *commerceTx
-}
-
-func (o *txOrders) CreateOne(_ context.Context, input *db.Order) (*db.Order, error) {
-	id := scalars.NewUUID()
-	order := *input
-	order.Id = &id
-	o.tx.order = order
-	return &order, nil
-}
-
-type txLines struct {
-	orm.NoOpOrderLineRepository
-	tx *commerceTx
-}
-
-func (l *txLines) CreateOne(_ context.Context, input *db.OrderLine) (*db.OrderLine, error) {
-	id := scalars.NewUUID()
-	line := *input
-	line.Id = &id
-	l.tx.order.Lines = append(l.tx.order.Lines, line)
-	return &line, nil
 }

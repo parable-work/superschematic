@@ -2,83 +2,40 @@ package shoporders
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 
 	api "example.com/acme/api/shop-orders"
-	engine "github.com/parable-work/superschematic/runtime/engine/go"
+	orm "example.com/acme/orm/shop-db"
+	db "example.com/acme/types/go/shop-db"
+	rules "github.com/parable-work/superschematic/runtime/rules/go"
+	rulespostgres "github.com/parable-work/superschematic/runtime/rules/go/postgres"
+	rulessqlite "github.com/parable-work/superschematic/runtime/rules/go/sqlite"
 	"go.uber.org/zap"
 )
 
-// The engine types shop-orders keeps, of shop-db (D70).
-const (
-	checkoutSchema = "Checkout"
-	refundSchema   = "Refund"
-	// provider is acmepay's name in Payments' attempts and actions.
-	provider = "acmepay"
-)
+// provider is acmepay's name in Payments' attempts and actions (D70).
+const provider = "acmepay"
 
-// serviceName is the deployable shop-orders' in-process calls name to the
-// engine's policy (D37): shop-db's rules let shop-orders read and write.
+// serviceName is the subject shop-orders' own commands run as, with no
+// shopper: acmepay's adapter.
 const serviceName = "shop-orders"
 
-// shopperPrincipal is a shopper's call through shop-orders: the shopper is
-// the actor its events record, and shop-orders the service that made it.
-func shopperPrincipal(subject string) *engine.Principal {
-	return &engine.Principal{
-		Subject: subject,
-		Service: &engine.PrincipalService{Deployable: serviceName, Serves: []string{serviceName}, Subject: serviceName},
-	}
+// asAdapter is ctx with Checkout's and Refund's behaviors run as shop-orders
+// as acmepay's adapter, with no shopper (D70, D103): it records what
+// acmepay did, which Payments' record permission allows. The core checks a
+// behavior's permission against the caller's, so an operation a shopper's
+// call makes, a move or a payment opened, runs as the shopper, whom the
+// route's context names, holding none.
+func asAdapter(ctx context.Context) context.Context {
+	return orm.WithBehaviorCaller(ctx, rules.Caller{Subject: serviceName, Permissions: []string{"payments.record", "payments.refund"}})
 }
 
-// adapterPrincipal is shop-orders as acmepay's adapter, with no shopper:
-// it records what acmepay did, which Payments' record permission allows,
-// and asks refunds of a checkout (refunds' permission).
-func adapterPrincipal() *engine.Principal {
-	return &engine.Principal{
-		Subject:     serviceName,
-		Permissions: []string{"payments.record", "payments.refund"},
-		Service:     &engine.PrincipalService{Deployable: serviceName, Serves: []string{serviceName}, Subject: serviceName},
-	}
-}
-
-// engineOf waits for the engine Deps holds, which the entrypoint opens in
-// the background, for as long as the request's context lets it.
-func engineOf(ctx context.Context, b *engine.Background) (*engine.Engine, error) {
-	if b == nil {
-		return nil, unavailable("shop-db's engine is not configured")
-	}
-	e, err := b.Wait(ctx)
-	if err != nil {
-		return nil, unavailable("shop-db's engine is not open yet")
-	}
-	return e, nil
-}
-
-// call makes an engine call and decodes its result into out, nil to drop
-// it; a refusal becomes the API's error (refusal).
-func call(ctx context.Context, b *engine.Background, out any, op string, principal *engine.Principal, args ...any) error {
-	e, err := engineOf(ctx, b)
-	if err != nil {
-		return err
-	}
-	result, err := e.Call(ctx, op, principal, args...)
-	if err != nil {
-		return refusal(err)
-	}
-	if out == nil || len(result) == 0 {
-		return nil
-	}
-	if err := json.Unmarshal(result, out); err != nil {
-		return fmt.Errorf("read the engine's answer to %s: %w", op, err)
-	}
-	return nil
-}
-
-// veto is what a behavior said when it refused a call: its code, which a
-// client branches on, and its details.
+// veto is what a behavior said when it refused a command: its code, which
+// a client branches on, and its details.
 type veto struct {
 	Behavior    string          `json:"behavior"`
 	VetoCode    string          `json:"vetoCode"`
@@ -87,8 +44,8 @@ type veto struct {
 
 // vetoOf is the veto err carries, when it is one.
 func vetoOf(err error) (veto, bool) {
-	var refused *engine.Error
-	if !errors.As(err, &refused) || refused.Code != engine.CodeVetoed {
+	refused, ok := rules.AsRefusal(err)
+	if !ok || refused.Code != rules.CodeVetoed {
 		return veto{}, false
 	}
 	var v veto
@@ -96,37 +53,73 @@ func vetoOf(err error) (veto, bool) {
 	return v, v.VetoCode != ""
 }
 
-// refusal answers an engine error as the API's: a behavior's veto is 409
-// with its code and details (unavailable, holds_missing, nothing_due, ...),
-// a refused argument 400, a missing instance 404, busy or not open 503, and
+// refusal answers a refusal of the behaviors' core as the API's: a
+// behavior's veto is 409 with its code and details (unavailable,
+// holds_missing, nothing_due, ...), a permission the caller lacks 403, a
+// refused argument 400, a missing row 404, a row that kept moving 503, and
 // anything else the server's.
 func refusal(err error) error {
-	var refused *engine.Error
-	if !errors.As(err, &refused) {
+	refused, ok := rules.AsRefusal(err)
+	if !ok {
+		if errors.Is(err, orm.ErrNotFound) {
+			return api.NotFoundError("checkout", err)
+		}
 		return err
 	}
 	switch refused.Code {
-	case engine.CodeVetoed:
+	case rules.CodeVetoed:
 		v, _ := vetoOf(err)
 		conflict := api.ConflictError(refused.Message, err).WithCode(v.VetoCode)
 		if len(v.VetoDetails) > 0 && string(v.VetoDetails) != "null" {
 			conflict = conflict.WithDetails(v.VetoDetails)
 		}
 		return conflict
-	case engine.CodeNotFound:
+	case rules.CodeForbidden:
+		return api.ForbiddenError(err)
+	case rules.CodeNotFound:
 		return api.NotFoundError("checkout", err)
-	case engine.CodeInvalidArgument, engine.CodeInvalidInstance:
+	case rules.CodeInvalidArgument, rules.CodeInvalidInstance:
 		return api.BadRequestError(refused.Message, err)
-	case engine.CodeConflict, engine.CodeSeqMismatch:
+	case rules.CodeConflict:
 		return api.ConflictError(refused.Message, err)
-	case engine.CodeBusy, engine.CodeUnavailable:
+	case rules.CodeBusy:
 		return unavailable(refused.Message)
 	}
 	return err
 }
 
-// unavailableError is a 503, which a client tries again: the engine is not
-// open yet, or busy, or acmepay did not answer.
+// subRows reads the rows of a sub-table of a behavior's use on one row
+// (D103), such as Checkout's Payments attempts, which no repository reads:
+// through the behaviors' core's store of the database's dialect, in a
+// transaction of its own.
+func subRows(ctx context.Context, database orm.DatabaseInterface, typeName string, key db.IdentityUUID, useID, table string) ([]rules.SubRow, error) {
+	var rows []rules.SubRow
+	err := database.Transaction(ctx, func(tx orm.TxInterface) error {
+		store := rulespostgres.NewStore(tx)
+		if lite, ok := tx.(interface{ SQL() *sql.Tx }); ok {
+			store = rulessqlite.NewStore(lite.SQL())
+		}
+		var err error
+		rows, err = rules.ReadSubRows(ctx, rules.Host{Layout: orm.RulesLayout, Store: store}, typeName, key.String(), useID, table)
+		return err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("read %s %s's %s %s: %w", typeName, key, useID, table, err)
+	}
+	return rows, nil
+}
+
+// unmarshalValues decodes a sub-table row's values, by field name, into out.
+func unmarshalValues(values map[string]json.RawMessage, out any) error {
+	data, err := json.Marshal(values)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(data, out)
+}
+
+// unavailableError is a 503, which a client tries again: a row kept
+// moving while a command ran, or acmepay did not answer.
 type unavailableError struct{ message string }
 
 func unavailable(message string) error { return &unavailableError{message: message} }
