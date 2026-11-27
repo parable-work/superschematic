@@ -134,6 +134,27 @@ func (h notifierHost) Behaving(ctx context.Context, subject string, permissions 
 	return ctx
 {{- end }}
 }
+
+func (h notifierHost) Presenting(ctx context.Context, preconditions map[string]any) context.Context {
+{{- if and .Rules .Rules.Preconditions }}
+	return WithPreconditions(ctx, rules.Preconditions(preconditions))
+{{- else }}
+	_ = preconditions
+	return ctx
+{{- end }}
+}
+
+func (h notifierHost) ErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return 404
+{{- if .Access }}
+	case errors.Is(err, ErrAccessRefused):
+		return 403
+{{- end }}
+	}
+	return 0
+}
 {{- if .Orchestration.Grants }}
 
 // orchestrationGrants are the repositories the grants are read and written

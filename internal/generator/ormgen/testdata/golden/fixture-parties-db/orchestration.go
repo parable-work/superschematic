@@ -271,6 +271,21 @@ func (h notifierHost) Behaving(ctx context.Context, subject string, permissions 
 	return ctx
 }
 
+func (h notifierHost) Presenting(ctx context.Context, preconditions map[string]any) context.Context {
+	_ = preconditions
+	return ctx
+}
+
+func (h notifierHost) ErrorStatus(err error) int {
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return 404
+	case errors.Is(err, ErrAccessRefused):
+		return 403
+	}
+	return 0
+}
+
 // orchestrationGrants are the repositories the grants are read and written
 // through, of the database or of a transaction.
 func (h notifierHost) orchestrationGrants() grantRepositories {

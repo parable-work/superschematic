@@ -36,9 +36,10 @@ var partiesGoCases = []string{
 
 // goRuntimeModule generates db's Go types and ORM under a temporary output
 // root, writes source as <name>_test.go into the ORM's module with the
-// database's create.sql, requires the HTTP runtime, and runs go vet and
-// go test -run run in it with env: the test's output.
-func goRuntimeModule(t *testing.T, db, name, source, run string, env ...string) string {
+// database's create.sql, requires the HTTP runtime and modules (each
+// module path to its directory), and runs go vet and go test -run run in
+// it with env: the test's output.
+func goRuntimeModule(t *testing.T, db, name, source, run string, modules map[string]string, env ...string) string {
 	t.Helper()
 	paths := testpaths.Local(t)
 	outputRoot := t.TempDir()
@@ -71,9 +72,13 @@ func goRuntimeModule(t *testing.T, db, name, source, run string, env ...string) 
 	}
 	httpRuntime := naming.Default().HTTPRuntimeGoModule
 	env = append([]string{"CGO_LDFLAGS=" + archiveLDFlags(t)}, env...)
+	edit := []string{"mod", "edit", "-require=" + httpRuntime + "@v0.0.0-00010101000000-000000000000", "-replace=" + httpRuntime + "=" + paths.HTTPRuntimeGo}
+	for _, path := range sortedModuleKeys(modules) {
+		edit = append(edit, "-require="+path+"@v0.0.0-00010101000000-000000000000", "-replace="+path+"="+modules[path])
+	}
 	var out []byte
 	for _, args := range [][]string{
-		{"mod", "edit", "-require=" + httpRuntime + "@v0.0.0-00010101000000-000000000000", "-replace=" + httpRuntime + "=" + paths.HTTPRuntimeGo},
+		edit,
 		{"mod", "tidy"},
 		{"vet", "./..."},
 		{"test", "-count=1", "-v", "-run", run, "./..."},
@@ -111,7 +116,7 @@ func TestGoPartiesEndToEnd(t *testing.T) {
 	if dsn == "" {
 		t.Skip("set " + behaviorServerDatabaseEnv + " to run the Go inbound path against Postgres")
 	}
-	out := goRuntimeModule(t, "fixture-parties-db", "parties", partiesGoTest, "TestParties", "PARTIES_TEST_DATABASE_URL="+dsn)
+	out := goRuntimeModule(t, "fixture-parties-db", "parties", partiesGoTest, "TestParties", nil, "PARTIES_TEST_DATABASE_URL="+dsn)
 	t.Logf("generated ORM tests:\n%s", out)
 	for _, name := range partiesGoCases {
 		if want := "--- PASS: TestParties/" + strings.ReplaceAll(name, " ", "_") + " "; !strings.Contains(out, want) {

@@ -67,6 +67,13 @@ type Host interface {
 	// subject with permissions: the dispatcher's caller, or an
 	// administrator's.
 	Behaving(ctx context.Context, subject string, permissions []string) context.Context
+	// Presenting is ctx whose behaviors' commands present preconditions,
+	// each use's entry by its use id (D104): a Lease's token.
+	Presenting(ctx context.Context, preconditions map[string]any) context.Context
+	// ErrorStatus is the HTTP status of an error the repositories
+	// returned: 404 for a row that is not there, 403 for a write the
+	// caller's access refuses, 0 for any other.
+	ErrorStatus(err error) int
 	// IssueGrant makes a grant (D156) and its token; RevokeGrant revokes
 	// the grant whose id is id at at.
 	IssueGrant(ctx context.Context, input access.IssueGrantInput) (access.Grant, string, error)
