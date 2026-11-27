@@ -20,7 +20,7 @@ func TestMissingDependencies(t *testing.T) {
 		{Name: "@acme/shop-db-types", Spec: WorkspaceSpec},
 		{Name: "superscalar", Spec: "*"},
 		{Name: "@acme/cache-types", Spec: WorkspaceSpec},
-		{Name: "typescript", Spec: "5.9.3"},
+		{Name: "typescript", Spec: "7.0.2"},
 	}
 	missing, err := MissingDependencies(dir, deps)
 	if err != nil || !reflect.DeepEqual(missing, deps) {
@@ -36,7 +36,7 @@ func TestMissingDependencies(t *testing.T) {
 	write(`{
   "name": "@acme/shop-web-site",
   "dependencies": { "@acme/shop-db-types": "workspace:*" },
-  "devDependencies": { "typescript": "5.9.3" },
+  "devDependencies": { "typescript": "7.0.2" },
   "peerDependencies": { "superscalar": "*" },
   "optionalDependencies": {}
 }`)
