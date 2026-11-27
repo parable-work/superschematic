@@ -964,8 +964,7 @@ var IndexMethods = []string{IndexMethodBTree, IndexMethodGIN, IndexMethodGIST, I
 
 // HasTableOptions reports whether the index sets an option only a table's
 // index has (D83): a method, an operator class, a predicate, an expression,
-// the concurrency of its build or a vector method's parameter (D84). The
-// engine indexes an engine type's listed fields and reads none of them.
+// the concurrency of its build or a vector method's parameter (D84).
 func (idx IndexDef) HasTableOptions() bool {
 	return idx.Method != "" || idx.Ops != "" || idx.Where != "" || idx.Expression != "" || idx.Concurrently != nil ||
 		idx.M != nil || idx.EFConstruction != nil || idx.Lists != nil

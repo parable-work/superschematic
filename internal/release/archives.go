@@ -20,8 +20,8 @@ import (
 // A release's static archives on the machine that runs superschematic
 // (D47, amended). A Go build of the code a release generates, in a project
 // whose naming file names no superscalar checkout, links superscalar's
-// archive, the version graph's and the engine's through cgo, and no module
-// the module proxy serves carries them. `stack dev` and `stack run` fetch
+// archive, the version graph's and the behaviors' core's through cgo, and
+// no module the module proxy serves carries them. `stack dev` and `stack run` fetch
 // the release's tarball for the machine's platform, as the generated CI's
 // check job does: they download it, check it against the digest the
 // binary names, keep it in a cache, and point cgo's linker at it with

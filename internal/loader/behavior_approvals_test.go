@@ -47,7 +47,7 @@ func TestApprovalsFixturesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	task := db.Types["Task"]
-	if task == nil || task.IsEngineType() || !task.Optimistic {
+	if task == nil || len(task.TypeBehaviors()) > 0 || !task.Optimistic {
 		t.Fatalf("Task = %s", marshal(t, task))
 	}
 	var uses []string
@@ -197,7 +197,7 @@ func TestApprovalsFromTheDataForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := schema.Types["Task"]; !got.Optimistic || len(got.ImplementsBehaviors()) != 3 || got.IsEngineType() {
+	if got := schema.Types["Task"]; !got.Optimistic || len(got.ImplementsBehaviors()) != 3 || len(got.TypeBehaviors()) > 0 {
 		t.Errorf("Task = %s", marshal(t, got))
 	}
 	if schema.Types["TaskApprovalsSignOffs"] == nil {

@@ -47,7 +47,7 @@ func TestSchedulesFixturesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	problem := db.Types["Problem"]
-	if problem == nil || problem.IsEngineType() || !problem.Optimistic {
+	if problem == nil || len(problem.TypeBehaviors()) > 0 || !problem.Optimistic {
 		t.Fatalf("Problem = %s", marshal(t, problem))
 	}
 	var uses []string
@@ -266,7 +266,7 @@ func TestSchedulesFromTheDataForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := schema.Types["Problem"]; got == nil || !got.Optimistic || len(got.ImplementsBehaviors()) != 1 || got.IsEngineType() {
+	if got := schema.Types["Problem"]; got == nil || !got.Optimistic || len(got.ImplementsBehaviors()) != 1 || len(got.TypeBehaviors()) > 0 {
 		t.Errorf("Problem = %s", marshal(t, got))
 	}
 	for _, name := range []string{"ProblemSchedulesSchedules", "ProblemDeadline", "ProblemChange", "ProblemEvent"} {

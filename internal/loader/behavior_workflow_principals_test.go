@@ -43,7 +43,7 @@ func TestWorkflowPrincipalsFixturesLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 	question := db.Types["Question"]
-	if question == nil || question.IsEngineType() || len(question.FieldBehaviors()) != 2 {
+	if question == nil || len(question.TypeBehaviors()) > 0 || len(question.FieldBehaviors()) != 2 {
 		t.Fatalf("Question = %s", marshal(t, question))
 	}
 	compareExpanded(t, db, "fixture-workflow-principals-db.expanded.json")

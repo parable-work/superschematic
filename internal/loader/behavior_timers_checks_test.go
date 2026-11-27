@@ -79,7 +79,7 @@ func TestTimersFromTheDataForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ticket := schema.Types["Ticket"]; !ticket.Optimistic || len(ticket.ImplementsBehaviors()) != 1 || ticket.IsEngineType() {
+	if ticket := schema.Types["Ticket"]; !ticket.Optimistic || len(ticket.ImplementsBehaviors()) != 1 || len(ticket.TypeBehaviors()) > 0 {
 		t.Errorf("Ticket = %+v", ticket)
 	}
 	if schema.Types["TicketTimersDeadlines"] == nil || schema.Types["TicketDeadline"] == nil {

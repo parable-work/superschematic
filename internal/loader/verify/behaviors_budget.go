@@ -194,16 +194,3 @@ func scopeProblem(schema *ir.Schema, td *ir.TypeDef, meter, scope string) string
 		at, relation = next, *inner.Scope
 	}
 }
-
-// compactJSON writes a JSON value with no space, as JSON.stringify does.
-func compactJSON(raw json.RawMessage) string {
-	var value any
-	if json.Unmarshal(raw, &value) != nil {
-		return string(raw)
-	}
-	out, err := json.Marshal(value)
-	if err != nil {
-		return string(raw)
-	}
-	return string(out)
-}

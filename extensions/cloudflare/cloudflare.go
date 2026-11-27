@@ -180,7 +180,7 @@ func (e Extension) Register(r *registry.Registry) error {
 
 // noDerivers is why the target places no deriver (D74), which resolution
 // says when it refuses one.
-const noDerivers = "a deriver fills Derived fields in a loop that lasts as long as its process, over its API's engine, a native addon, and a Worker runs only per request or per firing and loads no native code; " +
+const noDerivers = "a deriver fills Derived fields in a loop that lasts as long as its process, through its API's repositories, and a Worker runs only per request or per firing; " +
 	"run the stack's derivers in an environment on the gcp target, whose gcp.cloudrunderiver runs them, or under stack dev on the local target"
 
 // noApps is why the target places no app (D78), which resolution says

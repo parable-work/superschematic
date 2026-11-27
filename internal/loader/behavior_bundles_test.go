@@ -139,7 +139,7 @@ func TestBundleFixturesLoad(t *testing.T) {
 				loaded[c.fixture] = db
 			}
 			td := db.Types[c.table]
-			if td == nil || td.IsEngineType() || !td.Optimistic {
+			if td == nil || len(td.TypeBehaviors()) > 0 || !td.Optimistic {
 				t.Fatalf("%s = %s", c.table, marshal(t, td))
 			}
 			var bundles []string

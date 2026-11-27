@@ -176,7 +176,6 @@ export interface DeployableRef {
   deployable?: string;
   deriver?: string;
   job?: string;
-  runner?: boolean;
   service?: ServiceRef;
   worker?: string;
 }

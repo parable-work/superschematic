@@ -2,9 +2,9 @@
 // tables compose a behavior the core's crate does not ship (D103's step
 // 5): one a class or an extension declares, whose hooks a Rust crate
 // implements over the core's API (registry.BehaviorSpec.Rules). A
-// project's core is a value its build assembles, as its engine is (D58,
-// projectengine): the core's behaviors (superschematic_rules_behaviors::
-// core) with each composed behavior's crate added (Core::with). A schema
+// project's core is a value its build assembles: the core's behaviors
+// (superschematic_rules_behaviors::core) with each composed behavior's
+// crate added (Core::with). A schema
 // whose tables compose the core's behaviors alone needs no crate: the
 // stock core, the release's archive and module, runs them.
 //

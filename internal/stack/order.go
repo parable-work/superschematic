@@ -165,8 +165,7 @@ func (r *resolver) order(out *ir.ResolvedEnvironment) {
 // as a server does (D52), and so does a site, whose config names the
 // public addresses of the servers it calls (D55). A server's calls to the
 // APIs it serves itself do not order it. An app rolls out after its
-// callees and after each server of its API (D78), whose start deploys the
-// engine document the app's engine waits for. A cycle of calls between
+// callees and after each server of its API (D78). A cycle of calls between
 // servers has no such order and fails.
 func (r *resolver) orderRollout() {
 	callees := map[string][]string{}

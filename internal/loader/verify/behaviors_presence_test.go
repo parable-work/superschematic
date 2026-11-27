@@ -38,7 +38,7 @@ func TestPresenceConfigIsHeldToTheTable(t *testing.T) {
 	move := func(to string, from ...any) map[string]any { return map[string]any{"transition": to, "from": from} }
 	holdAgentsRefusals(t, "Presence", []agentsCase{
 		{"sweepMs", presence(map[string]any{"sweepMs": 5000}),
-			prefix + "sweepMs is the engine's runner's, which missed the instances past their deadline every sweepMs: on a table the API's @behaviorWorker runs each row's miss as its deadline falls due, so a table's Presence takes no sweepMs (D104)"},
+			prefix + "sweepMs is how often a sweep missed the instances past their deadline: on a table the API's @behaviorWorker runs each row's miss as its deadline falls due, so a table's Presence takes no sweepMs (D104)"},
 		{"a principalField the table lacks", presence(map[string]any{"principalField": "worker"}),
 			prefix + `principalField "worker" is not a field of Session (its fields: device, agent, seats)`},
 		{"a principalField that holds no subject", presence(map[string]any{"principalField": "seats"}),

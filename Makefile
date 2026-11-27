@@ -55,7 +55,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 .PHONY: all setup build cli test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behaviors behaviors-check \
         gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust acme-engine-rust \
-        engine-rust-soak engine-archive engine-go engine-link-check engine-servers rules-archive \
+        engine-rust-soak engine-archive engine-go engine-link-check rules-archive \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -370,28 +370,6 @@ engine-go: engine-archive
 		go test -count=1 -run Replay -v ./enginehttp/
 	scripts/engine-archive.sh >/dev/null
 
-# Generated servers over the engine (D58), as CI's engine-servers job runs
-# them: servergen's engine entrypoint tests and the script three servers,
-# Go, Rust and TypeScript, answer alike over one engine database
-# (TestEngineServersAnswerOneScriptAlike), and the commerce fixture's
-# servers in each language (TestCommerceEngineEntrypointServes*, D70),
-# which three answer one commerce script alike
-# (TestCommerceServersAnswerOneScriptAlike) and oversell nothing when
-# 1,000 claims race for the last units and one slot
-# (TestCommerceServersOversellNothing), over the engine's archive, its
-# package and its Node-API addon, which this builds. The holds-a-second
-# measurement, TestCommerceHoldsLoad, runs only with
-# SUPERSCHEMATIC_COMMERCE_LOAD=1. They run offline, and
-# on the Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names when it is
-# set; SUPERSCHEMATIC_REQUIRE_ENGINE_SERVERS=1 makes a missing toolchain or
-# database a failure rather than a skip.
-ENGINE_SERVER_TESTS := ^(TestEngineEntrypointServes|TestTheEngineReachesCloudSQLThroughASocket|TestEngineProjectArchiveServes|TestRustEngineEntrypointServes|TestTypeScriptEngineEntrypointServes|TestTypeScriptEngineProjectAddonServes|TestEngineServersAnswerOneScriptAlike|TestCommerceEngineEntrypointServes|TestCommerceEngineEntrypointServesRust|TestCommerceEngineEntrypointServesTypeScript|TestCommerceServersAnswerOneScriptAlike|TestCommerceServersOversellNothing)$$
-engine-servers: versiongraph engine-archive
-	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build
-	cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build
-	scripts/engine-napi.sh
-	go test -count=1 -timeout 80m -run '$(ENGINE_SERVER_TESTS)' ./internal/generator/servergen/
-
 # One Go binary that links superscalar's, the version graph's, the engine's
 # and the behaviors' core's archives together and calls each
 # (scripts/engine-link-check.sh), after checking that each of the four
@@ -529,19 +507,13 @@ docs:
 # runtime/engine-workqueue/typescript/test/package.test.ts, and the
 # commerce package's suites (runtime/engine-commerce/typescript) run its
 # behaviors on the addon. It builds
-# fixture-behaviors-json, a General schema, and fixture-engine-db-json,
-# whose engine types the sql generator leaves out and whose engine
-# document the build writes (D58).
+# fixture-behaviors-json, a General schema.
 cli-smoke: $(CORE_BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
 	@for s in fixture-db fixture-api fixture-general; do \
 		$(CORE_BIN) build internal/loader/tsreader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
-	@for s in fixture-db-json fixture-general-yaml fixture-engine-db-json fixture-behaviors-json; do \
+	@for s in fixture-db-json fixture-general-yaml fixture-behaviors-json; do \
 		$(CORE_BIN) build internal/loader/testdata/services/$$s --out /tmp/superschematic-cli-smoke || exit 1; done
-	@grep -q '"namespace": "fixture-engine-db"' /tmp/superschematic-cli-smoke/types/go/fixture-engine-db/engine/fixture-engine-db.json \
-		|| { echo "cli-smoke: the engine fixture's build wrote no engine document"; exit 1; }
-	@! grep -qi 'ticket' /tmp/superschematic-cli-smoke/sql/fixture-engine-db/create.sql \
-		|| { echo "cli-smoke: sql wrote a table for an engine type"; exit 1; }
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-behaviors-json --emit-ir --out /tmp/superschematic-cli-smoke \
 		>/tmp/superschematic-cli-smoke/behaviors-ir.json
 	@$(CORE_BIN) build internal/loader/testdata/services/fixture-cross-instance-json --emit-ir --out /tmp/superschematic-cli-smoke \

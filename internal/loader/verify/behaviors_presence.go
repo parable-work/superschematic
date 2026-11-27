@@ -48,7 +48,7 @@ func checkPresenceConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef, 
 func presenceProblem(schema *ir.Schema, td *ir.TypeDef, uses map[string]registry.Behavior, principalField string,
 	onMissed, onBeat *statusMove, releaseLeases []string, sweepMs bool, ttlByState map[string]int64, status *string) string {
 	if sweepMs {
-		return "sweepMs is the engine's runner's, which missed the instances past their deadline every sweepMs: on a table the API's @behaviorWorker runs each row's miss as its deadline falls due, so a table's Presence takes no sweepMs (D104)"
+		return "sweepMs is how often a sweep missed the instances past their deadline: on a table the API's @behaviorWorker runs each row's miss as its deadline falls due, so a table's Presence takes no sweepMs (D104)"
 	}
 	rule := fieldRule{at: "principalField", member: "principalField", names: "the table's own field that holds the principal", operations: true, holds: "one subject",
 		types: func(t string) bool { return slices.Contains(subjectTypes, t) }, wrong: "is not a string field"}

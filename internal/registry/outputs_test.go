@@ -18,7 +18,6 @@ func coreOutputRegistry(t *testing.T) *Registry {
 		{Name: "api", OutputKey: "api"},
 		{Name: "sdks", OutputKey: "sdk"},
 		{Name: "envConfig"},
-		{Name: "enginedoc"},
 		{Name: "stack", Kinds: []string{"Stack"}},
 		{Name: "site", Kinds: []string{"Site"}},
 		{Name: "memorystore", Kinds: []string{"MemoryStore"}},

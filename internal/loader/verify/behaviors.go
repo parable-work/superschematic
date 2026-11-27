@@ -179,16 +179,6 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 	}
 }
 
-// configNames reports whether config, a JSON object, has the member key.
-func configNames(config json.RawMessage, key string) bool {
-	var members map[string]json.RawMessage
-	if json.Unmarshal(config, &members) != nil {
-		return false
-	}
-	_, ok := members[key]
-	return ok
-}
-
 // implementable reports whether a table may implement behavior (D103): one
 // a core runs (registry.Behavior.RunsOnTheCore: the stock core's, one a
 // class or an extension declares with the Rust crate that runs it on a

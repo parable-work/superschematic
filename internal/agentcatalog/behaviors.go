@@ -16,13 +16,14 @@ const behaviorConfigs = "BehaviorConfigs"
 // configMember is one `Name: ConfigType;` member of BehaviorConfigs.
 var configMember = regexp.MustCompile(`(?m)^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*)\??:\s*([A-Za-z_$][\w$]*)`)
 
-// renderBehaviors is the behavior catalog: each core behavior an engine
-// implements as the registry declares it, what it adds to a type and the
+// renderBehaviors is the behavior catalog: each core behavior @behavior
+// composes as the registry declares it, what it adds to a type and the
 // name of its config type, then every config type, from
 // @superschematic/schema. A behavior the behaviors' core alone implements
-// (registry.RulesPackage: Seats, Reconcile, Schedules, Pool, D104; Recurrence, D152) is left
-// out: no engine type composes it, so BehaviorConfigs names no type for it,
-// and the guide to tables (database-tables) describes it.
+// (registry.RulesPackage: Seats, Reconcile, Schedules, Pool, D104;
+// Recurrence, D152; Aliased, D147) is left out: only a table composes it,
+// so BehaviorConfigs names no type for it, and the guide to tables
+// (database-tables) describes it.
 func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	configTypes := map[string]string{}
 	for _, d := range typeDecls(exports) {
@@ -38,17 +39,20 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	}
 
 	var b bytes.Buffer
-	b.WriteString("# Engine behaviors\n\n")
-	b.WriteString("A behavior adds fields, operations, checks and storage to a type that an\n")
-	b.WriteString("engine runs (`@superschematic/engine`, in TypeScript or Rust): an engine\n")
-	b.WriteString("type, which keeps no table and gets no ORM. A type composes one with\n")
-	b.WriteString("`@behavior(\"Workflow\", { ... })` from `@superschematic/schema`, once per\n")
-	b.WriteString("behavior, and the config is checked against the behavior's declaration\n")
-	b.WriteString("when the schema loads. A read returns a behavior's fields under\n")
-	b.WriteString("`behaviors.<Behavior>`, beside the type's own data; elsewhere a field is\n")
-	b.WriteString("named by its qualified name, `Workflow.status`.\n\n")
-	b.WriteString("Every type an engine runs also has the create, get, list, update and\n")
-	b.WriteString("delete operations, which the lists below leave out. An extension's\n")
+	b.WriteString("# Behaviors\n\n")
+	b.WriteString("A behavior adds fields, operations, checks and storage to a type. A\n")
+	b.WriteString("General schema's type composes one with `@behavior(\"Workflow\", { ... })`\n")
+	b.WriteString("from `@superschematic/schema`, once per behavior, and development mode\n")
+	b.WriteString("serves it (D117). A DB type takes no `@behavior`: it is a table, which\n")
+	b.WriteString("composes a behavior by a field type, `status: Workflow<{ ... }>`, or by\n")
+	b.WriteString("`implements Timers<Ticket, { ... }>` (D103). The config is checked\n")
+	b.WriteString("against the behavior's declaration when the schema loads. A read returns\n")
+	b.WriteString("a behavior's fields under `behaviors.<Behavior>`, beside the type's own\n")
+	b.WriteString("data; elsewhere a field is named by its qualified name,\n")
+	b.WriteString("`Workflow.status`.\n\n")
+	b.WriteString("Every type that composes a behavior with `@behavior` also has the create,\n")
+	b.WriteString("get, list, update and delete operations, which the lists below leave\n")
+	b.WriteString("out. An extension's\n")
 	b.WriteString("behaviors are named `<extension>.<Name>`, and their configs are given as\n")
 	b.WriteString("the JSON Schema the declaration checks them against.\n")
 

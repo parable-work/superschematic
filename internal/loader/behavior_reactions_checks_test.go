@@ -113,7 +113,7 @@ func TestReactionsFromTheDataForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if project := schema.Types["Project"]; !project.Optimistic || len(project.ImplementsBehaviors()) != 1 || project.IsEngineType() {
+	if project := schema.Types["Project"]; !project.Optimistic || len(project.ImplementsBehaviors()) != 1 || len(project.TypeBehaviors()) > 0 {
 		t.Errorf("Project = %+v", project)
 	}
 	task := schema.BehaviorQueueOf("Task", ir.BehaviorQueueChanges)
@@ -133,8 +133,7 @@ func TestReactionsFromTheDataForms(t *testing.T) {
 // holds a list, or composes no Workflow or several; and a then.link that
 // is no to-one relation, or whose target composes no Workflow, several, or
 // one without the state. A table whose writes are heard has one key field
-// and leaves its change queue's name to the build. An engine type's
-// Reactions that names status is refused too.
+// and leaves its change queue's name to the build.
 func TestReactionsChecks(t *testing.T) {
 	enters := func(state string) map[string]any { return map[string]any{"enters": state} }
 	changes := func(field string) map[string]any { return map[string]any{"changes": map[string]any{"field": field}} }
