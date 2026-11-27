@@ -184,6 +184,10 @@ type Options struct {
 	// PermissionsOf are the permissions a recipient holds; a user's roles'
 	// unless set.
 	PermissionsOf func(ctx context.Context, recipient RecipientRef) ([]string, error)
+	// Agents is the agent dispatcher a route's { agent } recipient puts a
+	// run request on the queue of (D158, D192); such a route is logged and
+	// reaches no one without it.
+	Agents Agents
 	// Expand is the core's expansion of a recurrence rule (D152), which
 	// digests and briefs are dated by: the instants it falls due at.
 	Expand func(ExpandInput) ([]time.Time, error)
@@ -981,11 +985,10 @@ func (n *Notifier) route(ctx context.Context, event raisedEvent) error {
 			}
 			specs := specsOf(r["recipients"])
 			// A route that names an agent starts its run about the record
-			// (D158), which the Go runtime does not serve yet (D192).
-			for _, spec := range specs {
-				if spec.Agent != nil {
-					n.log.Warn("a route names an agent, and the Go notifier has no agent dispatcher yet", zap.String("route", r.str("id")), zap.String("agent", *spec.Agent))
-				}
+			// (D158), a request on the dispatcher's queue in this
+			// transaction.
+			if err := n.requestAgents(ctx, h, event, r.str("id"), specs); err != nil {
+				return err
 			}
 			recipients, err := n.recipientsOf(ctx, h, event, specs)
 			if err != nil {
@@ -1054,13 +1057,22 @@ func (n *Notifier) addressOf(ctx context.Context, h notifications.Host, recipien
 		w.null("optedOutAt")
 	}
 	rows, err := n.find(ctx, h, w, "", 10)
-	if err != nil || len(rows) == 0 {
+	if err != nil {
 		return "", err
 	}
 	// A party's identity whose grants have all ended since it was verified
-	// (D157's identityLapsed) is D192's: the Go notifier does not serve
-	// parties' standing yet.
-	return rows[0].str("address"), nil
+	// may be someone else's now (D157's identityLapsed): it is sent
+	// nothing.
+	for _, r := range rows {
+		lapsed, err := n.lapsed(ctx, h, identityOf(r))
+		if err != nil {
+			return "", err
+		}
+		if !lapsed {
+			return r.str("address"), nil
+		}
+	}
+	return "", nil
 }
 
 func ended(state string) bool {
