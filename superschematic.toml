@@ -91,6 +91,16 @@ private_remarks = "keep"
 #
 #   behaviors = "behaviors"
 
+# The task sections the project registers as data (D203). A section is a
+# part of a Tasks service's task file that one forge owns and reads. Each
+# table names the JSON Schema files of the section's two parts, relative
+# to the schemas root: file, the part @tasks holds, and task, the part
+# @task holds. A section gives one or both. Unset by default:
+#
+#   [tasks.sections.forge]
+#   file = "forge/file.schema.json"
+#   task = "forge/task.schema.json"
+
 # The TypeScript packages a .schema.ts file may import symbols from. A
 # distribution that republishes them under its own names lists those names
 # here and maps each to the declaring package in [package_aliases]:

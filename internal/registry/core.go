@@ -7,14 +7,15 @@ import (
 // coreKinds returns the core kinds, each with the authoring rules
 // verify/kind.go and the tsreader walker apply to it and its generator
 // pipeline. The generators the pipelines name are registered by
-// generator.RegisterCore.
+// generator.RegisterCore. r is the registry the kinds are registered
+// in, which the Tasks kind's verification reads.
 //
 // ForbiddenPackages is keyed on the declaring authoring package (pkgAPI,
 // pkgDB). verify folds the import specifier a schema file writes onto its
 // declaring package through Naming.DeclaringPackage before the lookup, so a
 // distribution that re-exports the core packages under other names needs
 // only the [package_aliases] table, not a second key here.
-func coreKinds() []KindSpec {
+func coreKinds(r *Registry) []KindSpec {
 	return []KindSpec{
 		{
 			Name:       string(ir.SchemaKindDB),
@@ -63,5 +64,6 @@ func coreKinds() []KindSpec {
 		siteKind(),
 		bucketKind(),
 		memoryStoreKind(),
+		tasksKind(r),
 	}
 }

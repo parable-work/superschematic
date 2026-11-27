@@ -1,7 +1,7 @@
 # Development mode's handler (TypeScript)
 
-`@superschematic/rules-handler` is development mode's request handler (D117
-in `docs/DECISIONS.md`, D103's step 6) for a server written by hand in
+`@superschematic/rules-handler` is development mode's request handler
+(D117, #590; D103's step 6, #587) for a server written by hand in
 TypeScript. It is `superschematic-rules-handler` built for
 `wasm32-unknown-unknown` from `runtime/engine/rust/rules-handler-wasm`,
 driven over its JSON C ABI with no generated glue, as `@superschematic/rules`

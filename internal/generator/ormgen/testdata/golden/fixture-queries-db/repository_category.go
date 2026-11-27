@@ -356,10 +356,12 @@ func (r *CategoryRepository) GetOne(ctx context.Context, id types.IdentityUUID, 
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple Category records by their IDs in a single query
+// GetManyByIDs retrieves multiple Category records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *CategoryRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Category, error) {
+	resultMap := make(map[types.IdentityUUID]*types.Category, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.Category{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -371,7 +373,22 @@ func (r *CategoryRepository) GetManyByIDs(ctx context.Context, ids []types.Ident
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *CategoryRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.Category, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -453,7 +470,6 @@ func (r *CategoryRepository) GetManyByIDs(ctx context.Context, ids []types.Ident
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -1794,7 +1810,9 @@ func (r *CategoryRepository) heldOfKey(ctx context.Context, on CategoryUniqueKey
 	return row, nil
 }
 
-// CreateMany inserts multiple Category records in a single statement
+// CreateMany inserts multiple Category records and returns them in the
+// inputs' order: a statement of at most 13106 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *CategoryRepository) CreateMany(ctx context.Context, inputs []*types.Category) ([]*types.Category, error) {
 	if len(inputs) == 0 {
 		return []*types.Category{}, nil
@@ -1860,18 +1878,40 @@ func (r *CategoryRepository) CreateMany(ctx context.Context, inputs []*types.Cat
 		}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 13106 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.Category, error) {
+		return (&CategoryRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "name", "parent_id", "budget", "budget_since"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 13106 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *CategoryRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.Category, error) {
+	results := make([]*types.Category, 0, len(batch))
+	for start := 0; start < len(batch); start += 13106 {
+		created, err := r.createBatch(ctx, batch[start:min(start+13106, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *CategoryRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.Category, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO category (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"id", "name", "parent_id", "budget", "budget_since"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -1883,60 +1923,17 @@ func (r *CategoryRepository) CreateMany(ctx context.Context, inputs []*types.Cat
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.Category{}
+	results := make([]*types.Category, 0, len(batch))
 	for rows.Next() {
-		result := &types.Category{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		var tempBudget *types.GenericDecimal
-		var tempBudgetSince pgtype.Date
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		var tempRelParent *types.IdentityUUID
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.Id,
-
-			&result.Name,
-
-			&tempRelParent,
-
-			&tempBudget,
-
-			&tempBudgetSince,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		if tempBudget != nil {
-			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-			result.Budget = tempBudget
-		}
-		if tempBudgetSince.Valid {
-			// Nullable date scalar: typegen emits *Scalar, take address of converted value
-			tmpBudgetSince := types.TemporalDate(tempBudgetSince.Time.Format("2006-01-02"))
-			result.BudgetSince = &tmpBudgetSince
-		}
-
-		// Set relationship IDs from scanned FK values
-		if tempRelParent != nil {
-			// Initialize pointer for optional relationship before setting ID
-			result.Parent = &types.Category{Id: categoryUUIDPtr(*tempRelParent)}
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

@@ -1,5 +1,5 @@
-// Package behaviorops adds a table's behavior operations to an API (D103 in
-// docs/DECISIONS.md). An API marks a class with no members
+// Package behaviorops adds a table's behavior operations to an API
+// (D103, #587). An API marks a class with no members
 // @behaviorOperations(Type), from @superschematic/api, naming a table of its
 // database that composes a behavior, by implements or on a field:
 //

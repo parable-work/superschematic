@@ -12,7 +12,10 @@
  * service is a Redis or Valkey server the replicas of a stack share, which
  * holds no fact (D75): its schema declares each channel and key it carries
  * (`@superschematic/memory-store`), and APIs list it in their
- * `memoryStores`.
+ * `memoryStores`. A Tasks service declares the work a commit of its
+ * repository needs, a class per task (`@superschematic/tasks`, D203): its
+ * build writes the task file a forge reads, and nothing names it, so it
+ * has no sentinel.
  */
 export enum SchemaKind {
   DB = "DB",
@@ -21,7 +24,8 @@ export enum SchemaKind {
   Stack = "Stack",
   Site = "Site",
   Bucket = "Bucket",
-  MemoryStore = "MemoryStore"
+  MemoryStore = "MemoryStore",
+  Tasks = "Tasks"
 }
 
 /**
@@ -217,12 +221,23 @@ export type CiOutputConfig = {
   readonly [renderer: string]: CiRendererConfig | undefined;
 };
 
+/**
+ * The task file a Tasks service's build writes. Only a Tasks service sets it. The build writes the file under <out>/tasks/<service>/.
+ */
+export type TasksOutputConfig = {
+  /**
+   * The path the task file is committed at, from the repository root, as ci/tasks.json. Its directory must exist. Every build-all installs the file there, and tasks --check fails when the committed file is not what the schema gives. Unset, the file is written under the output root alone.
+   */
+  readonly install?: string;
+};
+
 export type SchemaOutputs = {
   readonly types?: TypesOutputConfig;
   readonly api?: ApiOutputConfig;
   readonly sdk?: SdkOutputConfig;
   readonly sql?: SqlOutputConfig;
   readonly ci?: CiOutputConfig;
+  readonly tasks?: TasksOutputConfig;
 };
 
 /**

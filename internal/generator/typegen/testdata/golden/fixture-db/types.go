@@ -700,7 +700,7 @@ type Tenant struct {
 
 	Email string `json:"email"`
 
-	Status TenantStatus `json:"status"`
+	Status TenantStatus `json:"status,omitzero"`
 
 	IsActive bool `json:"isActive"`
 

@@ -1,7 +1,7 @@
 # Permission catalog
 
 The permission catalog lists every permission an API's operations name,
-with the operations that name each (D50 in `docs/DECISIONS.md`). The build
+with the operations that name each (D50). The build
 writes it as `permissions.json` beside the API's `openapi.json`, in the
 API's output directory (`<out>/api/<api>/`), for a Go, TypeScript or Rust
 server alike; the TypeScript package exports it as

@@ -412,7 +412,8 @@ type Repository struct {
 
 	// Clauses are sqlutil.PostgresClauses, which an upsert's update writes
 	// a NULL it compares with (D89), and BatchRows the most rows one
-	// statement of UpsertMany writes (sqlutil.TableModel.BatchRows).
+	// statement of UpsertMany or CreateMany writes
+	// (sqlutil.TableModel.BatchRows).
 	// QualifiedKey is the primary key's column qualified by the table, which
 	// Nearest's ExcludeIDs leaves out the keys of.
 	Clauses      sqlutil.Clauses

@@ -752,14 +752,12 @@ func (g *RecipeGraph) History(ctx context.Context, ref types.IdentityUUID) ([]*t
 		if err != nil {
 			return err
 		}
-		for _, c := range commits {
-			commit, err := g.commitRow(ctx, tx, c.ID)
-			if err != nil {
-				return err
-			}
-			result = append(result, commit)
+		ids := make([]string, len(commits))
+		for i, c := range commits {
+			ids[i] = c.ID
 		}
-		return nil
+		result, err = g.commitRows(ctx, tx, ids)
+		return err
 	})
 	return result, err
 }
@@ -777,12 +775,16 @@ func (g *RecipeGraph) EntityHistory(ctx context.Context, root types.IdentityUUID
 		if err != nil {
 			return err
 		}
-		for _, change := range changes {
-			commit, err := g.commitRow(ctx, tx, change.Commit.ID)
-			if err != nil {
-				return err
-			}
-			result = append(result, RecipeEntityChange{Commit: commit, Operation: types.RecipePatchOperation(change.Operation)})
+		ids := make([]string, len(changes))
+		for i, change := range changes {
+			ids[i] = change.Commit.ID
+		}
+		commits, err := g.commitRows(ctx, tx, ids)
+		if err != nil {
+			return err
+		}
+		for i, change := range changes {
+			result = append(result, RecipeEntityChange{Commit: commits[i], Operation: types.RecipePatchOperation(change.Operation)})
 		}
 		return nil
 	})
@@ -849,6 +851,36 @@ func (g *RecipeGraph) commitRow(ctx context.Context, tx pgx.Tx, id string) (*typ
 		return nil, err
 	}
 	return (&RecipeCommitRepository{tx: tx, txDB: g.db}).GetOne(ctx, commitID, nil)
+}
+
+// commitRows reads the commit rows of ids, as commitRow does each, in the
+// order of ids, with one GetManyByIDs: ErrNotFound when a commit has no
+// row.
+func (g *RecipeGraph) commitRows(ctx context.Context, tx pgx.Tx, ids []string) ([]*types.RecipeCommit, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	keys := make([]types.IdentityUUID, len(ids))
+	for i, id := range ids {
+		key, err := parseGraphID(id)
+		if err != nil {
+			return nil, err
+		}
+		keys[i] = key
+	}
+	rows, err := (&RecipeCommitRepository{tx: tx, txDB: g.db}).GetManyByIDs(ctx, keys)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*types.RecipeCommit, len(keys))
+	for i, key := range keys {
+		row, ok := rows[key]
+		if !ok {
+			return nil, ErrNotFound
+		}
+		out[i] = row
+	}
+	return out, nil
 }
 
 // commitResult reads the typed ref and, unless none was written, the typed

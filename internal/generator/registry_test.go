@@ -132,13 +132,13 @@ func TestRunRejectsUnknownKindAndUnknownOutputWithTodaysText(t *testing.T) {
 	reg := extensionRegistry(t, widgetExtension{generate: writeWidget})
 	schema, cfg = catalogService(map[string]any{"graphql": map[string]any{"enabled": true}})
 	_, err = Run(schema, cfg, Options{OutputRoot: t.TempDir(), Registry: reg})
-	want := `schema config for shop: outputs block has unknown key "graphql" (expected types, sql, api, sdk, ci, widget)`
+	want := `schema config for shop: outputs block has unknown key "graphql" (expected types, sql, api, sdk, ci, tasks, widget)`
 	if err == nil || err.Error() != want {
 		t.Fatalf("unknown output error = %v, want %q", err, want)
 	}
 
 	_, err = Run(schema, cfg, Options{OutputRoot: t.TempDir(), Naming: naming.Default()})
-	want = `schema config for shop: outputs block has unknown key "graphql" (expected types, sql, api, sdk, ci)`
+	want = `schema config for shop: outputs block has unknown key "graphql" (expected types, sql, api, sdk, ci, tasks)`
 	if err == nil || err.Error() != want {
 		t.Fatalf("core-only unknown output error = %v, want %q", err, want)
 	}
@@ -189,28 +189,32 @@ func TestCoreRegistryPipelinesMatchTheFormerKindSwitch(t *testing.T) {
 		"API":     {"types", "api", "sdks"},
 		"General": {"types", "envConfig"},
 		"Stack":   {"stack", "server", "ci"},
+		"Tasks":   {"tasks"},
 	}
 	for kind, pipeline := range want {
 		if got := names(reg.Pipeline(kind)); !reflect.DeepEqual(got, pipeline) {
 			t.Errorf("Pipeline(%s) = %v, want %v", kind, got, pipeline)
 		}
 	}
-	if got := reg.OutputKeys(); !reflect.DeepEqual(got, []string{"types", "sql", "api", "sdk", "ci"}) {
+	if got := reg.OutputKeys(); !reflect.DeepEqual(got, []string{"types", "sql", "api", "sdk", "ci", "tasks"}) {
 		t.Errorf("OutputKeys() = %v", got)
 	}
 }
 
-// TestCoreRegistryCarriesNoDocumentsOrHooks: the core registers no sidecar
-// documents and no build-all hooks (the deploy family registers both from
-// the Acme extension), and a core-only run leaves a document it has no spec
-// for untouched instead of failing on it.
-func TestCoreRegistryCarriesNoDocumentsOrHooks(t *testing.T) {
+// TestCoreRegistryCarriesNoDocumentsAndOneHook: the core registers no
+// sidecar documents (the deploy family registers them, and its own hooks,
+// from the Acme extension) and one build-all hook, the Tasks kind's
+// install, and a core-only run leaves a document it has no spec for
+// untouched instead of failing on it.
+func TestCoreRegistryCarriesNoDocumentsAndOneHook(t *testing.T) {
 	reg := CoreRegistry(naming.Default())
 	if docs := reg.Documents(); len(docs) != 0 {
 		t.Errorf("Documents() = %+v, want none", docs)
 	}
-	if hooks := reg.BuildAllHooks(); len(hooks) != 0 {
-		t.Errorf("BuildAllHooks() = %+v, want none", hooks)
+	// The core's one hook installs a Tasks service's task file (D203): a
+	// build that restores the service from the cache runs no generator.
+	if hooks := reg.BuildAllHooks(); len(hooks) != 1 || hooks[0].Name != "tasks-install" || hooks[0].Extension != "" {
+		t.Errorf("BuildAllHooks() = %+v, want the core's tasks-install alone", hooks)
 	}
 
 	schema, cfg, err := loader.LoadServiceWithConfig(filepath.Join(tsFixtures, "fixture-general"), loader.WithRegistry(reg))

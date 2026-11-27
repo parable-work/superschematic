@@ -196,7 +196,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
+          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/resolvers/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
           restore-keys: |
             go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-
 
@@ -535,7 +535,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
+          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/resolvers/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
           restore-keys: |
             go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-
 
@@ -675,6 +675,15 @@ jobs:
         with:
           version: v${{ env.GOLANGCI_LINT_VERSION }}
           working-directory: extensions/embedded
+          install-mode: none
+
+      - name: golangci-lint (extensions/resolvers)
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+        with:
+          version: v${{ env.GOLANGCI_LINT_VERSION }}
+          working-directory: extensions/resolvers
           install-mode: none
 
       - name: golangci-lint (extensions/pulumi)
@@ -1438,7 +1447,7 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
+          key: go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-${{ hashFiles('go.sum', 'ir/go.sum', 'runtime/schema/go/go.sum', 'runtime/http/go/go.sum', 'runtime/migrate/go/go.sum', 'extensions/gcp/go.sum', 'extensions/cloudflare/go.sum', 'extensions/embedded/go.sum', 'extensions/resolvers/go.sum', 'extensions/pulumi/go.sum', 'extensions/topcoat/go.sum', 'cmd/superschematic/go.sum') }}
           restore-keys: |
             go-build-${{ runner.os }}-go${{ env.GO_VERSION }}-
 

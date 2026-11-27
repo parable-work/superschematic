@@ -7,7 +7,7 @@ version-graph core (`runtime/versiongraph/rust`) built for
 (`runtime/versiongraph/README.md`); the engine, which runs every graph
 operation over a storage adapter; the engine's Postgres and SQLite
 adapters; and the base of the facade tsgen generates per graph (D19 and
-D32 in `docs/DECISIONS.md`).
+D32).
 
 | Entry | Holds |
 | --- | --- |

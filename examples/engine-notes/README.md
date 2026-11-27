@@ -1,6 +1,6 @@
 # engine-notes
 
-A notes server on development mode (D117 in `docs/DECISIONS.md`), which
+A notes server on development mode (D117, #590), which
 runs a schema with no generated code: `@superschematic/rules-handler`, the
 handler of the behaviors' core, serves it from a server written by hand.
 A note moves from draft through review to published, collects comments

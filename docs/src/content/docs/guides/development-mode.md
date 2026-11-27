@@ -10,8 +10,8 @@ few minutes, make a handful of sample rows, and look at whether the shape
 is right. A publish takes effect at once. It needs no migration, no
 generator and no compiler.
 
-It is one of three modes (D117 in
-[docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+It is one of three modes
+([D117](https://github.com/parable-work/superschematic/issues/590)).
 Development keeps rows as JSON. Runtime gives each type its own table,
 whose DDL a publish plans. Compiled is the build: generated code, CI and a
 deploy. The schemas are the same in all three, so a schema you work out

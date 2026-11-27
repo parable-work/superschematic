@@ -3,8 +3,10 @@
 // every graph, so the engine keeps a graph in a SQLite file. Package
 // postgres is its Postgres counterpart, over the tables sqlgen generates per
 // graph. It is the Go port of the TypeScript adapter
-// (runtime/versiongraph/typescript/src/sqlite.ts), statement for statement,
-// and a file either one writes reads the same through the other.
+// (runtime/versiongraph/typescript/src/sqlite.ts), statement for statement
+// but that it writes patches, snapshot entries and released rows 100 to a
+// statement where that one writes a row a statement, and a file either one
+// writes reads the same through the other.
 //
 // The layout is nine STRICT tables: ref, ref_history, commit, patch,
 // snapshot_entry, release, release_history, member and member_history, each
@@ -1247,16 +1249,55 @@ func (t *tx) insertPatches(ctx context.Context, commit string, patches []storage
 	if err := t.requireOwnCommit(ctx, commit, "the patches' commit"); err != nil {
 		return err
 	}
-	for _, p := range patches {
+	rows := make([][]any, len(patches))
+	for i, p := range patches {
 		k, key, id, err := t.pinned(p.Kind, p.EntityKey, p.EntityID)
 		if err != nil {
 			return err
 		}
-		if _, err := t.conn.Exec(ctx, `INSERT INTO `+t.a.t.patch+` (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version, operation) `+
-			`VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
-			newID(), t.a.graph, commit, k.name, key, id, p.EntityVersion, p.Operation); err != nil {
+		rows[i] = []any{newID(), k.name, key, id, p.EntityVersion, p.Operation}
+	}
+	return t.insertRows(ctx, `INSERT INTO `+t.a.t.patch+` (graph, commit_id, id, entity_kind, entity_key, entity_id, entity_version, operation)`, "",
+		[]any{t.a.graph, commit}, rows)
+}
+
+// batchRows is the most rows one statement inserts or deletes, so that
+// its placeholders stay under 999, the fewest a SQLite build may take.
+const batchRows = 100
+
+// insertRows runs an INSERT of rows, batchRows to a statement: head, then
+// a VALUES list, then tail. Each row is the shared values (?1, ?2, ...),
+// then its own, which head's columns name in that order. The values are
+// bound as they are, so each is stored as one row's statement stored it.
+func (t *tx) insertRows(ctx context.Context, head, tail string, shared []any, rows [][]any) error {
+	for len(rows) > 0 {
+		n := min(len(rows), batchRows)
+		var sql strings.Builder
+		sql.WriteString(head)
+		sql.WriteString(" VALUES ")
+		args := append([]any(nil), shared...)
+		for i, row := range rows[:n] {
+			if i > 0 {
+				sql.WriteString(", ")
+			}
+			sql.WriteByte('(')
+			for j := range shared {
+				fmt.Fprintf(&sql, "?%d, ", j+1)
+			}
+			for j, value := range row {
+				if j > 0 {
+					sql.WriteString(", ")
+				}
+				args = append(args, value)
+				fmt.Fprintf(&sql, "?%d", len(args))
+			}
+			sql.WriteByte(')')
+		}
+		sql.WriteString(tail)
+		if _, err := t.conn.Exec(ctx, sql.String(), args...); err != nil {
 			return err
 		}
+		rows = rows[n:]
 	}
 	return nil
 }
@@ -1447,18 +1488,16 @@ func (t *tx) insertSnapshot(ctx context.Context, commit string, entries []storag
 	if err := t.requireOwnCommit(ctx, commit, "the snapshot's commit"); err != nil {
 		return err
 	}
-	for _, e := range entries {
+	rows := make([][]any, len(entries))
+	for i, e := range entries {
 		k, key, id, err := t.pinned(e.Kind, e.EntityKey, e.EntityID)
 		if err != nil {
 			return err
 		}
-		if _, err := t.conn.Exec(ctx, `INSERT INTO `+t.a.t.snapshot+` (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version) `+
-			`VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
-			newID(), t.a.graph, commit, k.name, key, id, e.EntityVersion); err != nil {
-			return err
-		}
+		rows[i] = []any{newID(), k.name, key, id, e.EntityVersion}
 	}
-	return nil
+	return t.insertRows(ctx, `INSERT INTO `+t.a.t.snapshot+` (graph, commit_id, id, entity_kind, entity_key, entity_id, entity_version)`, "",
+		[]any{t.a.graph, commit}, rows)
 }
 
 func (t *tx) Commits(ctx context.Context) ([]storage.CommitNode, error) {
@@ -1609,13 +1648,22 @@ func (t *tx) writeReleased(ctx context.Context, k *kind, write storage.ReleasedW
 			return err
 		}
 	}
-	for _, key := range write.Delete {
-		if _, err := t.conn.Exec(ctx, `DELETE FROM `+released+` WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key = ?4`,
-			t.a.graph, k.name, write.Root, key); err != nil {
+	for keys := write.Delete; len(keys) > 0; {
+		n := min(len(keys), batchRows)
+		args := []any{t.a.graph, k.name, write.Root}
+		list := make([]string, n)
+		for i, key := range keys[:n] {
+			args = append(args, key)
+			list[i] = "?" + strconv.Itoa(len(args))
+		}
+		if _, err := t.conn.Exec(ctx, `DELETE FROM `+released+` WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key IN (`+strings.Join(list, ", ")+`)`,
+			args...); err != nil {
 			return err
 		}
+		keys = keys[n:]
 	}
-	for _, row := range write.Upsert {
+	rows := make([][]any, len(write.Upsert))
+	for i, row := range write.Upsert {
 		var parsed map[string]json.RawMessage
 		if err := json.Unmarshal(row, &parsed); err != nil || parsed == nil {
 			return fmt.Errorf("a released %s row is a JSON object", k.name)
@@ -1637,14 +1685,14 @@ func (t *tx) writeReleased(ctx context.Context, k *kind, write storage.ReleasedW
 				}
 			}
 		}
-		if _, err := t.conn.Exec(ctx, `INSERT INTO `+released+` (graph, kind, root_id, entity_key, commit_id, sequence, data) `+
-			`VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET `+
-			`commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data`,
-			t.a.graph, k.name, write.Root, key, write.Commit, write.Sequence, writeObject(data)); err != nil {
-			return err
-		}
+		rows[i] = []any{key, writeObject(data)}
 	}
-	return nil
+	// SQLite inserts a VALUES list a row at a time, so a key the list
+	// repeats takes its last row, as one statement a row did.
+	return t.insertRows(ctx, `INSERT INTO `+released+` (graph, kind, root_id, commit_id, sequence, entity_key, data)`,
+		` ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET `+
+			`commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data`,
+		[]any{t.a.graph, k.name, write.Root, write.Commit, write.Sequence}, rows)
 }
 
 func (t *tx) DiscardedRefs(ctx context.Context, grace time.Duration) ([]storage.Ref, error) {

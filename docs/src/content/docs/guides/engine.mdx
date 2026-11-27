@@ -25,8 +25,8 @@ reference: every request, route, rule of the access policy and answer.
 
 ## What development mode is
 
-A project's schemas run in one of three modes (D117 in
-[docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)).
+A project's schemas run in one of three modes
+([D117](https://github.com/parable-work/superschematic/issues/590)).
 Development keeps rows as JSON in fixed tables, so a publish takes effect
 at once and may rename, retype, remove and tighten. Runtime gives each
 type its own table, whose DDL a publish plans. Compiled is the build. The

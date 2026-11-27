@@ -8,7 +8,7 @@ import (
 )
 
 // coreBehaviorFiles holds the declarations of the behaviors the core
-// declares, one JSON file each (D16 in docs/DECISIONS.md), under bare
+// declares, one JSON file each (D16), under bare
 // names: every behavior @superschematic/engine ships, every one the
 // optional @superschematic/engine-workqueue package does, and the commerce
 // behaviors the optional @superschematic/engine-commerce package does

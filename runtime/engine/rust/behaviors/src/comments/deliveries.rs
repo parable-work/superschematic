@@ -126,7 +126,7 @@ fn deliverable<'a>(
 }
 
 // A delivery's key within the namespace.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 struct DeliveryKey {
     schema: String,
     instance: String,
@@ -187,6 +187,28 @@ impl DeliveryKey {
 }
 
 const KEYED: &str = "namespace = ? AND schema = ? AND id = ? AND message = ? AND subject = ?";
+
+/// How many keys one statement of `settleDeliveries` names.
+const SETTLE_BATCH: usize = 200;
+
+// any_of is the condition and parameters that match the namespace's rows
+// with any of the keys: `namespace = ? AND ((schema = ? AND ...) OR ...)`,
+// typed by the columns on both databases as KEYED is.
+fn any_of<'k>(
+    namespace: &str,
+    keys: impl ExactSizeIterator<Item = &'k DeliveryKey>,
+) -> (String, Vec<SqlValue>) {
+    let mut params = vec![SqlValue::from(namespace)];
+    let count = keys.len();
+    for key in keys {
+        params.extend(key.values(namespace).into_iter().skip(1));
+    }
+    let one = "(schema = ? AND id = ? AND message = ? AND subject = ?)";
+    (
+        format!("namespace = ? AND ({})", vec![one; count].join(" OR ")),
+        params,
+    )
+}
 
 /// The reasons of a delivery, from its two columns.
 fn reasons(mention: bool, reply: bool) -> Value {
@@ -416,6 +438,9 @@ pub(super) fn next_attempt_at(now: i64, backoff: i64, attempts: i64) -> i64 {
         .min(MAX_BACKOFF_MS)
 }
 
+// What a settle writes to a row: its state, and when it is due again.
+type Settled<'a> = (&'a str, Option<i64>);
+
 pub(super) fn settle_deliveries(cx: Ncx<'_, '_>, params: &Value) -> Result<Value> {
     const OP: &str = "settleDeliveries";
     let token = params
@@ -440,27 +465,41 @@ pub(super) fn settle_deliveries(cx: Ncx<'_, '_>, params: &Value) -> Result<Value
     let sql = cx.sql();
     let deliveries = sql.table(DELIVERIES)?;
 
-    // 4: each id names a row of a schema the caller may settle.
+    // 4: each id names a row of a schema the caller may settle. The rows
+    // are read SETTLE_BATCH keys at a time.
+    let keys: Vec<Option<DeliveryKey>> = ids
+        .iter()
+        .map(|id| DeliveryKey::decode(id).filter(|key| configs.contains_key(&key.schema)))
+        .collect();
+    let mut rows: HashMap<DeliveryKey, (Option<String>, i64)> = HashMap::new();
+    let wanted: Vec<&DeliveryKey> = keys.iter().flatten().collect();
+    for chunk in wanted.chunks(SETTLE_BATCH) {
+        let (condition, params) = any_of(namespace, chunk.iter().copied());
+        for row in sql.all(
+            format!(
+                "SELECT schema, id, message, subject, token, attempts FROM {deliveries} WHERE {condition}"
+            ),
+            &params,
+        )? {
+            rows.insert(
+                DeliveryKey {
+                    schema: row.text("schema")?.to_owned(),
+                    instance: row.text("id")?.to_owned(),
+                    message: row.i64("message")?,
+                    subject: row.text("subject")?.to_owned(),
+                },
+                (row.opt_text("token")?.map(str::to_owned), row.i64("attempts")?),
+            );
+        }
+    }
     let mut found: Vec<(&str, DeliveryKey, Option<String>, i64)> = Vec::new();
     let mut unknown: Vec<&str> = Vec::new();
-    for id in &ids {
-        let row = match DeliveryKey::decode(id) {
-            Some(key) if configs.contains_key(&key.schema) => sql
-                .get(
-                    format!("SELECT token, attempts FROM {deliveries} WHERE {KEYED}"),
-                    &key.values(namespace),
-                )?
-                .map(|row| -> Result<_> {
-                    Ok((
-                        key,
-                        row.opt_text("token")?.map(str::to_owned),
-                        row.i64("attempts")?,
-                    ))
-                })
-                .transpose()?,
-            _ => None,
-        };
-        match row {
+    for (id, key) in ids.iter().zip(keys) {
+        match key.and_then(|key| {
+            rows.get(&key)
+                .cloned()
+                .map(|(held, attempts)| (key, held, attempts))
+        }) {
             Some((key, held, attempts)) => found.push((id, key, held, attempts)),
             None => unknown.push(id),
         }
@@ -519,8 +558,12 @@ pub(super) fn settle_deliveries(cx: Ncx<'_, '_>, params: &Value) -> Result<Value
         ));
     }
 
+    // The rows that end in the same state, due again at the same time,
+    // are written by one UPDATE per SETTLE_BATCH of them; each row is
+    // written once whatever the order, so the items keep the ids' order.
     let now = cx.now();
     let mut items = Vec::new();
+    let mut writes: Vec<(Settled<'_>, Vec<&DeliveryKey>)> = Vec::new();
     for (id, key, _, attempts) in &found {
         let config = configs.get(&key.schema);
         let max_attempts = config.map_or(super::DEFAULT_MAX_ATTEMPTS, |config| config.max_attempts);
@@ -533,21 +576,10 @@ pub(super) fn settle_deliveries(cx: Ncx<'_, '_>, params: &Value) -> Result<Value
             _ => "dropped",
         };
         let next = (state == "failed").then(|| next_attempt_at(now, backoff, *attempts));
-        let kept_error = if state == "sent" { None } else { error };
-        let mut values = vec![
-            SqlValue::from(state),
-            next.map_or(SqlValue::Null, SqlValue::Integer),
-            kept_error.map_or(SqlValue::Null, SqlValue::from),
-            SqlValue::Integer(now),
-        ];
-        values.extend(key.values(namespace));
-        sql.run(
-            format!(
-                "UPDATE {deliveries} SET state = ?, due_at = ?, token = NULL, error = ?, settled_at = ?
-                 WHERE {KEYED}"
-            ),
-            &values,
-        )?;
+        match writes.iter_mut().find(|(write, _)| *write == (state, next)) {
+            Some((_, keys)) => keys.push(key),
+            None => writes.push(((state, next), vec![key])),
+        }
         let mut item = Map::new();
         item.insert("id".into(), Value::from(*id));
         item.insert("state".into(), Value::from(state));
@@ -556,6 +588,26 @@ pub(super) fn settle_deliveries(cx: Ncx<'_, '_>, params: &Value) -> Result<Value
             item.insert("nextAttemptAt".into(), Value::from(next));
         }
         items.push(Value::Object(item));
+    }
+    for ((state, next), keys) in &writes {
+        let kept_error = if *state == "sent" { None } else { error };
+        for chunk in keys.chunks(SETTLE_BATCH) {
+            let (condition, params) = any_of(namespace, chunk.iter().copied());
+            let mut values = vec![
+                SqlValue::from(*state),
+                next.map_or(SqlValue::Null, SqlValue::Integer),
+                kept_error.map_or(SqlValue::Null, SqlValue::from),
+                SqlValue::Integer(now),
+            ];
+            values.extend(params);
+            sql.run(
+                format!(
+                    "UPDATE {deliveries} SET state = ?, due_at = ?, token = NULL, error = ?, settled_at = ?
+                     WHERE {condition}"
+                ),
+                &values,
+            )?;
+        }
     }
     let mut out = Map::new();
     out.insert("items".into(), Value::Array(items));

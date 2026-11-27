@@ -788,10 +788,12 @@ func (r *WorkspaceRepository) GetOne(ctx context.Context, id types.IdentityUUID,
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple Workspace records by their IDs in a single query
+// GetManyByIDs retrieves multiple Workspace records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *WorkspaceRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Workspace, error) {
+	resultMap := make(map[types.IdentityUUID]*types.Workspace, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.Workspace{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -803,7 +805,22 @@ func (r *WorkspaceRepository) GetManyByIDs(ctx context.Context, ids []types.Iden
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *WorkspaceRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.Workspace, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -864,7 +881,6 @@ func (r *WorkspaceRepository) GetManyByIDs(ctx context.Context, ids []types.Iden
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 

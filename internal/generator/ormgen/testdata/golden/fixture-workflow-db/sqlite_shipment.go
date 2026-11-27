@@ -405,6 +405,7 @@ var shipmentSQLite = &sqliteTable{
 		pageTiebreak:        `, shipment.id %s`,
 		pageKeyExists:       `SELECT EXISTS (SELECT 1 FROM shipment WHERE shipment.id = ?1)`,
 		insert:              `INSERT INTO shipment (%s) VALUES (%s) RETURNING %s`,
+		insertMany:          `INSERT INTO shipment (%s) VALUES %s RETURNING %s`,
 		update:              `UPDATE shipment SET %s, _version = _version + 1 WHERE id = ?%d`,
 		versionFence:        ` AND _version = ?%d`,
 		returning:           ` RETURNING "id", "reference", "status", "status_entered_at", "payment_status", "payment_status_entered_at", "_version"`,
@@ -507,15 +508,16 @@ func (r *ShipmentSQLiteRepository) GetOne(ctx context.Context, id types.Identity
 	return rows[0], nil
 }
 
-// GetManyByIDs retrieves the live Shipment rows of ids, by ID.
+// GetManyByIDs retrieves the live Shipment rows of ids, by ID: a query of
+// at most as many keys as SQLite binds the parameters of, as many times
+// as the keys take.
 func (r *ShipmentSQLiteRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Shipment, error) {
 	out := make(map[types.IdentityUUID]*types.Shipment, len(ids))
 	if len(ids) == 0 {
 		return out, nil
 	}
 	seen := make(map[types.IdentityUUID]bool, len(ids))
-	var args []any
-	var placeholders []string
+	var keys []any
 	for _, id := range ids {
 		if seen[id] {
 			continue
@@ -525,12 +527,20 @@ func (r *ShipmentSQLiteRepository) GetManyByIDs(ctx context.Context, ids []types
 		if err != nil {
 			return nil, err
 		}
-		args = append(args, key)
-		placeholders = append(placeholders, fmt.Sprintf("?%d", len(args)))
+		keys = append(keys, key)
 	}
-	records, err := shipmentSQLite.query(ctx, r.q(), fmt.Sprintf(shipmentSQLite.st.getMany, strings.Join(placeholders, ", "))+shipmentSQLite.st.live, args...)
-	if err != nil {
-		return nil, err
+	var records []sqliteRecord
+	for start := 0; start < len(keys); start += 32766 {
+		args := keys[start:min(start+32766, len(keys))]
+		placeholders := make([]string, len(args))
+		for i := range args {
+			placeholders[i] = fmt.Sprintf("?%d", i+1)
+		}
+		read, err := shipmentSQLite.query(ctx, r.q(), fmt.Sprintf(shipmentSQLite.st.getMany, strings.Join(placeholders, ", "))+shipmentSQLite.st.live, args...)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, read...)
 	}
 	rows, err := r.decode(ctx, records, ShipmentFields{}, false)
 	if err != nil {
@@ -855,8 +865,8 @@ func (o shipmentSQLitePaymentStatusOperations) Transition(ctx context.Context, i
 	return out, nil
 }
 
-// CreateMany inserts the rows, in order, a row at a time, in one
-// transaction: a VALUES list on SQLite takes no DEFAULT.
+// CreateMany inserts the rows, in order, each a create of the behaviors'
+// core (D103), in one transaction.
 func (r *ShipmentSQLiteRepository) CreateMany(ctx context.Context, inputs []*ShipmentCreate) ([]*types.Shipment, error) {
 	out := make([]*types.Shipment, 0, len(inputs))
 	if len(inputs) == 0 {

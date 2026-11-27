@@ -8,9 +8,11 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/servergen"
 	"github.com/parable-work/superschematic/internal/generator/sitegen"
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
+	"github.com/parable-work/superschematic/internal/generator/tasksgen"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/stack/generic"
 	"github.com/parable-work/superschematic/internal/stack/local"
+	inttasks "github.com/parable-work/superschematic/internal/tasks"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -286,6 +288,21 @@ func RegisterCore(reg *registry.Registry) error {
 				return run{c}.measure("output.rules-rust", run{c}.generateRulesCore)
 			},
 		},
+		{
+			// The Tasks kind's one output: the task file, at
+			// tasks/<service>/tasks.json, which the tasks-install hook
+			// installs where outputs.tasks.install says (D203).
+			Name:         tasksgen.Name,
+			Kinds:        []string{string(ir.SchemaKindTasks)},
+			OutputKey:    tasksgen.Name,
+			OutputSchema: tasksgen.OutputSchema,
+			Dirs: func(c registry.GenerateContext) []string {
+				return []string{tasksgen.OutDir(c.Options.OutputRoot, c.Config.Name)}
+			},
+			Generate: func(c registry.GenerateContext) error {
+				return run{c}.measure("output.tasks", func() error { return tasksgen.Generate(c) })
+			},
+		},
 	}
 	for _, spec := range specs {
 		if err := reg.RegisterGenerator(spec); err != nil {
@@ -293,6 +310,14 @@ func RegisterCore(reg *registry.Registry) error {
 		}
 	}
 	if err := reg.RegisterCIRenderer(cigen.GitHub()); err != nil {
+		return err
+	}
+	// The Tasks kind's input resolvers, `path` and `schema`, and the hook
+	// that installs each Tasks service's file on every build-all (D203).
+	if err := inttasks.Register(reg); err != nil {
+		return err
+	}
+	if err := reg.RegisterBuildAllHook(tasksgen.Hook()); err != nil {
 		return err
 	}
 	// The generic connector joins deployables of two providers that no

@@ -37,7 +37,7 @@ cd "$ROOT"
 # The modules beside the root one, as the Makefile's GO_MODULES has them
 # less the three that link an archive of their own, which have jobs of
 # their own (versiongraph, engine-go, rules-go).
-MODULES="ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/embedded extensions/pulumi extensions/topcoat cmd/superschematic"
+MODULES="ir runtime/schema/go runtime/http/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/embedded extensions/resolvers extensions/pulumi extensions/topcoat cmd/superschematic"
 
 NAMED="sqlmigrate loader generators"
 SHARDS="$NAMED modules rest"

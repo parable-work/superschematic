@@ -44,14 +44,14 @@ type newServiceFlags struct {
 
 // newServiceKinds are the kinds new service writes, as --kind names them.
 // A Stack service comes from stack init, which reads the tree it deploys.
-var newServiceKinds = []ir.SchemaKind{ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral, ir.SchemaKindBucket, ir.SchemaKindSite, ir.SchemaKindMemoryStore}
+var newServiceKinds = []ir.SchemaKind{ir.SchemaKindDB, ir.SchemaKindAPI, ir.SchemaKindGeneral, ir.SchemaKindBucket, ir.SchemaKindSite, ir.SchemaKindMemoryStore, ir.SchemaKindTasks}
 
 func newNewServiceCmd(a *app) *cobra.Command {
 	flags := &newServiceFlags{}
 	cmd := &cobra.Command{
-		Use:   "service <name> --kind DB|API|General|Bucket|Site|MemoryStore",
+		Use:   "service <name> --kind DB|API|General|Bucket|Site|MemoryStore|Tasks",
 		Short: "Write a service: its config, package files and a starter schema, then build it once",
-		Long: `service writes services/<name>/ under a schemas root (docs/DECISIONS.md, D71):
+		Long: `service writes services/<name>/ under a schemas root (D71):
 
   schema.config.ts     defineConfig with the name, the kind and an outputs
                        block that loads
@@ -62,7 +62,8 @@ func newNewServiceCmd(a *app) *cobra.Command {
                        service's handle
   src/<name>.schema.ts a starter declaration to rename and grow: a table
                        for a DB, an object type for General, a GET route
-                       for an API, a channel and a key for a MemoryStore
+                       for an API, a channel and a key for a MemoryStore,
+                       a task for Tasks
 
 A DB gets Go and TypeScript types, the Go types every DB needs. An API
 gets Go and TypeScript types, a Go server and Go and TypeScript SDKs,
@@ -71,11 +72,13 @@ schema gets Go and TypeScript types. A Bucket and a Site declare nothing
 in schema files, so they get the config, the package files and
 src/index.ts alone: an API lists a bucket in its buckets, and a site's
 config lists the APIs its browser code calls. A MemoryStore declares a
-channel and a key, and an API lists it in its memoryStores.
+channel and a key, and an API lists it in its memoryStores. A Tasks
+service declares a task; nothing names it, so it has no handle, and its
+src/index.ts exports its declarations alone.
 
 Last, it builds the service once, as superschematic build does, into the
 schemas root's dist/, which writes src/service.generated.ts, the handle
-other services' configs import. The name is lower-case words joined by
+other services' configs import, for every kind but Tasks. The name is lower-case words joined by
 hyphens, such as shop-db. A file that exists is never replaced: the
 command refuses, naming each, and writes nothing.
 
@@ -90,7 +93,7 @@ Examples:
 			return runNewService(cmd, a, flags, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&flags.kind, "kind", "", "the service's kind: DB, API, General, Bucket, Site or MemoryStore")
+	cmd.Flags().StringVar(&flags.kind, "kind", "", "the service's kind: DB, API, General, Bucket, Site, MemoryStore or Tasks")
 	cmd.Flags().StringVar(&flags.root, "root", "", "the schemas root (default: the working directory when it holds superschematic.toml, else ./schemas)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <schemas-root>/superschematic.toml)")
 	_ = cmd.MarkFlagRequired("kind")
@@ -210,8 +213,11 @@ func runNewService(cmd *cobra.Command, a *app, flags *newServiceFlags, name stri
 	if err := runBuild(cmd, a, buildFlags, dir); err != nil {
 		return fmt.Errorf("the service is written, but its first build failed: %w", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(sentinel.GeneratedFile))); err != nil {
-		return fmt.Errorf("the service is written and built, but the build wrote no %s", sentinel.GeneratedFile)
+	// A kind nothing names has no handle to write.
+	if spec, ok := reg.Kind(string(kind)); !ok || !spec.NoSentinel {
+		if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(sentinel.GeneratedFile))); err != nil {
+			return fmt.Errorf("the service is written and built, but the build wrote no %s", sentinel.GeneratedFile)
+		}
 	}
 	_, _ = io.WriteString(out, newServiceNext(name, kind, names, dir))
 	return nil
@@ -248,6 +254,9 @@ func newServiceNext(name string, kind ir.SchemaKind, names naming.Naming, dir st
 	case ir.SchemaKindMemoryStore:
 		fmt.Fprintf(&b, "  Declare its channels and keys in %s.\n", schema)
 		fmt.Fprintf(&b, "  An API uses it by listing it in its config's memoryStores: [%s], imported from %q.\n", handle, names.NpmServicePackage(name))
+	case ir.SchemaKindTasks:
+		fmt.Fprintf(&b, "  Declare the tasks in %s: each a command, what it reads and what it writes.\n", schema)
+		b.WriteString("  Give its config outputs.tasks.install, the path its task file is committed at.\n")
 	}
 	fmt.Fprintf(&b, "  superschematic build-all %s\n", displayPath(filepath.Dir(dir)))
 	return b.String()
@@ -269,7 +278,10 @@ func newServiceFiles(name string, kind ir.SchemaKind, names naming.Naming) []sta
 	if starter != nil {
 		fmt.Fprintf(&index, "export { %s } from \"./%s.schema\";\n", strings.Join(exports, ", "), name)
 	}
-	index.WriteString("export * from \"./service.generated\";\n")
+	// Nothing names a Tasks service, so it has no handle to export.
+	if kind != ir.SchemaKindTasks {
+		index.WriteString("export * from \"./service.generated\";\n")
+	}
 	files = append(files, stackinit.File{Path: "src/index.ts", Content: index.Bytes()})
 	if starter != nil {
 		files = append(files, stackinit.File{Path: "src/" + name + ".schema.ts", Content: starter})
@@ -325,6 +337,9 @@ func newServiceConfig(name string, kind ir.SchemaKind, names naming.Naming) []by
 		language = true
 		comment = "// A memory store that the replicas of a stack share: its schema declares\n// each channel and key it carries, and it never holds a fact. outputs.types\n// names the languages its definitions are written in, one for each server\n// language of the APIs that list it in their memoryStores."
 		body = "  outputs: {\n" + types + "\n  }"
+	case ir.SchemaKindTasks:
+		comment = "// The work a commit of the repository needs: its schema declares each task.\n// The build writes the task file a forge reads. To commit it, give outputs\n// tasks: { install: \"ci/tasks.json\" }, a path from the repository root whose\n// directory exists; build-all then installs it on every run, and\n// `tasks <this directory> --check` fails when the committed file is stale."
+		body = "  outputs: {}"
 	}
 	imports := "defineConfig, SchemaKind"
 	if language {
@@ -397,6 +412,21 @@ export abstract class ItemNoticeSent {
   itemId: Identity.UUID;
 }
 `, spec(names.ScalarNpmPackage), spec("@superschematic/memory-store")), []string{"ItemChanged", "ItemNoticeSent"}
+	case ir.SchemaKindTasks:
+		return fmt.Appendf(nil, `import { task } from %s;
+
+// A task: a command with what it reads and what it writes. Rename it, give
+// it its command and its inputs, and add tasks beside it. inputs are the
+// tracked files it reads, each a path or a glob. uses names the outputs of
+// other tasks it reads, and after the tasks it only waits for.
+//
+// hermetic: false says its inputs do not decide its result: it has no key,
+// and a forge runs it every time. A task whose inputs do decide it takes an
+// image and a platform, its own or the ones an @tasks class gives every
+// task, and this line goes.
+@task({ run: ["true"], hermetic: false })
+export abstract class Check {}
+`, spec("@superschematic/tasks")), []string{"Check"}
 	case ir.SchemaKindGeneral:
 		return []byte(`// An object type: an abstract class declares one, and an enum an enum.
 // Fields take superscalar scalars, enums and other types. Rename it and

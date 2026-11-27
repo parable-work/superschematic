@@ -1,7 +1,7 @@
 # The core
 
-`superschematic-rules` is the pure core of the behaviors (D103 in
-`docs/DECISIONS.md`). A behavior adds fields, sub-tables, operations and
+`superschematic-rules` is the pure core of the behaviors (D103, #587).
+A behavior adds fields, sub-tables, operations and
 rules to a table that stays a table; its rules are written once, in Rust,
 here, and every language embeds them through a binding. The core does no
 I/O: it opens no connection and no file, reads no clock and makes no id. It

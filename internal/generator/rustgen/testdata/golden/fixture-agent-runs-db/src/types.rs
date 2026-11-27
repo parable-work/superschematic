@@ -109,7 +109,7 @@ pub struct AgentApproval {
     pub params: GenericJSON,
     /// The SHA-256 of the operation and its parameters as canonical JSON: a call with any other parameter asks again.
     #[serde(rename = "paramsHash")]
-    pub params_hash: String,
+    pub params_hash: CryptoSHA256,
     /// The permission an approver holds.
     pub permission: String,
     /// pending, approved, denied, used or superseded.
@@ -1139,18 +1139,18 @@ pub struct NoticePreference {
     pub urgency: String,
     /// The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.
     pub channels: Vec<String>,
-    /// When quiet hours start, HH:MM in the time zone; null for none.
+    /// When quiet hours start, a time of day in the time zone; null for none.
     #[serde(default, rename = "quietStart", skip_serializing_if = "Option::is_none")]
-    pub quiet_start: Option<String>,
-    /// When they end, HH:MM.
+    pub quiet_start: Option<TemporalTime>,
+    /// When they end.
     #[serde(default, rename = "quietEnd", skip_serializing_if = "Option::is_none")]
-    pub quiet_end: Option<String>,
+    pub quiet_end: Option<TemporalTime>,
     /// The IANA time zone quiet hours and digests are read in; UTC when null.
     #[serde(default, rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub digest: Option<String>,
+    pub digest: Option<TemporalRecurrenceRule>,
 }
 
 impl Default for NoticePreference {
@@ -1351,7 +1351,7 @@ pub struct SearchIndex {
     pub agents: String,
     /// The SHA-256 of the text its embedding is of; null until embedded.
     #[serde(default, rename = "textHash", skip_serializing_if = "Option::is_none")]
-    pub text_hash: Option<String>,
+    pub text_hash: Option<CryptoSHA256>,
     /// Its embedding, of unit length; null until embedded, or with embeddings off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub embedding: Option<Vec<GenericFloat64>>,
@@ -1535,7 +1535,7 @@ pub struct TaskCommentsEdits {
     pub number: Option<GenericInt64>,
     /// The body before the edit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
+    pub body: Option<TextMarkdown>,
     /// The blocks before the edit.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "deserialize_optional_generic_json")]
@@ -1605,7 +1605,7 @@ pub struct TaskCommentsMessages {
     pub state: Option<String>,
     /// The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub body: Option<String>,
+    pub body: Option<TextMarkdown>,
     /// The blocks as posted or last edited, in order.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[serde(deserialize_with = "deserialize_optional_generic_json")]
@@ -1757,7 +1757,7 @@ pub struct TaskSchedulesSchedules {
     pub spec: Option<String>,
     /// The IANA time zone a cron line is read in, as the bundled database spells it; absent for after and every.
     #[serde(default, rename = "timeZone", skip_serializing_if = "Option::is_none")]
-    pub time_zone: Option<String>,
+    pub time_zone: Option<TemporalTimeZone>,
     /// active, paused or finished.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,

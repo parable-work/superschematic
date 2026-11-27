@@ -85,6 +85,7 @@ var packageDirs = map[string]string{
 	"@superschematic/schema-config": "schema-config/src",
 	"@superschematic/stack":         "stack/src",
 	"@superschematic/memory-store":  "memory-store/src",
+	"@superschematic/tasks":         "tasks/src",
 }
 
 // schemaPackage declares @behavior and the config type of each core
@@ -101,6 +102,7 @@ var packageOrder = []string{
 	"@superschematic/schema-config",
 	"@superschematic/stack",
 	"@superschematic/memory-store",
+	"@superschematic/tasks",
 }
 
 // wrapperFiles are the files whose exports are type wrappers and base

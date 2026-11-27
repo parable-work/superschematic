@@ -11,8 +11,8 @@ runs. A change has to take effect with no generator, no compiler of the
 generated code and no CI between the edit and the running app. The rows
 matter, so each type lives in its own table.
 
-It is one of three modes (D117 in
-[docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)):
+It is one of three modes
+([D117](https://github.com/parable-work/superschematic/issues/590)):
 
 | Mode | Rows live in | A schema change is |
 |------|--------------|--------------------|

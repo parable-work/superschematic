@@ -27,6 +27,8 @@ pub mod scalars {
 
     static IDENTITY_UUID_PATTERN: rt::Pattern = rt::Pattern::new("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$");
 
+    static TEXT_MARKDOWN_PATTERN: rt::Pattern = rt::Pattern::new("^[\\s\\S]*$");
+
     /// Validates a `Contact.Email` value.
     pub fn validate_contact_email(value: Option<&Value>) -> rt::ScalarResult {
         let value = match value {
@@ -95,6 +97,37 @@ pub mod scalars {
             None | Some(Value::Null) => Err(vec![ValidationError::required()]),
             Some(Value::String(text)) if text.is_empty() => Err(vec![ValidationError::required()]),
             _ => validate_crypto_sha256(value),
+        }
+    }
+
+    /// Validates a `File.SizeBytes` value.
+    pub fn validate_file_size_bytes(value: Option<&Value>) -> rt::ScalarResult {
+        let value = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(value) => value,
+        };
+        let Some(number) = value.as_number().and_then(rt::integer_value) else {
+            return Err(vec![ValidationError::new("type", "must be an integer")]);
+        };
+        let mut errors = Vec::new();
+        if number < 0_f64 {
+            errors.push(ValidationError::new("min", "must be at least 0"));
+        }
+        if number > 9007199254740991_f64 {
+            errors.push(ValidationError::new("max", "must be at most 9007199254740991"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a `File.SizeBytes` value that must be present.
+    pub fn validate_file_size_bytes_required(value: Option<&Value>) -> rt::ScalarResult {
+        match value {
+            None | Some(Value::Null) => Err(vec![ValidationError::required()]),
+            _ => validate_file_size_bytes(value),
         }
     }
 
@@ -250,6 +283,35 @@ pub mod scalars {
         match value {
             None | Some(Value::Null) => Err(vec![ValidationError::required()]),
             _ => validate_temporal_date_time(value),
+        }
+    }
+
+    /// Validates a `Text.Markdown` value.
+    pub fn validate_text_markdown(value: Option<&Value>) -> rt::ScalarResult {
+        let value = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(value) => value,
+        };
+        let Some(text) = value.as_str() else {
+            return Err(vec![ValidationError::new("type", "expected string value")]);
+        };
+        let mut errors = Vec::new();
+        if !TEXT_MARKDOWN_PATTERN.is_match(text) {
+            errors.push(ValidationError::new("pattern", "invalid format"));
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a `Text.Markdown` value that must be present.
+    pub fn validate_text_markdown_required(value: Option<&Value>) -> rt::ScalarResult {
+        match value {
+            None | Some(Value::Null) => Err(vec![ValidationError::required()]),
+            Some(Value::String(text)) if text.is_empty() => Err(vec![ValidationError::required()]),
+            _ => validate_text_markdown(value),
         }
     }
 
@@ -605,7 +667,9 @@ pub fn validate_file_released(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("contentHash");
-        rt::expect_string(&mut errors, "contentHash", field);
+        if !rt::is_absent(field) {
+            errors.set_result("contentHash", scalars::validate_crypto_sha256(field));
+        }
     }
     {
         let field = value.get("reason");
@@ -1165,7 +1229,9 @@ pub fn validate_search_index(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("textHash");
-        rt::expect_string(&mut errors, "textHash", field);
+        if !rt::is_absent(field) {
+            errors.set_result("textHash", scalars::validate_crypto_sha256(field));
+        }
     }
     {
         let field = value.get("embedding");
@@ -1467,14 +1533,11 @@ pub fn validate_unit_attachments(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("size");
-        errors.set_result("size", scalars::validate_generic_int64_required(field));
+        errors.set_result("size", scalars::validate_file_size_bytes_required(field));
     }
     {
         let field = value.get("contentHash");
-        if rt::is_absent(field) {
-            errors.push("contentHash", ValidationError::required());
-        }
-        rt::expect_string(&mut errors, "contentHash", field);
+        errors.set_result("contentHash", scalars::validate_crypto_sha256_required(field));
     }
     {
         let field = value.get("objectKey");
@@ -1868,7 +1931,9 @@ pub fn validate_unit_comments_edits(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("body");
-        rt::expect_string(&mut errors, "body", field);
+        if !rt::is_absent(field) {
+            errors.set_result("body", scalars::validate_text_markdown(field));
+        }
     }
     {
         let field = value.get("blocks");
@@ -2062,7 +2127,9 @@ pub fn validate_unit_comments_messages(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("body");
-        rt::expect_string(&mut errors, "body", field);
+        if !rt::is_absent(field) {
+            errors.set_result("body", scalars::validate_text_markdown(field));
+        }
     }
     {
         let field = value.get("blocks");

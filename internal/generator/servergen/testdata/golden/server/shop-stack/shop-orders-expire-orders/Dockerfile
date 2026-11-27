@@ -12,8 +12,8 @@
 # Dockerfile.dockerignore beside this file cuts the context down to the
 # directories the build reads; BuildKit, Docker's default builder, reads it.
 #
-# The generated code links superscalar's static archive through cgo (D3 in
-# docs/DECISIONS.md), so the job cannot build with CGO_ENABLED=0. The
+# The generated code links superscalar's static archive through cgo (D3),
+# so the job cannot build with CGO_ENABLED=0. The
 # superscalar stage builds the archive for the image's platform from the
 # checkout the naming file's [paths] scalar_go names, with the Rust release
 # that tools.env pins for the host's archives.

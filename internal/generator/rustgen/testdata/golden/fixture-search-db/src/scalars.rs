@@ -6,6 +6,9 @@ pub type ContactEmail = String;
 /// Lowercase hexadecimal SHA-256 digest
 pub type CryptoSHA256 = String;
 
+/// File size in bytes (non-negative, BIGINT-backed)
+pub type FileSizeBytes = i64;
+
 /// A finite 64-bit floating-point number
 pub type GenericFloat64 = f64;
 
@@ -23,3 +26,6 @@ pub type IdentityUUID = superscalar::Uuid;
 
 /// ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
 pub type TemporalDateTime = superscalar::DateTime;
+
+/// Markdown text
+pub type TextMarkdown = String;

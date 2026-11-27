@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, Problem, ProblemChange, ProblemDeadline, ProblemEvent, ProblemSchedulesSchedules,  } from '@schemas/fixture-schedules-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityUUID, TemporalDateTime, TemporalTimeZone, Problem, ProblemChange, ProblemDeadline, ProblemEvent, ProblemSchedulesSchedules,  } from '@schemas/fixture-schedules-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-schedules-db-types';
@@ -76,7 +76,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ## Type System
 
 
-### Scalars (4)
+### Scalars (5)
 
 
 - **Generic.Int64** - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
@@ -97,6 +97,12 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **Temporal.DateTime** - ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
   - TypeScript type: `JSDate`
   - Wire format: TypeScript schemas use `@temporalFormat('...')`; JSON/YAML schemas use `x-temporal-format`.
+
+
+- **Temporal.TimeZone** - IANA tz database name: UTC, GMT, or two or more '/'-separated segments of ASCII letters, digits, '_', '-', and '+', each starting with a letter (e.g., America/New_York, America/Port-au-Prince, Etc/GMT+5). Checks the name's shape, not that a tz release lists it.
+  - TypeScript type: `string`
+  - Pattern: `^(?:UTC|GMT|[A-Za-z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$`
+  - Max length: 100
 
 
 

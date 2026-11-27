@@ -3,8 +3,10 @@
 //! ([`Dialect`]), so the engine keeps a graph in tables a caller's own
 //! migrations create: in a SQLite file, or in Postgres without a trigger,
 //! as a D16 behavior's tables are (D58). On SQLite it is the Rust port of
-//! the TypeScript package's `sqlite.ts`, statement for statement, and
-//! stores what it does, so a file one writes the other reads;
+//! the TypeScript package's `sqlite.ts`, statement for statement but that
+//! it writes patches, snapshot entries and released rows 100 to a
+//! statement where `sqlite.ts` writes a row a statement, and stores what
+//! it does, so a file one writes the other reads;
 //! [`crate::sqlite`] is it under the SQLite adapter's names.
 //! [`crate::postgres`] is the Postgres adapter over the tables sqlgen
 //! generates per graph, whose triggers write history.
@@ -1474,6 +1476,10 @@ fn micros(d: Duration) -> i64 {
     i64::try_from(d.as_micros()).unwrap_or(i64::MAX)
 }
 
+/// The most rows one statement inserts or deletes, so that its
+/// placeholders stay under 999, the fewest a SQLite build may take.
+const BATCH_ROWS: usize = 100;
+
 /// A JSON array of strings, as canonical JSON writes it.
 fn string_list(items: &[String]) -> String {
     let texts: Vec<String> = items.iter().map(|s| canonical::string_text(s)).collect();
@@ -1511,6 +1517,39 @@ impl FixedTx<'_> {
 
     fn graph(&self) -> SqlValue {
         SqlValue::Text(self.a.graph.clone())
+    }
+
+    /// Runs an INSERT of rows, [`BATCH_ROWS`] to a statement: `head`, then
+    /// a `VALUES` list, then `tail`. Each row is the shared values (`?1`,
+    /// `?2`, ...), then its own, which `head`'s columns name in that order.
+    /// The values are bound as they are, so each is stored as one row's
+    /// statement stored it, and Postgres types each placeholder as its
+    /// column.
+    async fn insert_rows(
+        &mut self,
+        what: &str,
+        head: &str,
+        tail: &str,
+        shared: &[SqlValue],
+        rows: Vec<Vec<SqlValue>>,
+    ) -> Result<(), Error> {
+        let common: String = (1..=shared.len()).map(|i| format!("?{i}, ")).collect();
+        let mut rows = rows.into_iter().peekable();
+        while rows.peek().is_some() {
+            let mut args = shared.to_vec();
+            let mut values = Vec::new();
+            for row in rows.by_ref().take(BATCH_ROWS) {
+                let mut own = Vec::with_capacity(row.len());
+                for value in row {
+                    args.push(value);
+                    own.push(format!("?{}", args.len()));
+                }
+                values.push(format!("({common}{})", own.join(", ")));
+            }
+            let sql = format!("{head} VALUES {}{tail}", values.join(", "));
+            self.execute(what, &sql, &args).await?;
+        }
+        Ok(())
     }
 
     /// Refuses a write whose ref is not one of this graph's refs of `root`.
@@ -2209,26 +2248,24 @@ impl Tx for FixedTx<'_> {
         let what = "write patches";
         self.require_own_commit(what, commit, "the patches' commit")
             .await?;
-        let sql = format!(
-            "INSERT INTO {} (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version, operation) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-            self.a.tables.patch
-        );
+        let mut rows = Vec::with_capacity(patches.len());
         for p in patches {
             let (kind, key, id) = self.pinned(&p.kind, &p.entity_key, &p.entity_id)?;
-            let args = [
+            rows.push(vec![
                 self.a.new_id()?.into(),
-                self.graph(),
-                commit.into(),
                 kind.into(),
                 key.into(),
                 id.into(),
                 p.entity_version.into(),
                 p.operation.as_str().into(),
-            ];
-            self.execute(what, &sql, &args).await?;
+            ]);
         }
-        Ok(())
+        let head = format!(
+            "INSERT INTO {} (graph, commit_id, id, entity_kind, entity_key, entity_id, entity_version, operation)",
+            self.a.tables.patch
+        );
+        self.insert_rows(what, &head, "", &[self.graph(), commit.into()], rows)
+            .await
     }
 
     async fn walk(&mut self, commit: &str, limit: usize) -> Result<Vec<Commit>, Error> {
@@ -2374,25 +2411,23 @@ impl Tx for FixedTx<'_> {
         let what = "write the snapshot";
         self.require_own_commit(what, commit, "the snapshot's commit")
             .await?;
-        let sql = format!(
-            "INSERT INTO {} (id, graph, commit_id, entity_kind, entity_key, entity_id, entity_version) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            self.a.tables.snapshot
-        );
+        let mut rows = Vec::with_capacity(entries.len());
         for e in entries {
             let (kind, key, id) = self.pinned(&e.kind, &e.entity_key, &e.entity_id)?;
-            let args = [
+            rows.push(vec![
                 self.a.new_id()?.into(),
-                self.graph(),
-                commit.into(),
                 kind.into(),
                 key.into(),
                 id.into(),
                 e.entity_version.into(),
-            ];
-            self.execute(what, &sql, &args).await?;
+            ]);
         }
-        Ok(())
+        let head = format!(
+            "INSERT INTO {} (graph, commit_id, id, entity_kind, entity_key, entity_id, entity_version)",
+            self.a.tables.snapshot
+        );
+        self.insert_rows(what, &head, "", &[self.graph(), commit.into()], rows)
+            .await
     }
 
     async fn commits(&mut self) -> Result<Vec<CommitNode>, Error> {
@@ -2512,18 +2547,29 @@ impl Tx for FixedTx<'_> {
             ];
             self.execute(&what, &sql, &args).await?;
         }
-        for key in &write.delete {
-            let sql = format!(
-                "DELETE FROM {released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key = ?4"
-            );
-            let args = [
+        for keys in write.delete.chunks(BATCH_ROWS) {
+            let mut args = vec![
                 self.graph(),
                 k.name.as_str().into(),
                 write.root.as_str().into(),
-                key.as_str().into(),
             ];
+            let mut listed = Vec::with_capacity(keys.len());
+            for key in keys {
+                args.push(key.as_str().into());
+                listed.push(format!("?{}", args.len()));
+            }
+            let sql = format!(
+                "DELETE FROM {released} WHERE graph = ?1 AND kind = ?2 AND root_id = ?3 AND entity_key IN ({})",
+                listed.join(", ")
+            );
             self.execute(&what, &sql, &args).await?;
         }
+        // Each key's row, where the key first comes, from the last row that
+        // has it: what one statement a row left, as SQLite inserts a VALUES
+        // list a row at a time, but Postgres refuses a statement that
+        // updates a row twice.
+        let mut rows: Vec<Vec<SqlValue>> = Vec::with_capacity(write.upsert.len());
+        let mut places: HashMap<String, usize> = HashMap::new();
         for row in &write.upsert {
             let Value::Object(row) = row else {
                 return Err(Error::Invalid(format!(
@@ -2553,23 +2599,34 @@ impl Tx for FixedTx<'_> {
                 };
                 data.insert(column.clone(), value);
             }
-            let sql = format!(
-                "INSERT INTO {released} (graph, kind, root_id, entity_key, commit_id, sequence, data) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7) ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET \
-                 commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data"
-            );
-            let args = [
-                self.graph(),
-                k.name.as_str().into(),
-                write.root.as_str().into(),
-                key.into(),
-                write.commit.as_str().into(),
-                write.sequence.into(),
-                write_object(&data).into(),
-            ];
-            self.execute(&what, &sql, &args).await?;
+            let values = vec![key.into(), write_object(&data).into()];
+            match places.get(key) {
+                Some(&place) => rows[place] = values,
+                None => {
+                    places.insert(key.to_owned(), rows.len());
+                    rows.push(values);
+                }
+            }
         }
-        Ok(())
+        let head = format!(
+            "INSERT INTO {released} (graph, kind, root_id, commit_id, sequence, entity_key, data)"
+        );
+        let shared = [
+            self.graph(),
+            k.name.as_str().into(),
+            write.root.as_str().into(),
+            write.commit.as_str().into(),
+            write.sequence.into(),
+        ];
+        self.insert_rows(
+            &what,
+            &head,
+            " ON CONFLICT (graph, kind, root_id, entity_key) DO UPDATE SET \
+             commit_id = excluded.commit_id, sequence = excluded.sequence, data = excluded.data",
+            &shared,
+            rows,
+        )
+        .await
     }
 
     async fn prune(

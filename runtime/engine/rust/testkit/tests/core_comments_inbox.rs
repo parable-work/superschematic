@@ -764,6 +764,108 @@ fn a_standing_message_makes_one_delivery_per_subject_never_to_its_author() {
     }
 }
 
+// A message's deliveries are written a batch of rows to a statement, and
+// an edit's to its mentions a statement a kind of change: past a batch's
+// 500 rows, every follower still gets its row.
+#[test]
+fn a_thread_with_more_followers_than_a_batch_delivers_to_each_of_them() {
+    for target in targets("comments_inbox_many_followers") {
+        let world = world(&target, review_config());
+        world.say(&alice(), "Top.");
+        let many: Vec<String> = (0..620).map(|i| format!("u{i:03}")).collect();
+        for subject in &many {
+            world.ok(&named(subject), "follow", json!({"thread": 1, "on": true}));
+        }
+        // bob's reply reaches every follower but bob, alice included, and
+        // the subjects it mentions, u000 with both reasons.
+        world.post(
+            &bob(),
+            json!({"body": "Two.", "thread": 1, "mentions": ["u000", "erin", "role:leads"]}),
+        );
+        let of = |message: i64| -> Vec<Value> {
+            world
+                .deliveries()
+                .into_iter()
+                .filter(|row| row[2] == json!(message))
+                .collect()
+        };
+        let replies = of(2);
+        assert_eq!(replies.len(), 621 + 2);
+        assert!(replies.contains(&json!([
+            "Review", "r1", 2, "alice", 0, 1, "pending", 0, null
+        ])));
+        assert!(replies.contains(&json!([
+            "Review", "r1", 2, "u000", 1, 1, "pending", 0, null
+        ])));
+        assert!(replies.contains(&json!([
+            "Review", "r1", 2, "u619", 0, 1, "pending", 0, null
+        ])));
+        assert!(replies.contains(&json!([
+            "Review", "r1", 2, "erin", 1, 0, "pending", 0, null
+        ])));
+        assert!(replies.contains(&json!([
+            "Review",
+            "r1",
+            2,
+            "role:leads",
+            1,
+            0,
+            "pending",
+            0,
+            null
+        ])));
+        // erin follows from the mention, at one below the reply's stand.
+        let follows = world.follows();
+        assert_eq!(follows.len(), 1 + 620 + 2, "alice, the 620, bob and erin");
+        assert!(follows
+            .iter()
+            .any(|row| row[3] == json!("erin") && row[4] == json!(1)));
+        // An edit that mentions 25 followers and 25 others: a mention on
+        // each follower's row, a row and a follow for each other; the
+        // subjects it drops lose their mention, or their row.
+        let mut edited: Vec<String> = many[1..26].to_vec();
+        edited.extend((0..25).map(|i| format!("v{i:02}")));
+        world.ok(&bob(), "edit", json!({"message": 2, "mentions": edited}));
+        let replies = of(2);
+        assert_eq!(replies.len(), 621 + 25);
+        let mentioned = |row: &&Value| row[4] == json!(1);
+        assert_eq!(replies.iter().filter(mentioned).count(), 50);
+        assert!(replies.contains(&json!([
+            "Review", "r1", 2, "u000", 0, 1, "pending", 0, null
+        ])));
+        assert!(replies.contains(&json!([
+            "Review", "r1", 2, "u025", 1, 1, "pending", 0, null
+        ])));
+        assert!(replies.contains(&json!([
+            "Review", "r1", 2, "u026", 0, 1, "pending", 0, null
+        ])));
+        assert!(replies.contains(&json!(["Review", "r1", 2, "v24", 1, 0, "pending", 0, null])));
+        assert_eq!(world.follows().len(), 1 + 620 + 2 + 25);
+        world.ok(&bob(), "edit", json!({"message": 2, "mentions": []}));
+        let replies = of(2);
+        assert_eq!(replies.len(), 621);
+        assert!(!replies.iter().any(|row| mentioned(&row)));
+        // A settle of many claimed rows, in batches of its own.
+        let claim = world.claim(&notifier(), json!({"limit": 100}));
+        let ids = ids_of(&claim);
+        assert_eq!(ids.len(), 100);
+        let settled = world.settle(
+            &notifier(),
+            json!({"token": claim["token"], "ids": ids, "outcome": "failed", "error": "busy"}),
+        );
+        assert_eq!(settled["items"].as_array().unwrap().len(), 100);
+        assert_eq!(
+            world
+                .deliveries()
+                .iter()
+                .filter(|row| row[6] == json!("failed") && row[8] == json!("busy"))
+                .count(),
+            100
+        );
+        world.engine.shutdown();
+    }
+}
+
 #[test]
 fn claims_take_due_deliveries_in_order_and_drop_what_needs_no_sending() {
     for target in targets("comments_inbox_claims") {

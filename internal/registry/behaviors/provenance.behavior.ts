@@ -1,6 +1,6 @@
 // Provenance's class (D103): the build derives provenance.behavior.json from it
 // (make behaviors), which the behaviors' core and the engine read.
-import { Temporal } from "superscalar";
+import { Generic, Temporal } from "superscalar";
 import { computed, declaresBehavior, subTable, type Const, type JsonSchema } from "@superschematic/db";
 
 /** A state's name, as a config writes it. */
@@ -139,7 +139,7 @@ export abstract class Provenance<C extends ProvenanceConfig> {
     /** When, in epoch milliseconds. */
     writtenAt: Temporal.DateTime;
     /** The confidence the write's attribution gave, from 0 to 1. */
-    confidence: number;
+    confidence: Generic.Probability;
     /**
      * proposed, accepted, rejected or edited; absent for a write that entered
      * no review.

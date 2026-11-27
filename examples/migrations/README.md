@@ -3,8 +3,8 @@
 A schema migration end to end: two versions of one DB service,
 `tasks-db`, the plan `superschematic migrate plan` writes between them for
 Postgres and for SQLite, and `superschematic-migrate` applying it to a
-database that holds rows, one phase at a time (D27 in
-`docs/DECISIONS.md`). The docs site's schema migrations page
+database that holds rows, one phase at a time (D27).
+The docs site's schema migrations page
 (`docs/src/content/docs/reference/migrations.mdx`) quotes it;
 `runtime/migrate/README.md` is the runner's reference.
 

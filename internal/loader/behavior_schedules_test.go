@@ -81,7 +81,7 @@ func TestSchedulesFixturesLoad(t *testing.T) {
 	for _, fd := range sub.Fields {
 		fields = append(fields, fd.Name+":"+fd.TypeRef.Name)
 	}
-	if want := "problem:Problem,name:string,kind:string,spec:string,timeZone:string,state:string,setAt:Temporal.DateTime,nextAt:Temporal.DateTime,retryAt:Temporal.DateTime," +
+	if want := "problem:Problem,name:string,kind:string,spec:string,timeZone:Temporal.TimeZone,state:string,setAt:Temporal.DateTime,nextAt:Temporal.DateTime,retryAt:Temporal.DateTime," +
 		"runs:Generic.Int64,attempt:Generic.Int64,lastAt:Temporal.DateTime,lastOutcome:string,finishedAt:Temporal.DateTime,endedBy:string"; strings.Join(fields, ",") != want {
 		t.Errorf("ProblemSchedulesSchedules' fields =\n%s\nwant\n%s", strings.Join(fields, ","), want)
 	}

@@ -564,13 +564,13 @@ export const fixtureDerivedProvenanceDbRules: RulesLayout = {
                   "name": "sourceHash",
                   "field": "sourceHash",
                   "column": "source_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "settledHash",
                   "field": "settledHash",
                   "column": "settled_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "model",
@@ -582,7 +582,7 @@ export const fixtureDerivedProvenanceDbRules: RulesLayout = {
                   "name": "confidence",
                   "field": "confidence",
                   "column": "confidence",
-                  "type": "number"
+                  "type": "Generic.Probability"
                 },
                 {
                   "name": "settledAt",
@@ -754,13 +754,13 @@ export const fixtureDerivedProvenanceDbRules: RulesLayout = {
                   "name": "sourceHash",
                   "field": "sourceHash",
                   "column": "source_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "settledHash",
                   "field": "settledHash",
                   "column": "settled_hash",
-                  "type": "string"
+                  "type": "Crypto.SHA256"
                 },
                 {
                   "name": "model",
@@ -772,7 +772,7 @@ export const fixtureDerivedProvenanceDbRules: RulesLayout = {
                   "name": "confidence",
                   "field": "confidence",
                   "column": "confidence",
-                  "type": "number"
+                  "type": "Generic.Probability"
                 },
                 {
                   "name": "settledAt",
@@ -885,7 +885,7 @@ export const fixtureDerivedProvenanceDbRules: RulesLayout = {
                   "name": "confidence",
                   "field": "confidence",
                   "column": "confidence",
-                  "type": "number"
+                  "type": "Generic.Probability"
                 },
                 {
                   "name": "review",

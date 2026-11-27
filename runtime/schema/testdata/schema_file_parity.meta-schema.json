@@ -4979,7 +4979,8 @@
             "General",
             "MemoryStore",
             "Site",
-            "Stack"
+            "Stack",
+            "Tasks"
           ],
           "type": "string"
         },
@@ -7506,7 +7507,8 @@
             "General",
             "MemoryStore",
             "Site",
-            "Stack"
+            "Stack",
+            "Tasks"
           ],
           "type": "string"
         },
@@ -7706,6 +7708,177 @@
         "param",
         "relation"
       ],
+      "type": "object"
+    },
+    "TaskDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "after": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "hermetic": {
+          "type": "boolean"
+        },
+        "image": {
+          "default": "",
+          "type": "string"
+        },
+        "inputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskInput"
+          },
+          "type": "array"
+        },
+        "name": {
+          "default": "",
+          "type": "string"
+        },
+        "outputs": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskOutput"
+          },
+          "type": "array"
+        },
+        "platform": {
+          "default": "",
+          "type": "string"
+        },
+        "run": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "sections": {
+          "additionalProperties": {
+            "type": "object"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "services": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskService"
+          },
+          "type": "array"
+        },
+        "uses": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/TaskUse"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "run"
+      ],
+      "type": "object"
+    },
+    "TaskInput": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "spec": {
+          "default": {},
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "TaskOutput": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "default": "",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "paths": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "TaskService": {
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "image"
+      ],
+      "type": "object"
+    },
+    "TaskUse": {
+      "additionalProperties": false,
+      "properties": {
+        "output": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "output"
+      ],
+      "type": "object"
+    },
+    "TasksDecl": {
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "default": "",
+          "type": "string"
+        },
+        "platform": {
+          "default": "",
+          "type": "string"
+        },
+        "sections": {
+          "additionalProperties": {
+            "type": "object"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
       "type": "object"
     },
     "TraitConfigSchema": {
@@ -7998,6 +8171,12 @@
         "strictJSON": {
           "default": false,
           "type": "boolean"
+        },
+        "task": {
+          "$ref": "#/$defs/TaskDecl"
+        },
+        "tasks": {
+          "$ref": "#/$defs/TasksDecl"
         },
         "traitConfig": {
           "$ref": "#/$defs/TraitConfigSchema"

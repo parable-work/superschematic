@@ -21,6 +21,7 @@ func coreOutputRegistry(t *testing.T) *Registry {
 		{Name: "stack", Kinds: []string{"Stack"}},
 		{Name: "site", Kinds: []string{"Site"}},
 		{Name: "memorystore", Kinds: []string{"MemoryStore"}},
+		{Name: "tasks", Kinds: []string{"Tasks"}},
 	} {
 		spec.Generate = noopGenerate
 		if err := reg.RegisterGenerator(spec); err != nil {

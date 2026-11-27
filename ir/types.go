@@ -358,6 +358,13 @@ type TypeDef struct {
 	Database    *DatabaseDecl    `json:"database,omitempty" yaml:"database,omitempty"`
 	Environment *EnvironmentDecl `json:"environment,omitempty" yaml:"environment,omitempty"`
 
+	// Tasks and Task are the declarations of a Tasks schema's classes:
+	// @tasks, the defaults of the schema's tasks, and @task, one unit of
+	// work (D203). Every other type has neither. [TasksOf] assembles them
+	// into the schema's [Tasks].
+	Tasks *TasksDecl `json:"tasks,omitempty" yaml:"tasks,omitempty"`
+	Task  *TaskDecl  `json:"task,omitempty" yaml:"task,omitempty"`
+
 	// Extensions holds extension decorator data keyed by extension name; see
 	// [Schema.Extensions].
 	Extensions map[string]json.RawMessage `json:"extensions,omitempty" yaml:"extensions,omitempty"`

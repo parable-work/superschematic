@@ -67,13 +67,13 @@ By making a contribution to this project, I certify that:
 
 | Path | What it is |
 | --- | --- |
-| [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, embedded, pulumi) linked |
+| [`cmd/superschematic/`](cmd/superschematic/) | The installed binary, a Go module of its own: the core with the official extensions (gcp, cloudflare, embedded, resolvers, pulumi) linked |
 | [`internal/cmd/superschematic-core/`](internal/cmd/superschematic-core/) | The core with no extension linked, which `make cli-smoke` and the examples' scripts run; never shipped |
-| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `queries`, `json-schema`, `format`, `behaviors`, `env`, `catalog`, `new`, `stack`, `identity` |
+| [`cli/`](cli/) | `cli.New(Config, ...Extension)` and the commands: `init`, `check`, `build`, `build-all`, `migrate`, `queries`, `json-schema`, `format`, `behaviors`, `env`, `catalog`, `new`, `stack`, `identity`, `tasks` |
 | [`registry/`](registry/), [`loader/`](loader/), [`schemadeps/`](schemadeps/) | The public packages an extension imports |
 | [`internal/`](internal/) | The loader, the generators, the writers, the build plan and the cache |
 | [`ir/`](ir/) | The schema IR, its own Go module; [`ir/typescript/`](ir/typescript/) is `@superschematic/schema-ir`, its types and the data form's JSON Schema |
-| [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config,stack,memory-store}` |
+| [`packages/`](packages/) | The authoring packages schemas import: `@superschematic/{schema,db,api,schema-config,stack,memory-store,tasks}` |
 | [`runtime/schema/`](runtime/schema/) | The schema runtime generated types link, in Go, TypeScript and Python, and the helpers the generated Rust validators call |
 | [`runtime/http/`](runtime/http/) | The HTTP runtime generated servers link, in Go, Rust and TypeScript |
 | [`runtime/versiongraph/`](runtime/versiongraph/) | The version-graph core (Rust, with a Go binding and a wasm build) and its engines in Go, TypeScript, Rust and Python |
@@ -83,20 +83,21 @@ By making a contribution to this project, I certify that:
 | [`runtime/engine-commerce/`](runtime/engine-commerce/) | `@superschematic/engine-commerce` and its crate: the engine's `Stock`, `Calendar`, `Holds` and `Payments` |
 | [`runtime/rules/`](runtime/rules/) | The behaviors' core (D103): for Go, a cgo binding and the adapter every Go caller runs it through; for TypeScript, `@superschematic/rules`, the Rust core built for WebAssembly |
 | [`runtime/rules-handler/`](runtime/rules-handler/) | `@superschematic/rules-handler`: development mode's request handler for a TypeScript server (D117) |
+| [`tasks/`](tasks/) | The shape of the task file and of the plan (D203), with their JSON Schemas: what a Tasks service's build writes and `tasks plan` prints, which a forge reads |
 | [`stack/`](stack/) | The stack model's resolver: the Stack IR, the resource graph, `environment.json`, and the pinned provider schemas the targets check against offline |
-| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `embedded`, `pulumi`), `topcoat`, and example extensions and projects |
+| [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `embedded`, `resolvers`, `pulumi`), `topcoat`, and example extensions and projects |
 | [`agent/`](agent/), [`.claude-plugin/`](.claude-plugin/) | The agent skill for building with superschematic, and the marketplace that publishes it (D76) |
-| [`docs/`](docs/) | The docs site, the open decisions and the design documents |
+| [`docs/`](docs/) | The docs site and the design documents |
 | [`scripts/`](scripts/) | The build and release scripts: superscalar's and the Rust cores' static archives, the engine's addon, release archives and tags, and the scrub check |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has fourteen Go modules: the root (the compiler), `ir`,
+The repository has fifteen Go modules: the root (the compiler), `ir`,
 `runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
 `runtime/engine/go` (the engine's binding), `runtime/rules/go` (the
 behaviors' core's binding and adapter, D103),
 `runtime/migrate/go` (the migration runner), `extensions/gcp`,
-`extensions/cloudflare`, `extensions/embedded`, `extensions/pulumi`,
-`extensions/topcoat` and
+`extensions/cloudflare`, `extensions/embedded`, `extensions/resolvers`,
+`extensions/pulumi`, `extensions/topcoat` and
 `cmd/superschematic` (the installed binary). Generated code imports the
 runtimes and the IR, never the compiler, and the root module never imports
 an extension.
@@ -121,14 +122,10 @@ install` at a version refuses them; build from a checkout, or download a
 release's `superschematic_<version>_<platform>.tar.gz`.
 
 [`docs/extension-model.md`](docs/extension-model.md) is the design of the
-extension seam, [`docs/stack-model.md`](docs/stack-model.md) the design of
-stacks and deploys, and [`docs/DECISIONS.md`](docs/DECISIONS.md) holds
-the decisions that are not built yet. Code, commits and the docs cite
-decisions by number (D1, D2, ...). A decision leaves the file once it is
-built, and the code, the docs site and the commit that built it are its
-record from then on. Every entry up to D119 is in the file at commit
-e8e685a51: `git show e8e685a51:docs/DECISIONS.md`.
-[`docs/README.md`](docs/README.md) covers writing docs pages.
+extension seam and [`docs/stack-model.md`](docs/stack-model.md) the
+design of stacks and deploys. Decisions are GitHub issues ("Decisions"
+under "Rules"). [`docs/README.md`](docs/README.md) covers writing docs
+pages.
 
 ## Toolchain
 
@@ -465,6 +462,25 @@ breaking change.
 Plain ASCII in source, docs and commit messages. Keep comments and docs short
 and concrete.
 
+### Decisions
+
+- A decision is a GitHub issue labeled `decision`. Code, commits and the
+  docs cite it by its issue number (`#612`).
+- Its body says what is decided, the alternatives not taken, what is
+  built (Built) and what is not (Left).
+- A change that builds part of a decision edits the issue's Left. A
+  change that builds all of it closes the issue: its pull request says
+  `Closes #n`.
+- A change that reverses a decision, built or not, opens a new issue that
+  names the old one.
+- Decisions from before the move to issues keep their D-numbers (D1,
+  D2, ...) in code, commits and docs, and their issues' titles start with
+  them. D1 to D119 are in the file the decisions lived in at commit
+  e8e685a51: `git show e8e685a51:docs/DECISIONS.md`.
+- Write an issue in the style of the docs (`docs/README.md`): plain ASCII,
+  short declarative sentences, decisions in a table beside the
+  alternatives not taken.
+
 ## Releases
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
@@ -491,7 +507,7 @@ module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
 `runtime/engine/go/vX.Y.Z`, `runtime/rules/go/vX.Y.Z`,
 `runtime/migrate/go/vX.Y.Z`, `extensions/gcp/vX.Y.Z`,
 `extensions/cloudflare/vX.Y.Z`, `extensions/embedded/vX.Y.Z`,
-`extensions/pulumi/vX.Y.Z`, `extensions/topcoat/vX.Y.Z` and
+`extensions/resolvers/vX.Y.Z`, `extensions/pulumi/vX.Y.Z`, `extensions/topcoat/vX.Y.Z` and
 `cmd/superschematic/vX.Y.Z` (`bump_version.py go-modules` lists them, and
 a test fails when a module is missing). The `require`
 lines between them carry the release version so a consumer at a tag resolves
@@ -641,9 +657,9 @@ registered:
   `superschematic-http-runtime` is published by hand with a personal token
   before the publisher is registered.
 - npm is the same: a trusted publisher is a setting of a package that already
-  exists, so the first version of each of the eighteen packages is published
+  exists, so the first version of each of the nineteen packages is published
   by hand too. A new npm trusted publisher entry expires unless it publishes
-  within two days, so register the eighteen entries no more than two days
+  within two days, so register the nineteen entries no more than two days
   before the first tag that publishes. The `@superschematic` npm scope is an
   npmjs.com organization that must exist and be owned by the publisher before
   the variable is set.

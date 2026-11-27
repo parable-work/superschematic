@@ -837,10 +837,12 @@ func (r *NoteRepository) GetOne(ctx context.Context, id types.IdentityUUID, opts
 	return result, nil
 }
 
-// GetManyByIDs retrieves multiple Note records by their IDs in a single query
+// GetManyByIDs retrieves multiple Note records by their IDs: a query
+// of at most as many keys as Postgres binds the parameters of, as many times as the keys take.
 func (r *NoteRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error) {
+	resultMap := make(map[types.IdentityUUID]*types.Note, len(ids))
 	if len(ids) == 0 {
-		return map[types.IdentityUUID]*types.Note{}, nil
+		return resultMap, nil
 	}
 
 	// Dedupe IDs
@@ -852,7 +854,22 @@ func (r *NoteRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityU
 			uniqueIDs = append(uniqueIDs, id)
 		}
 	}
+	most := 65535
+	for start := 0; start < len(uniqueIDs); start += most {
+		read, err := r.getManyByIDs(ctx, uniqueIDs[start:min(start+most, len(uniqueIDs))])
+		if err != nil {
+			return nil, err
+		}
+		for id, row := range read {
+			resultMap[id] = row
+		}
+	}
+	return resultMap, nil
+}
 
+// getManyByIDs reads the rows of uniqueIDs, keys no two of which are one,
+// in one query.
+func (r *NoteRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.IdentityUUID) (map[types.IdentityUUID]*types.Note, error) {
 	// Build WHERE id IN (...) clause
 	placeholders := make([]string, len(uniqueIDs))
 	args := make([]interface{}, len(uniqueIDs))
@@ -937,7 +954,6 @@ func (r *NoteRepository) GetManyByIDs(ctx context.Context, ids []types.IdentityU
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating rows: %w", err)
 	}
-
 	return resultMap, nil
 }
 
@@ -2416,7 +2432,9 @@ func (r *NoteRepository) heldOfKey(ctx context.Context, on NoteUniqueKey, keyVal
 	return row, nil
 }
 
-// CreateMany inserts multiple Note records in a single statement
+// CreateMany inserts multiple Note records and returns them in the
+// inputs' order: a statement of at most 9361 rows, in a transaction of its
+// own when it takes more than one and none is open.
 func (r *NoteRepository) CreateMany(ctx context.Context, inputs []*types.Note) ([]*types.Note, error) {
 	if len(inputs) == 0 {
 		return []*types.Note{}, nil
@@ -2493,18 +2511,40 @@ func (r *NoteRepository) CreateMany(ctx context.Context, inputs []*types.Note) (
 		}
 		batch = append(batch, row)
 	}
-	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
+	// More than one statement runs in a transaction of its own when none is
+	// open.
+	if len(batch) <= 9361 {
+		return r.createBatches(ctx, batch)
+	}
+	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.Note, error) {
+		return (&NoteRepository{tx: tx, txDB: r.database()}).createBatches(ctx, batch)
+	})
+}
 
-	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClauseMany := `"id", "recipe_id", "reply_to", "body", "entity_key", "ref_id", "deleted_on_ref", "_version"`
+// createBatches is CreateMany of batch on the repository's connection: a
+// statement of at most 9361 rows at a time, as many as Postgres binds the
+// parameters of, each returning its rows in the order of its VALUES.
+func (r *NoteRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.Note, error) {
+	results := make([]*types.Note, 0, len(batch))
+	for start := 0; start < len(batch); start += 9361 {
+		created, err := r.createBatch(ctx, batch[start:min(start+9361, len(batch))])
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, created...)
+	}
+	return results, nil
+}
+
+// createBatch inserts the rows of batch in one statement and returns them.
+func (r *NoteRepository) createBatch(ctx context.Context, batch [][]batchInsertCell) ([]*types.Note, error) {
+	fieldNames, valuePlaceholders, values := buildBatchInsert(batch)
 	query := fmt.Sprintf(
 		`INSERT INTO note (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		returningClauseMany,
+		`"id", "recipe_id", "reply_to", "body", "entity_key", "ref_id", "deleted_on_ref", "_version"`,
 	)
-
-	// Execute query
 	var rows pgx.Rows
 	var err error
 	if r.tx != nil {
@@ -2516,63 +2556,17 @@ func (r *NoteRepository) CreateMany(ctx context.Context, inputs []*types.Note) (
 		return nil, fmt.Errorf("failed to execute batch insert: %w", err)
 	}
 	defer rows.Close()
-
-	// Scan results
-	results := []*types.Note{}
+	results := make([]*types.Note, 0, len(batch))
 	for rows.Next() {
-		result := &types.Note{}
-		// Create temporary variables for nullable fields that need pointer scanning
-
-		var tempReplyTo *types.IdentityUUID
-
-		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
-		var tempRelRecipe *types.IdentityUUID
-		var tempRelRef *types.IdentityUUID
-
-		// Scan all fields in schema order (matches DDL column order)
-		err := rows.Scan(
-
-			&result.Id,
-
-			&tempRelRecipe,
-
-			&tempReplyTo,
-
-			&result.Body,
-
-			&result.EntityKey,
-
-			&tempRelRef,
-
-			&result.DeletedOnRef,
-
-			&result.Version,
-		)
+		result, err := r.scanReturned(rows, nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan result: %w", err)
 		}
-
-		// Copy nullable fields when present
-
-		if tempReplyTo != nil {
-			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
-			result.ReplyTo = tempReplyTo
-		}
-
-		// Set relationship IDs from scanned FK values
-		if tempRelRecipe != nil {
-			result.Recipe.Id = noteUUIDPtr(*tempRelRecipe)
-		}
-		if tempRelRef != nil {
-			result.Ref.Id = noteUUIDPtr(*tempRelRef)
-		}
 		results = append(results, result)
 	}
-
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("error iterating results: %w", err)
 	}
-
 	return results, nil
 }
 

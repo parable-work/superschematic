@@ -30,7 +30,7 @@ depends on none of them.
 | the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | a check for `files` (attachments) and `credentials` (agent runs' credentials): those features register as they are built |
 | credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
 
-D159 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
+[D159](https://github.com/parable-work/superschematic/issues/608)
 records the design and what is left. `examples/runtime-providers` is the
 worked example this page quotes.
 

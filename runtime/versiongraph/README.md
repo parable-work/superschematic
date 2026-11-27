@@ -2,7 +2,7 @@
 
 The version-graph core composes, merges, diffs, hashes and validates trees
 of versioned rows, and makes the order keys that place a row among its
-siblings (D17, D19, D32 and D137 in `docs/DECISIONS.md`). It is one Rust crate
+siblings (D17, D19, D32 and D137). It is one Rust crate
 with no IO, clock or randomness. Its operations take one JSON document and
 return one. A graph descriptor tells it which columns of each kind's rows
 play which role, so it holds no per-kind code.
@@ -787,8 +787,9 @@ settings. `nodeSqlite` and `bunSqlite` bind an open `node:sqlite`
 they call, so no entry imports either module.
 
 The Python package's SQLite adapter (`superschematic_versiongraph.sqlite`)
-is this one, statement for statement and stored form for stored form, so
-a file either writes the other reads; `python/README.md` has its use. Its
+is this one, statement for statement (but that it writes patches, snapshot
+entries and released rows 100 to a statement) and stored form for stored
+form, so a file either writes the other reads; `python/README.md` has its use. Its
 `Client` holds the transactions, as the Python Postgres adapter's does:
 `sqlite_client` binds a `sqlite3.Connection` opened with
 `isolation_level=None` (or `autocommit=True`), issues `BEGIN IMMEDIATE`

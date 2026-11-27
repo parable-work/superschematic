@@ -1,6 +1,6 @@
 # engine-jobs
 
-A job runner on development mode (D117 in `docs/DECISIONS.md`), served by
+A job runner on development mode (D117, #590), served by
 `@superschematic/rules-handler`, the handler of the behaviors' core.
 Workers claim jobs in priority order and hold them under leases they
 renew; a failed attempt is retried by its failure class; each claim

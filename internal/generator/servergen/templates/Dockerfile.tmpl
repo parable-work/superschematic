@@ -14,7 +14,7 @@
 #
 {{- if .Docker.Archives }}
 # The generated code links superscalar's static archive, and the version
-# graph's, through cgo (D3 in docs/DECISIONS.md), so the {{ .Kind }} cannot build
+# graph's, through cgo (D3), so the {{ .Kind }} cannot build
 # with CGO_ENABLED=0, and no module the module proxy serves carries them.
 # superschematic {{ .Docker.Archives.Version }}, which wrote this file, ships both for each
 # platform beside its binaries, built with one Rust release so that they
@@ -27,8 +27,8 @@
 # links.
 {{- end }}
 {{- else }}
-# The generated code links superscalar's static archive through cgo (D3 in
-# docs/DECISIONS.md), so the {{ .Kind }} cannot build with CGO_ENABLED=0. The
+# The generated code links superscalar's static archive through cgo (D3),
+# so the {{ .Kind }} cannot build with CGO_ENABLED=0. The
 # superscalar stage builds the archive for the image's platform from the
 # checkout the naming file's [paths] scalar_go names, with the Rust release
 # that tools.env pins for the host's archives.

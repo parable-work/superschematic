@@ -16,7 +16,7 @@ beside the API crate, at `<out>/topcoat/<service>`, and is named
 - calls each operation in-process, from a page, a shard or a procedure, by
   its route's rules: the caller admitted as the route admits it (401, 403),
   the arguments checked as the router checks them (the same 400), then the
-  implementation ([D43](../../docs/DECISIONS.md)). An operation whose
+  implementation ([D43](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)). An operation whose
   route does something first that a call cannot has no call: a webhook
   (`@webhook`, `@hmacVerified`), which a third party calls and whose route
   checks its signature, and an operation the service mounts itself
@@ -409,7 +409,7 @@ decoding and their errors:
 
 - an **input form**, `<Input>Form`, per input type an operation with an
   in-process call takes, declared by the service itself, parsed by the
-  input type's rules ([D14](../../docs/DECISIONS.md)). The user model's
+  input type's rules ([D14](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)). The user model's
   operations have no in-process call, so login's input and the
   administration routes' arguments get none: a page signs a user in
   through the identity service, as above;
@@ -420,7 +420,7 @@ decoding and their errors:
   its input (one whose only
   argument is its path's is a button). It holds each argument, embeds the
   input's form when the operation takes one, and is parsed by the
-  router's own rules (`Args::check`, [D43](../../docs/DECISIONS.md)).
+  router's own rules (`Args::check`, [D43](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)).
 
 A form holds each field as the browser sends it, so a refused form
 renders again exactly as it was sent. A control is named by its field's
@@ -432,7 +432,7 @@ a word of its own (`line1` is "Line 1", `addressLine2` "Address line 2")
 unless an acronym or a single letter holds it (`awsS3Bucket` is "Aws S3
 bucket"). An enum's member, a select's option or a checkbox's label, is
 labeled by its title (`/** @title Held for a stock check */` in
-TypeScript, `title` in the data forms, [D48](../../docs/DECISIONS.md)),
+TypeScript, `title` in the data forms, [D48](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)),
 else by its name in words: `OnHold` is "On hold". When two members of an
 enum the crate labels take one label, ignoring case, such as `OnHold` and
 `Paused` titled "On hold", the build log says so, and a `@title` tells
@@ -517,7 +517,7 @@ async fn sign_up(cx: &Cx, Form(form): Form<SignupInputForm>) -> topcoat::Result<
   out, which reads its declared default or filters nothing; a new form
   selects the default. A checkbox could not say false, nor turn off a
   flag whose default is true, since an unchecked box sends nothing.
-- A list with a **`FilterBy`** argument ([D106](../../docs/DECISIONS.md))
+- A list with a **`FilterBy`** argument ([D106](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md))
   has one more control per field it filters by, after its arguments',
   labeled by the field's name in words. The form holds what each sent in a
   member named for the field, `filter_<field>`, and each control is named
@@ -641,7 +641,7 @@ attributes its rules give it:
 - a `<textarea rows="6">` for long text, a text field or argument whose
   `maxLength`, its own or its scalar's, is **500** or more: a reason, a
   review's body, not a name or a title. A field's multiline hint,
-  `@display({ multiline })` ([D48](../../docs/DECISIONS.md)), overrides
+  `@display({ multiline })` ([D48](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)), overrides
   that rule either way: `true` makes text a textarea without a bound or
   under 500, a note, and `false` keeps it one line at any bound, a code.
   The hint applies where the control would be text: an email, URL,
@@ -833,7 +833,7 @@ so it exists only where a browser's request can meet the route's rules:
 - An operation without an in-process call has none: a webhook, signed or
   not, and an operation the service mounts itself.
 - An operation whose route admits only a service caller
-  (`@requireService`, [D37](../../docs/DECISIONS.md)) has none, since a
+  (`@requireService`, [D37](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)) has none, since a
   browser holds no service credential. Nor has it an end user's call:
   only a service's ([Calling as a service](#calling-as-a-service)).
   An `@allowService` operation keeps its procedure, since its route
@@ -847,7 +847,7 @@ name gets no record either.
 ### Calling as a service
 
 An operation with a service clause, `@requireService` or `@allowService`
-([D37](../../docs/DECISIONS.md)), is called as a service through
+([D37](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)), is called as a service through
 `operations::as_service(&caller)`. The caller is the runtime's
 `ServiceCaller`, the record the route hands an implementation for a
 verified credential, which the app names itself:
@@ -913,7 +913,7 @@ such procedure:
 - **Rate limit.** The procedure takes the operation's limiter from the
   app's registry, `Setup.rate_limits`, the one the JSON API's route and
   the [pages](#route-controls-of-the-pages) take too
-  ([D44](../../docs/DECISIONS.md)). It counts each client by its IP
+  ([D44](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)). It counts each client by its IP
   address as Topcoat reads it (`client_ip`: the peer's, or the one a
   trusted proxy names), and `<service>(...)` gives the JSON API's routes
   the same address, so a client has one budget per operation through all
@@ -1004,7 +1004,7 @@ let choices = Choices::new().with("lines.productId", catalog.iter().map(|product
 view! { order_view_detail(record: OrderViewRecord::from(order), choices: choices) }
 ```
 
-The type's `@display` ([D48](../../docs/DECISIONS.md)) shapes both:
+The type's `@display` ([D48](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)) shapes both:
 `summaryFields` chooses and orders a table's columns (else every field),
 `titleField` names a detail (`aria-label`, falling back to `noun`) and
 heads each row (`<th scope="row">`), and `plural` captions a table.
@@ -1043,7 +1043,7 @@ page. An item's page shows a section's table with none.
 ## Money
 
 A field that holds an amount in a currency's minor units says which
-currency with `@display({ currency })` ([D48](../../docs/DECISIONS.md)):
+currency with `@display({ currency })` ([D48](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)):
 a code, `"GBP"`, or another field of the same type, `{ field: "currency" }`.
 A `Finance.Money` field without it takes its type's one `Finance.Currency`
 field, when the type has exactly one.
@@ -1510,7 +1510,7 @@ A page outside the prefix keeps the app's own metadata.
 
 A link of the nav and the index starts with its resource's icon when the
 list's element type, else the detail's, declares one with
-`@display({ icon })` ([D48](../../docs/DECISIONS.md)): an empty span the
+`@display({ icon })` ([D48](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)): an empty span the
 app's stylesheet draws, before the label.
 
 ```html
@@ -1581,7 +1581,7 @@ twice.
 A page's request meets the `@rateLimit`, `@bodyLimit` and `@timeout` of
 the operation it is for, in the route's order, as the route's request
 does, and of the options operations its references call, so the console
-is no unlimited twin of a route ([D44](../../docs/DECISIONS.md)). Each page names what it meets where
+is no unlimited twin of a route ([D44](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md)). Each page names what it meets where
 it is declared, in its route's context
 (`#[page("/console/orders", with(Meets { .. }))]`), and `<service>(...)`
 adds one layer at the prefix, `PageControls`, which reads it there:
