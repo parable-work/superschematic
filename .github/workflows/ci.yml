@@ -41,11 +41,22 @@ name: ci
 # workflow: before every release, on a dry run, and twice a day as the
 # release candidate on main (release-candidate.yml).
 # A step or job that belongs to the full tier carries
-# `if: github.event_name != 'pull_request'`; under workflow_call,
-# github.event_name is the caller's event, never pull_request.
+# `if: inputs.tier == 'full'`. The input is the call's alone, and full
+# unless the caller says otherwise, so a run an event starts has none and
+# is the quick tier. The event cannot say which tier a run is: under
+# workflow_call github.event_name is the caller's event, and a release's
+# is push, as a merge to main's is.
 #
 # A pull request runs CI only when it targets main and is not a draft.
-# Merges to main run nothing here: the release candidate is main's full run.
+# A merge to main runs the quick tier once more, on main itself. A run's
+# caches belong to its branch, and a pull request reads main's: this run
+# saves them, the Rust builds, the Go build cache and the superscalar
+# checkout among them, so that a pull request opened after a lock file, a
+# go.sum or a pin moved, or after the repository's ten gigabytes pushed a
+# cache out, starts from one. Without it they came back with the release
+# candidate, twice a day, and every run until then built from nothing. A
+# cache whose key is on main already is not saved again. The release
+# candidate is still main's full run.
 # On a draft every job skips and ci-pass reports under another name (see
 # that job). A stacked pull request runs nothing until it targets main; when
 # GitHub retargets it after its parent merges, push or close and reopen it to
@@ -63,8 +74,9 @@ name: ci
 # parts each, their steps divided between them in this file, and the
 # engine workspace's lints in engine-rust-lint.
 #
-# A pull request reads the caches the release candidate's run saved on main
-# and saves none of the large ones (the Rust builds, the Go build cache):
+# A pull request reads the caches main's runs saved, a merge's and the
+# release candidate's, and saves none of the large ones (the Rust builds,
+# the Go build cache):
 # the repository may keep ten gigabytes, and a copy a pull request pushed
 # main's own out.
 #
@@ -84,16 +96,25 @@ on:
     # ready_for_review is added to the defaults: a draft runs nothing, so the
     # draft -> ready transition has to start the run.
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
   workflow_call:
+    inputs:
+      tier:
+        description: "full runs every step and job; anything else the quick tier a pull request runs"
+        type: string
+        default: full
 
 # Least-privilege GITHUB_TOKEN: this workflow only reads the checkout.
 permissions:
   contents: read
 
-# Cancel superseded runs on the same PR branch (head_ref). workflow_call runs
-# are keyed by SHA and never cancelled.
+# Cancel superseded runs on the same PR branch (head_ref). A merge's run and
+# a call's are keyed by SHA and never cancelled, each under a name of its
+# own, so a release candidate of a commit does not wait for that commit's
+# run on main.
 concurrency:
-  group: ci-${{ github.head_ref || github.sha }}
+  group: ci-${{ github.head_ref || format('{0}-{1}', inputs.tier || 'main', github.sha) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -164,7 +185,7 @@ jobs:
     # module's tests. The whole job took two hours and a quarter there, the
     # root module's tests a hundred minutes of it. The limits are that
     # job's, and a shard is well inside them.
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 60 || 200 }}
+    timeout-minutes: ${{ inputs.tier != 'full' && 60 || 200 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -188,9 +209,9 @@ jobs:
         # One cache for the jobs that compile the root module and the
         # modules over it: this job's shards, go-lint and engine-rust. The
         # rest shard saves it, since it builds every module, and only
-        # outside a pull request: on main that is the release candidate's
-        # run, whose caches every pull request reads. A go.sum that moved
-        # starts from the cache before it.
+        # outside a pull request: on main those are a merge's run and the
+        # release candidate's, whose caches every pull request reads. A
+        # go.sum that moved starts from the cache before it.
         id: go-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -287,7 +308,7 @@ jobs:
 
       - name: Cache the engine's Rust build
         # The full tier's engine addon, below.
-        if: github.event_name != 'pull_request' && matrix.shard == 'generators'
+        if: inputs.tier == 'full' && matrix.shard == 'generators'
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
@@ -300,7 +321,7 @@ jobs:
         # addon in its native/, a debug build, which compiles faster than the
         # release's and loads the same. The tests that load it are all
         # under internal/generator, the generators shard.
-        if: github.event_name != 'pull_request' && matrix.shard == 'generators'
+        if: inputs.tier == 'full' && matrix.shard == 'generators'
         run: |
           (cd runtime/http/typescript && bun install --frozen-lockfile && bun run build)
           (cd runtime/engine/typescript && bun install --frozen-lockfile && bun run build)
@@ -472,7 +493,7 @@ jobs:
           CARGO_TARGET_DIR: ${{ runner.temp }}/generated-crates-target
           # The quick tier: -short skips the tests that compile and run
           # generated Go, TypeScript, Rust and Python modules.
-          GO_TEST_SHORT: ${{ github.event_name == 'pull_request' }}
+          GO_TEST_SHORT: ${{ inputs.tier != 'full' }}
           # A package's limit. Packages that run cargo queue on its lock of
           # the shared target directory, and the wait counts against each
           # package's limit: in the full tier cli and internal/generator
@@ -481,7 +502,7 @@ jobs:
           # internal/generator/servergen, takes about an hour, and cli,
           # internal/generator and internal/sqlmigrate thirty-two to
           # thirty-eight minutes each.
-          GO_TEST_TIMEOUT: ${{ github.event_name == 'pull_request' && '30m' || '90m' }}
+          GO_TEST_TIMEOUT: ${{ inputs.tier != 'full' && '30m' || '90m' }}
           SHARD: ${{ matrix.shard }}
         run: |
           export CGO_LDFLAGS="$(scripts/superscalar-dep.sh --print) $(scripts/versiongraph-archive.sh --print) $(scripts/rules-archive.sh --print)"
@@ -498,7 +519,7 @@ jobs:
           key: ${{ steps.go-cache.outputs.cache-primary-key }}
 
       - name: CLI smoke (the core with no extension builds DB, API and General fixtures)
-        if: github.event_name != 'pull_request' && matrix.shard == 'rest'
+        if: inputs.tier == 'full' && matrix.shard == 'rest'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
         run: |
@@ -512,7 +533,7 @@ jobs:
       # on the Postgres above, and fails when an output the page quotes
       # (examples/migrations/testdata/generated/) is stale.
       - name: examples/migrations (plan, gate and apply a migration on SQLite and Postgres)
-        if: github.event_name != 'pull_request' && matrix.shard == 'rest'
+        if: inputs.tier == 'full' && matrix.shard == 'rest'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
@@ -730,7 +751,7 @@ jobs:
     # The full tier: every step builds the example end to end. acme-shop's
     # check takes about half an hour of it, and up to fifteen minutes more
     # when its stack's Rust servers compile with nothing cached.
-    if: github.event_name != 'pull_request'
+    if: inputs.tier == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 75
     steps:
@@ -1111,7 +1132,7 @@ jobs:
         # against a listening server under each runtime. A step of this job
         # rather than a job of its own: it needs only what this job installs,
         # and takes seconds. End to end, so the full tier.
-        if: github.event_name != 'pull_request' && matrix.part == 'engine'
+        if: inputs.tier == 'full' && matrix.part == 'engine'
         run: examples/engine-notes/scripts/check.sh
 
       - name: examples/engine-jobs type-check + end to end (Node.js and Bun)
@@ -1119,7 +1140,7 @@ jobs:
         # package rebuilt from the installs above, linked into the example,
         # and its test run against a listening server under each runtime.
         # End to end, so the full tier, as engine-notes is.
-        if: github.event_name != 'pull_request' && matrix.part == 'engine'
+        if: inputs.tier == 'full' && matrix.part == 'engine'
         run: examples/engine-jobs/scripts/check.sh
 
   python:
@@ -1414,13 +1435,13 @@ jobs:
 
       - name: Cache Rust dependencies
         # Saved outside a pull request alone, here and in every job: on
-        # main that is the release candidate's run, whose caches every
-        # pull request reads. A pull request whose lock file is not main's
-        # starts from main's cache and builds what moved; when each saved a
-        # copy of its own instead, some hundreds of megabytes a job, a few
-        # of them pushed main's caches out of the ten gigabytes the
-        # repository may keep, and every run after that started from
-        # nothing.
+        # main those are a merge's run and the release candidate's, whose
+        # caches every pull request reads. A pull request whose lock file
+        # is not main's starts from main's cache and builds what moved;
+        # when each saved a copy of its own instead, some hundreds of
+        # megabytes a job, a few of them pushed main's caches out of the
+        # ten gigabytes the repository may keep, and every run after that
+        # started from nothing.
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
@@ -1815,7 +1836,7 @@ jobs:
     # SUPERSCHEMATIC_REQUIRE_TS_CHECKS make a missing one a failure. The
     # Dockerfile tests of the same fixtures run in the go job's full tier.
     name: engine-servers (generated Go, Rust and TypeScript servers over the engine, on Postgres)
-    if: github.event_name != 'pull_request'
+    if: inputs.tier == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -2007,7 +2028,7 @@ jobs:
       - name: Scenarios (every scenario through the Go engine on SQLite, with the SQLite adapter's tests, then on the Postgres adapter)
         # The SQLite pass needs no database; the Postgres pass fails, rather
         # than skips, without one.
-        if: github.event_name != 'pull_request'
+        if: inputs.tier == 'full'
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
@@ -2034,7 +2055,7 @@ jobs:
         # database; its Postgres pass fails, rather than skips, without one.
         # The second run turns serde_json's preserve_order on, as superscalar
         # does, so the canonical rules' key sort is checked.
-        if: github.event_name != 'pull_request'
+        if: inputs.tier == 'full'
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: |
@@ -2067,19 +2088,19 @@ jobs:
       - name: Scenarios through the TypeScript engine (every scenario on SQLite, then on Postgres with the canonical vectors against Postgres, the adapter, the sweeper and the facade)
         # The SQLite pass needs no database; the Postgres pass fails, rather
         # than skips, without one.
-        if: github.event_name != 'pull_request'
+        if: inputs.tier == 'full'
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: make versiongraph-scenarios-ts
 
       - name: Setup Python
-        if: github.event_name != 'pull_request'
+        if: inputs.tier == 'full'
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install uv
-        if: github.event_name != 'pull_request'
+        if: inputs.tier == 'full'
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: ${{ env.UV_VERSION }}
@@ -2088,7 +2109,7 @@ jobs:
         # uv builds the package's PyO3 extension with maturin. The SQLite
         # pass needs no database; the Postgres pass fails, rather than
         # skips, without one.
-        if: github.event_name != 'pull_request'
+        if: inputs.tier == 'full'
         env:
           SUPERSCHEMATIC_VERSIONGRAPH_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
         run: make versiongraph-scenarios-python
