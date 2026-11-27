@@ -13,9 +13,10 @@
 // ambient caller, the context, and a read across tables still takes the
 // caller's principal and binds it itself (Host.As), as the Rust runtime's
 // does (D188): a feed's route reads as the feed's holder, not as the
-// request's caller. Postgres alone: the build refuses a Go server whose
-// database lists sqlite first a calendar source and Recurrence, and the
-// loader refuses @searchable on SQLite for every language.
+// request's caller. Postgres alone: a Go server serves search, Recurrence
+// and the calendar on Postgres, and the build refuses them over a database
+// that lists sqlite first (verify.GoServerSQLiteErr), whose search the
+// TypeScript repositories alone serve (D186).
 package crosstable
 
 import (
