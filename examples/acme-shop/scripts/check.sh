@@ -325,7 +325,7 @@ TSC="$RUNTIME/node_modules/.bin/tsc"
 for pkg in \
   "$DIST/api/shop-storefront" "$DIST/sdk/typescript/shop-api" "$DIST/sdk/typescript/shop-orders" \
   "$DIST/sdk/typescript/shop-storefront" "$DIST/server/shop-stack/shop-storefront" \
-  "$DIST/api/shop-cart" "$DIST/sdk/typescript/shop-cart" "$DIST/server/shop-stack/shop-cart" \
+  "$DIST/api/shop-cart" "$DIST/sdk/typescript/shop-cart" "$DIST/server/shop-stack/shop-cart" "$DIST/server/shop-stack/shop-cart-ticket-reactions" \
   "$DIST/server/storefront-stack/shop-storefront" \
   "$DIST/api/shop-wishlist" "$DIST/server/wishlist-stack/shop-wishlist" \
   "$APP/shop-storefront" "$APP/shop-cart" "$APP/shop-wishlist" "$APP/clients" "$EXAMPLE_DIR/web/shop-web"; do
@@ -486,8 +486,12 @@ link_packages() {
 }
 link_packages "$DIST" "$WISHLIST_V2/dist"
 link_packages "$DIST/types/typescript/shop-wishlist" "$WISHLIST_V2/dist/types/typescript/shop-wishlist"
+link_packages "$DIST/types/typescript/shop-wishlist-db" "$WISHLIST_V2/dist/types/typescript/shop-wishlist-db"
 link_packages "$DIST/api/shop-wishlist" "$WISHLIST_V2/dist/api/shop-wishlist"
 ln -s "$WISHLIST_V2/dist/types/typescript/shop-wishlist" "$WISHLIST_V2/dist/api/shop-wishlist/node_modules/@acme/shop-wishlist-types"
+# The API's Deps names its database's repositories (D182), the second
+# version's own.
+ln -s "$WISHLIST_V2/dist/types/typescript/shop-wishlist-db" "$WISHLIST_V2/dist/api/shop-wishlist/node_modules/@acme/shop-wishlist-db-types"
 link_packages "$APP/shop-wishlist" "$WISHLIST_V2/shop-wishlist"
 ln -s "$WISHLIST_V2/dist/api/shop-wishlist" "$WISHLIST_V2/shop-wishlist/node_modules/@acme/shop-wishlist-api"
 ln -s "$WISHLIST_V2/dist/types/typescript/shop-wishlist" "$WISHLIST_V2/shop-wishlist/node_modules/@acme/shop-wishlist-types"

@@ -292,7 +292,7 @@ func TestStackDevRunsTheShop(t *testing.T) {
 
 	// A collection point, which staff who hold calendar.manage open through
 	// shop-cart's route the build serves from the CollectionPoint table
-	// (D106); a shopper is refused.
+	// (D106); staff who hold refunds.approve alone are refused, below.
 	carts := env.servers["shop-cart"]
 	status, body := call(t, http.MethodPost, carts+"/api/collection-points", token, `{"name": "Front counter"}`)
 	var point struct {
@@ -304,10 +304,6 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("open a collection point: %d %s", status, body)
 	}
 	counter := point.Data.ID
-	shopperToken := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], "Edsger Dijkstra", "orders.read", "orders.write")
-	if status, body := call(t, http.MethodPost, carts+"/api/collection-points", shopperToken, `{"name": "Back counter"}`); status != http.StatusForbidden {
-		t.Fatalf("a shopper opened a collection point: %d %s", status, body)
-	}
 
 	// shop-cart, on Bun over shop-db's tables: staff, as a shopper would,
 	// open a cart, put two green teas in it, and choose the first pickup
@@ -476,14 +472,19 @@ func TestStackDevRunsTheShop(t *testing.T) {
 		t.Fatalf("RequestRefund = %+v, %v", refund, err)
 	}
 	for _, name := range []string{"Barbara Liskov", "Katherine Johnson"} {
-		approver, err := apisdk.New(apisdk.SDKConfig{BaseURL: env.servers["shop-api"], Auth: &apisdk.AuthConfig{
-			Token: signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], name, "refunds.approve"),
-		}})
+		approverToken := signInOnTheStack(ctx, t, env.database, env.servers["shop-api"], name, "refunds.approve")
+		approver, err := apisdk.New(apisdk.SDKConfig{BaseURL: env.servers["shop-api"], Auth: &apisdk.AuthConfig{Token: approverToken}})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err := approver.RefundNamespace.Approvals.SignOff(ctx, refund.Id.String(), apitypes.RefundApprovalsSignOffInput{State: apitypes.RefundApprovalsGate_Approved}); err != nil {
 			t.Fatalf("%s's sign-off: %v", name, err)
+		}
+		if name == "Barbara Liskov" {
+			// Holding refunds.approve alone, she opens no counter.
+			if status, body := call(t, http.MethodPost, carts+"/api/collection-points", approverToken, `{"name": "Back counter"}`); status != http.StatusForbidden {
+				t.Fatalf("%s opened a collection point: %d %s", name, status, body)
+			}
 		}
 		if name == "Katherine Johnson" {
 			if _, err := approver.RefundNamespace.Status.Transition(ctx, refund.Id.String(), apitypes.RefundStatusTransitionInput{To: apitypes.RefundStatusState_Approved}); err != nil {
