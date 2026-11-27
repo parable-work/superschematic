@@ -39,9 +39,14 @@
 //! [`Error::AccessRefused`]. Repositories opened for no caller, a job's or
 //! the system's, read every row.
 
+pub mod agents;
 pub mod calendar;
 pub mod fieldcrypt;
+#[cfg(feature = "postgres")]
+pub mod inbound;
 pub mod notify;
+#[cfg(feature = "postgres")]
+pub mod parties;
 mod plan;
 #[cfg(feature = "postgres")]
 pub mod postgres;
@@ -375,6 +380,27 @@ pub struct Table {
     /// the table of channel identities; none for every other.
     #[serde(default)]
     pub notifier: Option<String>,
+    /// A `@party` table (D157), whose rows are principals of kind party:
+    /// the field a party is named by. None for every other table.
+    #[serde(default)]
+    pub party: Option<PartyDefinition>,
+    /// What the table is to the conversations (D157): `conversations` or
+    /// `messages`; none for every other.
+    #[serde(default)]
+    pub conversations: Option<String>,
+    /// What the table is to the agent orchestration (D158): `definitions`,
+    /// `runs`, `requests`, `policies`, `approvals` or `controls`; none for
+    /// every other.
+    #[serde(default)]
+    pub agents: Option<String>,
+}
+
+/// What a `@party` table says of its parties (D157).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct PartyDefinition {
+    /// The field a party is named by; none when it names none.
+    #[serde(default)]
+    pub title: Option<String>,
 }
 
 /// One `@event` of a table (D153): its kind, its default urgency, the
