@@ -48,7 +48,9 @@ func GetCaller(ctx context.Context) Caller {
 
 // GrantAuthenticator is the auth step of grants (D156, D180): a request
 // whose Authorization is "Bearer grant_..." runs as the grant's holder, a
-// party or an agent run, with its role's permissions as its one role and
+// party or any other holder but an agent run, whose token is refused here
+// and resolved by the agent dispatcher's authenticator (agents'
+// Authenticator, D192), with its role's permissions as its one role and
 // the grant's reach, which authority establishes from the database on
 // every call; every other request is inner's to establish, or has no
 // principal when inner is nil. A token authority refuses, unknown, ended
@@ -77,6 +79,15 @@ func GrantAuthenticator(authority access.GrantAuthority, inner func(http.Handler
 					return
 				}
 				response.Error(w, http.StatusInternalServerError, "Internal server error")
+				return
+			}
+			// A grant an agent run holds is the run's token, which the agent
+			// dispatcher's authenticator resolves (agents.Authenticator, D192):
+			// as its grant's holder it would act with the agent role's
+			// permissions, narrowed to no one it acts for and held to no
+			// autonomy.
+			if found.Principal.Kind == access.KindAgent {
+				response.Error(w, http.StatusUnauthorized, "An agent run's token is authenticated by the agent dispatcher")
 				return
 			}
 			ctx := ContextWithCaller(r.Context(), found.Principal)
