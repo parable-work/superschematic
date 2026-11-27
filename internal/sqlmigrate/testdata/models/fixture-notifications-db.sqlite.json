@@ -39,6 +39,63 @@
         {
           "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
           "name": "id",
+          "origin": "Approval.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "operation",
+          "origin": "Approval.operation",
+          "type": "TEXT"
+        },
+        {
+          "name": "summary",
+          "origin": "Approval.summary",
+          "type": "TEXT"
+        },
+        {
+          "name": "permission",
+          "origin": "Approval.permission",
+          "type": "TEXT"
+        },
+        {
+          "name": "state",
+          "origin": "Approval.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "decided_by",
+          "nullable": true,
+          "origin": "Approval.decidedBy",
+          "type": "TEXT"
+        },
+        {
+          "name": "decided_via",
+          "nullable": true,
+          "origin": "Approval.decidedVia",
+          "type": "TEXT"
+        },
+        {
+          "name": "decided_at",
+          "nullable": true,
+          "origin": "Approval.decidedAt",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "approval",
+      "origin": "Approval",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "approval_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
           "origin": "ChannelIdentity.id",
           "type": "TEXT"
         },
@@ -1651,6 +1708,12 @@
       "name": "trg_account_references_clear",
       "origin": "Account",
       "table": "account"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_approval_references_clear\" AFTER DELETE ON \"approval\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Approval deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Ticket', CAST(\"ticket_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"ticket_references\" WHERE \"target_table\" = 'Approval' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"ticket_references\" WHERE \"target_table\" = 'Approval' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_approval_references_clear",
+      "origin": "Approval",
+      "table": "approval"
     },
     {
       "definition": "CREATE TRIGGER \"trg_channel_identity_references_clear\" AFTER DELETE ON \"channel_identity\" FOR EACH ROW\nBEGIN\n  -- The references to the row of ChannelIdentity deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  INSERT INTO \"reference_cleared_queue\" (\"holder_table\", \"holder_key\", \"target_table\", \"target_key\", \"role\")\n    SELECT 'Ticket', CAST(\"ticket_id\" AS TEXT), \"target_table\", \"target_key\", \"role\" FROM \"ticket_references\" WHERE \"target_table\" = 'ChannelIdentity' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\n  DELETE FROM \"ticket_references\" WHERE \"target_table\" = 'ChannelIdentity' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",

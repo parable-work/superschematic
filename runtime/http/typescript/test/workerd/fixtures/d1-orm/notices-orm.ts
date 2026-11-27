@@ -18,9 +18,15 @@ to the caller's audience and grants (D156), and orm.references and
 orm.attachments read and write a row's references and files (D154), as on
 Postgres. On openSqlite's file a transaction holds the file's write lock
 from its BEGIN IMMEDIATE; D1 runs no interactive transaction, so there a
-transaction's statements each commit as they run.
+transaction's statements each commit as they run, and a write of several
+statements all known before the first goes as one batch: createMany, an
+upsert's read of its key with the upsert, an upsert of many rows. A table
+that composes behaviors upserts as on Postgres, its upsertMany a row at a
+time with upsertOne. On D1 a write whose later statement needs an earlier
+one's answer is refused by name: an upsert that seals an Encrypted<T>
+field, and runEvent.
 
-The SQLite repositories serve no upserts or merges yet.
+The SQLite repositories serve no merges yet (D147).
 createOrm(db, { fieldKeys }) takes a FieldKeyring for the Encrypted<T>
 fields (D85): parseFieldKeys(secret) of @superschematic/http-runtime/sqlite
 reads one under Bun, and a Worker, which has no node:crypto, has none yet.
@@ -88,6 +94,63 @@ export const accountTable: TableDefinition = {
     { name: "userCredentials", target: "userCredential", column: "userId" },
     { name: "userRoleGrants", target: "userRoleGrant", column: "userId" },
   ],
+};
+
+/** The approval table on SQLite, as the runtime reads and writes it. */
+export const approvalTable: TableDefinition = {
+  name: "Approval",
+  table: "approval",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "approval.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "operation", column: "operation", field: "operation", qualified: "approval.operation", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "summary", column: "summary", field: "summary", qualified: "approval.summary", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "permission", column: "permission", field: "permission", qualified: "approval.permission", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "state", column: "state", field: "state", qualified: "approval.state", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "decidedBy", column: "decided_by", field: "decidedBy", qualified: "approval.decided_by", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "decidedVia", column: "decided_via", field: "decidedVia", qualified: "approval.decided_via", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "decidedAt", column: "decided_at", field: "decidedAt", qualified: "approval.decided_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"operation\", \"summary\", \"permission\", \"state\", \"decided_by\", \"decided_via\", \"decided_at\"",
+    qualifiedColumns: "\"approval\".\"id\", \"approval\".\"operation\", \"approval\".\"summary\", \"approval\".\"permission\", \"approval\".\"state\", \"approval\".\"decided_by\", \"approval\".\"decided_via\", \"approval\".\"decided_at\"",
+    selectColumn: "\"approval\".\"%s\"",
+    getOne: "SELECT \"id\", \"operation\", \"summary\", \"permission\", \"state\", \"decided_by\", \"decided_via\", \"decided_at\" FROM approval WHERE id = ?1",
+    getOneFields: "SELECT %s FROM approval WHERE id = ?1",
+    getMany: "SELECT \"id\", \"operation\", \"summary\", \"permission\", \"state\", \"decided_by\", \"decided_via\", \"decided_at\" FROM approval WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM approval%s%s LIMIT 1",
+    findMany: "SELECT %s FROM approval%s%s%s",
+    count: "SELECT COUNT(*) FROM approval%s",
+    page: "SELECT %s FROM approval%s%s LIMIT %d",
+    pageAfterKey: "approval.id %s %s",
+    pageAfter: "(%s, approval.id) %s ((SELECT %s FROM approval AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM approval AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", approval.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM approval WHERE approval.id = ?1)",
+    insert: "INSERT INTO approval (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO approval (%s) VALUES %s RETURNING %s",
+    update: "UPDATE approval SET %s WHERE id = ?%d",
+    returning: " RETURNING \"id\", \"operation\", \"summary\", \"permission\", \"state\", \"decided_by\", \"decided_via\", \"decided_at\"",
+    updateMany: "UPDATE approval SET %s%s",
+    updatedAt: "updated_at = ?%d",
+    updatedBy: "updated_by = ?%d",
+    upsert: "INSERT INTO approval (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"operation\", \"summary\", \"permission\", \"state\", \"decided_by\", \"decided_via\", \"decided_at\"",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM approval WHERE id = ?1",
+    deleteMany: "DELETE FROM approval%s",
+  },
+  events: [
+    { kind: "approval.requested", urgency: "urgent", title: "summary" },
+  ],
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = approval.id", rows: "SELECT \"id\", \"operation\", \"summary\", \"permission\", \"state\", \"decided_by\", \"decided_via\", \"decided_at\" FROM approval WHERE (id) IN (VALUES %s)" },
+  },
 };
 
 /** The channel_identity table on SQLite, as the runtime reads and writes it. */
@@ -963,12 +1026,20 @@ export const fixtureNotificationsDbOrm: OrmDefinition = {
     null: "NULL",
     notIn: "%s NOT IN (%s)",
   },
+  jsonClauses: {
+    eq: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) = (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    ne: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IS NOT (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    in: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)",
+    noneOf: "((SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)) IS NOT TRUE",
+    value: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+  },
   defaultLimit: 100,
   manyLimit: 1000000,
   historyActorCTE: '',
   clearHistoryActor: '',
   tables: {
     account: accountTable,
+    approval: approvalTable,
     channelIdentity: channelIdentityTable,
     channelTrust: channelTrustTable,
     delivery: deliveryTable,
@@ -984,7 +1055,7 @@ export const fixtureNotificationsDbOrm: OrmDefinition = {
     userCredential: userCredentialTable,
     userRoleGrant: userRoleGrantTable,
   },
-  references: {"holders":{"Ticket":{"member":"ticket","table":"ticket_references","row":"ticket_id","uuid":true,"maxPerRow":1000}},"targets":{"Account":{"member":"account","table":"account","key":"id","uuid":true},"ChannelIdentity":{"member":"channelIdentity","table":"channel_identity","key":"id","uuid":true},"ChannelTrust":{"member":"channelTrust","table":"channel_trust","key":"id","uuid":true},"Delivery":{"member":"delivery","table":"delivery","key":"id","uuid":true},"Notice":{"member":"notice","table":"notice","key":"id","uuid":true},"NoticePreference":{"member":"noticePreference","table":"notice_preference","key":"id","uuid":true},"NoticeRoute":{"member":"noticeRoute","table":"notice_route","key":"id","uuid":true},"Reply":{"member":"reply","table":"reply","key":"id","uuid":true},"Role":{"member":"role","table":"role","key":"id","uuid":true},"Session":{"member":"session","table":"\"session\"","key":"id","uuid":true},"Subscription":{"member":"subscription","table":"subscription","key":"id","uuid":true},"Ticket":{"member":"ticket","table":"ticket","key":"id","uuid":true,"owner":"\"owner\"","restricted":"effective_audience"},"UserApiKey":{"member":"userApiKey","table":"user_api_key","key":"id","uuid":true},"UserCredential":{"member":"userCredential","table":"user_credential","key":"id","uuid":true},"UserRoleGrant":{"member":"userRoleGrant","table":"user_role_grant","key":"id","uuid":true}}},
+  references: {"holders":{"Ticket":{"member":"ticket","table":"ticket_references","row":"ticket_id","uuid":true,"maxPerRow":1000}},"targets":{"Account":{"member":"account","table":"account","key":"id","uuid":true},"Approval":{"member":"approval","table":"approval","key":"id","uuid":true},"ChannelIdentity":{"member":"channelIdentity","table":"channel_identity","key":"id","uuid":true},"ChannelTrust":{"member":"channelTrust","table":"channel_trust","key":"id","uuid":true},"Delivery":{"member":"delivery","table":"delivery","key":"id","uuid":true},"Notice":{"member":"notice","table":"notice","key":"id","uuid":true},"NoticePreference":{"member":"noticePreference","table":"notice_preference","key":"id","uuid":true},"NoticeRoute":{"member":"noticeRoute","table":"notice_route","key":"id","uuid":true},"Reply":{"member":"reply","table":"reply","key":"id","uuid":true},"Role":{"member":"role","table":"role","key":"id","uuid":true},"Session":{"member":"session","table":"\"session\"","key":"id","uuid":true},"Subscription":{"member":"subscription","table":"subscription","key":"id","uuid":true},"Ticket":{"member":"ticket","table":"ticket","key":"id","uuid":true,"owner":"\"owner\"","restricted":"effective_audience"},"UserApiKey":{"member":"userApiKey","table":"user_api_key","key":"id","uuid":true},"UserCredential":{"member":"userCredential","table":"user_credential","key":"id","uuid":true},"UserRoleGrant":{"member":"userRoleGrant","table":"user_role_grant","key":"id","uuid":true}}},
 };
 
 /**

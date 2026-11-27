@@ -677,9 +677,11 @@ target can choose. A service that lists `sqlite` first,
 - the cloudflare target keeps it on D1, and migrates it from the
   deploying machine at `d1://<account>/<uuid>`.
 
-A Go API on a sqlite-first database is refused where the database runs
-on SQLite, since its `Deps` reach Postgres alone, and so is a TypeScript
-or a Rust API whose database runs in another dialect than its first.
+A Go, TypeScript or Rust API whose database runs in another dialect than
+its first is refused: its `Deps` hold the client of the first. A Go API
+on a sqlite-first database opens the SQLite file
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)), and
+its workers are refused there, since they claim on Postgres alone.
 
 ### Types and defaults
 

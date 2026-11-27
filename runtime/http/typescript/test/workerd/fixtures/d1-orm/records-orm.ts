@@ -18,16 +18,23 @@ to the caller's audience and grants (D156), and orm.references and
 orm.attachments read and write a row's references and files (D154), as on
 Postgres. On openSqlite's file a transaction holds the file's write lock
 from its BEGIN IMMEDIATE; D1 runs no interactive transaction, so there a
-transaction's statements each commit as they run.
+transaction's statements each commit as they run, and a write of several
+statements all known before the first goes as one batch: createMany, an
+upsert's read of its key with the upsert, an upsert of many rows. A table
+that composes behaviors upserts as on Postgres, its upsertMany a row at a
+time with upsertOne. On D1 a write whose later statement needs an earlier
+one's answer is refused by name: an upsert that seals an Encrypted<T>
+field, and runEvent.
 
 A table that composes behaviors writes its rows and runs its operations,
-deadlines and changes through the behaviors' core, as on Postgres (D186):
-on openSqlite's file in the transaction, on D1 each change set in one batch.
-createOrm(db, { rules }) takes the core; with none, the rules package's is
-made when a behavior first runs, from its bundled module, which a Worker
-passes instead (initSync(wasmModule)).
+deadlines and changes through the behaviors' core, as on Postgres (D186),
+over the rules module's SQLite store (D103): on openSqlite's file in the
+transaction, on D1 each change set in one batch. createOrm(db, { rules })
+takes the core; with none, the rules package's is made when a behavior
+first runs, from its bundled module, which a Worker passes instead
+(initSync(wasmModule)).
 
-The SQLite repositories serve no upserts or merges yet.
+The SQLite repositories serve no merges yet (D147).
 createOrm(db, { fieldKeys }) takes a FieldKeyring for the Encrypted<T>
 fields (D85): parseFieldKeys(secret) of @superschematic/http-runtime/sqlite
 reads one under Bun, and a Worker, which has no node:crypto, has none yet.
@@ -142,7 +149,7 @@ export const ticketTable: TableDefinition = {
   },
 };
 
-/** Where the behaviors' core finds each table whose fields are behaviors (D103). */
+/** Where the behaviors' core finds each table whose fields are behaviors (D103), whose writes run through the core on SQLite as on Postgres. */
 export const fixtureReferencesDbRules: RulesLayout = {
   "types": {
     "Ticket": {
@@ -763,6 +770,13 @@ export const fixtureReferencesDbOrm: OrmDefinition = {
     never: "FALSE",
     null: "NULL",
     notIn: "%s NOT IN (%s)",
+  },
+  jsonClauses: {
+    eq: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) = (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    ne: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IS NOT (SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
+    in: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)",
+    noneOf: "((SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(%s)) IN (%s)) IS NOT TRUE",
+    value: "(SELECT group_concat(json_array(fullkey, CASE WHEN type IN ('integer', 'real') THEN 'number' ELSE type END, CASE WHEN type = 'real' AND atom = CAST(atom AS INTEGER) THEN CAST(atom AS INTEGER) ELSE atom END), ',' ORDER BY fullkey) FROM json_tree(?%d))",
   },
   defaultLimit: 100,
   manyLimit: 1000000,

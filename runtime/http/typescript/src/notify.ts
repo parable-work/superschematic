@@ -370,7 +370,8 @@ function hex(bytes: Uint8Array): string {
   return [...bytes].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function codeHash(code: string): string {
+/** The SHA-256 of a code, in hex, as the channel identities hold it: the code trimmed and in upper case. */
+export function codeHash(code: string): string {
   return hex(sha256(new TextEncoder().encode(code.trim().toUpperCase())));
 }
 
@@ -385,7 +386,7 @@ function newId(): string {
 }
 
 /** The wall minutes of the day at instant in zone. */
-function wallMinutes(at: Date, zone: string): number {
+export function wallMinutes(at: Date, zone: string): number {
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone: zone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(at);
   const hour = Number(parts.find(p => p.type === 'hour')?.value ?? 0);
   const minute = Number(parts.find(p => p.type === 'minute')?.value ?? 0);
@@ -419,14 +420,14 @@ export function quietDelaySeconds(at: Date, zone: string, start: string | null |
 }
 
 /** Whether held, a principal's permissions, may use need within cap, the channel's trust (null: no cap). */
-function allows(held: readonly string[], cap: readonly string[] | null, need: string): boolean {
+export function replyAllows(held: readonly string[], cap: readonly string[] | null, need: string): boolean {
   if (!held.some(h => covers(h, need))) return false;
   if (cap === null) return true;
   return cap.some(c => covers(c, need));
 }
 
 /** held narrowed to cap: each held permission cap covers, and each of cap's that a held one covers. */
-function narrowed(held: readonly string[], cap: readonly string[] | null): string[] {
+export function narrowedPermissions(held: readonly string[], cap: readonly string[] | null): string[] {
   if (cap === null) return [...held];
   const out = new Set<string>();
   for (const h of held) {
@@ -440,6 +441,32 @@ function narrowed(held: readonly string[], cap: readonly string[] | null): strin
 
 const ACK_VERBS = new Set(['ack', 'ok', 'acknowledge', 'acknowledged']);
 const UNDO_VERB = 'undo';
+
+/** A reply's words as the keyword interpreter reads them. */
+export interface ReadReply {
+  /** The first word, in lower case. */
+  readonly verb: string;
+  /** The reference a second word of digits names, with or without #. */
+  readonly reference?: number;
+  /** The words after. */
+  readonly args: readonly string[];
+  readonly ack: boolean;
+  readonly undo: boolean;
+}
+
+/** Reads a reply's text (D153): its verb, the reference it names, and its words; the Rust runtime's read_reply. */
+export function readReply(text: string): ReadReply {
+  const [rawVerb, ...words] = text.trim().split(/\s+/u);
+  const verb = (rawVerb ?? '').toLowerCase();
+  let reference: number | undefined;
+  if (words.length > 0 && /^#?\d+$/u.test(words[0]!)) reference = Number(words.shift()!.replace('#', ''));
+  return { verb, ...(reference !== undefined ? { reference } : {}), args: words, ack: ACK_VERBS.has(verb), undo: verb === UNDO_VERB };
+}
+
+/** Whether a reply's text is shaped as a code an address answers its verification with. */
+export function looksLikeCode(text: string): boolean {
+  return /^[0-9A-Za-z]{4,12}$/u.test(text.trim());
+}
 
 /** Creates the notifier over options.orm (D153). */
 export function createNotifier(options: NotifierOptions): Notifier {
@@ -1185,7 +1212,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
     const identities = await resolveSender(addressKind, address);
     if (identities.length === 0) {
       // An address with a code pending verifies by replying with it.
-      if (parts.identities && /^[0-9A-Za-z]{4,12}$/u.test(text)) {
+      if (parts.identities && looksLikeCode(text)) {
         const pending = (await identitiesRepo(orm).findMany({ kind: { eq: addressKind }, address: { eq: address }, codePurpose: { eq: 'verify' }, revokedAt: { isNull: true } }, { limit: 10, count: false })).rows;
         for (const identity of pending) {
           if (await checkCode(identity, text, 'verify')) {
@@ -1206,17 +1233,17 @@ export function createNotifier(options: NotifierOptions): Notifier {
     const identity = identities[0]!;
     const recipient: RecipientRef = { kind: identity.principalKind as RecipientRef['kind'], id: String(identity.principal), ...(identity.principalTable ? { table: identity.principalTable } : {}) };
     const withIdentity = { ...base, identity: identity.id, principal: identity.principal };
-    const [rawVerb, ...words] = text.split(/\s+/u);
-    const verb = (rawVerb ?? '').toLowerCase();
-    let reference: number | undefined;
-    if (words.length > 0 && /^#?\d+$/u.test(words[0]!)) reference = Number(words.shift()!.replace('#', ''));
+    const read = readReply(text);
+    const verb = read.verb;
+    const reference = read.reference;
+    const words = read.args;
     const refuse = async (outcome: ReplyOutcome['outcome'], detail: string, extra: Values = {}): Promise<ReplyOutcome> => {
       const id = await record(orm, { ...withIdentity, verb, ...(reference !== undefined ? { reference } : {}), outcome, detail, ...extra });
       await echo(input, address, detail, recipient.id);
       return { outcome, ...(id ? { reply: id } : {}), verb, detail, echo: detail, principal: recipient, ...(extra.notice ? { notice: String(extra.notice) } : {}) };
     };
 
-    if (verb === UNDO_VERB) {
+    if (read.undo) {
       if (reference === undefined || !parts.replies) return refuse('ambiguous', 'Reply UNDO and the reference number.');
       const notice = (await repo(sys(orm), parts.inbox).findOne({ recipient: { eq: recipient.id }, reference: { eq: reference } })) as NoticeRow | null;
       if (!notice) return refuse('refused', `No notice ${reference} is yours.`);
@@ -1250,9 +1277,9 @@ export function createNotifier(options: NotifierOptions): Notifier {
     // acknowledges and runs nothing else.
     const cap = identity.trust === 'entered' ? [] : trust.permissions;
     const held = await permissionsOf(recipient);
-    const principal: Principal = { subject: recipient.id, kind: recipient.kind === 'agent' ? 'agent' : recipient.kind, permissions: narrowed(held, cap) };
+    const principal: Principal = { subject: recipient.id, kind: recipient.kind === 'agent' ? 'agent' : recipient.kind, permissions: narrowedPermissions(held, cap) };
 
-    if (ACK_VERBS.has(verb)) {
+    if (read.ack) {
       if (notice.state === 'acknowledged' || notice.state === 'done') return refuse('refused', `${notice.reference} is acknowledged already.`, { notice: notice.id });
       let id: string | undefined;
       await orm.transaction(async (tx: any) => {
@@ -1266,7 +1293,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
 
     const action = actionOf(notice.eventKind, verb);
     if (!action) return refuse('refused', `"${verb}" is no reply ${notice.reference} takes.`, { notice: notice.id });
-    if (action.permission && !allows(held, cap, action.permission)) {
+    if (action.permission && !replyAllows(held, cap, action.permission)) {
       const detail = held.some(h => covers(h, action.permission!))
         ? `A reply by ${input.channel} may not ${verb}: its trust is ${identity.trust === 'entered' ? 'entered by hand' : trust.level}. Use the app.`
         : `You may not ${verb} ${notice.reference}.`;
@@ -1298,7 +1325,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
     const undo = done.undo as { data?: unknown; previous?: string } | null;
     const held = await permissionsOf(recipient);
     const trust = await trustOf(input.channel);
-    const principal: Principal = { subject: recipient.id, kind: recipient.kind === 'agent' ? 'agent' : recipient.kind, permissions: narrowed(held, trust.permissions) };
+    const principal: Principal = { subject: recipient.id, kind: recipient.kind === 'agent' ? 'agent' : recipient.kind, permissions: narrowedPermissions(held, trust.permissions) };
     const verb = String(done.verb);
     const action = verb === 'ack' ? undefined : actionOf(notice.eventKind, verb);
     if (!undo || (verb !== 'ack' && !action?.undo)) {

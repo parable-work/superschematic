@@ -1,0 +1,11 @@
+# deps-go-stock on a Go server of its own, with its job beside it. It
+# declares no environment: TestGoServerAndJobOnSQLite in
+# internal/generator builds it.
+kind: Stack
+types:
+  Stock:
+    name: Stock
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: deps-go-stock, kind: API }

@@ -111,7 +111,7 @@ Each server takes the identity service, built over a store of the
 | Server | It takes | Built with |
 | --- | --- | --- |
 | Go | `Config.Identity`, which `Validate` requires | the generated `NewIdentity(store, cfg)` over `identity.NewSQLStore(db, identity.Postgres, []byte(IdentityDescriptor))` |
-| TypeScript | `buildRouter(implementations, { identity })`, which refuses `authenticate` beside it | the generated `identityService()` over `postgresIdentityStore(pool, identityDescriptor)` or `sqliteIdentityStore(...)` |
+| TypeScript | `buildRouter(implementations, { identity })`, which refuses `authenticate` beside it | the generated `identityService()` over `postgresIdentityStore(pool, identityDescriptor)`, `sqliteIdentityStore(...)`, or `sqlDatabaseIdentityStore(db, identityDescriptor)` over the SQLite file a server's repositories share (D116) |
 | Rust | `Implementations.authenticator`, an `Arc<IdentityAuthenticator>` | the crate's `identity::store(client)` and `identity::service(store, config)`, with its `identity-postgres` or `identity-sqlite` feature |
 
 [Auth and permissions](/superschematic/guides/auth-and-permissions/#say-who-the-caller-is-go)

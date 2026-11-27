@@ -31,23 +31,28 @@ const (
 	runnerPath    = "/opt/superschematic/bin/superschematic-migrate"
 )
 
-// runnerCall is one run of the stand-in runner.
+// runnerCall is one run of the stand-in runner: a job's document and
+// plans, or a queue operation's document (D68).
 type runnerCall struct {
 	args  []string
 	token string
 	job   map[string]any
 	plans map[string]string
+	queue string
 }
 
 // migrateFixture is the extension over a fake Cloudflare, with a shell
 // naming the runner and a stand-in that records each run; fail makes the
-// stand-in's runs fail. outputs are what each environment's applied graph
-// outputs for its D1 database's node, by environment.
+// stand-in's runs fail, writing refusal to its stderr when set. outputs
+// are what each environment's applied graph outputs for its D1 database's
+// node, by environment. result is what a queue operation prints.
 type migrateFixture struct {
 	cloud   *fakeCloud
 	shell   shell
 	calls   []runnerCall
 	fail    error
+	refusal string
+	result  string
 	reg     *registry.Registry
 	outputs map[string]map[string]any
 }
@@ -85,6 +90,20 @@ func newMigrateFixture(t *testing.T) *migrateFixture {
 				}
 				call.plans[rel] = string(plan)
 			}
+		}
+		if len(cmd.Args) > 3 && cmd.Args[1] == "queue" && cmd.Args[2] == "--queue" {
+			data, err := os.ReadFile(cmd.Args[3])
+			if err != nil {
+				t.Errorf("the queue document the runner was handed: %v", err)
+			}
+			call.queue = string(data)
+			f.calls = append(f.calls, call)
+			if f.fail != nil {
+				_, _ = cmd.Stderr.Write([]byte("superschematic-migrate: " + f.refusal + "\n"))
+				return f.fail
+			}
+			_, _ = cmd.Stdout.Write([]byte(f.result))
+			return nil
 		}
 		_, _ = cmd.Stdout.Write([]byte("service reviews-db: applied 2 steps\n"))
 		f.calls = append(f.calls, call)

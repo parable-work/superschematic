@@ -24,8 +24,8 @@
 //     message, through the note's trigger;
 //   - a file's upload is begun, its bytes put, completed, listed, read,
 //     viewed, processed and detached, which enqueues its release;
-//   - a ticket, which composes Comments, is created and its thread posted
-//     to through the core, each change set one batch;
+//   - a ticket, which composes Comments, is created, renamed and its thread
+//     posted to through the core, each change set one batch;
 //   - a filing's recurrence is set, which plans its occurrences and arms its
 //     deadlines in one batch; the remind deadline a worker claimed fires,
 //     its batch spending the claim with the occurrence's reminder and the
@@ -329,6 +329,8 @@ async function records(db: SqlDatabase, rules: ReturnType<typeof initSync>): Pro
     // through the core, each change set one batch (D186).
     const ticket = (await orm.ticket.createOne({ title: 'Written on D1' } as never)).id as string;
     check((await orm.ticket.getOne(ticket as never)).title === 'Written on D1', "a behaviors' table is written through the core");
+    const renamed = (await orm.ticket.updateOne(ticket as never, { title: 'Renamed on D1' } as never)) as { title: string };
+    check(renamed.title === 'Renamed on D1' && (await orm.ticket.getOne(ticket as never)).title === 'Renamed on D1', "a behaviors' table's row is updated through the core");
     await orm.withBehaviorCaller({ subject: ALICE, permissions: [] }).ticket.comments.post(ticket as never, { body: 'Posted on D1.' } as never);
     const posted = await system.query<{ body: string; state: string }>('SELECT body, state FROM ticket_comments_messages WHERE ticket_id = ?1', [uuidToDb(ticket)]);
     check(posted.rows.length === 1 && posted.rows[0]!.body === 'Posted on D1.' && posted.rows[0]!.state === 'posted', `a post lands as one message: ${JSON.stringify(posted.rows)}`);

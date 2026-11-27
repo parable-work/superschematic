@@ -179,7 +179,7 @@ func TestTheWorkerdD1FixtureIsCurrent(t *testing.T) {
 		}
 		header := fmt.Sprintf("// Written by TestTheWorkerdD1FixtureIsCurrent (internal/generator/tsgen) from\n// %s's orm-sqlite.ts, its runtime the built dist/d1.js.\n", database.service)
 		text := strings.ReplaceAll(string(orm), runtime, "'../../../../dist/d1.js'")
-		text = strings.ReplaceAll(text, "'@superschematic/rules'", "'../../../../../../rules/typescript/dist/index.js'")
+		text = strings.ReplaceAll(text, "'"+naming.Default().RulesNpmPackage+"'", "'../../../../../../rules/typescript/dist/index.js'")
 		model, err := sqlmigrate.BuildModel(schema, sqlgen.Options{SchemaName: database.service}, sqlmigrate.SQLite)
 		if err != nil {
 			t.Fatal(err)

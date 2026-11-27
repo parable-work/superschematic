@@ -41,6 +41,7 @@
 
 pub mod calendar;
 pub mod fieldcrypt;
+pub mod notify;
 mod plan;
 #[cfg(feature = "postgres")]
 pub mod postgres;
@@ -112,6 +113,11 @@ pub struct Definition {
     pub json_clauses: Option<JsonClauses>,
     /// The rows `find_many` and `find_page` read unless told.
     pub default_limit: u32,
+    /// The most parameters one statement binds in the dialect, by which
+    /// `upsert_many` batches its rows (D89): 65535 on Postgres, 32766 on
+    /// SQLite. Zero in a definition a compiler before it wrote.
+    #[serde(default)]
+    pub max_parameters: usize,
     /// Who a repository opened as the system acts as (D87): the DB
     /// service's `outputs.sql.systemActor`, [`DEFAULT_SYSTEM_ACTOR`] unless
     /// set.
@@ -232,6 +238,14 @@ pub struct Clauses {
     pub changed: String,
     pub never: String,
     pub null: String,
+    /// An upsert of many rows' assignment of the column `%s` from the
+    /// value the row it would have inserted holds in the column `%s`, and
+    /// that value (D89); empty in a definition a compiler before
+    /// `upsert_many` wrote, which refuses it.
+    #[serde(default)]
+    pub set_excluded: String,
+    #[serde(default)]
+    pub excluded: String,
 }
 
 /// The conditions of a JSON column's filter, `sqlutil.JSONClauses`: `eq`
@@ -363,6 +377,34 @@ pub struct Table {
     /// [`search_tables::index_search`] writes; Postgres alone (D188).
     #[serde(default)]
     pub searchable: Option<search_tables::SearchableDefinition>,
+    /// The table's `@event` declarations (D153), which
+    /// [`notify::Notifier::raise`] holds an event to and whose payload and
+    /// title it reads; none for most tables, and on Postgres alone (D191).
+    #[serde(default)]
+    pub events: Vec<EventDefinition>,
+    /// What the table is to the notifier (D153): its `@notifier` part
+    /// (`inbox`, `deliveries`, `routes`, `preferences`, `subscriptions`,
+    /// `channelTrust`, `replies`, `dispatch`), or `channelIdentities` for
+    /// the table of channel identities; none for every other.
+    #[serde(default)]
+    pub notifier: Option<String>,
+}
+
+/// One `@event` of a table (D153): its kind, its default urgency, the
+/// member a notice is titled by and the members its payload carries.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Deserialize)]
+pub struct EventDefinition {
+    /// Dotted lower-camel words: `ticket.overdue`.
+    pub kind: String,
+    /// `urgent`, `normal`, `digest` or `record`.
+    pub urgency: String,
+    /// The member a notice of it is titled by; the kind and the key unless
+    /// set.
+    #[serde(default)]
+    pub title: Option<String>,
+    /// The members of the row its payload carries.
+    #[serde(default)]
+    pub payload: Vec<String>,
 }
 
 /// A one-to-many relation of a table (D90, D156): the rows of another
@@ -831,6 +873,18 @@ pub struct UpsertOptions {
     /// Updates the row that holds the key only when a field the update
     /// sets differs from what the row holds (D89).
     pub only_if_changed: bool,
+}
+
+/// The options of `upsert_many` (D89).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct UpsertManyOptions {
+    /// Updates a row that holds an input's key only when a field the
+    /// update sets differs from what the row holds.
+    pub only_if_changed: bool,
+    /// The most rows one statement writes; none is as many as the
+    /// dialect binds the parameters of. More rows than a batch take a
+    /// statement each, in the caller's transaction.
+    pub batch: Option<usize>,
 }
 
 /// What an upsert did with a row (D89).

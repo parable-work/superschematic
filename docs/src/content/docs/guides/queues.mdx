@@ -35,12 +35,12 @@ each links to shows.
 | `@queue` on a DB service's message class; its table in every dialect the service lists, which the migration plan carries | |
 | a backoff that doubles with each failure up to a maximum, and done messages removed after a retention | |
 | a message's `key`: one waiting message per key (`onDuplicate`), one claim per key (`serialize`), in every language, on Postgres and SQLite; a key over several fields; a [delay on enqueue](#enqueue-for-later) | `when` rules of `@enqueueOnChange` beyond the literal ones; a delay in an `@enqueueOnChange` trigger |
-| `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row; its `backfill` in the migration step that adds it, and `stack queue backfill` | `stack queue backfill` on SQLite |
-| the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1, and `stack queue` on SQLite |
+| `@enqueueOnChange` on a table: a trigger, on Postgres and SQLite, that enqueues a message whatever writes the row; its `backfill` in the migration step that adds it, and `stack queue backfill`, on Postgres, SQLite and D1 | |
+| the Go ORM's `Enqueue<Queue>` in your transaction, and its claims on Postgres; its `Enqueue<Queue>SQLite` and claims on SQLite, which the TypeScript and Rust runtimes run too | claims on D1 |
 | the TypeScript types' `./queues` entry and the HTTP runtime's `enqueue`, in a transaction of the generated repositories (`Deps.orm`, D79), and `postgresQueue`, which run the Go ORM's statements; the Rust types' `queues` module and the Rust HTTP runtime's `queue::enqueue` and `PostgresQueue`, which run them too; a location (`POINT`) and a duration (`INTERVAL`) in a message, in every language | a list of locations or durations (`POINT[]`, `INTERVAL[]`) in a queue's message |
 | `@worker` on an API, Go's `Workers` and `NewWorkers`, TypeScript's `Workers` and `createWorkers`, Rust's `Workers` and `create_workers`, the `worker` deployable, its entrypoint and image | |
 | `stack dev`'s worker processes, a TypeScript or a Rust one on the environment's SQLite file too; on gcp a Cloud Run worker pool, or, for a worker in [drain mode](#drain-mode), a Cloud Run job that an enqueue wakes and a schedule ticks; on Cloudflare a TypeScript worker's Worker, which drains its queue from Postgres through Hyperdrive at each firing of a Cron Trigger every minute, and which an enqueue due before the next firing wakes through its Workflow; a worker's `maxInstances` | scaling a worker with its queue's depth, which `maxInstances` sets the ceiling for; a drain worker over a SQLite file, and a wake from an enqueue there or from a raw SQL write |
-| `stack queue dead`, `retry`, `drop` and `backfill` on a local environment's queues, on gcp through the migration job, and on Cloudflare from your machine on the database's origin | |
+| `stack queue dead`, `retry`, `drop` and `backfill` on a local environment's queues, on its Postgres or its SQLite file, on gcp through the migration job, and on Cloudflare from your machine, on the database's origin or on D1 | `stack queue` from a generated CI job |
 
 D53, D68, D80, D88 and D96 in the [decision log](https://github.com/parable-work/superschematic/blob/e8e685a5149a8897001153fb6cca1100ac90d0c0/docs/DECISIONS.md) record the decisions, and section 8.8 of
 [docs/stack-model.md](https://github.com/parable-work/superschematic/blob/main/docs/stack-model.md)
@@ -264,8 +264,11 @@ superschematic stack queue backfill Dev shop-db.OrderPlaced
 transaction that takes no lock on the tables, and says how many messages
 it enqueued. A row written while it runs may be enqueued by its trigger
 too, which a queue that appends then holds twice. It runs where the other
-`stack queue` commands run ([Dead messages](#dead-messages)): on Postgres,
-with the migration runner.
+`stack queue` commands run ([Dead messages](#dead-messages)), with the
+migration runner, on Postgres, SQLite and D1. Under `replace` it takes
+the first row of each key by the table's key, on SQLite as on Postgres.
+On D1 each table's insert commits on its own, since D1 runs each
+statement apart.
 
 ## Enqueue a message
 
@@ -727,8 +730,11 @@ Each command resolves the environment from your schemas and runs the
 operation with the migration runner, `superschematic-migrate`, which holds
 the database drivers, as `stack dev`'s migrations do. On the `local`
 target it reaches the Postgres container `stack dev` runs, so run it from
-another terminal while the environment runs. It runs on Postgres alone:
-`stack queue` on a SQLite file is not built.
+another terminal while the environment runs. A database on SQLite is its
+file under the environment's state directory, which `stack dev` creates
+and migrates; the command refuses to run before the file is there. On
+SQLite and D1 the statements are SQLite's: a retry or a drop of the
+messages it names is one statement, which changes each of them or none.
 
 On gcp it reaches the deployed run's Cloud SQL database the way a
 deploy's migrations do, as one execution of the stack's migration job,
@@ -780,6 +786,12 @@ what it must match. The runner gets the connection string in
 result comes back to the command alone: the log says only which database
 it ran on.
 
+A queue on D1 runs from your machine too, as a deploy's migrations do: the
+runner reaches the run's D1 database through Cloudflare's API with your
+`CLOUDFLARE_API_TOKEN`, at the uuid the last deploy's outputs hold. No
+worker claims on D1, but a Worker or a Cron job enqueues there, and a
+trigger's messages wait there for a backfill.
+
 ## Change it per environment
 
 An environment sets how many instances of a worker run, and how many
@@ -808,8 +820,9 @@ which the platform sets.
 
 The claims run on Postgres, or on SQLite where `stack dev` places the
 queue's database on the environment's SQLite file and the worker is in
-TypeScript or Rust; a Go worker there does not resolve, since its `Deps`
-reach Postgres alone. A Rust API's `Deps.db` is then the file, its job
+TypeScript or Rust; a Go worker there does not resolve, since it claims
+on Postgres alone, while a Go API's server and jobs open the file (D116).
+A Rust API's `Deps.db` is then the file, its job
 opens it as its server does, and its worker is drained on connections of
 its own ([On SQLite](#on-sqlite), D116). An environment that places the queue's database on
 a platform of another dialect, or on D1, does not resolve either. On

@@ -54,6 +54,33 @@ func TestReadsTheQueueDocuments(t *testing.T) {
 	}
 }
 
+// TestReadsTheSQLiteQueueDocuments reads every golden queue document of
+// SQLite's statements (D68): each names its dialect and takes the IDs as
+// a JSON array, and a document of a dialect the runner has no driver of is
+// refused.
+func TestReadsTheSQLiteQueueDocuments(t *testing.T) {
+	root := filepath.Join("..", "..", "..")
+	for _, name := range []string{"dead", "retry", "retry-all", "retry-refused", "drop", "drop-all", "retry-keyed", "retry-all-keyed", "backfill"} {
+		q, err := migrate.ReadQueueDocument(queueGolden(t, root, filepath.Join("sqlite", name)))
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if q.Dialect != migrate.SQLite || q.DialectOf() != migrate.SQLite {
+			t.Errorf("%s: dialect %q", name, q.Dialect)
+		}
+		if !strings.Contains(q.Statements.States, "json_each(?1)") || strings.Contains(q.Statements.Retry, "$1") {
+			t.Errorf("%s: the statements take no JSON array:\n%s", name, q.Statements.States)
+		}
+	}
+	if q, err := migrate.ReadQueueDocument(queueGolden(t, root, "dead")); err != nil || q.DialectOf() != migrate.Postgres {
+		t.Fatalf("a document that names no dialect is Postgres's: %v", err)
+	}
+	doc := strings.Replace(string(queueGolden(t, root, "dead")), `"queue": "OrderPlaced",`, `"queue": "OrderPlaced", "dialect": "mysql",`, 1)
+	if _, err := migrate.ReadQueueDocument([]byte(doc)); err == nil || !strings.Contains(err.Error(), `dialect "mysql" is not postgres or sqlite`) {
+		t.Fatalf("a document of another dialect: %v", err)
+	}
+}
+
 // TestReadsTheBackfillDocument reads the golden backfill document of
 // fixture-queue-db's OrderChanged (D88): a backfill with one statement,
 // which counts what it enqueues, beside the queue's operator statements.

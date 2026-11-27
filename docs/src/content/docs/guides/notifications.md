@@ -14,7 +14,8 @@ person who sent it.
 
 | Built | Not built yet |
 | --- | --- |
-| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Go and Rust runtimes |
+| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | the Go runtime; Rust on SQLite and D1 |
+| the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties | a generated server that builds the notifier into its `Deps` |
 | the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
@@ -241,3 +242,54 @@ await runWorker(notifier.workerQueue(db), { signal });
 
 A Worker drains no queue on D1 yet: a Workflow that wakes the
 dispatch queue's worker on D1 is D151's design, and not built.
+
+## In Rust
+
+The Rust HTTP runtime's `orm::notify` is the same notifier, on Postgres
+(D191). The Postgres definition of a generated Rust types crate carries
+each table's `@event` declarations and what each table is to the
+notifier, so `Notifier::new` finds the inbox, the deliveries, the routes
+and the rest by itself, and the crate re-exports the module as
+`orm::postgres::notify`. It takes the database's `Tables`, whose keys and
+behaviors a reply's action writes through, and the dispatch queue's
+descriptor:
+
+```rust
+use superschematic_http_runtime::orm::notify::{approval_replies, Notifier, RaiseInput, ReplyInput};
+use superschematic_http_runtime::queue::QueueDefinition;
+
+let [(approve, approve_action), (deny, deny_action)] = approval_replies("Approval", "agents.approve");
+let notifier = Notifier::new(orm::postgres::tables(pool.clone()), QueueDefinition::parse(queues::NOTICE_WORK_QUEUE)?)?
+    .with_providers(deps.providers.clone())
+    .with_reply("ticket.overdue", "done", Arc::new(MarkDone))
+    .with_reply("approval.requested", approve, approve_action)
+    .with_reply("approval.requested", deny, deny_action);
+
+// In the transaction of the change that caused it.
+notifier.raise(&tx, RaiseInput::of("Ticket", key, "ticket.overdue")).await?;
+// The dispatch queue's worker.
+run_worker(notifier.worker_queue(), move |message| { let n = notifier.clone(); async move { Ok(n.handle(message).await?) } }, options, shutdown).await?;
+// A relay's @webhook route.
+let outcomes = notifier.inbound("SMS", &request).await?;
+```
+
+A reply action is a `ReplyAction`: its permission, what its echo says, its
+`run` and, when `undoable`, its `undo`. It runs on repositories of its
+transaction that act as the sender, keep to what the sender reads and run
+a behavior's command with the permissions the channel's trust leaves the
+sender. `approval_replies` are the `approve` and `deny` of an approval a
+route sends to the people who hold its permission: each decides the row
+as the replier, refuses an agent run and an approval already decided, and
+writes the state, who decided it and on which channel.
+
+`from_behavior_event` takes a behavior worker's event from its Workers
+method, `cleared` a cleared reference's message, and `PasswordReset` sends
+a reset code through the email adapter and sets the password with the
+identity service's `reset_password`. Rust has no ambient caller, so a
+recipient's read of the record opens the repositories for the recipient
+(`with_access`). The wall time of quiet hours and digests is read from
+Postgres, which holds the zone database. A route that names an agent is
+logged and reaches no one, as in TypeScript without an agent dispatcher:
+the Rust runtime does not serve agent runs yet. A Rust types crate that
+lists `sqlite` is refused the notifier, which runs on SQLite and D1 in
+TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).

@@ -14,6 +14,10 @@ Generated at: 2026-01-02T03:04:05Z
 - `repository_order.go` -- Order repository
 - `repository_order_line.go` -- OrderLine repository
 - `repository_product.go` -- Product repository
+- `sqlite.go` -- the repositories on a SQLite file: `OpenSQLite`, `SQLiteDSN`, `SQLiteDatabase` and `SQLiteTx`, a `DatabaseInterface` and a `TxInterface` as the Postgres ones are
+- `sqlite_order.go` -- Order repository on SQLite
+- `sqlite_order_line.go` -- OrderLine repository on SQLite
+- `sqlite_product.go` -- Product repository on SQLite
 
 ## Usage
 
