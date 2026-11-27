@@ -1295,6 +1295,45 @@ func (r *{{ .Name }}) requireCreatedReach(ctx context.Context, row *types.{{ .Ty
 	{{- end }}
 }
 {{- end }}
+{{- if .AnswersRows }}
+
+// keepAnsweredRow is raw, the answer of a table operation whose member
+// names a row of {{ .TypeName }} by its key in its wire form (Aliased's
+// resolve's row), with that member null when it is a row the operation's
+// caller does not see (D156), as for an answer of no row: the behaviors'
+// core reads every row, so the answer keeps to the caller here, as a read
+// does.
+func (r *{{ .Name }}) keepAnsweredRow(ctx context.Context, raw json.RawMessage, member string) (json.RawMessage, error) {
+	if !accessHeld(ctx, {{ printf "%q" .TypeName }}) {
+		return raw, nil
+	}
+	var answer map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &answer); err != nil {
+		return nil, fmt.Errorf("orm: an answer of {{ .TypeName }}'s, %s: %w", raw, err)
+	}
+	named, ok := answer[member]
+	if !ok || string(named) == "null" {
+		return raw, nil
+	}
+	var row struct {
+		Key *string `json:"key"`
+	}
+	if err := json.Unmarshal(named, &row); err != nil || row.Key == nil {
+		return nil, fmt.Errorf("orm: an answer of {{ .TypeName }}'s names a row with no key at %s: %s", member, raw)
+	}
+	key, ok := accessKey(accessTables[{{ printf "%q" .TypeName }}], *row.Key)
+	if !ok {
+		return nil, fmt.Errorf("orm: an answer of {{ .TypeName }}'s names the row %q, which is no key of the table", *row.Key)
+	}
+	if err := r.requireReach(ctx, key, false); err == ErrNotFound {
+		answer[member] = json.RawMessage("null")
+		return json.Marshal(answer)
+	} else if err != nil {
+		return nil, err
+	}
+	return raw, nil
+}
+{{- end }}
 
 {{- end }}
 
@@ -5152,7 +5191,7 @@ type {{ .Value }} struct{ r *{{ $repo.Name }} }
 {{- range .Operations }}
 {{- if .Table }}
 
-{{ docComment "" (printf "%s runs %s's %s on the table as a whole (D104), a command without a row, in a transaction, and returns its result. It reads the table's rows and writes them only through their own operations, each held to its version, and presents no preconditions. It returns a refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name) }}
+{{ docComment "" (printf "%s runs %s's %s on the table as a whole (D104), a command without a row, in a transaction, and returns its result. It reads the table's rows and writes them only through their own operations, each held to its version, and presents no preconditions.%s It returns a refusal of the core's as the *rules.Refusal it is." .GoName $use.Member .Name (or (and $repo.HeldByAccess .AnswersRow (printf " The row its answer names at %s is null when it is one the operation's caller does not see (D156)." .AnswersRow)) "")) }}
 func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }}) ({{ .ResultReturn }}, error) {
 	{{- if eq .Params "json.RawMessage" }}
 	var given any = params
@@ -5166,6 +5205,12 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, params {{ .Params }
 		if err != nil {
 			return out, err
 		}
+		{{- if and $repo.HeldByAccess .AnswersRow }}
+		// The core reads every row; its answer keeps to the caller (D156).
+		if raw, err = (&{{ $repo.Name }}{tx: tx, txDB: o.r.database()}).keepAnsweredRow(ctx, raw, {{ printf "%q" .AnswersRow }}); err != nil {
+			return out, err
+		}
+		{{- end }}
 		{{- if .ResultIsStruct }}
 		out = &{{ .Result }}{}
 		if err := json.Unmarshal(raw, out); err != nil {

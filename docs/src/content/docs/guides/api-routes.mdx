@@ -1360,16 +1360,19 @@ Identity.UUID, into: Identity.UUID): LabelView`) reads both live rows, 404
 for either that holds none, and runs [the
 merge](/superschematic/guides/database-tables/#merging-rows) in the route's
 transaction. A merge of a row into itself, or into a row that references
-it through a relation of the table to itself, is 409. It takes no row rule
+it through a relation of the table to itself, is 409, and one that would
+repoint or delete a row of another table its caller may not write is 403
+(`out_of_reach`), naming the table and nothing of the row. It takes no row rule
 and no parent in its path, since it reaches both rows by their keys. The
 TypeScript server serves it; the Go and Rust servers write no handler of
 it yet, so the operation stays in the implementation's interface, to write
 over `MergeInto` and `merge_into`. A TypeScript server whose database
 lists sqlite first opens it on SQLite, where its repositories merge no
 rows yet, so the build refuses the merge there (D182). The route reads
-both rows as its caller, and the Go and Rust repositories' merges find
-only the rows their caller may write
-([Who may read a row](/superschematic/guides/database-tables/#who-may-read-a-row)).
+both rows as its caller, and the TypeScript, Go and Rust repositories'
+merges find only the two rows their caller may write, and write no row of
+another table their caller may not
+([A merge and who may write the rows](/superschematic/guides/database-tables/#a-merge-and-who-may-write-the-rows)).
 
 A success is the envelope a hand-written route answers, with the status it
 answers, 200. A shape that fits no kind fails the load, and the message
@@ -1959,6 +1962,19 @@ that is not there: the call is refused before the behaviors' core reads
 the row, and nothing is written. The TypeScript, Go and Rust repositories
 hold every operation on a row to this, and so do the Go and Rust servers'
 behavior routes.
+
+Two writes reach rows past the one they name, and keep to the caller
+too. A merge repoints and deletes the rows of every table that references
+the row merged away, and refuses (`out_of_reach`, which a route answers
+403) when one of them is a row its caller may not write
+([A merge and who may write the rows](/superschematic/guides/database-tables/#a-merge-and-who-may-write-the-rows)).
+And the behaviors' core reads every row, so a behavior's answer that names
+a row is held to the caller where the repositories hand it back:
+Aliased's `resolve` answers `{ row: null }` for a name a row the caller
+does not see holds, and the `name_taken` that refuses a name another row
+holds names nothing of that row
+([A row's names](/superschematic/guides/database-tables/#a-rows-names)).
+Both hold in TypeScript, Go and Rust.
 
 Outside an operation, a job, a worker and `orm.asSystem()` read every row,
 and so does the database's own role. `orm.as(principal)` and

@@ -1,6 +1,6 @@
 import { Contact, Identity } from "superscalar";
 import { Nullable } from "@superschematic/schema";
-import { AutoGenerate, Mergeable, Relation, User, UserRole, accessGrants, audience, key, unique } from "@superschematic/db";
+import { Aliased, AutoGenerate, ManyToMany, Mergeable, Relation, User, UserRole, accessGrants, audience, key, unique } from "@superschematic/db";
 
 // A person who signs in.
 export abstract class Account implements User<{ login: "email" }> {
@@ -25,7 +25,8 @@ export abstract class Role implements UserRole {
 }
 
 // A label its owner sees whatever its audience. Two labels that turn out
-// to be one are merged (D147), by a caller who may write both.
+// to be one are merged (D147), by a caller who may write both, and every
+// row the merge would repoint or delete.
 @audience<Label>({ owner: "owner" })
 export abstract class Label implements Mergeable {
   @key
@@ -36,14 +37,46 @@ export abstract class Label implements Mergeable {
   owner: Identity.UUID;
 }
 
-// A note on a label, which a merge repoints.
+// A note on a label, which a merge repoints, its author's whatever its
+// audience: a merge of the label by a caller who may not write a note on
+// it is refused (D156).
+@audience<LabelNote>({ owner: "author" })
 export abstract class LabelNote {
   @key
   id: AutoGenerate<Identity.UUID>;
 
   label: Relation<Label, { onDelete: "CASCADE" }>;
 
+  author: Identity.UUID;
+
   text: string;
+}
+
+// A board of labels, its owner's whatever its audience, through a join
+// table the build adds (board_label): a pair is its board's, so a merge of
+// a label on a board the caller may not write is refused (D156).
+@audience<Board>({ owner: "owner" })
+export abstract class Board {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  owner: Identity.UUID;
+
+  labels: ManyToMany<Label>;
+}
+
+// A brand, known by its name and the names it was known by (D147), its
+// owner's whatever its audience: resolve, and the refusal of a name
+// another brand holds, tell a caller nothing of a brand it may not read
+// (D156).
+@audience<Brand>({ owner: "owner" })
+export abstract class Brand implements Mergeable {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  name: Aliased<string>;
+
+  owner: Identity.UUID;
 }
 
 // The grants that let a party reach rows (D156).

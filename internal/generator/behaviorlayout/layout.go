@@ -436,6 +436,14 @@ type Operation struct {
 	// declaration's scope "schema": a repository method that takes no key,
 	// which the adapters run as a command without a row.
 	Table bool `json:"table,omitempty"`
+	// AnswersRow is, of an operation of the table as a whole, the member of
+	// its answer that names one of the table's rows, an object whose key is
+	// the row's key in its wire form, or null for none (Aliased's resolve:
+	// row; registry.TableOperationRow). The core reads every row, so the
+	// adapters keep it to the caller (D156): to one who may not read the
+	// row, they answer null there, as for an answer of no row. Empty for any
+	// other operation.
+	AnswersRow string `json:"answersRow,omitempty"`
 }
 
 // TypeSpec is the type as the core runs it: superschematic_rules::TypeSpec
@@ -857,7 +865,7 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 			case "", registry.OperationScopeInstance:
 				use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes})
 			case registry.OperationScopeSchema:
-				use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes, Table: true})
+				use.Operations = append(use.Operations, Operation{Name: op.Name, Writes: op.Writes, Table: true, AnswersRow: registry.TableOperationRow(ref.Name, op.Name)})
 			}
 		}
 		for _, declared := range behavior.Tables {

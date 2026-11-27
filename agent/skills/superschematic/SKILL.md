@@ -282,8 +282,9 @@ path for when the store is unavailable.
   your own (D147). A create gives the name; change it with
   `name.rename`, which keeps the old one as an alias, and keep the rest
   with `name.addAlias` and `name.removeAlias`; find a row by any of them
-  with `name.resolve({ name })`. A name another row holds is refused with
-  that row's key (`name_taken`), and a merge moves the aliases.
+  with `name.resolve({ name })`, which answers no row its caller may not
+  read. A name another row holds is refused (`name_taken`) naming nothing
+  of that row, and a merge moves the aliases.
 - **A link to a row of any table, or a file, is a declaration.** Put
   `@references<T>({ tables?, cleared? })` or `@attachments<T>({ released })`
   on the table and use `orm.references` (`add`, `of`, `referencedBy`) and

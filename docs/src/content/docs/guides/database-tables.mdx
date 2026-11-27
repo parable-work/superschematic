@@ -1178,7 +1178,9 @@ turn on itself (`ErrMergeSelfReference`, code `self_reference`): point
 `into` elsewhere first. A merge that stamps a row deleted, `from` on a
 soft-deletable table or a refused row of one, needs an acting user as a
 soft delete does, and fails before it writes without one
-(`ErrNoUserInContext`, `NoUserError`).
+(`ErrNoUserInContext`, `NoUserError`). Under per-record access a merge
+keeps to the rows its caller may write
+([A merge and who may write the rows](#a-merge-and-who-may-write-the-rows)).
 
 What a merge does not do:
 
@@ -1221,6 +1223,38 @@ caller opened none, and the lock is SQLite's one writer, which holds the
 database once the merge writes. A merge whose relations delete rows of a
 `@versioned` table has no SQLite form. The TypeScript and Go
 repositories run on Postgres alone, so D1 has no merge.
+
+### A merge and who may write the rows
+
+Under per-record access (D156) a merge keeps to its caller: in an
+operation of a TypeScript server, under Go's `WithPrincipal`, and in
+Rust's repositories opened `with_access`
+([Per-record access](/superschematic/guides/api-routes/#per-record-access)).
+Both rows must be ones the caller may write. Either one beyond its
+audience or its grants is not found (`ErrNotFound`, `NotFoundError`,
+`Error::NotFound`) before a statement runs, as an update's row is.
+
+So must every row the merge would repoint or delete. A note on `from`
+that someone else keeps private, or a board of theirs that carries
+`from`, is a row the caller would change without being able to see it.
+Before it writes, with both rows locked, the merge reads each relation's
+rows that reference `from` against the conditions of the caller's write
+of their table. At the first it may not write, it refuses and writes
+nothing: `ErrMergeOutOfReach` in Go, and code `out_of_reach` of a
+`MergeError` in TypeScript and of `Error::Merge` in Rust. The refusal names
+the table and carries no key or field of the row; a merge route answers
+it 403.
+
+- A pair of a `ManyToMany`'s join table is its declaring row's: a merge
+  of a label checks the boards whose `Board.labels` hold it. The pairs
+  the merged table declares are `from`'s own, as an Aliased field's
+  aliases and names are.
+- A party or an agent run reaches only the rows its grants reach, so a
+  grant whose role should fold the notes on a label names a path to
+  them (`LabelNote: ["label"]`).
+- A job, a worker, `AsSystem` and `asSystem()`, and Rust's repositories
+  opened for no caller write every row, so their merges repoint
+  everything.
 
 ## References and files on any row
 
@@ -4397,9 +4431,13 @@ as a whole and keyed by its normalized form (`company_name_names`), whose
 `holder` column holds the row's key. So the database holds each name
 unique: a create, a rename or an addAlias that takes a name inserts its
 row, and two that take one name at once never both hold it. A name
-another row holds is refused with that row's key, the veto `name_taken`
-(`details.vetoDetails.holder`), on Postgres, SQLite and D1 alike. A
-removed alias frees its name for any row, and so does a delete of the
+another row holds is refused, the veto `name_taken`, on Postgres, SQLite
+and D1 alike. The refusal says the name is taken and nothing of the row
+that holds it: its details are the name and its normalized form
+(`details.vetoDetails.name` and `.normalized`), with neither the row's
+key nor its fields, since the caller may be one that row is hidden from.
+Ask `resolve` for the row, which answers it to a caller who may read it.
+A removed alias frees its name for any row, and so does a delete of the
 row, through the repository, for all of its names. A name whose holder is
 no live row, deleted past the repository, is taken over by the next row
 that takes it. Aliased cannot be added to a table with rows, nor removed
@@ -4407,10 +4445,22 @@ from one, and its `normalize` stays while the table has rows. A table
 whose behaviors keep such tables has no upserts. A write around the core,
 raw SQL of the name, the aliases or the names, runs none of these rules.
 
+On a table whose rows keep to their caller, an `@audience` table or any
+table for a party or an agent run calling through grants
+([Per-record access](/superschematic/guides/api-routes/#per-record-access)),
+`resolve` answers `{ row: null }` for a name a row the caller may not
+read holds, as for a name no row holds: in a TypeScript operation, under
+Go's `WithPrincipal` and in Rust's repositories opened `with_access`. A
+job, a worker and the system actor read every row. Names stay unique
+across the table whoever holds them, so a caller can learn that a name
+is taken, by a create or a rename that `name_taken` refuses, and never
+which row holds it.
+
 A merge of a table with an Aliased field ([Merging rows](#merging-rows))
 moves the aliases of the row merged away to the row that stays, its name
 among them, and its rows of the names table with them, so a merge frees
-no name and takes none.
+no name and takes none. Those rows are the merged rows' own, so a merge
+under per-record access reads no access of them.
 
 ### A row's conversation
 

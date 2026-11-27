@@ -456,6 +456,9 @@ type ORMMergeStep struct {
 	Before        []ORMMergeStatement
 	Collisions    []ORMMergeStatement
 	Repoint       ORMMergeStatement
+	// Reach is the rows the step writes as per-record access holds them
+	// (D156, sqlutil.MergeStep.Reach); nil for the merged rows' own.
+	Reach *sqlutil.MergeReach
 }
 
 // ORMMergeStatement is a statement of a merge: its SQL, and how it takes
@@ -495,7 +498,7 @@ func ormMerge(schema *ir.Schema, models []sqlutil.TableModel, tables []ORMTable,
 	}
 	out := &ORMMerge{Lock: plan.Lock, HistoryActor: plan.HistoryActor, RequiresUser: plan.RequiresUser}
 	for _, step := range plan.Steps {
-		s := ORMMergeStep{Source: step.Source, Field: step.Field, SelfReference: step.SelfReference, Repoint: statement(step.Source, step.Repoint)}
+		s := ORMMergeStep{Source: step.Source, Field: step.Field, SelfReference: step.SelfReference, Repoint: statement(step.Source, step.Repoint), Reach: step.Reach}
 		for _, before := range step.Before {
 			s.Before = append(s.Before, statement(step.Source, before))
 		}

@@ -7,7 +7,8 @@ live rows by their keys, the path's {id} and {into}, folds the one into
 the other with the repository's mergeInto in the route's transaction, and
 answers the view of the row that stays; a key that holds no live row is
 404, and the repository's MergeError (a row into itself, or into a row
-under it) is 409.
+under it) is 409, but for one that would write a row of another table the
+caller may not write (out_of_reach, D156), which is 403.
 */
 
 const columns = [
@@ -16,7 +17,10 @@ const columns = [
 ];
 
 class MergeError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly code: string = 'self_reference'
+  ) {
     super(message);
     this.name = 'MergeError';
   }
@@ -84,5 +88,14 @@ describe('tableMerge', () => {
     expect(refused).toBeInstanceOf(HttpProblem);
     expect((refused as HttpProblem).status).toBe(409);
     expect((refused as HttpProblem).message).toContain('references a through parent');
+  });
+
+  test("the repository's MergeError of a row the caller may not write is 403", async () => {
+    const out = new MergeError('Label a cannot be merged away: LabelNote holds a row that references it, which the caller may not write', 'out_of_reach');
+    const { orm } = fake({ a: { id: 'a', name: 'x' }, b: { id: 'b', name: 'y' } }, out);
+    const refused = await tableMerge(orm, merge, ctx, { path: { id: 'a', into: 'b' }, query: {} }).catch(error => error);
+    expect(refused).toBeInstanceOf(HttpProblem);
+    expect((refused as HttpProblem).status).toBe(403);
+    expect((refused as HttpProblem).message).toContain('LabelNote');
   });
 });

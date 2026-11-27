@@ -597,12 +597,14 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
     /// index holds live rows alone, repoints the rest, moves an Aliased
     /// field's aliases and names, and then deletes `from` as `delete_one`
     /// does. It answers the rows repointed and deleted by table.
-    /// [`Error::NotFound`] when either is no live row; [`Error::Merge`]
-    /// when they are one row, or when `into` references `from` through a
-    /// relation of the table to itself; [`Error::NoUser`] when it stamps a
-    /// row deleted and no user acts; [`Error::Invalid`] for a table that
-    /// does not implement Mergeable, and for a client outside a
-    /// transaction.
+    /// [`Error::NotFound`] when either is no live row, or opened for a
+    /// caller (D156) one the caller may not write; [`Error::Merge`] when
+    /// they are one row, when `into` references `from` through a relation
+    /// of the table to itself, and opened for a caller when a row it would
+    /// repoint or delete is one the caller may not write (`out_of_reach`);
+    /// [`Error::NoUser`] when it stamps a row deleted and no user acts;
+    /// [`Error::Invalid`] for a table that does not implement Mergeable,
+    /// and for a client outside a transaction.
     pub async fn merge_into(
         &self,
         from: &Value,

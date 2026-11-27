@@ -415,6 +415,7 @@ export const customerTable: TableDefinition = {
         source: "Address",
         field: "customer_id",
         repoint: { sql: "UPDATE address SET customer_id = $2 WHERE address.customer_id = $1" },
+        reach: { type: "Address", rows: "SELECT 1 FROM address WHERE address.customer_id = $1" },
       },
       {
         source: "CustomerProfile",
@@ -423,11 +424,13 @@ export const customerTable: TableDefinition = {
           { sql: "WITH moved AS (SELECT customer_profile.id AS merge_key FROM customer_profile WHERE customer_profile.customer_id = $1), held AS (SELECT 1 AS k0 FROM customer_profile WHERE customer_profile.customer_id = $2) DELETE FROM customer_profile WHERE customer_profile.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held))" },
         ],
         repoint: { sql: "UPDATE customer_profile SET customer_id = $2 WHERE customer_profile.customer_id = $1" },
+        reach: { type: "CustomerProfile", rows: "SELECT 1 FROM customer_profile WHERE customer_profile.customer_id = $1" },
       },
       {
         source: "Purchase",
         field: "customer",
         repoint: { sql: "UPDATE purchase SET customer_id = $2 WHERE purchase.customer_id = $1" },
+        reach: { type: "Purchase", rows: "SELECT 1 FROM purchase WHERE purchase.customer_id = $1" },
       },
     ],
   },
@@ -964,6 +967,7 @@ export const labelTable: TableDefinition = {
           { sql: "DELETE FROM board_label AS moved WHERE moved.label_id = $1 AND EXISTS (SELECT 1 FROM board_label AS held WHERE held.label_id = $2 AND held.board_id = moved.board_id)" },
         ],
         repoint: { sql: "UPDATE board_label SET label_id = $2 WHERE label_id = $1" },
+        reach: { type: "Board", rows: "SELECT 1 FROM board WHERE board.id IN (SELECT board_id FROM board_label WHERE label_id = $1)" },
       },
       {
         source: "DocumentLabel",
@@ -972,12 +976,14 @@ export const labelTable: TableDefinition = {
           { sql: "WITH moved AS (SELECT document_label.id AS merge_key, document_label.document_id AS k1 FROM document_label WHERE document_label.label_id = $1), held AS (SELECT document_label.document_id AS k1 FROM document_label WHERE document_label.label_id = $2) DELETE FROM document_label WHERE document_label.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))" },
         ],
         repoint: { sql: "UPDATE document_label SET label_id = $2 WHERE document_label.label_id = $1" },
+        reach: { type: "DocumentLabel", rows: "SELECT 1 FROM document_label WHERE document_label.label_id = $1" },
       },
       {
         source: "Label",
         field: "parent",
         selfReference: "SELECT 1 FROM label WHERE label.id = $2 AND label.parent_id = $1",
         repoint: { sql: "UPDATE label SET parent_id = $2 WHERE label.parent_id = $1" },
+        reach: { type: "Label", rows: "SELECT 1 FROM label WHERE label.parent_id = $1" },
       },
       {
         source: "LabelCode",
@@ -986,11 +992,13 @@ export const labelTable: TableDefinition = {
           { sql: "WITH moved AS (SELECT label_code.id AS merge_key, (SELECT ((CAST(label_id AS text) || ':' || lower(code))) FROM (VALUES (CAST($2 AS UUID), label_code.code)) AS label_code (label_id, code)) AS k1 FROM label_code WHERE label_code.label_id = $1), held AS (SELECT ((CAST(label_id AS text) || ':' || lower(code))) AS k1 FROM label_code WHERE label_code.label_id = $2) DELETE FROM label_code WHERE label_code.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))" },
         ],
         repoint: { sql: "UPDATE label_code SET label_id = $2 WHERE label_code.label_id = $1" },
+        reach: { type: "LabelCode", rows: "SELECT 1 FROM label_code WHERE label_code.label_id = $1" },
       },
       {
         source: "LabelNote",
         field: "label",
         repoint: { sql: "UPDATE label_note SET label_id = $2, updated_at = now(), updated_by = COALESCE($3, updated_by), revision = label_note.revision + 1 WHERE label_note.label_id = $1", actor: "uuid" },
+        reach: { type: "LabelNote", rows: "SELECT 1 FROM label_note WHERE label_note.label_id = $1" },
       },
       {
         source: "LabelPair",
@@ -999,6 +1007,7 @@ export const labelTable: TableDefinition = {
           { sql: "WITH moved AS (SELECT label_pair.id AS merge_key, label_pair.second_id AS k1 FROM label_pair WHERE label_pair.first_id = $1), held AS (SELECT label_pair.second_id AS k1 FROM label_pair WHERE label_pair.first_id = $2) DELETE FROM label_pair WHERE label_pair.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))" },
         ],
         repoint: { sql: "UPDATE label_pair SET first_id = $2 WHERE label_pair.first_id = $1" },
+        reach: { type: "LabelPair", rows: "SELECT 1 FROM label_pair WHERE label_pair.first_id = $1" },
       },
       {
         source: "LabelPair",
@@ -1007,6 +1016,7 @@ export const labelTable: TableDefinition = {
           { sql: "WITH moved AS (SELECT label_pair.id AS merge_key, label_pair.first_id AS k1 FROM label_pair WHERE label_pair.second_id = $1), held AS (SELECT label_pair.first_id AS k1 FROM label_pair WHERE label_pair.second_id = $2) DELETE FROM label_pair WHERE label_pair.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))" },
         ],
         repoint: { sql: "UPDATE label_pair SET second_id = $2 WHERE label_pair.second_id = $1" },
+        reach: { type: "LabelPair", rows: "SELECT 1 FROM label_pair WHERE label_pair.second_id = $1" },
       },
       {
         source: "LabelSlot",
@@ -1015,6 +1025,7 @@ export const labelTable: TableDefinition = {
           { sql: "WITH moved AS (SELECT label_slot.id AS merge_key, label_slot.slot AS k1 FROM label_slot WHERE label_slot.label_id = $1 AND (open)), held AS (SELECT label_slot.slot AS k1 FROM label_slot WHERE label_slot.label_id = $2 AND (open)) DELETE FROM label_slot WHERE label_slot.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 IS NOT DISTINCT FROM held.k1))" },
         ],
         repoint: { sql: "UPDATE label_slot SET label_id = $2 WHERE label_slot.label_id = $1" },
+        reach: { type: "LabelSlot", rows: "SELECT 1 FROM label_slot WHERE label_slot.label_id = $1" },
       },
       {
         source: "Subscription",
@@ -1023,6 +1034,7 @@ export const labelTable: TableDefinition = {
           { sql: "WITH moved AS (SELECT subscription.id AS merge_key, subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $1 AND (deleted_at IS NULL)), held AS (SELECT subscription.subscriber AS k1 FROM subscription WHERE subscription.label_id = $2 AND (deleted_at IS NULL)) UPDATE subscription SET deleted_at = now(), deleted_by = $3, label_id = $2 WHERE subscription.id IN (SELECT moved.merge_key FROM moved WHERE EXISTS (SELECT 1 FROM held WHERE moved.k1 = held.k1))", actor: "uuid" },
         ],
         repoint: { sql: "UPDATE subscription SET label_id = $2 WHERE subscription.label_id = $1" },
+        reach: { type: "Subscription", rows: "SELECT 1 FROM subscription WHERE subscription.label_id = $1" },
       },
     ],
   },

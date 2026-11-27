@@ -360,7 +360,7 @@ const PAYMENTS_FLOOR: usize = 73;
 const BLUEPRINT_FLOOR: usize = 151;
 /// core-aliased's floor (D147): 46 steps of the scenarios written by hand,
 /// 36 commands and 10 checks: names claimed in the use's shared table, a
-/// name another row holds refused with its key, rename, addAlias and
+/// name another row holds refused naming nothing of it, rename, addAlias and
 /// removeAlias, resolve a command without a row, and a delete that deletes
 /// the row's rows of the shared table.
 const ALIASED_FLOOR: usize = 46;

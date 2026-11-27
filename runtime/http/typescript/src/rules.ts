@@ -491,6 +491,14 @@ export interface RulesOperation {
   readonly writes: boolean;
   /** True for an operation of the table as a whole (D104), a declaration's scope schema: a repository method that takes no key, which the adapter runs as a command without a row (runTableOperation). */
   readonly table?: boolean;
+  /**
+   * Of an operation of the table as a whole, the member of its answer that
+   * names one of the table's rows, an object whose key is the row's key in
+   * its wire form, or null (Aliased's resolve: row). The core reads every
+   * row, so the repository keeps the answer to its caller (D156): null for a
+   * row the caller does not see. Absent for any other operation.
+   */
+  readonly answersRow?: string;
 }
 
 /**
