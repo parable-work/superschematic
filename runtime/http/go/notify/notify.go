@@ -208,7 +208,9 @@ func LooksLikeCode(text string) bool {
 		return false
 	}
 	for _, r := range text {
-		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z') {
+		digit := r >= '0' && r <= '9'
+		letter := r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+		if !digit && !letter {
 			return false
 		}
 	}
