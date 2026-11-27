@@ -158,6 +158,19 @@ func Type(td *ir.TypeDef, values Values) (*ir.TypeDef, error) {
 		lowered.Behaviors[i].Field = value
 		anchored[value] = ref.Name
 	}
+	// TypeScript states the behaviors a class implements in its heritage
+	// and its field behaviors in its body, and reads them in that order,
+	// so the table lists them so too: its columns are then the ones a
+	// build of the class writes, in the same order.
+	slices.SortStableFunc(lowered.Behaviors, func(a, b ir.BehaviorRef) int {
+		switch {
+		case !a.FieldAnchored() && b.FieldAnchored():
+			return -1
+		case a.FieldAnchored() && !b.FieldAnchored():
+			return 1
+		}
+		return 0
+	})
 	return &lowered, nil
 }
 

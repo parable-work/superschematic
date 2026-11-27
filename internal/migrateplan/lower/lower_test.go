@@ -25,9 +25,9 @@ func note(fields ...*ir.FieldDef) *ir.TypeDef {
 // TestTypeLowersAGeneralTypeToItsTable: the type is a DB table with
 // development mode's key; a behavior whose declaration names a value
 // field is anchored on a field of that name, Workflow's status and
-// Numbering's label, and the others are ones the table implements; its
-// description and its fields' are their comments. The type given is left
-// as it was.
+// Numbering's label, and the others are ones the table implements, listed
+// first; its description and its fields' are their comments. The type
+// given is left as it was.
 func TestTypeLowersAGeneralTypeToItsTable(t *testing.T) {
 	td := note()
 	table, err := Type(td, CoreValues())
@@ -39,9 +39,11 @@ func TestTypeLowersAGeneralTypeToItsTable(t *testing.T) {
 	assert.Empty(t, table.Fields[1].Description)
 	assert.Equal(t, "A note.", table.Comment)
 	assert.Empty(t, table.Description)
+	// The behaviors the table implements come first, as TypeScript reads
+	// a class's heritage before its fields.
 	assert.Equal(t, []ir.BehaviorRef{
-		{Name: "Workflow", Field: "status", Config: []byte(`{"states":["draft","published"]}`)},
 		{Name: "Comments", Implements: true},
+		{Name: "Workflow", Field: "status", Config: []byte(`{"states":["draft","published"]}`)},
 		{Name: "Numbering", Field: "label", Config: []byte(`{"format":"N-{n}"}`)},
 	}, table.Behaviors)
 

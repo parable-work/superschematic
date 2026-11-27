@@ -73,10 +73,15 @@ hazards. superschematic-migrate (runtime/migrate) applies it.
 A plan starts from another version of the schema, with no database at
 hand, or from a SQLite file built by hand (--from-database). The new
 version is a service directory, or one DB service's schema documents as
-format --to=json writes them (--documents, --request).`,
+format --to=json writes them (--documents, --request).
+
+export writes a runtime database's schemas and the model it recorded as
+a compiled project's DB service, whose first plan from that model is
+empty (D117).`,
 		Args: cobra.NoArgs,
 	}
 	cmd.AddCommand(newMigratePlanCmd(a))
+	cmd.AddCommand(newMigrateExportCmd(a))
 	return cmd
 }
 
