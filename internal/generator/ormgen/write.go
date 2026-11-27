@@ -154,6 +154,17 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(rowFeaturesFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove rowrefs.go: %w", err)
 	}
+	// crosstable.go holds a database's calendar sources and search index
+	// (D152, D155, D187); a database without them has none, so a file an
+	// earlier build wrote goes.
+	crossTablesFile := filepath.Join(outputDir, "crosstable.go")
+	if output.CrossTables != nil {
+		if err := generateFile(generator, "crosstable.tmpl", crossTablesFile, output); err != nil {
+			return fmt.Errorf("failed to write crosstable.go: %w", err)
+		}
+	} else if err := os.Remove(crossTablesFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove crosstable.go: %w", err)
+	}
 	// fences.go holds the fences of each table with a @fenced field and
 	// the rule by which a write advances them (D119); a schema without one
 	// has none, so a file an earlier build wrote goes.

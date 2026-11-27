@@ -179,7 +179,7 @@ func sourceLive(table *sqlutil.TableModel) string {
 // Encrypted<T> fields (D85), or its access package, which holds the
 // principal a database with per-record access keeps its reads to (D180).
 func (o *ORMOutput) RequiresSchemaRuntime() bool {
-	return o.HasEncryptedFields || o.Access != nil || o.RowFeatures != nil
+	return o.HasEncryptedFields || o.Access != nil || o.RowFeatures != nil || o.CrossTables != nil
 }
 
 // attachManyRelations gives each repository the one-to-many relations its
