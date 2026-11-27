@@ -26,7 +26,7 @@ func record(ctx context.Context, args []string, o options) error {
 		return err
 	}
 	var driver migrate.Driver
-	closeDriver := func() {}
+	var closeDriver func()
 	if !d1.IsURL(url) && migrate.URLDialect(url) == migrate.SQLite {
 		// A file is read alone, and one that does not exist is refused
 		// rather than created.
