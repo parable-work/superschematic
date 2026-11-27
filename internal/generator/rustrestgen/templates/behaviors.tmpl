@@ -311,8 +311,8 @@ fn presented(input: &mut Value) -> Map<String, Value> {
 /// the repositories of {{ .BehaviorDatabase }}'s Rust types, opened on `tx` for the
 /// caller, the anonymous one for a request with none, check the row as
 /// their update and their operation do. A row out of reach is the core's
-/// not_found of a row no live row holds, in its words, so the 404 tells it
-/// from none; a failure of the check is the server's internal error.
+/// not_found of a row no live row holds, in its words, so its 404 is a
+/// missing row's; a failure of the check is the server's internal error.
 async fn reach(
     tx: &deadpool_postgres::Transaction<'_>,
     ctx: &RequestContext,
