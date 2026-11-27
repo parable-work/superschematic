@@ -545,10 +545,10 @@ export interface {{.Name}}Repositories {
 }
 
 /** The repositories of {{$.SchemaName}} over a pool, acting as a user or none{{if or .References .Attachments}}, with{{if .References}} its references{{end}}{{if and .References .Attachments}} and{{end}}{{if .Attachments}} its attachments{{end}}{{end}}. */
-export type {{.Name}}Orm = Orm<{{.Name}}Repositories>{{if .References}} & ReferencesMembers{{end}}{{if .Attachments}} & AttachmentsMembers{{end}};
+export type {{.Name}}Orm = Orm<{{.Name}}Repositories{{with .RowFeatureMembers}}, {{.}}{{end}}>;
 
 /** The repositories of {{$.SchemaName}} in a transaction, with its raw SQL. */
-export type {{.Name}}Tx = OrmTx<{{.Name}}Repositories>{{if .References}} & ReferencesMembers{{end}}{{if .Attachments}} & AttachmentsMembers{{end}};
+export type {{.Name}}Tx = OrmTx<{{.Name}}Repositories{{with .RowFeatureMembers}}, {{.}}{{end}}>;
 {{- if .Postgres}}
 
 {{- if .Rules}}

@@ -109,3 +109,66 @@ func TestLoadProvidersChecksTheSlots(t *testing.T) {
 		})
 	}
 }
+
+// TestReadRuntimeProviderReadsACrate (D185): a provider crate's Cargo.toml
+// declares the interface it implements under
+// [package.metadata.superschematic.provider], which the build checks as
+// it checks a package.json, and a directory that holds both declares one
+// provider in each.
+func TestReadRuntimeProviderReadsACrate(t *testing.T) {
+	const crate = `[package]
+name = "relay-a"
+version = "0.0.0"
+
+[package.metadata.superschematic.provider]
+name = "relay"
+implements = "channel"
+operations = ["send", "health", "inbound"]
+role = ["messages.relay"]
+
+[package.metadata.superschematic.provider.config]
+URL = { description = "where" }
+TOKEN = { secret = true }
+`
+	write := func(dir, name, text string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	write(dir, "Cargo.toml", crate)
+	p, err := ReadRuntimeProvider(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Name != "relay" || p.Crate != "relay-a" || p.Package != "" || strings.Join(p.Operations, ",") != "send,health,inbound" || len(p.Config) != 2 || p.Config[0] != (ir.ProviderConfigKey{Key: "TOKEN", Secret: true}) {
+		t.Fatalf("ReadRuntimeProvider = %+v", p)
+	}
+	// The same provider in a package.json beside it: one provider, of
+	// both.
+	write(dir, "package.json", `{"name": "@example/relay", "superschematic": {"provider": {
+		"name": "relay", "implements": "channel", "operations": ["inbound", "send", "health"],
+		"config": {"URL": {}, "TOKEN": {"secret": true}}, "role": ["messages.relay"]}}}`)
+	if p, err = ReadRuntimeProvider(dir); err != nil || p.Package != "@example/relay" || p.Crate != "relay-a" {
+		t.Fatalf("ReadRuntimeProvider of both = %+v, %v", p, err)
+	}
+	// A package.json of another provider is refused.
+	write(dir, "package.json", `{"name": "@example/relay", "superschematic": {"provider": {"name": "relay", "implements": "channel", "role": ["messages.send"]}}}`)
+	if _, err := ReadRuntimeProvider(dir); err == nil || !strings.Contains(err.Error(), "declare different providers") {
+		t.Fatalf("two providers in one directory: %v", err)
+	}
+	for name, tc := range map[string]struct{ cargo, want string }{
+		"no provider":    {"[package]\nname = \"plain\"\n", "crate plain declares no provider"},
+		"an unknown key": {"[package]\nname = \"x\"\n[package.metadata.superschematic.provider]\nname = \"x\"\nimplements = \"model\"\nkind = \"llm\"\n", "unknown key package.metadata.superschematic.provider.kind"},
+		"no interface":   {"[package]\nname = \"x\"\n[package.metadata.superschematic.provider]\nname = \"x\"\nimplements = \"queue\"\n", `implements "queue", which is no runtime interface`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			write(dir, "Cargo.toml", tc.cargo)
+			if _, err := ReadRuntimeProvider(dir); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("ReadRuntimeProvider() = %v, want it to say %q", err, tc.want)
+			}
+		})
+	}
+}

@@ -656,7 +656,10 @@ Most are load errors; knowing them saves a build round-trip:
   `fields` are set by the create for good; `oneWay` fields (a boolean, a
   number or a date-time, never a decimal or a list) only go `"up"` or
   `"down"` after it, a create giving any value and clearing one counting
-  as a move down. StateRules' `required` fields are needed to enter a
+  as a move down; a table whose one rule is a read mark names `oneWay`
+  alone, `Constants<Message, { oneWay: { readAt: "up" } }>`. These configs
+  name a to-one relation by the field that holds its key, `authorityId`,
+  never by its name. StateRules' `required` fields are needed to enter a
   state and kept while in it, for every caller; its `frozen` fields change
   only for a caller with `permission` or the subject a state's `by` field
   held before the update (the entries a transition's `by` takes). An

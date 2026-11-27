@@ -24,7 +24,7 @@ import {
   type Notifier,
   type TranscriptEntry,
 } from '@superschematic/http-runtime/postgres';
-import { providersFrom, SecretValue, type Providers, type SandboxProvider } from '@superschematic/http-runtime/providers';
+import { providersFrom, SecretValue, type ModelTurn, type Providers, type SandboxProvider } from '@superschematic/http-runtime/providers';
 import type { Principal } from '@superschematic/http-runtime';
 import { createOrm, type FixtureAgentRunsDbOrm } from './orm';
 import { agentRunRequestQueue, noticeWorkQueue, runRequestQueue, taskDeadlineQueue, taskEventQueue } from './queues';
@@ -98,6 +98,10 @@ interface World {
   stopApp: () => void;
   bucket: Map<string, string>;
   logs: string[];
+  /** Each turn the model was asked to complete, in order. */
+  modelTurns: ModelTurn[];
+  /** The providerState the model returns with its nth completion, when set. */
+  modelState: { of?: (n: number) => unknown };
   boss: Principal;
   ann: Principal;
   ids: Record<string, string>;
@@ -153,6 +157,8 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
   const svc = services();
   const logs: string[] = [];
   const bucket = new Map<string, string>();
+  const modelTurns: ModelTurn[] = [];
+  const modelState: { of?: (n: number) => unknown } = {};
   const base = providersFrom({
     slots: { SANDBOX: 'sandbox', MODEL: 'model', SMS: 'channel' },
     config: {
@@ -192,7 +198,20 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
     credentials: slot => base.credentials(slot),
     channel: slot => base.channel(slot),
     sandbox: async () => recording,
-    model: slot => base.model(slot),
+    // The stub, recording each turn it is asked and returning the
+    // providerState the test sets with each completion.
+    model: async slot => {
+      const model = await base.model(slot);
+      return {
+        ...model,
+        async complete(turn) {
+          modelTurns.push(turn);
+          const completion = await model.complete(turn);
+          const state = modelState.of?.(modelTurns.length);
+          return state === undefined ? completion : { ...completion, providerState: state };
+        },
+      };
+    },
     files: slot => base.files(slot),
     principalOf: slot => base.principalOf(slot),
   };
@@ -308,7 +327,7 @@ async function world(options: { watchSeconds?: number } = {}): Promise<World> {
   const noteB = String((await sys.taskNote.createOne({ taskId: b, text: 'pump spare is in bay four' })).id);
   const invoice = String((await sys.invoice.createOne({ taskId: a, amount: 100, paid: 0 })).id);
   const ids = { a, b, noteA, noteB, invoice, ann, boss: bossId };
-  const w: World = { db, orm, sys, agents, notifier, inbound, providers, sandbox, started, failStarts, svc, endpoint, stopApp: () => app.stop(true), bucket, logs, boss, ann: annPrincipal, ids };
+  const w: World = { db, orm, sys, agents, notifier, inbound, providers, sandbox, started, failStarts, svc, endpoint, stopApp: () => app.stop(true), bucket, logs, modelTurns, modelState, boss, ann: annPrincipal, ids };
   await indexAll(w);
   return w;
 }
@@ -488,6 +507,39 @@ describe.skipIf(!dsn)('agent runs', () => {
     expect(tool?.content).toContain(a);
     expect(tool?.content).not.toContain(b);
     await watch(w);
+  });
+
+  test("each turn replays the run's earlier completions with their tool calls and the provider's state unchanged, and a reader gets the state redacted", async () => {
+    w = await world();
+    const { a } = w.ids;
+    // The model's own record of each turn, as a Claude provider's thinking
+    // block with its signature: text the transcript's redaction would
+    // rewrite, so a replay of it redacted would fail the provider's check.
+    const state = (n: number) => ({ thinking: [{ type: 'thinking', thinking: `turn ${n}: the search sent Bearer abc.def`, signature: `sig-${n}` }] });
+    w.modelState.of = state;
+    const id = await ask(w, 'reviewer', a);
+    await exited(w, id);
+    // The reviewer's task calls search on its first turn, and the second
+    // turn answers the result.
+    expect(w.modelTurns.length).toBe(2);
+    const [first, second] = w.modelTurns;
+    expect(first!.messages.filter(m => m.role === 'assistant')).toEqual([]);
+    const replayed = second!.messages.findIndex(m => m.role === 'assistant');
+    const assistant = second!.messages[replayed]!;
+    expect(assistant.toolCalls).toEqual([{ id: expect.any(String), name: 'search', input: { q: 'pump' } }]);
+    expect(assistant.providerState).toEqual(state(1));
+    // Its tool result follows it, answering its call.
+    expect(second!.messages[replayed + 1]).toMatchObject({ role: 'tool', toolCallId: assistant.toolCalls![0]!.id });
+    // A reader of the transcript, while the run lives and after it ends,
+    // gets the state redacted.
+    const live = (await w.agents.transcript(id)).filter(e => e.kind === 'completion');
+    expect(live[0]!.providerState).toEqual({ thinking: [{ type: 'thinking', thinking: 'turn 1: the search sent [redacted]', signature: 'sig-1' }] });
+    await watch(w);
+    const done = await run(w, id);
+    expect(done.status).toBe('done');
+    const left = (await w.agents.transcript(id)).filter(e => e.kind === 'completion');
+    expect(left.map(e => e.providerState)).toEqual([1, 2].map(n => ({ thinking: [{ type: 'thinking', thinking: `turn ${n}: the search sent [redacted]`, signature: `sig-${n}` }] })));
+    expect(w.bucket.get(String(done.transcriptObject))).not.toContain('Bearer abc.def');
   });
 
   test('an ask operation waits for an approval given on any channel, then runs', async () => {

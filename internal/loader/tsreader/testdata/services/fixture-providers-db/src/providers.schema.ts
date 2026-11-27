@@ -1,0 +1,13 @@
+import { Identity } from "superscalar";
+import { AutoGenerate, key } from "@superschematic/db";
+
+// A notice a channel adapter sent: to whom, what, through which provider,
+// and the id the provider's service gave it.
+export abstract class Delivery {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+  recipient: string;
+  body: string;
+  provider: string;
+  providerMessageId: string;
+}

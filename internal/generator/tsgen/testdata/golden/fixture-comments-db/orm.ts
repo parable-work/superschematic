@@ -495,10 +495,10 @@ export interface FixtureCommentsDbRepositories {
 }
 
 /** The repositories of fixture-comments-db over a pool, acting as a user or none, with its references. */
-export type FixtureCommentsDbOrm = Orm<FixtureCommentsDbRepositories> & ReferencesMembers;
+export type FixtureCommentsDbOrm = Orm<FixtureCommentsDbRepositories, ReferencesMembers>;
 
 /** The repositories of fixture-comments-db in a transaction, with its raw SQL. */
-export type FixtureCommentsDbTx = OrmTx<FixtureCommentsDbRepositories> & ReferencesMembers;
+export type FixtureCommentsDbTx = OrmTx<FixtureCommentsDbRepositories, ReferencesMembers>;
 
 /** Where the behaviors' core finds each table whose fields are behaviors (D103): its table, key, version, the column a soft-deletable table's live rows hold NULL, and own columns, each behavior's owned columns and operations, and the type as the core runs it. */
 export const fixtureCommentsDbRules: RulesLayout = {

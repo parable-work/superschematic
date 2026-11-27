@@ -1,4 +1,4 @@
-import { Identity } from "superscalar";
+import { Identity, Temporal } from "superscalar";
 import { Nullable, Validate } from "@superschematic/schema";
 import {
   Authenticated,
@@ -11,7 +11,7 @@ import {
   source,
   tableOperation
 } from "@superschematic/api";
-import { Contract, Document, Folder, Request, Unit } from "@schemas/fixture-access-db";
+import { AccessEntry, Contract, Document, Folder, Grant, Request, Unit } from "@schemas/fixture-access-db";
 
 // A folder, with who may see it.
 @source(Folder)
@@ -99,6 +99,35 @@ export abstract class RequestView {
 @source(Request)
 export abstract class CreateRequestInput {
   title: Validate<string, { minLength: 1 }>;
+}
+
+// A grant of the database's @accessGrants table, whose fields the build
+// fills, without the hash of its token.
+@source(Grant)
+export abstract class GrantView {
+  id: Identity.UUID;
+  holder: Identity.UUID;
+  holderKind: string;
+  role: string;
+  targetType: string;
+  targetId: Identity.UUID;
+  startsAt: Temporal.DateTime;
+  endsAt: Nullable<Temporal.DateTime>;
+  revokedAt: Nullable<Temporal.DateTime>;
+}
+
+// A row of the database's @accessLog table, whose fields the build fills.
+@source(AccessEntry)
+export abstract class AccessEntryView {
+  id: Identity.UUID;
+  at: Temporal.DateTime;
+  kind: string;
+  principal: Nullable<string>;
+  principalKind: Nullable<string>;
+  operation: Nullable<string>;
+  targetType: Nullable<string>;
+  targetId: Nullable<string>;
+  field: Nullable<string>;
 }
 
 export class Folders extends Authenticated {
@@ -208,6 +237,26 @@ export class Requests extends Authenticated {
   @requirePermission(["requests.write"])
   @tableOperation()
   createRequest(unitId: Identity.UUID, input: CreateRequestInput): RequestView {
+    throw new Error("schema declaration only");
+  }
+}
+
+export class Access extends Authenticated {
+  // The grants, for an administrator of access.
+  @rest(HttpMethod.GET, "access/grants")
+  @requirePermission(["access.admin"])
+  @paginated()
+  @tableOperation()
+  listGrants(): GrantView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // The access log, for an administrator of access.
+  @rest(HttpMethod.GET, "access/log")
+  @requirePermission(["access.admin"])
+  @paginated()
+  @tableOperation()
+  listAccessLog(): AccessEntryView[] {
     throw new Error("schema declaration only");
   }
 }

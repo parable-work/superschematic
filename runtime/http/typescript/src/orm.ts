@@ -1225,8 +1225,12 @@ export interface OrmQueryOptions {
   readonly decode?: TableDefinition | readonly RowField[];
 }
 
-/** The members an ORM and a transaction hold beside their repositories. */
-export interface OrmMembers<R> {
+/**
+ * The members an ORM and a transaction hold beside their repositories. X is
+ * what both hold beside these, which a transaction the ORM opens holds too:
+ * a database's references and attachments (D154).
+ */
+export interface OrmMembers<R, X = unknown> {
   /**
    * The acting user's id, or undefined: for an ORM opened with no user of
    * its own, the caller of the operation being run (D87).
@@ -1249,25 +1253,30 @@ export interface OrmMembers<R> {
    */
   withBehaviorCaller(caller: CoreCaller | null): this;
   /** Runs fn in a transaction, with repositories bound to it, and commits; rolls back when fn throws. options sets its isolation level and makes it read only (D89). */
-  transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>, options?: TransactionOptions): Promise<T>;
+  transaction<T>(fn: (tx: OrmTx<R, X>) => Promise<T>, options?: TransactionOptions): Promise<T>;
   /** Runs a statement: a text and its values, or a pg query config, as enqueue passes one; options.decode reads its rows as a table's repository does (D89). */
   query<Row = Record<string, unknown>>(text: string | OrmQueryConfig, values?: readonly unknown[], options?: OrmQueryOptions): Promise<OrmQueryResult<Row>>;
   /** Runs a statement and resolves to how many rows it changed. */
   exec(text: string, values?: readonly unknown[]): Promise<number>;
 }
 
-/** An ORM: its repositories, by table, and the members of OrmMembers. */
-export type Orm<R> = R & OrmMembers<R>;
+/**
+ * An ORM: its repositories, by table, the members X its transactions hold
+ * too (a database's references and attachments, D154), and the members of
+ * OrmMembers.
+ */
+export type Orm<R, X = unknown> = R & X & OrmMembers<R, X>;
 
-/** A transaction: its repositories, bound to it, and raw SQL on it. */
-export type OrmTx<R> = R &
-  Omit<OrmMembers<R>, 'transaction'> & {
+/** A transaction: its repositories, bound to it, the members X, and raw SQL on it. */
+export type OrmTx<R, X = unknown> = R &
+  X &
+  Omit<OrmMembers<R, X>, 'transaction'> & {
     /**
      * Runs fn in a transaction nested in this one, a savepoint (D89): when
      * fn throws, its writes are rolled back and this transaction goes on,
      * as it may after a statement of fn's failed.
      */
-    transaction<T>(fn: (tx: OrmTx<R>) => Promise<T>): Promise<T>;
+    transaction<T>(fn: (tx: OrmTx<R, X>) => Promise<T>): Promise<T>;
   };
 
 /** The members a repository's table may not take, which an ORM holds itself. */
