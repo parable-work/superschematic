@@ -2529,7 +2529,11 @@ impl Agents {
         if !token.starts_with(GRANT_TOKEN_PREFIX) {
             return Ok(None);
         }
-        let authenticator = GrantAuthenticator::new(self.inner.tables.clone())?;
+        let mut authenticator =
+            GrantAuthenticator::new(self.inner.tables.clone())?.admitting_runs();
+        if let Some(now) = self.inner.now.clone() {
+            authenticator = authenticator.with_clock(now);
+        }
         let (parts, ()) = http::Request::builder()
             .header(http::header::AUTHORIZATION, format!("Bearer {token}"))
             .body(())

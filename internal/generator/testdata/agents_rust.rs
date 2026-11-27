@@ -937,6 +937,19 @@ async fn a_scheduled_run_reads_only_its_target() {
     assert_eq!(started["targets"], json!([{ "table": "Task", "key": a }]));
     let id = text(&started, "id");
     w.exited(&id).await;
+    // The run's token is the dispatcher's to resolve: the plain grant
+    // authenticator refuses it, where its holder would run with its role's
+    // permissions, neither narrowed nor gated (D193), and the dispatcher's
+    // authenticator resolves it as the run.
+    let parts = |token: &str| {
+        axum::http::Request::get("/").header("authorization", format!("Bearer {token}")).body(()).unwrap().into_parts().0
+    };
+    let plain = runtime::access::GrantAuthenticator::new(types::orm::postgres::tables(w.pool.clone())).unwrap();
+    let refused = runtime::Authenticator::authenticate(&plain, &parts(&w.token(&id))).await.unwrap_err();
+    assert_eq!(refused.status.as_u16(), 401);
+    let runs = w.agents.authenticator(None).unwrap();
+    let run = runtime::Authenticator::authenticate(&runs, &parts(&w.token(&id))).await.unwrap().unwrap();
+    assert_eq!((run.kind, run.claims["run"].clone()), (PrincipalKind::Agent, json!(id)));
     // The token reaches the target and the rows the role reaches from it,
     // and nothing else.
     assert_eq!(w.mcp(&id, "read_task", json!({ "key": a })).await.1["id"], json!(a));
