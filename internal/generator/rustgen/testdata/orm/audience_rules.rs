@@ -284,7 +284,7 @@ async fn on_postgres(pool: &deadpool_postgres::Pool) -> Result<(), Box<dyn std::
     let deriving = postgres::Repositories::new(&transaction)?.with_caller(Caller {
         subject: "fill-notes".to_owned(),
         permissions: vec!["notes.derive".to_owned()],
-        stands_in: false,
+        ..Caller::default()
     });
     let page = deriving.note()?.untyped().table_operation("derived", "staleDerivations", &json!({})).await?;
     let item = page["items"]
