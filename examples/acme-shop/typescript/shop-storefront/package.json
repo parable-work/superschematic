@@ -18,6 +18,6 @@
     "@acme/shop-storefront-sdk": "workspace:*",
     "@types/node": "22.19.9",
     "hono": "4.13.16",
-    "typescript": "5.9.3"
+    "typescript": "7.0.2"
   }
 }

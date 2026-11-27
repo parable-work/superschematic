@@ -427,7 +427,6 @@ func initTSConfig(v *initValues, schemasRoot string) ([]byte, error) {
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    "baseUrl": ".",
     "paths": {
       "@superschematic/*": [%q],
       "superscalar": [%q],
