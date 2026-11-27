@@ -8,7 +8,7 @@ import (
 )
 
 // BehaviorRef is one behavior a type composes: code that adds fields,
-// operations, checks and storage to the type (D16 in docs/DECISIONS.md). A
+// operations, checks and storage to the type (D16). A
 // registry declares each behavior by name; the loader checks a reference
 // against that declaration. The list order is the order its checks run in.
 //

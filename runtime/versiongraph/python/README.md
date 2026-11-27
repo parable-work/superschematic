@@ -1,7 +1,7 @@
 # Version graph (Python)
 
 `superschematic-versiongraph` (module `superschematic_versiongraph`) is the
-version graph for Python (D17 and D19 in `docs/DECISIONS.md`): the core
+version graph for Python (D17 and D19): the core
 (`runtime/versiongraph/rust`) as a PyO3 extension module built with
 maturin, with typed `compose`, `merge`, `diff`, `content_hash`, `validate`,
 `order_keys` and `arrange` over its JSON contract

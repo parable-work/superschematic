@@ -1,6 +1,6 @@
 // Package engineclientgen writes a TypeScript module of typed wrappers over
 // the engine's client (@superschematic/engine/client, D16) for one or more
-// engine schemas (D49 in docs/DECISIONS.md).
+// engine schemas (D49).
 //
 // The engine's client is generic over schema names: a create takes
 // unknown data, an operation unknown parameters. A schema's shape is known

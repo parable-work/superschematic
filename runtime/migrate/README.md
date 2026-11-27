@@ -1,8 +1,8 @@
 # Migration runner
 
 `superschematic migrate plan` writes a plan: the ordered steps that take a
-DB service's database from one version of its schema to the next (D27 in
-`docs/DECISIONS.md`). The runner applies a plan. It never computes one, so
+DB service's database from one version of its schema to the next (D27).
+The runner applies a plan. It never computes one, so
 a migration job needs the plan file and the `superschematic-migrate`
 binary, not the compiler.
 
@@ -315,7 +315,7 @@ superschematic-migrate job --job job.json|gs://<bucket>/<object>
 
 Runs a job document: one phase of the plans of the DB services one
 database server hosts, then the privileges of the servers that connect to
-each (D46 in `docs/DECISIONS.md`). A deploy on a cloud target writes the
+each (D46). A deploy on a cloud target writes the
 document and the plans beside it, and a job on the target runs it: on gcp,
 a Cloud Run job, which reads both from the state bucket.
 

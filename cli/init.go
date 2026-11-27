@@ -36,7 +36,7 @@ func newInitCmd(a *app) *cobra.Command {
 		Use:   "init [<schemas-root>]",
 		Short: "Write a schemas root: the naming file, the base tsconfig, the ignore rules and services/",
 		Long: `init writes a schemas root, the directory every other command reads
-(docs/DECISIONS.md, D71):
+(D71):
 
   superschematic.toml  go_module_root and npm_scope, and a [paths] table
                        that points the generated packages' path

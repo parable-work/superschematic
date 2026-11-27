@@ -1,7 +1,7 @@
 # The adapter in Rust
 
 `superschematic-rules-adapter` is the behaviors' adapter for a hand-written
-Rust server (D103 in `docs/DECISIONS.md`): the host loop of the pure core,
+Rust server (D103, #587): the host loop of the pure core,
 `superschematic-rules` (`../rules`), run inside the caller's own
 transaction over a build-time project's tables. It is the Rust adapter as
 the HTTP runtime's `src/rules.ts` is TypeScript's and `runtime/rules/go`

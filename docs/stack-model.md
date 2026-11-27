@@ -4,7 +4,7 @@ This is the design of the stack model: how a schema tree declares what
 runs where, how superschematic resolves the wiring between the services in
 it, and how it deploys them. It is built, except where a section says
 what is left (section 14 lists what has not run live). D30 records the
-decisions (in `docs/DECISIONS.md` at commit e8e685a51); this document is
+decisions (at commit e8e685a51); this document is
 the design they point at. When this document and the code disagree, the
 code is right and this document is the defect.
 
@@ -4479,7 +4479,7 @@ never waits for it.
 ## 9. End-user auth and service auth
 
 These are two concepts, with separate credentials, context values and
-checks. D37 in `docs/DECISIONS.md` records the decisions in this section.
+checks. D37 records the decisions in this section.
 
 ### 9.1 End-user auth
 
@@ -5778,8 +5778,8 @@ the stack targets replaced them.
 
 ## 14. Milestones
 
-Each milestone is built. What has not run live is listed under "Never run
-live" in `docs/DECISIONS.md`.
+Each milestone is built. What has not run live is tracked in the
+[issues labeled `decision`](https://github.com/parable-work/superschematic/issues?q=label%3Adecision).
 
 1. **Wiring with no cloud.** Derived config fields, the Go entrypoint, the
    `local` target and `stack dev`. `TestStackDevRunsTheShop`

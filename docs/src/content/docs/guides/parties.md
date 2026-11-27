@@ -26,7 +26,7 @@ takes one path, which decides who sent it and what it may reach.
 | the Go runtime's `inbound` package, on Postgres | |
 | the Rust runtime's `orm::parties` and `orm::inbound`, on Postgres | |
 
-D157 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
+[D157](https://github.com/parable-work/superschematic/issues/606)
 records the design and what is left. `examples/parties` is the worked
 example this page quotes.
 
