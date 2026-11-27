@@ -287,7 +287,12 @@ database (`Tx`, the ORM's `TxInterface`). The run's principal
 (`PrincipalOf`) carries the run, the agent, the definition's version and
 the trust beside the permissions, as Go's `access.Principal` holds none of
 them. Each call to the agent routes runs its work to its end whether or
-not the instance stays, so a run a call cancels is not left half done. The
+not the instance stays, so a run a call cancels is not left half done. A
+run's token on the app's own routes goes through `Authenticator`, in place
+of `session.GrantAuthenticator`, which refuses one: the route runs as the
+run's principal, narrowed as above, and each call is held to the run's
+autonomy first, so an entered sender's write answers 428 until someone
+approves it. The
 sandbox's side is `providers.RunAgentInstance`. A Go server is refused an
 operation's `@autonomy`, which holds an agent run's calls of the API's MCP
 tools, since it serves no MCP endpoint; `MCPGate` is that gate for the day

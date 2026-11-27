@@ -39,6 +39,7 @@ import (
 	"github.com/parable-work/superschematic/runtime/http/go/inbound"
 	"github.com/parable-work/superschematic/runtime/http/go/notify"
 	"github.com/parable-work/superschematic/runtime/http/go/providers"
+	"github.com/parable-work/superschematic/runtime/http/go/session"
 	"github.com/parable-work/superschematic/runtime/http/go/worker"
 	rules "github.com/parable-work/superschematic/runtime/rules/go"
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
@@ -1679,6 +1680,138 @@ func TestAgentRuns(t *testing.T) {
 		w.watch()
 		if done := w.run(id); done.Str("status") != "done" || done.Str("leaseHolder") != "" {
 			t.Fatalf("the run: %s holder %q", done.Str("status"), done.Str("leaseHolder"))
+		}
+	})
+
+	t.Run("a run's token on an app's own route acts as the run, its reach narrowed and every call held to its autonomy", func(t *testing.T) {
+		w := newWorld(t)
+		a, noteA, invoice := w.ids.a, w.ids.noteA, w.ids.invoice
+		// The app's own routes, behind the dispatcher's authenticator: a
+		// read of a task, a note and an invoice, and a write of a task's
+		// details, each through the repositories as the caller.
+		as := func(r *http.Request) context.Context {
+			caller := session.GetCaller(r.Context())
+			ctx := orm.WithPrincipal(r.Context(), caller)
+			return orm.WithBehaviorCaller(ctx, rules.Caller{Subject: caller.Subject, Permissions: session.GetRoles(r.Context())[0].Permissions})
+		}
+		mux := http.NewServeMux()
+		answer := func(rw http.ResponseWriter, v any, err error) {
+			if errors.Is(err, orm.ErrNotFound) || errors.Is(err, orm.ErrAccessRefused) {
+				http.Error(rw, "not found", http.StatusNotFound)
+				return
+			}
+			if err != nil {
+				http.Error(rw, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			rw.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(rw).Encode(v)
+		}
+		mux.HandleFunc("GET /app/tasks/{id}", func(rw http.ResponseWriter, r *http.Request) {
+			row, err := w.db.GetTaskRepository().GetOne(as(r), w.id(r.PathValue("id")), nil)
+			answer(rw, row, err)
+		})
+		mux.HandleFunc("GET /app/notes/{id}", func(rw http.ResponseWriter, r *http.Request) {
+			row, err := w.db.GetTaskNoteRepository().GetOne(as(r), w.id(r.PathValue("id")), nil)
+			answer(rw, row, err)
+		})
+		mux.HandleFunc("GET /app/invoices/{id}", func(rw http.ResponseWriter, r *http.Request) {
+			row, err := w.db.GetInvoiceRepository().GetOne(as(r), w.id(r.PathValue("id")), nil)
+			answer(rw, row, err)
+		})
+		mux.HandleFunc("PATCH /app/tasks/{id}", func(rw http.ResponseWriter, r *http.Request) {
+			var body struct{ Details string }
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			row, err := w.db.GetTaskRepository().UpdateOne(as(r), w.id(r.PathValue("id")), &orm.TaskUpdate{Details: &body.Details})
+			answer(rw, row, err)
+		})
+		guarded := httptest.NewServer(w.agents.Authenticator(w.db, nil, agents.AuthenticatorOptions{})(mux))
+		t.Cleanup(guarded.Close)
+		plain := httptest.NewServer(session.GrantAuthenticator(w.db, nil, nil)(mux))
+		t.Cleanup(plain.Close)
+		call := func(server *httptest.Server, run, method, path string, body any) int {
+			t.Helper()
+			var reader io.Reader
+			if body != nil {
+				reader = bytes.NewReader(must(json.Marshal(body)))
+			}
+			request := must(http.NewRequest(method, server.URL+path, reader))
+			request.Header.Set("Authorization", "Bearer "+w.sandbox.token(run))
+			request.Header.Set("Content-Type", "application/json")
+			response := must(http.DefaultClient.Do(request))
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+			return response.StatusCode
+		}
+		// A tenant's role reaches a task's notes and not its invoices; the
+		// responder writes on its own by its policy.
+		must(w.agents.SetPolicy(ctx, w.boss, agents.Policy{Agent: "responder", OperationClass: agents.InternalWrite, Mode: agents.Auto}))
+		must(w.db.GetRoleRepository().CreateOne(system, &types.Role{Name: "tenant", Permissions: []string{"tasks.read", "tasks.write", "parties.message"}, Reaches: []string{"TaskNote:task"}}))
+		start := func(phone, trust string) string {
+			party := must(w.db.GetCustomerRepository().CreateOne(system, &types.Customer{Name: "A " + trust + " tenant"})).Id.String()
+			verified := "now()"
+			if trust != "verified" {
+				verified = "NULL"
+			}
+			w.exec(`INSERT INTO channel_identity (kind, address, principal_kind, principal_table, principal, trust, verified_at) VALUES ('phone', $1, 'party', 'Customer', $2, $3, `+verified+`)`, phone, rowrefs.UUIDToDB(party), trust)
+			must2(w.host.IssueGrant(system, access.IssueGrantInput{Holder: party, HolderKind: "party", Role: "tenant", TargetType: "Task", TargetID: a}))
+			must(w.inbound.Receive(ctx, inbound.ReceivedMessage{InboundMessage: providers.InboundMessage{From: phone, Body: "Is my pump booked?"}, Channel: "sms", Slot: "SMS"}))
+			w.drain()
+			id := w.runOf("responder").Str("id")
+			w.exited(id)
+			return id
+		}
+		verified := start(phoneCust, "verified")
+		// As its grant's holder, a run's token is refused: the run reaches
+		// the app's routes as the run alone.
+		if got := call(plain, verified, http.MethodGet, "/app/tasks/"+a, nil); got != http.StatusUnauthorized {
+			t.Fatalf("a run's token on the grants' own authenticator answered %d", got)
+		}
+		// As the run: its task and the notes its grant's paths reach, and no
+		// invoice, which the agent's role reaches and the tenant's does not.
+		if got := call(guarded, verified, http.MethodGet, "/app/tasks/"+a, nil); got != http.StatusOK {
+			t.Fatalf("the verified run's read of its task answered %d", got)
+		}
+		if got := call(guarded, verified, http.MethodGet, "/app/notes/"+noteA, nil); got != http.StatusOK {
+			t.Fatalf("the verified run's read of its task's note answered %d", got)
+		}
+		if got := call(guarded, verified, http.MethodGet, "/app/invoices/"+invoice, nil); got != http.StatusNotFound {
+			t.Fatalf("the verified run's read of an invoice outside its narrowed reach answered %d", got)
+		}
+		if got := call(guarded, verified, http.MethodPatch, "/app/tasks/"+a, map[string]any{"details": "booked Tuesday"}); got != http.StatusOK || w.task(a).Details != "booked Tuesday" {
+			t.Fatalf("the verified run's write by its policy answered %d", got)
+		}
+		// Entered by hand: it reads, and its write asks, whatever the policy
+		// says, and is not made.
+		entered := start(phoneEnter, "entered")
+		if got := call(guarded, entered, http.MethodGet, "/app/tasks/"+a, nil); got != http.StatusOK {
+			t.Fatalf("the entered run's read answered %d", got)
+		}
+		if got := call(guarded, entered, http.MethodGet, "/app/invoices/"+invoice, nil); got != http.StatusNotFound {
+			t.Fatalf("the entered run's read of an invoice answered %d", got)
+		}
+		if got := call(guarded, entered, http.MethodPatch, "/app/tasks/"+a, map[string]any{"details": "cancel everything"}); got != http.StatusPreconditionRequired {
+			t.Fatalf("the entered run's write answered %d, want 428", got)
+		}
+		if details := w.task(a).Details; details != "booked Tuesday" {
+			t.Fatalf("the entered run's write was made: %q", details)
+		}
+		asked := w.approvalsOf(entered)
+		if len(asked) != 1 || asked[0].Str("operation") != "PATCH /app/tasks/"+a || !strings.Contains(asked[0].Str("summary"), "entered by hand") {
+			t.Fatalf("the entered run's approvals: %v", asked)
+		}
+		// Approved, the same write runs once.
+		check(t, w.agents.Approve(ctx, w.ann, asked[0].Str("id"), ""))
+		if got := call(guarded, entered, http.MethodPatch, "/app/tasks/"+a, map[string]any{"details": "cancel everything"}); got != http.StatusOK || w.task(a).Details != "cancel everything" {
+			t.Fatalf("the approved write answered %d", got)
+		}
+		if got := call(guarded, entered, http.MethodPatch, "/app/tasks/"+a, map[string]any{"details": "cancel everything"}); got != http.StatusPreconditionRequired {
+			t.Fatalf("the write again answered %d, want 428", got)
+		}
+		w.watch()
+		// An ended run's token reaches nothing.
+		if got := call(guarded, verified, http.MethodGet, "/app/tasks/"+a, nil); got != http.StatusUnauthorized {
+			t.Fatalf("the ended run's token answered %d", got)
 		}
 	})
 

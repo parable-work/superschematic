@@ -324,7 +324,7 @@ func (w *world) contact(name string) string {
 }
 
 func (w *world) identity(kind, address, party, trust string) {
-	w.exec(`INSERT INTO channel_identity (kind, address, principal_kind, principal_table, principal, trust, verified_at) VALUES ($1, $2, 'party', 'Contact', $3, $4, now())`, kind, address, rowrefs.UUIDToDB(party), trust)
+	w.exec(`INSERT INTO channel_identity (kind, address, principal_kind, principal_table, principal, trust, verified_at) VALUES ($1, $2, 'party', 'Contact', $3, $4, $5)`, kind, address, rowrefs.UUIDToDB(party), trust, time.Now())
 }
 
 func (w *world) issue(holder, job string) string {

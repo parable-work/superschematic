@@ -2535,8 +2535,7 @@ its Lease; and administration is permissions.
 Left:
 
 - Rust: the dispatcher, the run's authenticator, autonomy and the runner;
-  SQLite and D1. Go serves them on Postgres (D192), but an authenticator
-  of a run's token for a Go API's own routes.
+  SQLite and D1. Go serves them on Postgres (D192).
 - A real container platform's sandbox provider and one model API's
   provider (D159's left), and the live Workers run (`smoke.sh
   Cloudflare`), which is the maintainer's. The dispatcher's module reaches
@@ -3042,6 +3041,7 @@ port of the same decisions (D193) settled where the languages allow.
 | As in Rust: the dispatcher is built first (`agents.New`), the notifier takes its requests (`notify.Options.Agents`, a route's `{ agent }` recipient enqueued in the routing transaction) and its reply actions (`ReplyActions`), the inbound path takes its send approval (`Options.Approve`, the `SendApproval` interface, with `ApprovalFunc` for the app's), and the dispatcher is given both once they are (`SetNotifier`, `SetInbound`; `SetApproval` on a path built first). Redaction is written out (`RedactTokens`), and the app's own redactions are texts. A key a queue's message carries is base62, as the Go types write a UUID, and a statement reads a UUID column in base62. `moveRun` writes the outcome, cost and transcript before the status moves. | A notifier that holds the dispatcher built inside it. |
 | The agent routes are an `http.Handler` under the endpoint's path (`Routes`), and each call's work runs in a context that the caller leaving does not cancel (`context.WithoutCancel`): a run a call cancels (a pause, a budget's cap) has its instance stopped, which closes the instance's connection, and the work that cancelled it would stop half done. This is D193's task of its own, in Go's terms. | A goroutine per call, which the context does without. |
 | The run's MCP endpoint (`<endpoint>/mcp`) is the package's own JSON-RPC: initialize, ping, `tools/list` and `tools/call`, alone or in a batch, each answered as one JSON body, a refused call a tool error whose structured content is its problem, as TypeScript's `serveMcp` answers. The Go runtime serves no MCP endpoint of its own (D81, D116). `providers.RunAgentInstance` is the sandbox's side, and reads a body or a stream's event alike. | An MCP server package in the runtime, which a Go API's endpoint would need first. |
+| A run's token on an app's own routes is the dispatcher's to authenticate (`agents.Authenticator`, TypeScript's `agents.authenticator` and Rust's `Agents::authenticator`): the run's principal, its permissions narrowed to whom it acts for as its one role, its reach narrowed to a party's paths, and each call held to the run's autonomy (`Gate`, the method and the path as its operation unless the app names it), so an entered sender's write asks and an approved one runs once. Every other grant's token is `session.GrantAuthenticator`'s, which now refuses a run's token (401): as its grant's holder a run would act with the agent role's permissions, narrowed and gated by nothing. TypeScript and Rust hold a route to a run's autonomy only where the implementation asks the gate; Go's authenticator holds every route. | Reading a run's token as its grant's holder, which widens what a run may do past D183; leaving the gate to each route, which a route that forgets it would skip. |
 | A Go server stays refused an operation's `@autonomy`, since it holds an agent run's calls of the API's MCP tools and a Go server serves no MCP endpoint; `MCPGate` is the gate for the day it does. A Go server over a database with parties or agents and no `@notifier("dispatch")` queue is refused (the host is the notifier's), and `GoServerSQLiteErr` refuses the parties' and agents' tables, which the loader refuses on SQLite for every language. | Lifting `@autonomy` with nothing to read it, which would ignore it. |
 | The pure parts are read from `runtime/http/testdata/agents_parity.json`, which TypeScript's `agents-parity.test.ts` writes (D193's copy, taken unchanged): `DefaultAutonomy`, `TrustOf`, `EffectiveAutonomy`, `NarrowReaches`, `NarrowPermissions`, `ParamsHash` (over `CanonicalJSON`), `BestPolicy`, `BudgetCrossing`, `RedactTokens` and `inbound.EmailAuthenticated`. | |
 
@@ -3067,12 +3067,13 @@ fixture-parties-db and fixture-agent-runs-db); the HTTP runtime's
 `RunQueue`, `EmailAuthenticated`, `BucketOf`) and `agents` package (`New`,
 `RequestRun`, `RouteRequest`, `Handle`, `HandleRunRequest`, `WorkerQueue`,
 `PrincipalOf`, `Gate`, `Approve`, `Deny`, `ReplyActions`, `SendPolicy`,
-`ApproveSend`, `MCPGate`, `MCPTools`, `Routes`, `Pause`, `Resume`,
+`ApproveSend`, `MCPGate`, `Authenticator`, `MCPTools`, `Routes`, `Pause`, `Resume`,
 `SetPolicy`, `SetBudget`, `Define`, `Cancel`, `Transcript`, `Prune`, and the
 pure parts with their parity test); `providers.RunAgentInstance`; the
 notifier's `Options.Agents` and its check of a lapsed identity; the
 refusals of D180 lose `@party`, `@conversations`, `@runRequests` and
 `@agents` but with no notifier and on SQLite (`verify/go_features.go`);
+`session.GrantAuthenticator` refusing a run's token;
 TypeScript's four exports and the parity file, as D193 has them.
 `TestGoPartiesEndToEnd` runs D157's seven cases through the Go inbound
 path on Postgres over a stand-in SMS relay and mail relay and a bucket in
@@ -3085,7 +3086,7 @@ reply threads to its party; a party with no grant is on its timeline and
 a user's text is the notifier's reply; two parties on one address are told
 apart by the thread; and sending is held to the permission, the rate
 limit, the approval policy and STOP. `TestGoAgentRunsEndToEnd` runs D158's
-and D183's thirteen cases through the Go dispatcher on Postgres: a
+and D183's thirteen cases and one of D192's through the Go dispatcher on Postgres: a
 schedule's run reads only its target and the rows its role reaches; its
 MCP search keeps to its scope; each turn replays the earlier completions
 with their tool calls and provider state, which a reader gets redacted; an
@@ -3099,7 +3100,10 @@ the text says, and its message back waits on its approval, given by text;
 a party's run reaches only its grant's paths, and an entered sender's run
 reads and asks before every write; an unanswered question makes a
 follow-up row; Retries starts a failed instance again while the run holds
-its Lease; and administration is permissions. The guides' Go sections.
+its Lease; a run's token on an app's own route acts as the run, reaches no
+row past its narrowed paths, is refused by the grants' own authenticator,
+and its entered sender's write asks and, approved, runs once; and
+administration is permissions. The guides' Go sections.
 
 Left:
 
@@ -3110,10 +3114,5 @@ Left:
   does (D193's left).
 - `@autonomy` in a Go server, which needs the Go server's MCP endpoint
   first (D81, D116).
-- An authenticator of a run's token for a Go API's own routes
-  (TypeScript's `agents.authenticator`): an app that composes
-  `session.GrantAuthenticator` reads one as its grant's holder, with the
-  agent role's permissions, neither narrowed nor gated; `PrincipalOf` is
-  what one would call.
 - Go on SQLite: parties, the inbound path and the dispatcher (D157's and
   D158's, for every language).

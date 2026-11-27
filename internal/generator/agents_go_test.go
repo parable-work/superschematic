@@ -30,6 +30,7 @@ var agentsGoCases = []string{
 	"a party's run reaches only the paths its grant reaches, and an entered sender's run reads and asks before every write whatever the policy says",
 	"an agent asks in the row's thread and makes a follow-up row when nobody answers by the deadline",
 	"a sandbox that fails is started again by Retries, and the run holds its Lease while it runs",
+	"a run's token on an app's own route acts as the run, its reach narrowed and every call held to its autonomy",
 	"administering agents is permissions, and an agent cannot start a run",
 }
 
