@@ -27,10 +27,921 @@ are two filters of an allOf (D99).
 Each table's definition also describes its rows for the runtime's
 decodeRow, so a raw query of its columns reads back as its row type:
 query(text, values, { decode: <table>Table }) reads them so (D89).
+
+A table that composes behaviors (D103), status: Workflow<{ ... }> or
+implements Timers<Ticket, { ... }>, stays a table: each field a behavior
+owns is a column its row holds, which the inputs of a create, an update and
+an upsert leave out, since only the behavior's operations change it. Its
+repository holds each use's operations under the use's member, the field
+or the behavior, orm.order.status.transition(key, { to: 'paid' }), and
+creates, updates and deletes its rows through the behaviors' core, which
+the runtime's adapter runs in the ORM's transaction over the layout
+shopDbRules records. An upsert inserts a new row with the owned
+fields the core's create gives it, and updates a row the key holds by its
+own fields alone, through the core's update as updateOne's does, so each
+use's guards hold it, Constants' and StateRules' among them (D104): its
+statement locks the row and writes nothing of it, and the row is read back
+by the key's columns. A table whose behaviors keep sub-tables or arm
+deadlines has no upserts, and its repository runs a due deadline, as a
+behavior worker claimed it (runDeadline). A behavior's sub-table has no
+repository: only its operations write it. A raw SQL write of an owned
+column or a sub-table row is never refused. A table whose writes its behaviors
+hear (D103) keeps a change queue, which a trigger of the table writes a
+message of for each write of a row, whoever makes it: the repositories'
+own, updateMany's, deleteMany's and hardDeleteOne's among them, and raw
+SQL's; its repository runs one, as a behavior worker claimed it
+(runChange), so the row's deadlines reconcile, and its rules run, after the
+write commits.
+
+An operation of a table as a whole (D104), a declaration's scope schema,
+takes no key: orm.job.lease.expireHolder({ holder }) runs it through the
+core as a command without a row, which reads the table's rows and writes
+only the rows its calls on each write, each held to its version, and
+takes no preconditions.
 */
-import { ormOf } from '@superschematic/http-runtime/postgres';
-import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, SoftDeleteRepository, StringFilter, TableDefinition, UuidFilter } from '@superschematic/http-runtime/postgres';
+import { initSync } from '@superschematic/rules';
+import { ormOf, withRulesCore } from '@superschematic/http-runtime/postgres';
+import type { BehaviorChanges, BehaviorDeadlines, BoolFilter, DateTimeFilter, JsonFilter, NullFilter, NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencedByFilter, Related, Repository, RulesLayout, SoftDeleteRepository, StringFilter, TableDefinition, TableOperations, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
+
+/**
+ * A row of Checkout, the checkout table: A shopper's checkout. shop-cart keeps it in cart while the shopper fills
+ * it; shop-orders' startCheckout moves it to held, which holds each line's
+ * units and the pickup slot at the counter, all of them or none;
+ * payCheckout opens its payment with acmepay, and once acmepay's capture
+ * is recorded shop-orders moves it to placed, which Payments allows only
+ * once it is paid, which commits what it holds, and writes its Order row.
+ * A checkout still held fifteen minutes on expires, through the deadline
+ * shop-orders' behavior worker runs, and lets go of what it holds, unless
+ * a payment is in flight, which holds it until the two-hour backstop. A
+ * capture that arrives after it expired is refunded.
+ */
+export interface CheckoutRow {
+  id: T.IdentityUUID;
+  customerId: T.IdentityUUID;
+  lines: T.CheckoutLine[];
+  counterId: T.IdentityUUID | null;
+  pickupAt: T.TemporalDateTime | null;
+  address: T.CheckoutAddress | null;
+  holdsState: 'none' | 'pending' | 'held' | 'committed' | 'released' | 'returned' | null;
+  holdsTotal: T.GenericJSON | null;
+  paymentsDue: T.GenericInt64 | null;
+  paymentsAuthorized: T.GenericInt64 | null;
+  paymentsCaptured: T.GenericInt64 | null;
+  paymentsRefunded: T.GenericInt64 | null;
+  paymentsOutstanding: T.GenericInt64 | null;
+  paymentsOverpaid: T.GenericInt64 | null;
+  paymentsCurrency: string | null;
+  paymentsState: 'unpaid' | 'pending' | 'authorized' | 'paid' | 'partiallyRefunded' | 'refunded' | null;
+  status: 'cart' | 'held' | 'placed' | 'expired' | 'cancelled';
+  statusEnteredAt: T.TemporalDateTime | null;
+  numberSeq: T.GenericInt64 | null;
+  number: string | null;
+  _version: number;
+}
+
+/** What a create of a row of Checkout sets; a member left unset takes its column's default, or the schema's. */
+export interface CheckoutCreate {
+  id?: T.IdentityUUID | null;
+  customerId: T.IdentityUUID;
+  lines: T.CheckoutLine[];
+  counterId?: T.IdentityUUID | null;
+  pickupAt?: T.TemporalDateTime | null;
+  address?: T.CheckoutAddress | null;
+}
+
+/** What an update of a row of Checkout sets: each member set, null setting a column that may be null to NULL. */
+export interface CheckoutUpdate {
+  customerId?: T.IdentityUUID;
+  lines?: T.CheckoutLine[];
+  counterId?: T.IdentityUUID | null;
+  pickupAt?: T.TemporalDateTime | null;
+  address?: T.CheckoutAddress | null;
+}
+
+/** The rows of Checkout a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface CheckoutFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  customerId?: UuidFilter<T.IdentityUUID>;
+  counterId?: UuidFilter<T.IdentityUUID> & NullFilter;
+  pickupAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  holdsState?: StringFilter<'none' | 'pending' | 'held' | 'committed' | 'released' | 'returned'> & NullFilter;
+  holdsTotal?: JsonFilter<T.GenericJSON> & NullFilter;
+  paymentsDue?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsAuthorized?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsCaptured?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsRefunded?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsOutstanding?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsOverpaid?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsCurrency?: StringFilter<string> & NullFilter;
+  paymentsState?: StringFilter<'unpaid' | 'pending' | 'authorized' | 'paid' | 'partiallyRefunded' | 'refunded'> & NullFilter;
+  status?: StringFilter<'cart' | 'held' | 'placed' | 'expired' | 'cancelled'>;
+  statusEnteredAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  numberSeq?: NumberFilter<T.GenericInt64> & NullFilter;
+  number?: StringFilter<string> & NullFilter;
+  _version?: NumberFilter<number>;
+  /** The rows a Refund row's checkout points at, or none does. */
+  referencedByRefundCheckout?: ReferencedByFilter;
+  /** The rows whose customer is among the User rows the filter finds (D90). */
+  customer?: UserFilter;
+  /** The rows whose counter is among the CollectionPoint rows the filter finds; a row whose counter is null is not among them (D90). */
+  counter?: CollectionPointFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly CheckoutFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly CheckoutFilter[];
+}
+
+/** The members findOne and findMany order rows of Checkout by. */
+export type CheckoutOrderField = "id" | "lines" | "pickupAt" | "address" | "holdsState" | "holdsTotal" | "paymentsDue" | "paymentsAuthorized" | "paymentsCaptured" | "paymentsRefunded" | "paymentsOutstanding" | "paymentsOverpaid" | "paymentsCurrency" | "paymentsState" | "status" | "statusEnteredAt" | "numberSeq" | "number" | "_version";
+
+/** The members findPage orders rows of Checkout by (D60, amended); ties break by id. */
+export type CheckoutSortField = "id" | "pickupAt" | "holdsState" | "paymentsDue" | "paymentsAuthorized" | "paymentsCaptured" | "paymentsRefunded" | "paymentsOutstanding" | "paymentsOverpaid" | "paymentsCurrency" | "paymentsState" | "status" | "statusEnteredAt" | "numberSeq" | "number";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type CheckoutUniqueKey = readonly ["id"];
+
+/** The position of a row of Checkout in a findPage order: its id. */
+export interface CheckoutPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Checkout includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface CheckoutRelations {
+  readonly customer: Related<UserRow, UserRelations, 'one'>;
+  readonly counter: Related<CollectionPointRow, CollectionPointRelations, 'optional'>;
+  readonly refunds: Related<RefundRow, RefundRelations, 'many'>;
+}
+
+/** The behaviors of Checkout (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes, or on the table as a whole for one that takes none (D104). */
+export interface CheckoutUses {
+  /** The operations of Holds, which Checkout implements. */
+  readonly holds: UseOperations<{
+    /** Takes the holds again while the claim is in a takeOn state and an item is not held, after a supply refused it or what the items ask was changed: refused with unavailable as a move into the state is, and holds every item or none. */
+    retakeHolds: {
+      params: Record<string, never>;
+      result: {
+        items: Array<{
+          currency?: string;
+          endMs?: number;
+          hold: 'lines' | 'pickup';
+          id: string;
+          item: number;
+          quantity?: number;
+          schema: string;
+          startMs?: number;
+          state: 'pending' | 'held' | 'committed' | 'released' | 'returned';
+          unitPrice?: number;
+        }>;
+        state: 'none' | 'pending' | 'held' | 'committed' | 'released' | 'returned';
+        total: { amount: number; currency: string | null } | null;
+      };
+    };
+    /** Lists the claim's items, as Holds.items has them, with each supply's answer to checkHold for an item still pending, counting the claim's other pending items of the same supply. */
+    listHolds: {
+      params: Record<string, never>;
+      result: unknown;
+    };
+  }, T.IdentityUUID>;
+  /** The operations of Timers, which Checkout implements. */
+  readonly timers: UseOperations<{
+    /** Fires a deadline that is due and has not fired: marks it fired and moves the status by its then, recording the outcome; a veto or a missing permission the move meets leaves the status as it is and the deadline fired. A deadline whose until holds is cancelled instead. On a deadline not due, fired already or not started it changes nothing. Any principal who may write the instance may call it; the engine's runner calls it on every due deadline, every sweepMs. */
+    fireTimer: {
+      params: { deadline: 'backstop' | 'holdExpiry' };
+      result: {
+        fired: boolean;
+        outcome?: 'moved' | 'skipped' | 'vetoed' | 'forbidden';
+      };
+    };
+    /** Starts a deadline again from what it starts from now, the create, the status's entry into its state or its field's value, so it is due afterMs after it and not fired: a snooze or a fire is undone. Needs the config's permission; refused for a deadline with nothing to start from now, or whose until holds. */
+    resetTimer: {
+      params: { deadline: 'backstop' | 'holdExpiry' };
+      result: { dueAt: number };
+    };
+    /** Moves a started deadline's due time to dueAt, and a fired one fires again then. A later write keeps it, until what the deadline starts from changes. Needs the config's permission; refused for a deadline not started, cancelled, or whose until holds. */
+    snoozeTimer: {
+      params: { deadline: 'backstop' | 'holdExpiry'; dueAt: number };
+      result: { dueAt: number };
+    };
+  }, T.IdentityUUID>;
+  /** The operations of Payments, which Checkout implements. */
+  readonly payments: UseOperations<{
+    /** Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change. */
+    openPayment: {
+      params: { idempotencyKey: string; provider: string; returnUrl?: string };
+      result: {
+        amount: number;
+        attempt: string;
+        currency: string;
+        provider: string;
+        status: 'open' | 'requiresAction' | 'processing' | 'authorized' | 'captured' | 'failed' | 'cancelled';
+      };
+    };
+    /** Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing. */
+    recordPaymentEvent: {
+      params: {
+        amount: number;
+        at: number;
+        attempt?: string;
+        brand?: string;
+        currency: string;
+        eventId: string;
+        kind: 'requiresAction' | 'processing' | 'authorized' | 'captured' | 'failed' | 'cancelled' | 'refunded' | 'refundFailed';
+        last4?: string;
+        metadata?: { [key: string]: string };
+        provider: string;
+        providerRef?: string;
+        refund?: string;
+      };
+      result: unknown;
+    };
+    /** Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter. */
+    capturePayment: {
+      params: { amount?: number; attempt: string };
+      result: {
+        action: string;
+        amount: number;
+        attempt: string;
+        currency: string;
+        kind: 'create' | 'capture' | 'void' | 'refund';
+      };
+    };
+    /** Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter. */
+    voidPayment: {
+      params: { attempt: string };
+      result: {
+        action: string;
+        amount: number;
+        attempt: string;
+        currency: string;
+        kind: 'create' | 'capture' | 'void' | 'refund';
+      };
+    };
+    /** Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund. */
+    refundPayment: {
+      params: { amount: number; idempotencyKey: string; reason: string };
+      result: {
+        action: string;
+        amount: number;
+        currency: string;
+        refund: string;
+        status: 'requested' | 'sent' | 'succeeded' | 'failed';
+      };
+    };
+    /** Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund. */
+    refundFor: {
+      params: {
+        amount: number;
+        idempotencyKey: string;
+        refund: { id: string; schema: string };
+      };
+      result: { action: string; amount: number; currency: string; refund: string };
+    };
+    /** Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund. */
+    settleRefundFor: {
+      params: {
+        amount: number;
+        of: { id: string; schema: string };
+        refund: string;
+        status: 'succeeded' | 'failed';
+      };
+      result: {
+        state: 'unpaid' | 'pending' | 'authorized' | 'paid' | 'partiallyRefunded' | 'refunded';
+      };
+    };
+  }, T.IdentityUUID> & TableOperations<{
+    /** Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded. */
+    listPaymentActions: {
+      params: { cursor?: string; limit?: number; provider: string };
+      result: {
+        items: Array<{
+          action: string;
+          amount: number;
+          at: number;
+          attempt: string;
+          currency: string;
+          id: string;
+          kind: 'create' | 'capture' | 'void' | 'refund';
+          providerRef?: string;
+          refund?: string;
+          returnUrl?: string;
+        }>;
+        next: string | null;
+      };
+    };
+  }>;
+  /** The operations of status, a Workflow. */
+  readonly status: UseOperations<{
+    /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
+    transition: {
+      params: {
+        from?: 'cart' | 'held' | 'placed' | 'expired' | 'cancelled';
+        to: 'cart' | 'held' | 'placed' | 'expired' | 'cancelled';
+      };
+      result: {
+        from: 'cart' | 'held' | 'placed' | 'expired' | 'cancelled';
+        to: 'cart' | 'held' | 'placed' | 'expired' | 'cancelled';
+        unchanged?: boolean;
+      };
+    };
+  }, T.IdentityUUID>;
+  /** The operations of number, a Numbering. */
+  readonly number: UseOperations<{
+    /** Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order. */
+    assignNumber: {
+      params: Record<string, never>;
+      result: { label: string; seq: number };
+    };
+  }, T.IdentityUUID>;
+}
+
+/** The repository of Checkout, with no upserts: its behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten (D103). */
+export type CheckoutRepository = WithoutUpserts<Repository<
+  CheckoutRow,
+  CheckoutCreate,
+  CheckoutUpdate,
+  CheckoutFilter,
+  CheckoutOrderField,
+  CheckoutSortField,
+  CheckoutUniqueKey,
+  T.IdentityUUID,
+  CheckoutPageKey,
+  CheckoutRelations
+>> & CheckoutUses & BehaviorDeadlines<T.IdentityUUID> & BehaviorChanges<T.IdentityUUID>;
+
+/** The checkout table, as the runtime reads and writes it. */
+export const checkoutTable: TableDefinition = {
+  name: "Checkout",
+  table: "checkout",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "checkout.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "customerId", column: "customer_id", field: "customer", qualified: "checkout.customer_id", uuid: true, required: true, relation: "User", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "lines", column: "lines", field: "lines", qualified: "checkout.lines", json: true, required: true },
+    { name: "counterId", column: "counter_id", field: "counter", qualified: "checkout.counter_id", uuid: true, relation: "CollectionPoint", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "pickupAt", column: "pickup_at", field: "pickupAt", qualified: "checkout.pickup_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "address", column: "address", field: "address", qualified: "checkout.address", json: true },
+    { name: "holdsState", column: "holds_state", field: "holdsState", qualified: "checkout.holds_state", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "holdsTotal", column: "holds_total", field: "holdsTotal", qualified: "checkout.holds_total", json: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "paymentsDue", column: "payments_due", field: "paymentsDue", qualified: "checkout.payments_due", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsAuthorized", column: "payments_authorized", field: "paymentsAuthorized", qualified: "checkout.payments_authorized", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsCaptured", column: "payments_captured", field: "paymentsCaptured", qualified: "checkout.payments_captured", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsRefunded", column: "payments_refunded", field: "paymentsRefunded", qualified: "checkout.payments_refunded", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsOutstanding", column: "payments_outstanding", field: "paymentsOutstanding", qualified: "checkout.payments_outstanding", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsOverpaid", column: "payments_overpaid", field: "paymentsOverpaid", qualified: "checkout.payments_overpaid", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsCurrency", column: "payments_currency", field: "paymentsCurrency", qualified: "checkout.payments_currency", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "paymentsState", column: "payments_state", field: "paymentsState", qualified: "checkout.payments_state", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "checkout.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "checkout.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "numberSeq", column: "number_seq", field: "numberSeq", qualified: "checkout.number_seq", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "number", column: "number", field: "number", qualified: "checkout.number", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "checkout._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"customer_id\", \"lines\", \"counter_id\", \"pickup_at\", \"address\", \"holds_state\", \"holds_total\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\"",
+    qualifiedColumns: "\"checkout\".\"id\", \"checkout\".\"customer_id\", \"checkout\".\"lines\", \"checkout\".\"counter_id\", \"checkout\".\"pickup_at\", \"checkout\".\"address\", \"checkout\".\"holds_state\", \"checkout\".\"holds_total\", \"checkout\".\"payments_due\", \"checkout\".\"payments_authorized\", \"checkout\".\"payments_captured\", \"checkout\".\"payments_refunded\", \"checkout\".\"payments_outstanding\", \"checkout\".\"payments_overpaid\", \"checkout\".\"payments_currency\", \"checkout\".\"payments_state\", \"checkout\".\"status\", \"checkout\".\"status_entered_at\", \"checkout\".\"number_seq\", \"checkout\".\"number\", \"checkout\".\"_version\"",
+    selectColumn: "\"checkout\".\"%s\"",
+    getOne: "SELECT \"id\", \"customer_id\", \"lines\", \"counter_id\", \"pickup_at\", \"address\", \"holds_state\", \"holds_total\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\" FROM checkout WHERE id = $1",
+    getOneFields: "SELECT %s FROM checkout WHERE id = $1",
+    getMany: "SELECT \"id\", \"customer_id\", \"lines\", \"counter_id\", \"pickup_at\", \"address\", \"holds_state\", \"holds_total\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\" FROM checkout WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM checkout%s%s LIMIT 1",
+    findMany: "SELECT %s FROM checkout%s%s%s",
+    count: "SELECT COUNT(*) FROM checkout%s",
+    page: "SELECT %s FROM checkout%s%s LIMIT %d",
+    pageAfterKey: "checkout.id %s %s",
+    pageAfter: "(%s, checkout.id) %s ((SELECT %s FROM checkout AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM checkout AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", checkout.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM checkout WHERE checkout.id = $1)",
+    insert: "INSERT INTO checkout (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO checkout (%s) VALUES %s RETURNING %s",
+    update: "UPDATE checkout SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"customer_id\", \"lines\", \"counter_id\", \"pickup_at\", \"address\", \"holds_state\", \"holds_total\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\"",
+    updateMany: "UPDATE checkout SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO checkout (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"customer_id\", \"lines\", \"counter_id\", \"pickup_at\", \"address\", \"holds_state\", \"holds_total\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM checkout WHERE id = $1",
+    deleteMany: "DELETE FROM checkout%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = checkout.id", rows: "SELECT \"id\", \"customer_id\", \"lines\", \"counter_id\", \"pickup_at\", \"address\", \"holds_state\", \"holds_total\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\" FROM checkout WHERE (id) IN (%s)" },
+  },
+  referencedBy: [
+    { filter: "referencedByRefundCheckout", probe: "SELECT 1 FROM refund WHERE refund.checkout_id = checkout.id" },
+  ],
+  relations: [
+    { field: "customer", column: "customerId", target: "user", probe: "checkout.customer_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+    { field: "counter", column: "counterId", target: "collectionPoint", probe: "checkout.counter_id IN (SELECT collection_point.id FROM collection_point%s)" },
+  ],
+  many: [
+    { name: "refunds", target: "refund", column: "checkoutId" },
+  ],
+};
+
+/**
+ * A row of CollectionPoint, the collection_point table: A counter a shopper collects an order from, which opens fifteen-minute
+ * pickup slots in London's time, four shoppers at a time, from two hours
+ * ahead to sixty days ahead, with five minutes after each to clear it.
+ */
+export interface CollectionPointRow {
+  id: T.IdentityUUID;
+  name: string;
+  _version: number;
+}
+
+/** What a create of a row of CollectionPoint sets; a member left unset takes its column's default, or the schema's. */
+export interface CollectionPointCreate {
+  id?: T.IdentityUUID | null;
+  name: string;
+}
+
+/** What an update of a row of CollectionPoint sets: each member set, null setting a column that may be null to NULL. */
+export interface CollectionPointUpdate {
+  name?: string;
+}
+
+/** The rows of CollectionPoint a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface CollectionPointFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  name?: StringFilter<string>;
+  _version?: NumberFilter<number>;
+  /** The rows a Checkout row's counter points at, or none does. */
+  referencedByCheckoutCounter?: ReferencedByFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly CollectionPointFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly CollectionPointFilter[];
+}
+
+/** The members findOne and findMany order rows of CollectionPoint by. */
+export type CollectionPointOrderField = "id" | "name" | "_version";
+
+/** The members findPage orders rows of CollectionPoint by (D60, amended); ties break by id. */
+export type CollectionPointSortField = "id" | "name";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type CollectionPointUniqueKey = readonly ["id"];
+
+/** The position of a row of CollectionPoint in a findPage order: its id. */
+export interface CollectionPointPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of CollectionPoint includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface CollectionPointRelations {
+  readonly checkouts: Related<CheckoutRow, CheckoutRelations, 'many'>;
+}
+
+/** The behaviors of CollectionPoint (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes, or on the table as a whole for one that takes none (D104). */
+export interface CollectionPointUses {
+  /** The operations of Calendar, which CollectionPoint implements. */
+  readonly calendar: UseOperations<{
+    /** Sets the instance's own weekly hours, its time zone, or both; null for either goes back to the config's. Holds already made stay; the time zone changes only while the instance holds no time that has not ended. Needs the config's permission. */
+    setOpeningHours: {
+      params: {
+        hours?: {
+          fri?: unknown[][];
+          mon?: unknown[][];
+          sat?: unknown[][];
+          sun?: unknown[][];
+          thu?: unknown[][];
+          tue?: unknown[][];
+          wed?: unknown[][];
+        } | null;
+        timeZone?: string | null;
+      };
+      result: unknown;
+    };
+    /** Closes the instance from startMs to endMs, with a reason. Needs the config's permission; refused over time a claim holds unless force is set, which needs the permission's .override. Forcing keeps the holds: the claims are moved by their own Workflow, by a rule or by hand. */
+    addClosure: {
+      params: { endMs: number; force?: boolean; reason: string; startMs: number };
+      result: { closure: string; endMs: number; reason: string; startMs: number };
+    };
+    /** Removes a closure. Needs the config's permission. */
+    removeClosure: {
+      params: { closure: string };
+      result: { closure: string; endMs: number; reason: string; startMs: number };
+    };
+    /** Holds what an item of a claim's Holds asks, for that claim, once the claim's item is held. Refused when it does not fit, and for an item the claim does not hold. */
+    holdFor: {
+      params: {
+        hold: string;
+        holder: { id: string; schema: string };
+        interval: { endMs: number; startMs: number };
+        item: number;
+      };
+      result: {
+        changed: boolean;
+        currency?: string;
+        state: 'held' | 'committed' | 'released' | 'returned';
+        unitPrice?: number;
+      };
+    };
+    /** Makes what an item of a claim holds the claim's for good, once the claim's item is committed. */
+    commitFor: {
+      params: {
+        hold: string;
+        holder: { id: string; schema: string };
+        interval: { endMs: number; startMs: number };
+        item: number;
+      };
+      result: {
+        changed: boolean;
+        currency?: string;
+        state: 'held' | 'committed' | 'released' | 'returned';
+        unitPrice?: number;
+      };
+    };
+    /** Frees what an item of a claim holds, once the claim's item is released. */
+    releaseFor: {
+      params: {
+        hold: string;
+        holder: { id: string; schema: string };
+        interval: { endMs: number; startMs: number };
+        item: number;
+      };
+      result: {
+        changed: boolean;
+        currency?: string;
+        state: 'held' | 'committed' | 'released' | 'returned';
+        unitPrice?: number;
+      };
+    };
+    /** Answers whether holdFor would hold what an item asks now, and when not, why. */
+    checkHold: {
+      params: {
+        also?: Array<{ interval: { endMs: number; startMs: number } }>;
+        hold: string;
+        holder: { id: string; schema: string };
+        interval: { endMs: number; startMs: number };
+        item: number;
+      };
+      result: unknown;
+    };
+    /** Lists the holds the instance has over a window of at most 31 days, by start, one page at a time: each claim's item, its interval and its state, held or committed, and retired for a deleted claim's committed time. */
+    listBookings: {
+      params: { cursor?: string; endMs: number; limit?: number; startMs: number };
+      result: {
+        items: Array<{
+          endMs: number;
+          hold: string;
+          holder: { id: string; schema: string };
+          item: number;
+          retired?: boolean;
+          startMs: number;
+          state: 'held' | 'committed';
+        }>;
+        next: string | null;
+      };
+    };
+  }, T.IdentityUUID> & TableOperations<{
+    /** Finds free slots of a duration across the schema's instances over a window of at most 31 days, by holdFor's rules at the engine's clock: at most limit slots, soonest first, each with the instance and how many more holds it can take then. ids or where narrow the instances, as a list does. */
+    findAvailability: {
+      params: unknown;
+      result: {
+        slots: Array<{ endMs: number; id: string; remaining: number; startMs: number }>;
+        truncated: boolean;
+      };
+    };
+  }>;
+}
+
+/** The repository of CollectionPoint, with no upserts: its behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten (D103). */
+export type CollectionPointRepository = WithoutUpserts<Repository<
+  CollectionPointRow,
+  CollectionPointCreate,
+  CollectionPointUpdate,
+  CollectionPointFilter,
+  CollectionPointOrderField,
+  CollectionPointSortField,
+  CollectionPointUniqueKey,
+  T.IdentityUUID,
+  CollectionPointPageKey,
+  CollectionPointRelations
+>> & CollectionPointUses;
+
+/** The collection_point table, as the runtime reads and writes it. */
+export const collectionPointTable: TableDefinition = {
+  name: "CollectionPoint",
+  table: "collection_point",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "collection_point.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "collection_point.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "collection_point._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"name\", \"_version\"",
+    qualifiedColumns: "\"collection_point\".\"id\", \"collection_point\".\"name\", \"collection_point\".\"_version\"",
+    selectColumn: "\"collection_point\".\"%s\"",
+    getOne: "SELECT \"id\", \"name\", \"_version\" FROM collection_point WHERE id = $1",
+    getOneFields: "SELECT %s FROM collection_point WHERE id = $1",
+    getMany: "SELECT \"id\", \"name\", \"_version\" FROM collection_point WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM collection_point%s%s LIMIT 1",
+    findMany: "SELECT %s FROM collection_point%s%s%s",
+    count: "SELECT COUNT(*) FROM collection_point%s",
+    page: "SELECT %s FROM collection_point%s%s LIMIT %d",
+    pageAfterKey: "collection_point.id %s %s",
+    pageAfter: "(%s, collection_point.id) %s ((SELECT %s FROM collection_point AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM collection_point AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", collection_point.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM collection_point WHERE collection_point.id = $1)",
+    insert: "INSERT INTO collection_point (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO collection_point (%s) VALUES %s RETURNING %s",
+    update: "UPDATE collection_point SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"name\", \"_version\"",
+    updateMany: "UPDATE collection_point SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO collection_point (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"name\", \"_version\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM collection_point WHERE id = $1",
+    deleteMany: "DELETE FROM collection_point%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = collection_point.id", rows: "SELECT \"id\", \"name\", \"_version\" FROM collection_point WHERE (id) IN (%s)" },
+  },
+  referencedBy: [
+    { filter: "referencedByCheckoutCounter", probe: "SELECT 1 FROM checkout WHERE checkout.counter_id = collection_point.id" },
+  ],
+  many: [
+    { name: "checkouts", target: "checkout", column: "counterId" },
+  ],
+};
+
+/**
+ * A row of Inventory, the inventory table: The units the warehouse holds of a product: one row per product, whose
+ * key is the product's id. shop-stock's staff routes receive and count
+ * them, and a checkout holds them at the price they sell for, in pounds.
+ * Its available units at or below reorderAt make it low, which
+ * shop-stock's job OrderRestocks finds.
+ */
+export interface InventoryRow {
+  id: T.IdentityUUID;
+  sku: string;
+  priceCents: T.GenericInt64;
+  reorderAt: T.GenericInt64 | null;
+  stockOnHand: T.GenericInt64 | null;
+  stockHeld: T.GenericInt64 | null;
+  _version: number;
+}
+
+/** What a create of a row of Inventory sets; a member left unset takes its column's default, or the schema's. */
+export interface InventoryCreate {
+  id?: T.IdentityUUID | null;
+  sku: string;
+  priceCents: T.GenericInt64;
+  reorderAt?: T.GenericInt64 | null;
+}
+
+/** What an update of a row of Inventory sets: each member set, null setting a column that may be null to NULL. */
+export interface InventoryUpdate {
+  sku?: string;
+  priceCents?: T.GenericInt64;
+  reorderAt?: T.GenericInt64 | null;
+}
+
+/** The rows of Inventory a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface InventoryFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  sku?: StringFilter<string>;
+  priceCents?: NumberFilter<T.GenericInt64>;
+  reorderAt?: NumberFilter<T.GenericInt64> & NullFilter;
+  stockOnHand?: NumberFilter<T.GenericInt64> & NullFilter;
+  stockHeld?: NumberFilter<T.GenericInt64> & NullFilter;
+  _version?: NumberFilter<number>;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly InventoryFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly InventoryFilter[];
+}
+
+/** The members findOne and findMany order rows of Inventory by. */
+export type InventoryOrderField = "id" | "sku" | "priceCents" | "reorderAt" | "stockOnHand" | "stockHeld" | "_version";
+
+/** The members findPage orders rows of Inventory by (D60, amended); ties break by id. */
+export type InventorySortField = "id" | "sku" | "priceCents" | "reorderAt" | "stockOnHand" | "stockHeld";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type InventoryUniqueKey = readonly ["id"];
+
+/** The position of a row of Inventory in a findPage order: its id. */
+export interface InventoryPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Inventory includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface InventoryRelations {
+}
+
+/** The behaviors of Inventory (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
+export interface InventoryUses {
+  /** The operations of Stock, which Inventory implements. */
+  readonly stock: UseOperations<{
+    /** Adds units that arrived to what is on hand, with a reason and an optional reference, such as a delivery note's. Needs the config's permission. */
+    receiveStock: {
+      params: { quantity: number; reason: string; reference?: string };
+      result: {
+        available: number;
+        held: number;
+        movement: number | null;
+        onHand: number;
+      };
+    };
+    /** Adds a delta, positive or negative, to what is on hand, with a reason: damage, loss, a correction. Needs the config's permission. Refused when it leaves fewer on hand than claims hold, unless the config allows backorder. */
+    adjustStock: {
+      params: { delta: number; reason: string };
+      result: {
+        available: number;
+        held: number;
+        movement: number | null;
+        onHand: number;
+      };
+    };
+    /** Sets what is on hand to a count, with a reason, recording the difference as a movement; a count equal to what is on hand records nothing. Needs the config's permission, and its .override for a count below what claims hold. */
+    countStock: {
+      params: { onHand: number; reason: string };
+      result: {
+        available: number;
+        held: number;
+        movement: number | null;
+        onHand: number;
+      };
+    };
+    /** Holds what an item of a claim's Holds asks, for that claim, once the claim's item is held. Refused when it does not fit, and for an item the claim does not hold. */
+    holdFor: {
+      params: {
+        hold: string;
+        holder: { id: string; schema: string };
+        item: number;
+        quantity: number;
+      };
+      result: {
+        changed: boolean;
+        currency?: string;
+        state: 'held' | 'committed' | 'released' | 'returned';
+        unitPrice?: number;
+      };
+    };
+    /** Makes what an item of a claim holds the claim's for good, once the claim's item is committed. */
+    commitFor: {
+      params: {
+        hold: string;
+        holder: { id: string; schema: string };
+        item: number;
+        quantity: number;
+      };
+      result: {
+        changed: boolean;
+        currency?: string;
+        state: 'held' | 'committed' | 'released' | 'returned';
+        unitPrice?: number;
+      };
+    };
+    /** Frees what an item of a claim holds, once the claim's item is released. */
+    releaseFor: {
+      params: {
+        hold: string;
+        holder: { id: string; schema: string };
+        item: number;
+        quantity: number;
+      };
+      result: {
+        changed: boolean;
+        currency?: string;
+        state: 'held' | 'committed' | 'released' | 'returned';
+        unitPrice?: number;
+      };
+    };
+    /** Takes back units an item of a claim committed, once the claim's item is returned. */
+    returnFor: {
+      params: {
+        hold: string;
+        holder: { id: string; schema: string };
+        item: number;
+        quantity: number;
+      };
+      result: {
+        changed: boolean;
+        currency?: string;
+        state: 'held' | 'committed' | 'released' | 'returned';
+        unitPrice?: number;
+      };
+    };
+    /** Answers whether holdFor would hold what an item asks now, and when not, why. */
+    checkHold: {
+      params: {
+        also?: Array<{ quantity: number }>;
+        hold: string;
+        holder: { id: string; schema: string };
+        item: number;
+        quantity: number;
+      };
+      result: unknown;
+    };
+    /** Lists the instance's movements, newest first, one page at a time: each change of what is on hand, by kind, with its delta, reason, the claim and item it was for, who made it and when. */
+    listStockMovements: {
+      params: { cursor?: string; limit?: number };
+      result: {
+        items: Array<{
+          actor: string;
+          at: number;
+          delta: number;
+          hold?: string;
+          holder?: { id: string; schema: string };
+          item?: number;
+          kind: 'receive' | 'adjust' | 'count' | 'commit' | 'return';
+          onHand: number;
+          reason?: string;
+          reference?: string;
+          seq: number;
+        }>;
+        next: string | null;
+      };
+    };
+  }, T.IdentityUUID>;
+}
+
+/** The repository of Inventory, with no upserts: its behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten (D103). */
+export type InventoryRepository = WithoutUpserts<Repository<
+  InventoryRow,
+  InventoryCreate,
+  InventoryUpdate,
+  InventoryFilter,
+  InventoryOrderField,
+  InventorySortField,
+  InventoryUniqueKey,
+  T.IdentityUUID,
+  InventoryPageKey,
+  InventoryRelations
+>> & InventoryUses;
+
+/** The inventory table, as the runtime reads and writes it. */
+export const inventoryTable: TableDefinition = {
+  name: "Inventory",
+  table: "inventory",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "inventory.id", uuid: true, key: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "sku", column: "sku", field: "sku", qualified: "inventory.sku", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "priceCents", column: "price_cents", field: "priceCents", qualified: "inventory.price_cents", int64: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "reorderAt", column: "reorder_at", field: "reorderAt", qualified: "inventory.reorder_at", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "stockOnHand", column: "stock_on_hand", field: "stockOnHand", qualified: "inventory.stock_on_hand", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "stockHeld", column: "stock_held", field: "stockHeld", qualified: "inventory.stock_held", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "inventory._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"sku\", \"price_cents\", \"reorder_at\", \"stock_on_hand\", \"stock_held\", \"_version\"",
+    qualifiedColumns: "\"inventory\".\"id\", \"inventory\".\"sku\", \"inventory\".\"price_cents\", \"inventory\".\"reorder_at\", \"inventory\".\"stock_on_hand\", \"inventory\".\"stock_held\", \"inventory\".\"_version\"",
+    selectColumn: "\"inventory\".\"%s\"",
+    getOne: "SELECT \"id\", \"sku\", \"price_cents\", \"reorder_at\", \"stock_on_hand\", \"stock_held\", \"_version\" FROM inventory WHERE id = $1",
+    getOneFields: "SELECT %s FROM inventory WHERE id = $1",
+    getMany: "SELECT \"id\", \"sku\", \"price_cents\", \"reorder_at\", \"stock_on_hand\", \"stock_held\", \"_version\" FROM inventory WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM inventory%s%s LIMIT 1",
+    findMany: "SELECT %s FROM inventory%s%s%s",
+    count: "SELECT COUNT(*) FROM inventory%s",
+    page: "SELECT %s FROM inventory%s%s LIMIT %d",
+    pageAfterKey: "inventory.id %s %s",
+    pageAfter: "(%s, inventory.id) %s ((SELECT %s FROM inventory AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM inventory AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", inventory.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM inventory WHERE inventory.id = $1)",
+    insert: "INSERT INTO inventory (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO inventory (%s) VALUES %s RETURNING %s",
+    update: "UPDATE inventory SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"sku\", \"price_cents\", \"reorder_at\", \"stock_on_hand\", \"stock_held\", \"_version\"",
+    updateMany: "UPDATE inventory SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO inventory (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"sku\", \"price_cents\", \"reorder_at\", \"stock_on_hand\", \"stock_held\", \"_version\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM inventory WHERE id = $1",
+    deleteMany: "DELETE FROM inventory%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = inventory.id", rows: "SELECT \"id\", \"sku\", \"price_cents\", \"reorder_at\", \"stock_on_hand\", \"stock_held\", \"_version\" FROM inventory WHERE (id) IN (%s)" },
+  },
+};
 
 /**
  * A row of Order, the "order" table: A shopper's order. Staff look orders up by customer, newest first. An
@@ -484,6 +1395,344 @@ export const productTable: TableDefinition = {
     { name: "orderLines", target: "orderLine", column: "productId" },
     { name: "restockRequests", target: "restockRequest", column: "productId" },
     { name: "reviews", target: "review", column: "productId" },
+  ],
+};
+
+/**
+ * A row of Refund, the refund table: A refund of a placed checkout, which two staff who hold refunds.approve
+ * sign off before it is issued: entering approved asks the checkout's
+ * Payments for the refund, which shop-orders' job SettlePayments makes at
+ * acmepay and records on the checkout, which settles it here; the job then
+ * moves it to issued.
+ */
+export interface RefundRow {
+  id: T.IdentityUUID;
+  checkoutId: T.IdentityUUID;
+  amountCents: T.GenericInt64;
+  reason: string;
+  createdBy: T.IdentityUUID;
+  paymentsDue: T.GenericInt64 | null;
+  paymentsAuthorized: T.GenericInt64 | null;
+  paymentsCaptured: T.GenericInt64 | null;
+  paymentsRefunded: T.GenericInt64 | null;
+  paymentsOutstanding: T.GenericInt64 | null;
+  paymentsOverpaid: T.GenericInt64 | null;
+  paymentsCurrency: string | null;
+  paymentsState: 'unpaid' | 'pending' | 'authorized' | 'paid' | 'partiallyRefunded' | 'refunded' | null;
+  status: 'requested' | 'approved' | 'issued' | 'rejected' | 'failed';
+  statusEnteredAt: T.TemporalDateTime | null;
+  numberSeq: T.GenericInt64 | null;
+  number: string | null;
+  _version: number;
+}
+
+/** What a create of a row of Refund sets; a member left unset takes its column's default, or the schema's. */
+export interface RefundCreate {
+  id?: T.IdentityUUID | null;
+  checkoutId: T.IdentityUUID;
+  amountCents: T.GenericInt64;
+  reason: string;
+}
+
+/** What an update of a row of Refund sets: each member set, null setting a column that may be null to NULL. */
+export interface RefundUpdate {
+  checkoutId?: T.IdentityUUID;
+  amountCents?: T.GenericInt64;
+  reason?: string;
+}
+
+/** The rows of Refund a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface RefundFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  checkoutId?: UuidFilter<T.IdentityUUID>;
+  amountCents?: NumberFilter<T.GenericInt64>;
+  reason?: StringFilter<string>;
+  createdBy?: UuidFilter<T.IdentityUUID>;
+  paymentsDue?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsAuthorized?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsCaptured?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsRefunded?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsOutstanding?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsOverpaid?: NumberFilter<T.GenericInt64> & NullFilter;
+  paymentsCurrency?: StringFilter<string> & NullFilter;
+  paymentsState?: StringFilter<'unpaid' | 'pending' | 'authorized' | 'paid' | 'partiallyRefunded' | 'refunded'> & NullFilter;
+  status?: StringFilter<'requested' | 'approved' | 'issued' | 'rejected' | 'failed'>;
+  statusEnteredAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  numberSeq?: NumberFilter<T.GenericInt64> & NullFilter;
+  number?: StringFilter<string> & NullFilter;
+  _version?: NumberFilter<number>;
+  /** The rows whose checkout is among the Checkout rows the filter finds (D90). */
+  checkout?: CheckoutFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly RefundFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly RefundFilter[];
+}
+
+/** The members findOne and findMany order rows of Refund by. */
+export type RefundOrderField = "id" | "amountCents" | "reason" | "createdBy" | "paymentsDue" | "paymentsAuthorized" | "paymentsCaptured" | "paymentsRefunded" | "paymentsOutstanding" | "paymentsOverpaid" | "paymentsCurrency" | "paymentsState" | "status" | "statusEnteredAt" | "numberSeq" | "number" | "_version";
+
+/** The members findPage orders rows of Refund by (D60, amended); ties break by id. */
+export type RefundSortField = "id" | "amountCents" | "reason" | "paymentsDue" | "paymentsAuthorized" | "paymentsCaptured" | "paymentsRefunded" | "paymentsOutstanding" | "paymentsOverpaid" | "paymentsCurrency" | "paymentsState" | "status" | "statusEnteredAt" | "numberSeq" | "number";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type RefundUniqueKey = readonly ["id"];
+
+/** The position of a row of Refund in a findPage order: its id. */
+export interface RefundPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Refund includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface RefundRelations {
+  readonly checkout: Related<CheckoutRow, CheckoutRelations, 'one'>;
+}
+
+/** The behaviors of Refund (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes, or on the table as a whole for one that takes none (D104). */
+export interface RefundUses {
+  /** The operations of Approvals, which Refund implements. */
+  readonly approvals: UseOperations<{
+    /** Signs off on the instance for a gated state, as the caller. Needs the gate's permission; refused for the instance's creator unless the gate allows it, while the instance is in the state, and for a caller whose sign-off for the state is not yet consumed. */
+    signOff: {
+      params: { note?: string; state: 'approved'; version?: number };
+      result: {
+        at: number;
+        count: number;
+        note?: string;
+        signedBy: string[];
+        state: 'approved';
+        subject: string;
+      };
+    };
+    /** Withdraws the caller's sign-off for a gated state, one not yet consumed. */
+    withdrawSignOff: {
+      params: { state: 'approved' };
+      result: { at: number; note?: string; state: 'approved'; subject: string };
+    };
+    /** Lists the instance's sign-offs, oldest first, one page at a time, the consumed ones included; with state, only those for it. */
+    listSignOffs: {
+      params: { cursor?: string; limit?: number; state?: string };
+      result: {
+        items: Array<{
+          at: number;
+          consumedAt?: number;
+          note?: string;
+          state: string;
+          subject: string;
+        }>;
+        next: string | null;
+      };
+    };
+  }, T.IdentityUUID>;
+  /** The operations of Payments, which Refund implements. */
+  readonly payments: UseOperations<{
+    /** Opens a payment attempt for what is outstanding at a provider, and records the action that creates it there, for the provider's adapter; returns the attempt and its amount. The same idempotencyKey returns the same attempt. While an attempt is open, the amount due does not change. */
+    openPayment: {
+      params: { idempotencyKey: string; provider: string; returnUrl?: string };
+      result: {
+        amount: number;
+        attempt: string;
+        currency: string;
+        provider: string;
+        status: 'open' | 'requiresAction' | 'processing' | 'authorized' | 'captured' | 'failed' | 'cancelled';
+      };
+    };
+    /** Records what a provider did, as its adapter reports it: an attempt's progress, authorization, capture, failure or cancellation, or a refund's outcome. Needs the config's record permission. Each (provider, eventId) applies once, and a repeat changes and writes nothing. An attempt's status only moves forward, so an event that arrives late is recorded and changes nothing. */
+    recordPaymentEvent: {
+      params: {
+        amount: number;
+        at: number;
+        attempt?: string;
+        brand?: string;
+        currency: string;
+        eventId: string;
+        kind: 'requiresAction' | 'processing' | 'authorized' | 'captured' | 'failed' | 'cancelled' | 'refunded' | 'refundFailed';
+        last4?: string;
+        metadata?: { [key: string]: string };
+        provider: string;
+        providerRef?: string;
+        refund?: string;
+      };
+      result: unknown;
+    };
+    /** Records the action that captures an authorized attempt, all of it or an amount, for the provider's adapter. */
+    capturePayment: {
+      params: { amount?: number; attempt: string };
+      result: {
+        action: string;
+        amount: number;
+        attempt: string;
+        currency: string;
+        kind: 'create' | 'capture' | 'void' | 'refund';
+      };
+    };
+    /** Records the action that cancels an open attempt or voids an authorized one, for the provider's adapter. */
+    voidPayment: {
+      params: { attempt: string };
+      result: {
+        action: string;
+        amount: number;
+        attempt: string;
+        currency: string;
+        kind: 'create' | 'capture' | 'void' | 'refund';
+      };
+    };
+    /** Records a refund of an amount of what is captured and the action that asks the provider for it. Needs the config's refunds permission. Refused above what is captured, less what is refunded and what refunds already ask. The same idempotencyKey returns the same refund. */
+    refundPayment: {
+      params: { amount: number; idempotencyKey: string; reason: string };
+      result: {
+        action: string;
+        amount: number;
+        currency: string;
+        refund: string;
+        status: 'requested' | 'sent' | 'succeeded' | 'failed';
+      };
+    };
+    /** Records a refund that a refund instance asks of this one: its Payments' refundOf link must point here, it must be in an issueOn state, the amount must be its own and refundable, and it has no other refund asked or paid. The refund instance's Payments invokes it as the instance enters an issueOn state, under the idempotencyKey it derives from itself and its failed refunds; another key is key_reused, and the same key returns the same refund. */
+    refundFor: {
+      params: {
+        amount: number;
+        idempotencyKey: string;
+        refund: { id: string; schema: string };
+      };
+      result: { action: string; amount: number; currency: string; refund: string };
+    };
+    /** Records on a refund instance the outcome of the refund it asked of the instance it refunds: that instance's Payments invokes it when the provider's refund event is reported there. Needs the config's record permission, and refuses a status or an amount that is not what that instance recorded of the refund. */
+    settleRefundFor: {
+      params: {
+        amount: number;
+        of: { id: string; schema: string };
+        refund: string;
+        status: 'succeeded' | 'failed';
+      };
+      result: {
+        state: 'unpaid' | 'pending' | 'authorized' | 'paid' | 'partiallyRefunded' | 'refunded';
+      };
+    };
+  }, T.IdentityUUID> & TableOperations<{
+    /** Lists the actions waiting for a provider across the schema's instances, oldest first, one page at a time: what its adapter is to do. An action stops waiting when an event for it is recorded. */
+    listPaymentActions: {
+      params: { cursor?: string; limit?: number; provider: string };
+      result: {
+        items: Array<{
+          action: string;
+          amount: number;
+          at: number;
+          attempt: string;
+          currency: string;
+          id: string;
+          kind: 'create' | 'capture' | 'void' | 'refund';
+          providerRef?: string;
+          refund?: string;
+          returnUrl?: string;
+        }>;
+        next: string | null;
+      };
+    };
+  }>;
+  /** The operations of status, a Workflow. */
+  readonly status: UseOperations<{
+    /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
+    transition: {
+      params: {
+        from?: 'requested' | 'approved' | 'issued' | 'rejected' | 'failed';
+        to: 'requested' | 'approved' | 'issued' | 'rejected' | 'failed';
+      };
+      result: {
+        from: 'requested' | 'approved' | 'issued' | 'rejected' | 'failed';
+        to: 'requested' | 'approved' | 'issued' | 'rejected' | 'failed';
+        unchanged?: boolean;
+      };
+    };
+  }, T.IdentityUUID>;
+  /** The operations of number, a Numbering. */
+  readonly number: UseOperations<{
+    /** Numbers an instance created before its schema composed Numbering, in the count of the year it was created in, as its create would have. On an instance numbered already it changes nothing and returns its number. A deployment backfills by invoking it in creation order. */
+    assignNumber: {
+      params: Record<string, never>;
+      result: { label: string; seq: number };
+    };
+  }, T.IdentityUUID>;
+}
+
+/** The repository of Refund, with no upserts: its behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten (D103). */
+export type RefundRepository = WithoutUpserts<Repository<
+  RefundRow,
+  RefundCreate,
+  RefundUpdate,
+  RefundFilter,
+  RefundOrderField,
+  RefundSortField,
+  RefundUniqueKey,
+  T.IdentityUUID,
+  RefundPageKey,
+  RefundRelations
+>> & RefundUses;
+
+/** The refund table, as the runtime reads and writes it. */
+export const refundTable: TableDefinition = {
+  name: "Refund",
+  table: "refund",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "refund.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "checkoutId", column: "checkout_id", field: "checkout", qualified: "refund.checkout_id", uuid: true, required: true, relation: "Checkout", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "amountCents", column: "amount_cents", field: "amountCents", qualified: "refund.amount_cents", int64: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "reason", column: "reason", field: "reason", qualified: "refund.reason", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "createdBy", column: "created_by", field: "createdBy", qualified: "refund.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "paymentsDue", column: "payments_due", field: "paymentsDue", qualified: "refund.payments_due", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsAuthorized", column: "payments_authorized", field: "paymentsAuthorized", qualified: "refund.payments_authorized", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsCaptured", column: "payments_captured", field: "paymentsCaptured", qualified: "refund.payments_captured", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsRefunded", column: "payments_refunded", field: "paymentsRefunded", qualified: "refund.payments_refunded", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsOutstanding", column: "payments_outstanding", field: "paymentsOutstanding", qualified: "refund.payments_outstanding", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsOverpaid", column: "payments_overpaid", field: "paymentsOverpaid", qualified: "refund.payments_overpaid", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "paymentsCurrency", column: "payments_currency", field: "paymentsCurrency", qualified: "refund.payments_currency", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "paymentsState", column: "payments_state", field: "paymentsState", qualified: "refund.payments_state", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "status", column: "status", field: "status", qualified: "refund.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "refund.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "numberSeq", column: "number_seq", field: "numberSeq", qualified: "refund.number_seq", int64: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "number", column: "number", field: "number", qualified: "refund.number", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "refund._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"checkout_id\", \"amount_cents\", \"reason\", \"created_by\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\"",
+    qualifiedColumns: "\"refund\".\"id\", \"refund\".\"checkout_id\", \"refund\".\"amount_cents\", \"refund\".\"reason\", \"refund\".\"created_by\", \"refund\".\"payments_due\", \"refund\".\"payments_authorized\", \"refund\".\"payments_captured\", \"refund\".\"payments_refunded\", \"refund\".\"payments_outstanding\", \"refund\".\"payments_overpaid\", \"refund\".\"payments_currency\", \"refund\".\"payments_state\", \"refund\".\"status\", \"refund\".\"status_entered_at\", \"refund\".\"number_seq\", \"refund\".\"number\", \"refund\".\"_version\"",
+    selectColumn: "\"refund\".\"%s\"",
+    getOne: "SELECT \"id\", \"checkout_id\", \"amount_cents\", \"reason\", \"created_by\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\" FROM refund WHERE id = $1",
+    getOneFields: "SELECT %s FROM refund WHERE id = $1",
+    getMany: "SELECT \"id\", \"checkout_id\", \"amount_cents\", \"reason\", \"created_by\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\" FROM refund WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM refund%s%s LIMIT 1",
+    findMany: "SELECT %s FROM refund%s%s%s",
+    count: "SELECT COUNT(*) FROM refund%s",
+    page: "SELECT %s FROM refund%s%s LIMIT %d",
+    pageAfterKey: "refund.id %s %s",
+    pageAfter: "(%s, refund.id) %s ((SELECT %s FROM refund AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM refund AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", refund.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM refund WHERE refund.id = $1)",
+    insert: "INSERT INTO refund (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO refund (%s) VALUES %s RETURNING %s",
+    update: "UPDATE refund SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"checkout_id\", \"amount_cents\", \"reason\", \"created_by\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\"",
+    updateMany: "UPDATE refund SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO refund (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"checkout_id\", \"amount_cents\", \"reason\", \"created_by\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM refund WHERE id = $1",
+    deleteMany: "DELETE FROM refund%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = refund.id", rows: "SELECT \"id\", \"checkout_id\", \"amount_cents\", \"reason\", \"created_by\", \"payments_due\", \"payments_authorized\", \"payments_captured\", \"payments_refunded\", \"payments_outstanding\", \"payments_overpaid\", \"payments_currency\", \"payments_state\", \"status\", \"status_entered_at\", \"number_seq\", \"number\", \"_version\" FROM refund WHERE (id) IN (%s)" },
+  },
+  relations: [
+    { field: "checkout", column: "checkoutId", target: "checkout", probe: "refund.checkout_id IN (SELECT checkout.id FROM checkout%s)" },
   ],
 };
 
@@ -1064,6 +2313,275 @@ export const sessionTable: TableDefinition = {
 };
 
 /**
+ * A row of Ticket, the ticket table: A shopper's support ticket, which a model triages and a person confirms
+ * (D73, D74, D146): shop-cart's deriver TriageTickets fills its category,
+ * priority and summary from its subject and body while it is new or in
+ * triage. A category or priority the model is less than 0.8 sure of waits
+ * in review, which holds the ticket from assigned until support staff
+ * (support.review) accept or correct it and move it on. A ticket the model
+ * is sure of is assigned with no person: the Reactions rules hear its
+ * category and its priority settle and move it, once both are there, the
+ * state's required fields, and out of review. The summary is derived in
+ * every state, so it follows the body. shop-cart's behavior worker
+ * TicketReactions runs the rules.
+ */
+export interface TicketRow {
+  id: T.IdentityUUID;
+  customerId: T.IdentityUUID;
+  subject: string;
+  body: string | null;
+  orderId: string | null;
+  category: T.TicketCategory | null;
+  priority: T.TicketPriority | null;
+  summary: string | null;
+  provenanceInReview: boolean | null;
+  status: 'new' | 'triage' | 'assigned' | 'resolved';
+  statusEnteredAt: T.TemporalDateTime | null;
+  _version: number;
+}
+
+/** What a create of a row of Ticket sets; a member left unset takes its column's default, or the schema's. */
+export interface TicketCreate {
+  id?: T.IdentityUUID | null;
+  customerId: T.IdentityUUID;
+  subject: string;
+  body?: string | null;
+  orderId?: string | null;
+  category?: T.TicketCategory | null;
+  priority?: T.TicketPriority | null;
+  summary?: string | null;
+}
+
+/** What an update of a row of Ticket sets: each member set, null setting a column that may be null to NULL. */
+export interface TicketUpdate {
+  customerId?: T.IdentityUUID;
+  subject?: string;
+  body?: string | null;
+  orderId?: string | null;
+  category?: T.TicketCategory | null;
+  priority?: T.TicketPriority | null;
+  summary?: string | null;
+}
+
+/** The rows of Ticket a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface TicketFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  customerId?: UuidFilter<T.IdentityUUID>;
+  subject?: StringFilter<string>;
+  body?: StringFilter<string> & NullFilter;
+  orderId?: StringFilter<string> & NullFilter;
+  category?: StringFilter<T.TicketCategory> & NullFilter;
+  priority?: StringFilter<T.TicketPriority> & NullFilter;
+  summary?: StringFilter<string> & NullFilter;
+  provenanceInReview?: BoolFilter & NullFilter;
+  status?: StringFilter<'new' | 'triage' | 'assigned' | 'resolved'>;
+  statusEnteredAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  _version?: NumberFilter<number>;
+  /** The rows whose customer is among the User rows the filter finds (D90). */
+  customer?: UserFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly TicketFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly TicketFilter[];
+}
+
+/** The members findOne and findMany order rows of Ticket by. */
+export type TicketOrderField = "id" | "subject" | "body" | "orderId" | "category" | "priority" | "summary" | "provenanceInReview" | "status" | "statusEnteredAt" | "_version";
+
+/** The members findPage orders rows of Ticket by (D60, amended); ties break by id. */
+export type TicketSortField = "id" | "subject" | "body" | "orderId" | "summary" | "status" | "statusEnteredAt";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type TicketUniqueKey = readonly ["id"];
+
+/** The position of a row of Ticket in a findPage order: its id. */
+export interface TicketPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of Ticket includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface TicketRelations {
+  readonly customer: Related<UserRow, UserRelations, 'one'>;
+}
+
+/** The behaviors of Ticket (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes, or on the table as a whole for one that takes none (D104). */
+export interface TicketUses {
+  /** The operations of Derived, which Ticket implements. */
+  readonly derived: UseOperations<{
+    /** Writes derived values on the instance, each with the hash it was computed under: through update(), so the type's validation and every guard judge them, attributed to Derived with each value's confidence. Refused for a field the config does not derive, one a write overrode, one outside its states and one whose hash moved. Needs the config's permission; settleDerivations calls it. */
+    applyDerived: {
+      params: unknown;
+      result: { settled: Array<'category' | 'priority' | 'summary'> };
+    };
+    /** Makes derived fields stale again, every one when fields is absent: clears an override, the failed attempts, and the last value's hash, so the deriver computes them anew. The values stay until new ones settle. */
+    rederive: {
+      params: { fields?: Array<'category' | 'priority' | 'summary'> };
+      result: { stale: Array<'category' | 'priority' | 'summary'> };
+    };
+  }, T.IdentityUUID> & TableOperations<{
+    /** Lists the derived fields a deriver should compute, oldest first: each one's instance id, field, inputs by field name, instruction, model label, the field's JSON Schema as output, the hash to present and the attempt number. Leaves out a field outside its states, one overridden, one whose inputs are all absent and one out of attempts. Needs the config's permission. */
+    staleDerivations: {
+      params: {
+        cursor?: string;
+        field?: 'category' | 'priority' | 'summary';
+        limit?: number;
+      };
+      result: unknown;
+    };
+    /** Settles what a deriver computed from staleDerivations: each item a value, or a failure, with the hash it pulled. Values are written instance by instance through applyDerived, each instance in one event; an item whose hash moved, whose instance is gone, whose field was overridden or left its states, whose value the type refuses, or that another behavior vetoes is skipped, and the others still settle. A failure, an invalid value or a veto counts an attempt and appends no event. An item given twice, or with both a value and a failure, refuses the whole call. Needs the config's permission. */
+    settleDerivations: {
+      params: {
+        items: Array<{
+          confidence?: number;
+          failure?: { class?: string; message: string };
+          field: string;
+          id: string;
+          sourceHash: string;
+          usage?: {
+            costMicros?: number;
+            inputTokens?: number;
+            modelId?: string;
+            outputTokens?: number;
+          };
+          value?: unknown;
+        }>;
+      };
+      result: {
+        failed: number;
+        settled: number;
+        skipped: Array<{
+          behavior?: string;
+          code?: string;
+          field: string;
+          id: string;
+          issues?: unknown[];
+          reason: string;
+        }>;
+      };
+    };
+    /** Lists the derived fields out of attempts, oldest first, with each one's last failure. Needs the config's permission. */
+    failedDerivations: {
+      params: { cursor?: string; limit?: number };
+      result: unknown;
+    };
+  }>;
+  /** The operations of Provenance, which Ticket implements. */
+  readonly provenance: UseOperations<{
+    /** Accepts proposed fields as they are, as the caller. Needs the review's permission. */
+    accept: {
+      params: {
+        fields: Array<'body' | 'category' | 'customer' | 'id' | 'orderId' | 'priority' | 'provenanceInReview' | 'status' | 'statusEnteredAt' | 'subject' | 'summary'>;
+      };
+      result: {
+        accepted: Array<'body' | 'category' | 'customer' | 'id' | 'orderId' | 'priority' | 'provenanceInReview' | 'status' | 'statusEnteredAt' | 'subject' | 'summary'>;
+        inReview: boolean;
+      };
+    };
+    /** Rejects proposed fields: clears each, or sets it to the patch's value, through update(), as the caller's own write, so Derived does not propose it again. Needs the review's permission. */
+    reject: {
+      params: {
+        fields: Array<'body' | 'category' | 'customer' | 'id' | 'orderId' | 'priority' | 'provenanceInReview' | 'status' | 'statusEnteredAt' | 'subject' | 'summary'>;
+        patch?: unknown;
+      };
+      result: {
+        inReview: boolean;
+        rejected: Array<'body' | 'category' | 'customer' | 'id' | 'orderId' | 'priority' | 'provenanceInReview' | 'status' | 'statusEnteredAt' | 'subject' | 'summary'>;
+      };
+    };
+  }, T.IdentityUUID>;
+  /** The operations of status, a Workflow. */
+  readonly status: UseOperations<{
+    /** Moves the instance to another state along a transition the config lists. A transition that names a permission needs a caller who holds it. */
+    transition: {
+      params: {
+        from?: 'new' | 'triage' | 'assigned' | 'resolved';
+        to: 'new' | 'triage' | 'assigned' | 'resolved';
+      };
+      result: {
+        from: 'new' | 'triage' | 'assigned' | 'resolved';
+        to: 'new' | 'triage' | 'assigned' | 'resolved';
+        unchanged?: boolean;
+      };
+    };
+  }, T.IdentityUUID>;
+}
+
+/** The repository of Ticket, with no upserts: its behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten (D103). */
+export type TicketRepository = WithoutUpserts<Repository<
+  TicketRow,
+  TicketCreate,
+  TicketUpdate,
+  TicketFilter,
+  TicketOrderField,
+  TicketSortField,
+  TicketUniqueKey,
+  T.IdentityUUID,
+  TicketPageKey,
+  TicketRelations
+>> & TicketUses & BehaviorChanges<T.IdentityUUID>;
+
+/** The ticket table, as the runtime reads and writes it. */
+export const ticketTable: TableDefinition = {
+  name: "Ticket",
+  table: "ticket",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "ticket.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "customerId", column: "customer_id", field: "customer", qualified: "ticket.customer_id", uuid: true, required: true, relation: "User", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "subject", column: "subject", field: "subject", qualified: "ticket.subject", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "body", column: "body", field: "body", qualified: "ticket.body", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "orderId", column: "order_id", field: "orderId", qualified: "ticket.order_id", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "category", column: "category", field: "category", qualified: "ticket.category", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"] },
+    { name: "priority", column: "priority", field: "priority", qualified: "ticket.priority", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"] },
+    { name: "summary", column: "summary", field: "summary", qualified: "ticket.summary", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "provenanceInReview", column: "provenance_in_review", field: "provenanceInReview", qualified: "ticket.provenance_in_review", boolean: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "status", column: "status", field: "status", qualified: "ticket.status", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "statusEnteredAt", column: "status_entered_at", field: "statusEnteredAt", qualified: "ticket.status_entered_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "_version", column: "_version", field: "_version", qualified: "ticket._version", int64: true, auto: true, required: true, internal: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"] },
+  ],
+  statements: {
+    columns: "\"id\", \"customer_id\", \"subject\", \"body\", \"order_id\", \"category\", \"priority\", \"summary\", \"provenance_in_review\", \"status\", \"status_entered_at\", \"_version\"",
+    qualifiedColumns: "\"ticket\".\"id\", \"ticket\".\"customer_id\", \"ticket\".\"subject\", \"ticket\".\"body\", \"ticket\".\"order_id\", \"ticket\".\"category\", \"ticket\".\"priority\", \"ticket\".\"summary\", \"ticket\".\"provenance_in_review\", \"ticket\".\"status\", \"ticket\".\"status_entered_at\", \"ticket\".\"_version\"",
+    selectColumn: "\"ticket\".\"%s\"",
+    getOne: "SELECT \"id\", \"customer_id\", \"subject\", \"body\", \"order_id\", \"category\", \"priority\", \"summary\", \"provenance_in_review\", \"status\", \"status_entered_at\", \"_version\" FROM ticket WHERE id = $1",
+    getOneFields: "SELECT %s FROM ticket WHERE id = $1",
+    getMany: "SELECT \"id\", \"customer_id\", \"subject\", \"body\", \"order_id\", \"category\", \"priority\", \"summary\", \"provenance_in_review\", \"status\", \"status_entered_at\", \"_version\" FROM ticket WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM ticket%s%s LIMIT 1",
+    findMany: "SELECT %s FROM ticket%s%s%s",
+    count: "SELECT COUNT(*) FROM ticket%s",
+    page: "SELECT %s FROM ticket%s%s LIMIT %d",
+    pageAfterKey: "ticket.id %s %s",
+    pageAfter: "(%s, ticket.id) %s ((SELECT %s FROM ticket AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM ticket AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", ticket.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM ticket WHERE ticket.id = $1)",
+    insert: "INSERT INTO ticket (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO ticket (%s) VALUES %s RETURNING %s",
+    update: "UPDATE ticket SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"customer_id\", \"subject\", \"body\", \"order_id\", \"category\", \"priority\", \"summary\", \"provenance_in_review\", \"status\", \"status_entered_at\", \"_version\"",
+    updateMany: "UPDATE ticket SET %s%s",
+    updatedAt: "updated_at = $%d",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO ticket (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"customer_id\", \"subject\", \"body\", \"order_id\", \"category\", \"priority\", \"summary\", \"provenance_in_review\", \"status\", \"status_entered_at\", \"_version\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM ticket WHERE id = $1",
+    deleteMany: "DELETE FROM ticket%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = ticket.id", rows: "SELECT \"id\", \"customer_id\", \"subject\", \"body\", \"order_id\", \"category\", \"priority\", \"summary\", \"provenance_in_review\", \"status\", \"status_entered_at\", \"_version\" FROM ticket WHERE (id) IN (%s)" },
+  },
+  relations: [
+    { field: "customer", column: "customerId", target: "user", probe: "ticket.customer_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+  ],
+};
+
+/**
  * A row of User, the "user" table: A person who can sign in to the shop, with their email and a password.
  * The User trait makes the table the core user model's (D50): the build
  * adds the Session and UserCredential tables beside it, and both APIs sign
@@ -1098,12 +2616,16 @@ export interface UserFilter {
   id?: UuidFilter<T.IdentityUUID>;
   email?: StringFilter<T.ContactEmail>;
   name?: StringFilter<T.IdentityName>;
+  /** The rows a Checkout row's customer points at, or none does. */
+  referencedByCheckoutCustomer?: ReferencedByFilter;
   /** The rows a Order row's customer points at, or none does. */
   referencedByOrderCustomer?: ReferencedByFilter;
   /** The rows a Review row's author points at, or none does. */
   referencedByReviewAuthor?: ReferencedByFilter;
   /** The rows a Session row's user points at, or none does. */
   referencedBySessionUser?: ReferencedByFilter;
+  /** The rows a Ticket row's customer points at, or none does. */
+  referencedByTicketCustomer?: ReferencedByFilter;
   /** The rows a UserApiKey row's user points at, or none does. */
   referencedByUserApiKeyUser?: ReferencedByFilter;
   /** The rows a UserCredential row's user points at, or none does. */
@@ -1132,9 +2654,11 @@ export interface UserPageKey {
 
 /** The relations a read of User includes (D90): each one's rows, their own relations, and how many a row has. */
 export interface UserRelations {
+  readonly checkouts: Related<CheckoutRow, CheckoutRelations, 'many'>;
   readonly orders: Related<OrderRow, OrderRelations, 'many'>;
   readonly reviews: Related<ReviewRow, ReviewRelations, 'many'>;
   readonly sessions: Related<SessionRow, SessionRelations, 'many'>;
+  readonly tickets: Related<TicketRow, TicketRelations, 'many'>;
   readonly userApiKeys: Related<UserApiKeyRow, UserApiKeyRelations, 'many'>;
   readonly userCredentials: Related<UserCredentialRow, UserCredentialRelations, 'many'>;
   readonly userRoleGrants: Related<UserRoleGrantRow, UserRoleGrantRelations, 'many'>;
@@ -1205,17 +2729,21 @@ export const userTable: TableDefinition = {
     "email": { conflict: "(email)", keep: "email = \"user\".email", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (email) IN (%s)" },
   },
   referencedBy: [
+    { filter: "referencedByCheckoutCustomer", probe: "SELECT 1 FROM checkout WHERE checkout.customer_id = \"user\".id" },
     { filter: "referencedByOrderCustomer", probe: "SELECT 1 FROM \"order\" WHERE \"order\".customer_id = \"user\".id" },
     { filter: "referencedByReviewAuthor", probe: "SELECT 1 FROM review WHERE review.author_id = \"user\".id", live: " AND review.deleted_at IS NULL" },
     { filter: "referencedBySessionUser", probe: "SELECT 1 FROM \"session\" WHERE \"session\".user_id = \"user\".id" },
+    { filter: "referencedByTicketCustomer", probe: "SELECT 1 FROM ticket WHERE ticket.customer_id = \"user\".id" },
     { filter: "referencedByUserApiKeyUser", probe: "SELECT 1 FROM user_api_key WHERE user_api_key.user_id = \"user\".id" },
     { filter: "referencedByUserCredentialUser", probe: "SELECT 1 FROM user_credential WHERE user_credential.user_id = \"user\".id" },
     { filter: "referencedByUserRoleGrantUser", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = \"user\".id" },
   ],
   many: [
+    { name: "checkouts", target: "checkout", column: "customerId" },
     { name: "orders", target: "order", column: "customerId" },
     { name: "reviews", target: "review", column: "authorId" },
     { name: "sessions", target: "session", column: "userId" },
+    { name: "tickets", target: "ticket", column: "customerId" },
     { name: "userApiKeys", target: "userApiKey", column: "userId" },
     { name: "userCredentials", target: "userCredential", column: "userId" },
     { name: "userRoleGrants", target: "userRoleGrant", column: "userId" },
@@ -1638,13 +3166,18 @@ export const userRoleGrantTable: TableDefinition = {
 
 /** The repositories of shop-db, by table. */
 export interface ShopDbRepositories {
+  readonly checkout: CheckoutRepository;
+  readonly collectionPoint: CollectionPointRepository;
+  readonly inventory: InventoryRepository;
   readonly order: OrderRepository;
   readonly orderLine: OrderLineRepository;
   readonly product: ProductRepository;
+  readonly refund: RefundRepository;
   readonly restockRequest: RestockRequestRepository;
   readonly review: ReviewRepository;
   readonly role: RoleRepository;
   readonly session: SessionRepository;
+  readonly ticket: TicketRepository;
   readonly user: UserRepository;
   readonly userApiKey: UserApiKeyRepository;
   readonly userCredential: UserCredentialRepository;
@@ -1656,6 +3189,2981 @@ export type ShopDbOrm = Orm<ShopDbRepositories>;
 
 /** The repositories of shop-db in a transaction, with its raw SQL. */
 export type ShopDbTx = OrmTx<ShopDbRepositories>;
+
+/** Where the behaviors' core finds each table whose fields are behaviors (D103): its table, key, version, the column a soft-deletable table's live rows hold NULL, and own columns, each behavior's owned columns and operations, and the type as the core runs it. */
+export const shopDbRules: RulesLayout = {
+  "types": {
+    "Checkout": {
+      "type": "Checkout",
+      "table": "checkout",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "customerId",
+          "column": "customer_id",
+          "type": "Identity.UUID"
+        },
+        {
+          "field": "lines",
+          "column": "lines",
+          "type": "CheckoutLine",
+          "list": true
+        },
+        {
+          "field": "counterId",
+          "column": "counter_id",
+          "type": "Identity.UUID"
+        },
+        {
+          "field": "pickupAt",
+          "column": "pickup_at",
+          "type": "Temporal.DateTime",
+          "convert": "epochMillis"
+        },
+        {
+          "field": "address",
+          "column": "address",
+          "type": "CheckoutAddress"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Holds",
+          "behavior": "Holds",
+          "member": "holds",
+          "fields": [
+            {
+              "name": "state",
+              "field": "holdsState",
+              "column": "holds_state",
+              "type": "string"
+            },
+            {
+              "name": "total",
+              "field": "holdsTotal",
+              "column": "holds_total",
+              "type": "Generic.JSON"
+            }
+          ],
+          "operations": [
+            {
+              "name": "retakeHolds",
+              "writes": true
+            },
+            {
+              "name": "listHolds",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "items",
+              "table": "checkout_holds_items",
+              "row": "checkout_id",
+              "key": {
+                "name": "key",
+                "field": "key",
+                "column": "key",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "hold",
+                  "field": "hold",
+                  "column": "hold",
+                  "type": "string"
+                },
+                {
+                  "name": "item",
+                  "field": "item",
+                  "column": "item",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "supplySchema",
+                  "field": "supplySchema",
+                  "column": "supply_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "supplyId",
+                  "field": "supplyId",
+                  "column": "supply_id",
+                  "type": "string"
+                },
+                {
+                  "name": "quantity",
+                  "field": "quantity",
+                  "column": "quantity",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "startMs",
+                  "field": "startMs",
+                  "column": "start_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "endMs",
+                  "field": "endMs",
+                  "column": "end_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "unitPrice",
+                  "field": "unitPrice",
+                  "column": "unit_price",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "takenAt",
+                  "field": "takenAt",
+                  "column": "taken_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "Timers",
+          "behavior": "Timers",
+          "member": "timers",
+          "fields": [],
+          "operations": [
+            {
+              "name": "fireTimer",
+              "writes": true
+            },
+            {
+              "name": "resetTimer",
+              "writes": true
+            },
+            {
+              "name": "snoozeTimer",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "deadlines",
+              "table": "checkout_timers_deadlines",
+              "row": "checkout_id",
+              "key": {
+                "name": "name",
+                "field": "name",
+                "column": "name",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "baseAt",
+                  "field": "baseAt",
+                  "column": "base_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "armedFrom",
+                  "field": "armedFrom",
+                  "column": "armed_from",
+                  "type": "string"
+                },
+                {
+                  "name": "dueAt",
+                  "field": "dueAt",
+                  "column": "due_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "fired",
+                  "field": "fired",
+                  "column": "fired",
+                  "type": "boolean"
+                },
+                {
+                  "name": "firedAt",
+                  "field": "firedAt",
+                  "column": "fired_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "outcome",
+                  "field": "outcome",
+                  "column": "outcome",
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "Payments",
+          "behavior": "Payments",
+          "member": "payments",
+          "fields": [
+            {
+              "name": "due",
+              "field": "paymentsDue",
+              "column": "payments_due",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "authorized",
+              "field": "paymentsAuthorized",
+              "column": "payments_authorized",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "captured",
+              "field": "paymentsCaptured",
+              "column": "payments_captured",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "refunded",
+              "field": "paymentsRefunded",
+              "column": "payments_refunded",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "outstanding",
+              "field": "paymentsOutstanding",
+              "column": "payments_outstanding",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "overpaid",
+              "field": "paymentsOverpaid",
+              "column": "payments_overpaid",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "currency",
+              "field": "paymentsCurrency",
+              "column": "payments_currency",
+              "type": "string"
+            },
+            {
+              "name": "state",
+              "field": "paymentsState",
+              "column": "payments_state",
+              "type": "string"
+            }
+          ],
+          "operations": [
+            {
+              "name": "openPayment",
+              "writes": true
+            },
+            {
+              "name": "recordPaymentEvent",
+              "writes": true
+            },
+            {
+              "name": "capturePayment",
+              "writes": true
+            },
+            {
+              "name": "voidPayment",
+              "writes": true
+            },
+            {
+              "name": "refundPayment",
+              "writes": true
+            },
+            {
+              "name": "listPaymentActions",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "refundFor",
+              "writes": true
+            },
+            {
+              "name": "settleRefundFor",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "attempts",
+              "table": "checkout_payments_attempts",
+              "row": "checkout_id",
+              "key": {
+                "name": "attempt",
+                "field": "attempt",
+                "column": "attempt",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "providerRef",
+                  "field": "providerRef",
+                  "column": "provider_ref",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "due",
+                  "field": "due",
+                  "column": "due",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "authorized",
+                  "field": "authorized",
+                  "column": "authorized",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "captured",
+                  "field": "captured",
+                  "column": "captured",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "brand",
+                  "field": "brand",
+                  "column": "brand",
+                  "type": "string"
+                },
+                {
+                  "name": "last4",
+                  "field": "last4",
+                  "column": "last4",
+                  "type": "string"
+                },
+                {
+                  "name": "returnUrl",
+                  "field": "returnUrl",
+                  "column": "return_url",
+                  "type": "string"
+                },
+                {
+                  "name": "openedAt",
+                  "field": "openedAt",
+                  "column": "opened_at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "actions",
+              "table": "checkout_payments_actions",
+              "row": "checkout_id",
+              "key": {
+                "name": "action",
+                "field": "action",
+                "column": "action",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "refund",
+                  "field": "refund",
+                  "column": "refund",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "doneAt",
+                  "field": "doneAt",
+                  "column": "done_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "refunds",
+              "table": "checkout_payments_refunds",
+              "row": "checkout_id",
+              "key": {
+                "name": "refund",
+                "field": "refund",
+                "column": "refund",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "reason",
+                  "field": "reason",
+                  "column": "reason",
+                  "type": "string"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "refunded",
+                  "field": "refunded",
+                  "column": "refunded",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "originSchema",
+                  "field": "originSchema",
+                  "column": "origin_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "originId",
+                  "field": "originId",
+                  "column": "origin_id",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "issues",
+              "table": "checkout_payments_issues",
+              "row": "checkout_id",
+              "key": {
+                "name": "refund",
+                "field": "refund",
+                "column": "refund",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "ofSchema",
+                  "field": "ofSchema",
+                  "column": "of_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "ofId",
+                  "field": "ofId",
+                  "column": "of_id",
+                  "type": "string"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "refunded",
+                  "field": "refunded",
+                  "column": "refunded",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "enteredAt",
+                  "field": "enteredAt",
+                  "column": "entered_at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ],
+          "shared": [
+            {
+              "name": "events",
+              "table": "checkout_payments_events",
+              "key": {
+                "name": "event",
+                "field": "event",
+                "column": "event",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "eventId",
+                  "field": "eventId",
+                  "column": "event_id",
+                  "type": "string"
+                },
+                {
+                  "name": "rowKey",
+                  "field": "rowKey",
+                  "column": "row_key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "providerRef",
+                  "field": "providerRef",
+                  "column": "provider_ref",
+                  "type": "string"
+                },
+                {
+                  "name": "refund",
+                  "field": "refund",
+                  "column": "refund",
+                  "type": "string"
+                },
+                {
+                  "name": "applied",
+                  "field": "applied",
+                  "column": "applied",
+                  "type": "boolean"
+                },
+                {
+                  "name": "metadata",
+                  "field": "metadata",
+                  "column": "metadata",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "recordedAt",
+                  "field": "recordedAt",
+                  "column": "recorded_at",
+                  "type": "Generic.Int64"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        },
+        {
+          "id": "StateRules",
+          "behavior": "StateRules",
+          "member": "staterules",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        },
+        {
+          "id": "number",
+          "behavior": "Numbering",
+          "anchor": "number",
+          "member": "number",
+          "fields": [
+            {
+              "name": "seq",
+              "field": "numberSeq",
+              "column": "number_seq",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "label",
+              "field": "number",
+              "column": "number",
+              "type": "string",
+              "value": true
+            }
+          ],
+          "operations": [
+            {
+              "name": "assignNumber",
+              "writes": true
+            }
+          ],
+          "shared": [
+            {
+              "name": "counts",
+              "table": "checkout_number_counts",
+              "key": {
+                "name": "scope",
+                "field": "scope",
+                "column": "scope",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "last",
+                  "field": "last",
+                  "column": "last",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "counting",
+                  "field": "counting",
+                  "column": "counting",
+                  "type": "string"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        }
+      ],
+      "deadlines": {
+        "queue": "CheckoutDeadline",
+        "table": "checkout_deadline_queue",
+        "rowKey": "row_key",
+        "use": "use_id",
+        "name": "name",
+        "at": "at",
+        "payload": "payload"
+      },
+      "changes": {
+        "queue": "CheckoutChange",
+        "table": "checkout_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
+      },
+      "spec": {
+        "name": "Checkout",
+        "uses": [
+          {
+            "behavior": "Holds",
+            "config": {
+              "commitOn": [
+                "placed"
+              ],
+              "holds": {
+                "lines": {
+                  "each": {
+                    "field": "lines",
+                    "target": "inventoryId"
+                  },
+                  "quantity": {
+                    "field": "quantity"
+                  },
+                  "schema": "Inventory"
+                },
+                "pickup": {
+                  "interval": {
+                    "durationMs": 900000,
+                    "start": "pickupAt"
+                  },
+                  "link": "counter"
+                }
+              },
+              "maxItems": 50,
+              "releaseOn": [
+                "expired",
+                "cancelled"
+              ],
+              "takeOn": [
+                "held"
+              ]
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Timers",
+            "config": {
+              "deadlines": {
+                "backstop": {
+                  "afterMs": 7200000,
+                  "start": {
+                    "enters": "held"
+                  },
+                  "then": {
+                    "transition": "expired"
+                  },
+                  "until": {
+                    "leaves": "held"
+                  }
+                },
+                "holdExpiry": {
+                  "afterMs": 900000,
+                  "start": {
+                    "enters": "held"
+                  },
+                  "then": {
+                    "transition": "expired"
+                  },
+                  "until": {
+                    "leaves": "held"
+                  }
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Payments",
+            "config": {
+              "afterRelease": "refund",
+              "amount": {
+                "holds": true
+              },
+              "record": {
+                "permission": "payments.record"
+              },
+              "refunds": {
+                "permission": "payments.refund"
+              },
+              "require": {
+                "placed": "paid"
+              },
+              "voidOn": [
+                "expired",
+                "cancelled"
+              ]
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "StateRules",
+            "config": {
+              "states": {
+                "held": {
+                  "frozen": [
+                    "lines",
+                    "counterId",
+                    "pickupAt",
+                    "address"
+                  ],
+                  "required": [
+                    "address"
+                  ]
+                },
+                "placed": {
+                  "frozen": "all"
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "initial": "cart",
+              "outcomes": {
+                "cancelled": "neutral",
+                "expired": "failure"
+              },
+              "states": [
+                "cart",
+                "held",
+                "placed",
+                "expired",
+                "cancelled"
+              ],
+              "transitions": [
+                {
+                  "from": "cart",
+                  "to": "held"
+                },
+                {
+                  "from": "held",
+                  "to": "placed"
+                },
+                {
+                  "from": "held",
+                  "to": "expired"
+                },
+                {
+                  "from": "held",
+                  "to": "cancelled"
+                },
+                {
+                  "from": "cart",
+                  "to": "cancelled"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          },
+          {
+            "behavior": "Numbering",
+            "config": {
+              "format": "ORD-{yyyy}-{seq:5}",
+              "reset": "yearly"
+            },
+            "anchor": {
+              "field": "number"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "customerId",
+            "type": "Identity.UUID",
+            "relation": {
+              "name": "customer",
+              "type": "User"
+            }
+          },
+          {
+            "name": "lines",
+            "type": "CheckoutLine"
+          },
+          {
+            "name": "counterId",
+            "type": "Identity.UUID",
+            "relation": {
+              "name": "counter",
+              "type": "CollectionPoint"
+            }
+          },
+          {
+            "name": "pickupAt",
+            "type": "Temporal.DateTime",
+            "dateTime": true
+          },
+          {
+            "name": "address",
+            "type": "CheckoutAddress"
+          }
+        ]
+      }
+    },
+    "CollectionPoint": {
+      "type": "CollectionPoint",
+      "table": "collection_point",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "name",
+          "column": "name",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Calendar",
+          "behavior": "Calendar",
+          "member": "calendar",
+          "fields": [],
+          "operations": [
+            {
+              "name": "setOpeningHours",
+              "writes": true
+            },
+            {
+              "name": "addClosure",
+              "writes": true
+            },
+            {
+              "name": "removeClosure",
+              "writes": true
+            },
+            {
+              "name": "holdFor",
+              "writes": true
+            },
+            {
+              "name": "commitFor",
+              "writes": true
+            },
+            {
+              "name": "releaseFor",
+              "writes": true
+            },
+            {
+              "name": "checkHold",
+              "writes": false
+            },
+            {
+              "name": "listBookings",
+              "writes": false
+            },
+            {
+              "name": "findAvailability",
+              "writes": false,
+              "table": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "bookings",
+              "table": "collection_point_calendar_bookings",
+              "row": "collection_point_id",
+              "key": {
+                "name": "record",
+                "field": "record",
+                "column": "record",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "holderSchema",
+                  "field": "holderSchema",
+                  "column": "holder_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "holderId",
+                  "field": "holderId",
+                  "column": "holder_id",
+                  "type": "string"
+                },
+                {
+                  "name": "hold",
+                  "field": "hold",
+                  "column": "hold",
+                  "type": "string"
+                },
+                {
+                  "name": "item",
+                  "field": "item",
+                  "column": "item",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "startMs",
+                  "field": "startMs",
+                  "column": "start_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "endMs",
+                  "field": "endMs",
+                  "column": "end_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "unitPrice",
+                  "field": "unitPrice",
+                  "column": "unit_price",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "retired",
+                  "field": "retired",
+                  "column": "retired",
+                  "type": "boolean"
+                }
+              ]
+            },
+            {
+              "name": "closures",
+              "table": "collection_point_calendar_closures",
+              "row": "collection_point_id",
+              "key": {
+                "name": "closure",
+                "field": "closure",
+                "column": "closure",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "startMs",
+                  "field": "startMs",
+                  "column": "start_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "endMs",
+                  "field": "endMs",
+                  "column": "end_ms",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "reason",
+                  "field": "reason",
+                  "column": "reason",
+                  "type": "string"
+                },
+                {
+                  "name": "by",
+                  "field": "by",
+                  "column": "by",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            },
+            {
+              "name": "settings",
+              "table": "collection_point_calendar_settings",
+              "row": "collection_point_id",
+              "key": {
+                "name": "name",
+                "field": "name",
+                "column": "name",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "value",
+                  "field": "value",
+                  "column": "value",
+                  "type": "Generic.JSON"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "CollectionPoint",
+        "uses": [
+          {
+            "behavior": "Calendar",
+            "config": {
+              "bufferMs": {
+                "after": 300000
+              },
+              "capacity": 4,
+              "horizonMs": 5184000000,
+              "hours": {
+                "fri": [
+                  [
+                    "09:00",
+                    "17:30"
+                  ]
+                ],
+                "mon": [
+                  [
+                    "09:00",
+                    "12:30"
+                  ],
+                  [
+                    "13:30",
+                    "17:30"
+                  ]
+                ],
+                "sat": [
+                  [
+                    "10:00",
+                    "16:00"
+                  ]
+                ],
+                "thu": [
+                  [
+                    "09:00",
+                    "17:30"
+                  ]
+                ],
+                "tue": [
+                  [
+                    "09:00",
+                    "17:30"
+                  ]
+                ],
+                "wed": [
+                  [
+                    "09:00",
+                    "17:30"
+                  ]
+                ]
+              },
+              "leadMs": 7200000,
+              "maxMs": 900000,
+              "minMs": 900000,
+              "permission": "calendar.manage",
+              "slotMs": 900000,
+              "timeZone": "Europe/London"
+            },
+            "anchor": "type"
+          }
+        ],
+        "fields": [
+          {
+            "name": "name",
+            "type": "string"
+          }
+        ]
+      }
+    },
+    "Inventory": {
+      "type": "Inventory",
+      "table": "inventory",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "sku",
+          "column": "sku",
+          "type": "string"
+        },
+        {
+          "field": "priceCents",
+          "column": "price_cents",
+          "type": "Generic.Int64"
+        },
+        {
+          "field": "reorderAt",
+          "column": "reorder_at",
+          "type": "Generic.Int64"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Stock",
+          "behavior": "Stock",
+          "member": "stock",
+          "fields": [
+            {
+              "name": "onHand",
+              "field": "stockOnHand",
+              "column": "stock_on_hand",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "held",
+              "field": "stockHeld",
+              "column": "stock_held",
+              "type": "Generic.Int64"
+            }
+          ],
+          "operations": [
+            {
+              "name": "receiveStock",
+              "writes": true
+            },
+            {
+              "name": "adjustStock",
+              "writes": true
+            },
+            {
+              "name": "countStock",
+              "writes": true
+            },
+            {
+              "name": "holdFor",
+              "writes": true
+            },
+            {
+              "name": "commitFor",
+              "writes": true
+            },
+            {
+              "name": "releaseFor",
+              "writes": true
+            },
+            {
+              "name": "returnFor",
+              "writes": true
+            },
+            {
+              "name": "checkHold",
+              "writes": false
+            },
+            {
+              "name": "listStockMovements",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "holds",
+              "table": "inventory_stock_holds",
+              "row": "inventory_id",
+              "key": {
+                "name": "record",
+                "field": "record",
+                "column": "record",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "holderSchema",
+                  "field": "holderSchema",
+                  "column": "holder_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "holderId",
+                  "field": "holderId",
+                  "column": "holder_id",
+                  "type": "string"
+                },
+                {
+                  "name": "hold",
+                  "field": "hold",
+                  "column": "hold",
+                  "type": "string"
+                },
+                {
+                  "name": "item",
+                  "field": "item",
+                  "column": "item",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "quantity",
+                  "field": "quantity",
+                  "column": "quantity",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "unitPrice",
+                  "field": "unitPrice",
+                  "column": "unit_price",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "retired",
+                  "field": "retired",
+                  "column": "retired",
+                  "type": "boolean"
+                }
+              ]
+            },
+            {
+              "name": "movements",
+              "table": "inventory_stock_movements",
+              "row": "inventory_id",
+              "key": {
+                "name": "seq",
+                "field": "seq",
+                "column": "seq",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "delta",
+                  "field": "delta",
+                  "column": "delta",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "onHand",
+                  "field": "onHand",
+                  "column": "on_hand",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "reason",
+                  "field": "reason",
+                  "column": "reason",
+                  "type": "string"
+                },
+                {
+                  "name": "reference",
+                  "field": "reference",
+                  "column": "reference",
+                  "type": "string"
+                },
+                {
+                  "name": "holderSchema",
+                  "field": "holderSchema",
+                  "column": "holder_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "holderId",
+                  "field": "holderId",
+                  "column": "holder_id",
+                  "type": "string"
+                },
+                {
+                  "name": "hold",
+                  "field": "hold",
+                  "column": "hold",
+                  "type": "string"
+                },
+                {
+                  "name": "item",
+                  "field": "item",
+                  "column": "item",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "actor",
+                  "field": "actor",
+                  "column": "actor",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Inventory",
+        "uses": [
+          {
+            "behavior": "Stock",
+            "config": {
+              "backorder": false,
+              "lowAt": {
+                "field": "reorderAt"
+              },
+              "maxPerHold": 99,
+              "permission": "stock.write",
+              "price": {
+                "currency": "GBP",
+                "field": "priceCents"
+              }
+            },
+            "anchor": "type"
+          }
+        ],
+        "fields": [
+          {
+            "name": "sku",
+            "type": "string"
+          },
+          {
+            "name": "priceCents",
+            "type": "Generic.Int64"
+          },
+          {
+            "name": "reorderAt",
+            "type": "Generic.Int64"
+          }
+        ]
+      }
+    },
+    "Refund": {
+      "type": "Refund",
+      "table": "refund",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "checkoutId",
+          "column": "checkout_id",
+          "type": "Identity.UUID"
+        },
+        {
+          "field": "amountCents",
+          "column": "amount_cents",
+          "type": "Generic.Int64"
+        },
+        {
+          "field": "reason",
+          "column": "reason",
+          "type": "string"
+        }
+      ],
+      "audit": [
+        {
+          "field": "createdBy",
+          "column": "created_by",
+          "type": "Identity.UUID"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Approvals",
+          "behavior": "Approvals",
+          "member": "approvals",
+          "fields": [],
+          "operations": [
+            {
+              "name": "signOff",
+              "writes": true
+            },
+            {
+              "name": "withdrawSignOff",
+              "writes": true
+            },
+            {
+              "name": "listSignOffs",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "signOffs",
+              "table": "refund_approvals_sign_offs",
+              "row": "refund_id",
+              "key": {
+                "name": "number",
+                "field": "number",
+                "column": "number",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "subject",
+                  "field": "subject",
+                  "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "note",
+                  "field": "note",
+                  "column": "note",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "consumedAt",
+                  "field": "consumedAt",
+                  "column": "consumed_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "StateRules",
+          "behavior": "StateRules",
+          "member": "staterules",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "Payments",
+          "behavior": "Payments",
+          "member": "payments",
+          "fields": [
+            {
+              "name": "due",
+              "field": "paymentsDue",
+              "column": "payments_due",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "authorized",
+              "field": "paymentsAuthorized",
+              "column": "payments_authorized",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "captured",
+              "field": "paymentsCaptured",
+              "column": "payments_captured",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "refunded",
+              "field": "paymentsRefunded",
+              "column": "payments_refunded",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "outstanding",
+              "field": "paymentsOutstanding",
+              "column": "payments_outstanding",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "overpaid",
+              "field": "paymentsOverpaid",
+              "column": "payments_overpaid",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "currency",
+              "field": "paymentsCurrency",
+              "column": "payments_currency",
+              "type": "string"
+            },
+            {
+              "name": "state",
+              "field": "paymentsState",
+              "column": "payments_state",
+              "type": "string"
+            }
+          ],
+          "operations": [
+            {
+              "name": "openPayment",
+              "writes": true
+            },
+            {
+              "name": "recordPaymentEvent",
+              "writes": true
+            },
+            {
+              "name": "capturePayment",
+              "writes": true
+            },
+            {
+              "name": "voidPayment",
+              "writes": true
+            },
+            {
+              "name": "refundPayment",
+              "writes": true
+            },
+            {
+              "name": "listPaymentActions",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "refundFor",
+              "writes": true
+            },
+            {
+              "name": "settleRefundFor",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "attempts",
+              "table": "refund_payments_attempts",
+              "row": "refund_id",
+              "key": {
+                "name": "attempt",
+                "field": "attempt",
+                "column": "attempt",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "providerRef",
+                  "field": "providerRef",
+                  "column": "provider_ref",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "due",
+                  "field": "due",
+                  "column": "due",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "authorized",
+                  "field": "authorized",
+                  "column": "authorized",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "captured",
+                  "field": "captured",
+                  "column": "captured",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "brand",
+                  "field": "brand",
+                  "column": "brand",
+                  "type": "string"
+                },
+                {
+                  "name": "last4",
+                  "field": "last4",
+                  "column": "last4",
+                  "type": "string"
+                },
+                {
+                  "name": "returnUrl",
+                  "field": "returnUrl",
+                  "column": "return_url",
+                  "type": "string"
+                },
+                {
+                  "name": "openedAt",
+                  "field": "openedAt",
+                  "column": "opened_at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "actions",
+              "table": "refund_payments_actions",
+              "row": "refund_row_id",
+              "key": {
+                "name": "action",
+                "field": "action",
+                "column": "action",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "refund",
+                  "field": "refund",
+                  "column": "refund",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "doneAt",
+                  "field": "doneAt",
+                  "column": "done_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "refunds",
+              "table": "refund_payments_refunds",
+              "row": "refund_row_id",
+              "key": {
+                "name": "refund",
+                "field": "refund",
+                "column": "refund",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "reason",
+                  "field": "reason",
+                  "column": "reason",
+                  "type": "string"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "refunded",
+                  "field": "refunded",
+                  "column": "refunded",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "originSchema",
+                  "field": "originSchema",
+                  "column": "origin_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "originId",
+                  "field": "originId",
+                  "column": "origin_id",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            },
+            {
+              "name": "issues",
+              "table": "refund_payments_issues",
+              "row": "refund_row_id",
+              "key": {
+                "name": "refund",
+                "field": "refund",
+                "column": "refund",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "seq",
+                  "field": "seq",
+                  "column": "seq",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "ofSchema",
+                  "field": "ofSchema",
+                  "column": "of_schema",
+                  "type": "string"
+                },
+                {
+                  "name": "ofId",
+                  "field": "ofId",
+                  "column": "of_id",
+                  "type": "string"
+                },
+                {
+                  "name": "idempotencyKey",
+                  "field": "idempotencyKey",
+                  "column": "idempotency_key",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "status",
+                  "field": "status",
+                  "column": "status",
+                  "type": "string"
+                },
+                {
+                  "name": "refunded",
+                  "field": "refunded",
+                  "column": "refunded",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "enteredAt",
+                  "field": "enteredAt",
+                  "column": "entered_at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "updatedAt",
+                  "field": "updatedAt",
+                  "column": "updated_at",
+                  "type": "Generic.Int64"
+                }
+              ]
+            }
+          ],
+          "shared": [
+            {
+              "name": "events",
+              "table": "refund_payments_events",
+              "key": {
+                "name": "event",
+                "field": "event",
+                "column": "event",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "provider",
+                  "field": "provider",
+                  "column": "provider",
+                  "type": "string"
+                },
+                {
+                  "name": "eventId",
+                  "field": "eventId",
+                  "column": "event_id",
+                  "type": "string"
+                },
+                {
+                  "name": "rowKey",
+                  "field": "rowKey",
+                  "column": "row_key",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "amount",
+                  "field": "amount",
+                  "column": "amount",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "currency",
+                  "field": "currency",
+                  "column": "currency",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "attempt",
+                  "field": "attempt",
+                  "column": "attempt",
+                  "type": "string"
+                },
+                {
+                  "name": "providerRef",
+                  "field": "providerRef",
+                  "column": "provider_ref",
+                  "type": "string"
+                },
+                {
+                  "name": "refund",
+                  "field": "refund",
+                  "column": "refund",
+                  "type": "string"
+                },
+                {
+                  "name": "applied",
+                  "field": "applied",
+                  "column": "applied",
+                  "type": "boolean"
+                },
+                {
+                  "name": "metadata",
+                  "field": "metadata",
+                  "column": "metadata",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "recordedAt",
+                  "field": "recordedAt",
+                  "column": "recorded_at",
+                  "type": "Generic.Int64"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        },
+        {
+          "id": "number",
+          "behavior": "Numbering",
+          "anchor": "number",
+          "member": "number",
+          "fields": [
+            {
+              "name": "seq",
+              "field": "numberSeq",
+              "column": "number_seq",
+              "type": "Generic.Int64"
+            },
+            {
+              "name": "label",
+              "field": "number",
+              "column": "number",
+              "type": "string",
+              "value": true
+            }
+          ],
+          "operations": [
+            {
+              "name": "assignNumber",
+              "writes": true
+            }
+          ],
+          "shared": [
+            {
+              "name": "counts",
+              "table": "refund_number_counts",
+              "key": {
+                "name": "scope",
+                "field": "scope",
+                "column": "scope",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "last",
+                  "field": "last",
+                  "column": "last",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "counting",
+                  "field": "counting",
+                  "column": "counting",
+                  "type": "string"
+                }
+              ],
+              "version": "_version"
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Refund",
+        "uses": [
+          {
+            "behavior": "Approvals",
+            "config": {
+              "gates": {
+                "approved": {
+                  "count": 2,
+                  "permission": "refunds.approve"
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "StateRules",
+            "config": {
+              "states": {
+                "approved": {
+                  "frozen": "all"
+                },
+                "requested": {
+                  "required": [
+                    "amountCents",
+                    "reason"
+                  ]
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Payments",
+            "config": {
+              "amount": {
+                "field": "amountCents"
+              },
+              "currency": "GBP",
+              "issueOn": [
+                "approved"
+              ],
+              "record": {
+                "permission": "payments.record"
+              },
+              "refundOf": {
+                "link": "checkout"
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "initial": "requested",
+              "outcomes": {
+                "failed": "failure",
+                "rejected": "neutral"
+              },
+              "states": [
+                "requested",
+                "approved",
+                "issued",
+                "rejected",
+                "failed"
+              ],
+              "transitions": [
+                {
+                  "from": "requested",
+                  "to": "approved"
+                },
+                {
+                  "from": "requested",
+                  "to": "rejected"
+                },
+                {
+                  "from": "approved",
+                  "to": "issued"
+                },
+                {
+                  "from": "approved",
+                  "to": "failed"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          },
+          {
+            "behavior": "Numbering",
+            "config": {
+              "format": "RF-{yyyy}-{seq:5}",
+              "reset": "yearly"
+            },
+            "anchor": {
+              "field": "number"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "checkoutId",
+            "type": "Identity.UUID",
+            "relation": {
+              "name": "checkout",
+              "type": "Checkout"
+            }
+          },
+          {
+            "name": "amountCents",
+            "type": "Generic.Int64"
+          },
+          {
+            "name": "reason",
+            "type": "string"
+          },
+          {
+            "name": "createdBy",
+            "type": "Identity.UUID"
+          }
+        ]
+      }
+    },
+    "Ticket": {
+      "type": "Ticket",
+      "table": "ticket",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "customerId",
+          "column": "customer_id",
+          "type": "Identity.UUID"
+        },
+        {
+          "field": "subject",
+          "column": "subject",
+          "type": "string"
+        },
+        {
+          "field": "body",
+          "column": "body",
+          "type": "string"
+        },
+        {
+          "field": "orderId",
+          "column": "order_id",
+          "type": "string"
+        },
+        {
+          "field": "category",
+          "column": "category",
+          "type": "TicketCategory"
+        },
+        {
+          "field": "priority",
+          "column": "priority",
+          "type": "TicketPriority"
+        },
+        {
+          "field": "summary",
+          "column": "summary",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Derived",
+          "behavior": "Derived",
+          "member": "derived",
+          "fields": [],
+          "operations": [
+            {
+              "name": "staleDerivations",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "settleDerivations",
+              "writes": true,
+              "table": true
+            },
+            {
+              "name": "failedDerivations",
+              "writes": false,
+              "table": true
+            },
+            {
+              "name": "applyDerived",
+              "writes": true
+            },
+            {
+              "name": "rederive",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "derivations",
+              "table": "ticket_derived_derivations",
+              "row": "ticket_id",
+              "key": {
+                "name": "field",
+                "field": "field",
+                "column": "field",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "sourceHash",
+                  "field": "sourceHash",
+                  "column": "source_hash",
+                  "type": "string"
+                },
+                {
+                  "name": "settledHash",
+                  "field": "settledHash",
+                  "column": "settled_hash",
+                  "type": "string"
+                },
+                {
+                  "name": "model",
+                  "field": "model",
+                  "column": "model",
+                  "type": "string"
+                },
+                {
+                  "name": "confidence",
+                  "field": "confidence",
+                  "column": "confidence",
+                  "type": "number"
+                },
+                {
+                  "name": "settledAt",
+                  "field": "settledAt",
+                  "column": "settled_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "settledBy",
+                  "field": "settledBy",
+                  "column": "settled_by",
+                  "type": "string"
+                },
+                {
+                  "name": "overriddenBy",
+                  "field": "overriddenBy",
+                  "column": "overridden_by",
+                  "type": "string"
+                },
+                {
+                  "name": "overriddenAt",
+                  "field": "overriddenAt",
+                  "column": "overridden_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "attempts",
+                  "field": "attempts",
+                  "column": "attempts",
+                  "type": "Generic.Int64"
+                },
+                {
+                  "name": "failure",
+                  "field": "failure",
+                  "column": "failure",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "forced",
+                  "field": "forced",
+                  "column": "forced",
+                  "type": "boolean"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "Provenance",
+          "behavior": "Provenance",
+          "member": "provenance",
+          "fields": [
+            {
+              "name": "inReview",
+              "field": "provenanceInReview",
+              "column": "provenance_in_review",
+              "type": "boolean"
+            }
+          ],
+          "operations": [
+            {
+              "name": "accept",
+              "writes": true
+            },
+            {
+              "name": "reject",
+              "writes": true
+            }
+          ],
+          "tables": [
+            {
+              "name": "records",
+              "table": "ticket_provenance_records",
+              "row": "ticket_id",
+              "key": {
+                "name": "field",
+                "field": "field",
+                "column": "field",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "source",
+                  "field": "source",
+                  "column": "source",
+                  "type": "string"
+                },
+                {
+                  "name": "bySubject",
+                  "field": "bySubject",
+                  "column": "by_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "forSubject",
+                  "field": "forSubject",
+                  "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "writtenAt",
+                  "field": "writtenAt",
+                  "column": "written_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "confidence",
+                  "field": "confidence",
+                  "column": "confidence",
+                  "type": "number"
+                },
+                {
+                  "name": "review",
+                  "field": "review",
+                  "column": "review",
+                  "type": "string"
+                },
+                {
+                  "name": "reviewedBy",
+                  "field": "reviewedBy",
+                  "column": "reviewed_by",
+                  "type": "string"
+                },
+                {
+                  "name": "reviewedAt",
+                  "field": "reviewedAt",
+                  "column": "reviewed_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "StateRules",
+          "behavior": "StateRules",
+          "member": "staterules",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "Reactions",
+          "behavior": "Reactions",
+          "member": "reactions",
+          "fields": [],
+          "operations": []
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "changes": {
+        "queue": "TicketChange",
+        "table": "ticket_change_queue",
+        "rowKey": "row_key",
+        "write": "write",
+        "at": "at",
+        "before": "before",
+        "after": "after"
+      },
+      "spec": {
+        "name": "Ticket",
+        "uses": [
+          {
+            "behavior": "Derived",
+            "config": {
+              "fields": {
+                "category": {
+                  "from": [
+                    "subject",
+                    "body"
+                  ],
+                  "instruction": "Which part of the shop is the shopper asking about?",
+                  "model": "standard",
+                  "states": [
+                    "new",
+                    "triage"
+                  ]
+                },
+                "priority": {
+                  "from": [
+                    "subject",
+                    "body"
+                  ],
+                  "instruction": "How urgent is this for the shopper?",
+                  "model": "standard",
+                  "states": [
+                    "new",
+                    "triage"
+                  ]
+                },
+                "summary": {
+                  "from": [
+                    "body"
+                  ],
+                  "instruction": "Summarize the request in one sentence.",
+                  "model": "simple"
+                }
+              },
+              "permission": "tickets.derive"
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Provenance",
+            "config": {
+              "gates": {
+                "assigned": {
+                  "reviewed": [
+                    "category",
+                    "priority"
+                  ]
+                }
+              },
+              "review": {
+                "below": 0.8,
+                "permission": "support.review",
+                "sources": [
+                  "Derived"
+                ]
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "StateRules",
+            "config": {
+              "states": {
+                "assigned": {
+                  "required": [
+                    "category",
+                    "priority"
+                  ]
+                },
+                "resolved": {
+                  "frozen": "all"
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Reactions",
+            "config": {
+              "rules": [
+                {
+                  "then": {
+                    "transition": "assigned"
+                  },
+                  "when": {
+                    "changes": {
+                      "field": "category"
+                    }
+                  }
+                },
+                {
+                  "then": {
+                    "transition": "assigned"
+                  },
+                  "when": {
+                    "changes": {
+                      "field": "priority"
+                    }
+                  }
+                }
+              ]
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "initial": "new",
+              "states": [
+                "new",
+                "triage",
+                "assigned",
+                "resolved"
+              ],
+              "transitions": [
+                {
+                  "from": "new",
+                  "to": "triage"
+                },
+                {
+                  "from": "new",
+                  "to": "assigned"
+                },
+                {
+                  "from": "triage",
+                  "to": "assigned"
+                },
+                {
+                  "from": "assigned",
+                  "to": "resolved"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "customerId",
+            "type": "Identity.UUID",
+            "relation": {
+              "name": "customer",
+              "type": "User"
+            }
+          },
+          {
+            "name": "subject",
+            "type": "string"
+          },
+          {
+            "name": "body",
+            "type": "string"
+          },
+          {
+            "name": "orderId",
+            "type": "string"
+          },
+          {
+            "name": "category",
+            "type": "TicketCategory",
+            "schema": {
+              "description": "A TicketCategory value",
+              "enum": [
+                "orders",
+                "payments",
+                "delivery",
+                "product",
+                "other",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "priority",
+            "type": "TicketPriority",
+            "schema": {
+              "description": "A TicketPriority value",
+              "enum": [
+                "low",
+                "normal",
+                "urgent",
+                null
+              ],
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          {
+            "name": "summary",
+            "type": "string",
+            "schema": {
+              "description": "A string value",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        ]
+      }
+    }
+  }
+};
 
 /** The tables of shop-db and the clauses their statements are written with. */
 export const shopDbOrm: OrmDefinition = {
@@ -1699,24 +6207,32 @@ export const shopDbOrm: OrmDefinition = {
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {
+    checkout: checkoutTable,
+    collectionPoint: collectionPointTable,
+    inventory: inventoryTable,
     order: orderTable,
     orderLine: orderLineTable,
     product: productTable,
+    refund: refundTable,
     restockRequest: restockRequestTable,
     review: reviewTable,
     role: roleTable,
     session: sessionTable,
+    ticket: ticketTable,
     user: userTable,
     userApiKey: userApiKeyTable,
     userCredential: userCredentialTable,
     userRoleGrant: userRoleGrantTable,
   },
+  rules: shopDbRules,
 };
 
 /**
  * Opens the repositories of shop-db over pool, acting as the user
- * options names, or as the user it is when a string.
+ * options names, or as the user it is when a string. The behaviors'
+ * core is options.rules, or the rules package's, made when a behavior first
+ * runs.
  */
 export function createOrm(pool: OrmPool, options?: string | null | OrmOptions): ShopDbOrm {
-  return ormOf<ShopDbRepositories>(pool, shopDbOrm, options);
+  return ormOf<ShopDbRepositories>(pool, shopDbOrm, withRulesCore(options, initSync));
 }
