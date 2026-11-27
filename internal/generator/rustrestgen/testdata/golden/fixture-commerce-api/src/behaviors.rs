@@ -43,7 +43,8 @@ pub const RULES_LAYOUT: &str = r#"{
         {
           "field": "lines",
           "column": "lines",
-          "type": "Line"
+          "type": "Line",
+          "list": true
         },
         {
           "field": "wrapId",

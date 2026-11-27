@@ -3148,8 +3148,15 @@ class TableRepository {
     return error;
   }
 
-  /** Runs an operation of one of the table's uses on a row, in a transaction, as options.caller presenting options.preconditions, and resolves to its result; NotFoundError for a key no live row holds. */
-  private async operate(useId: string, operation: string, key: unknown, params: unknown, options: RulesCallOptions = {}): Promise<unknown> {
+  /**
+   * Runs an operation of one of the table's uses on a row, in a transaction,
+   * as options.caller presenting options.preconditions, and resolves to its
+   * result; NotFoundError for a key no live row holds, and for a row the
+   * caller does not see, or for an operation that writes, may not write
+   * (D156), as a read, an updateOne and a deleteOne of it are.
+   */
+  private async operate(useId: string, operation: string, writes: boolean, key: unknown, params: unknown, options: RulesCallOptions = {}): Promise<unknown> {
+    await this.requireReach(key, writes);
     return this.atomically(async repo => {
       const host = repo.rulesHost();
       const action = { kind: 'operation' as const, key: repo.wireKey(key), useId, operation, params: params ?? {} };
@@ -3243,7 +3250,7 @@ class TableRepository {
       for (const operation of use.operations) {
         operations[operation.name] = operation.table
           ? (params: unknown, options?: RulesTableCallOptions) => this.operateTable(use.id, operation.name, params, options)
-          : (key: unknown, params: unknown, options?: RulesCallOptions) => this.operate(use.id, operation.name, key, params, options);
+          : (key: unknown, params: unknown, options?: RulesCallOptions) => this.operate(use.id, operation.name, operation.writes, key, params, options);
       }
       Object.defineProperty(this, member, { value: Object.freeze(operations), enumerable: true });
     }

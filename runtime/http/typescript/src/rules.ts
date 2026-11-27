@@ -465,6 +465,13 @@ export interface RulesColumn {
   readonly type: string;
   /** How the adapter converts it; absent for none. */
   readonly convert?: RulesConvert;
+  /**
+   * True for a column that holds a list of type (a Postgres array, its
+   * JSON text on SQLite): an @audience table's audience ids, a uuid[]
+   * (D156), which the adapter converts element by element. Absent for one
+   * value.
+   */
+  readonly list?: boolean;
 }
 
 /** A behavior's declared field and the column it takes. */
@@ -2310,8 +2317,11 @@ const INT64_TYPE = 'Generic.Int64';
 /**
  * A value of the core's as its column binds it: null for none; a
  * timestamp's epoch milliseconds as a Date on Postgres and its ISO text on
- * SQLite; a UUID's hyphenated text; a JSON column's value, whatever it is,
- * as its JSON text, and an object or array in any other column so too
+ * SQLite; a UUID's hyphenated text; a list of UUIDs (an @audience table's
+ * ids, D156) as an array of their hyphenated texts on Postgres, which pg
+ * binds as a uuid[], and its JSON text on SQLite; a JSON column's value,
+ * whatever it is, as its JSON text, and an object or array in any other
+ * column so too
  * (which Postgres casts to a JSON column, and which pg would otherwise bind
  * as an array); a boolean as 1 or 0 on SQLite.
  */
@@ -2323,6 +2333,11 @@ function toColumn(value: unknown, column: RulesColumn, table: RulesTable, dialec
     return dialect === 'postgres' ? date : date.toISOString();
   }
   if (column.type === JSON_TYPE) return JSON.stringify(value);
+  if (UUID_TYPES.has(column.type) && (column.list || Array.isArray(value))) {
+    if (!Array.isArray(value)) throw internal(`${table.type}.${column.field}: ${JSON.stringify(value)} is no list of UUIDs`);
+    const ids = value.map(id => (id === null || id === undefined ? null : uuidToDb(id)));
+    return dialect === 'postgres' ? ids : JSON.stringify(ids);
+  }
   if (UUID_TYPES.has(column.type) && typeof value === 'string') return uuidToDb(value);
   if (typeof value === 'object') return JSON.stringify(value);
   if (typeof value === 'boolean' && dialect === 'sqlite') return value ? 1 : 0;
@@ -2332,7 +2347,8 @@ function toColumn(value: unknown, column: RulesColumn, table: RulesTable, dialec
 /**
  * A column's value as the core holds it: undefined for NULL, which the
  * row leaves absent; a timestamp as epoch milliseconds, from a Date on
- * Postgres and from ISO text on SQLite; a UUID as its base62 wire form; a
+ * Postgres and from ISO text on SQLite; a UUID as its base62 wire form,
+ * and a list of UUIDs (an @audience table's ids, D156) as a list of them; a
  * boolean column's 1 or 0 as a boolean on SQLite; a JSON column's SQLite
  * text as the JSON it holds (pg reads a JSONB column already parsed, so on
  * Postgres its value is taken as it is, a string among them); a BIGINT pg
@@ -2353,12 +2369,31 @@ function fromColumn(value: unknown, column: RulesColumn, table: RulesTable, dial
     if (Number.isNaN(millis)) throw internal(`${table.type}.${column.field}: ${JSON.stringify(String(value))} is no timestamp`);
     return millis;
   }
+  if (UUID_TYPES.has(column.type) && (column.list || Array.isArray(value))) return uuidsFromDb(value, column, table);
   if (UUID_TYPES.has(column.type)) return uuidFromDb(value);
   if (column.type === 'boolean' && typeof value === 'number') return value !== 0;
   if (typeof value === 'bigint') return Number(value);
   if (column.type === INT64_TYPE && typeof value === 'string' && /^-?[0-9]+$/.test(value)) return Number(value);
   if (value instanceof Date) return value.toISOString();
   return value;
+}
+
+/**
+ * A list of UUIDs a column holds as the core holds it, each as its base62
+ * wire form: pg reads a uuid[] as an array of hyphenated texts, and
+ * SQLite's column holds the JSON text of one.
+ */
+function uuidsFromDb(value: unknown, column: RulesColumn, table: RulesTable): unknown[] {
+  let list = value;
+  if (typeof value === 'string') {
+    try {
+      list = JSON.parse(value);
+    } catch {
+      list = undefined;
+    }
+  }
+  if (!Array.isArray(list)) throw internal(`${table.type}.${column.field}: ${JSON.stringify(String(value))} is no list of UUIDs`);
+  return list.map(id => (id === null || id === undefined ? null : uuidFromDb(id)));
 }
 
 /**
