@@ -43,6 +43,7 @@ import { createLogger, type DatabaseConnection } from '@superschematic/http-runt
 import { binding, stackEnvOf } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import type { SqlDatabase } from '@superschematic/http-runtime/d1';
+import { createOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm/sqlite';
 import * as tsNotesApi from '@schemas/ts-notes-api';
 import * as tsNotesImpl from '@schemas/ts-notes-implementation';
 
@@ -87,6 +88,7 @@ async function build() {
   const tsNotesDeps: tsNotesApi.Deps = {
     config: tsNotesConfig,
     db: tsNotesDbDatabase,
+    orm: createTsNotesDbOrm(tsNotesDbDatabase),
     logger: logger.child({ api: 'ts-notes' }),
   };
   return construct('ts-notes', 'jobs', () => tsNotesImpl.createJobs(tsNotesDeps));

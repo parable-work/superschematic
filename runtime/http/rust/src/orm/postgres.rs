@@ -31,8 +31,8 @@ use super::run::{Client, Runner};
 use super::{
     row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
     CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error,
-    FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertOptions, Upserted,
-    Values, WriteOptions,
+    FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertManyOptions,
+    UpsertOptions, Upserted, Values, WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -388,6 +388,13 @@ impl Tables {
         self.keys.as_ref()
     }
 
+    /// What runs the behaviors of the tables that compose them, when
+    /// given: what a write across tables of its own (a reply's action,
+    /// D191) opens its repositories with.
+    pub fn rules(&self) -> Option<&Arc<PoolRules>> {
+        self.rules.as_ref()
+    }
+
     /// The definition of the database's tables.
     pub fn definition(&self) -> Result<&'static Definition, Error> {
         (self.definition)()
@@ -549,6 +556,24 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
         options: UpsertOptions,
     ) -> Result<Upserted<Values>, Error> {
         self.runner().upsert_one(input, on, update, options).await
+    }
+
+    /// Inserts each of `inputs`, or, when a row already holds its value of
+    /// the unique key `on`, sets on that row each field `fields` names to
+    /// the value the input would have inserted (D89), a statement a batch,
+    /// and answers each input's row and what the upsert did with it, in
+    /// order. More rows than a batch take a statement each, which the
+    /// caller's transaction holds together. Two inputs of one batch that
+    /// hold one key are refused before it runs, and a table that composes
+    /// behaviors upserts a row at a time with [`Repository::upsert_one`].
+    pub async fn upsert_many(
+        &self,
+        inputs: &[Values],
+        on: &[&str],
+        fields: &[&str],
+        options: UpsertManyOptions,
+    ) -> Result<Vec<Upserted<Values>>, Error> {
+        self.runner().upsert_many(inputs, on, fields, options).await
     }
 
     /// Deletes the live row whose key is `key`, stamping it on a
@@ -815,6 +840,31 @@ where
             row: row(upserted.row)?,
             status: upserted.status,
         })
+    }
+
+    /// Inserts each of `inputs`, or, when a row already holds its value of
+    /// the unique key `on`, sets on that row each field `fields` names, by
+    /// its member or its field, to the value the input would have inserted
+    /// (D89); each input's row and what the upsert did with it, in order.
+    pub async fn upsert_many(
+        &self,
+        inputs: &[Create],
+        on: &[&str],
+        fields: &[&str],
+        options: UpsertManyOptions,
+    ) -> Result<Vec<Upserted<Row>>, Error> {
+        let inputs = inputs.iter().map(values).collect::<Result<Vec<_>, _>>()?;
+        self.repository
+            .upsert_many(&inputs, on, fields, options)
+            .await?
+            .into_iter()
+            .map(|upserted| {
+                Ok(Upserted {
+                    row: row(upserted.row)?,
+                    status: upserted.status,
+                })
+            })
+            .collect()
     }
 
     /// Deletes the live row whose key is `key`, stamping it on a

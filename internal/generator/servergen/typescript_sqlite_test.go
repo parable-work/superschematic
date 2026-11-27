@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -111,12 +112,12 @@ func TestTypeScriptSQLiteEntrypointGolden(t *testing.T) {
 	}
 }
 
-// TestTypeScriptPlanRefusesWhatSQLiteCannotRun: a stack whose environments
-// resolve refuses these first; the plan of an entrypoint refuses them too,
-// since its code could not reach the database: an identity store over a
-// sqlite-first authDb, which no TypeScript store runs on (D50). A worker
-// whose queue's database lists sqlite first plans, claiming on the SQLite
-// file with sqliteQueue (D53, amended).
+// TestTypeScriptPlanRefusesWhatSQLiteCannotRun: an identity store over a
+// sqlite-first authDb plans on Bun, over the file the server opens, which
+// the repositories share (D116), where it was refused before (D50); on
+// Workers, where the database is a D1 binding, it is refused
+// (TestTypeScriptWorkersRefusals). A worker whose queue's database lists sqlite
+// first plans, claiming on the SQLite file with sqliteQueue (D53, amended).
 func TestTypeScriptPlanRefusesWhatSQLiteCannotRun(t *testing.T) {
 	input := func(output *tsrestgen.APIOutput, worker *servergen.WorkerInput) servergen.TypeScriptInput {
 		return servergen.TypeScriptInput{
@@ -139,38 +140,64 @@ func TestTypeScriptPlanRefusesWhatSQLiteCannotRun(t *testing.T) {
 		SchemaName: "notes", PackageName: "@schemas/notes-api", HasEnvConfig: true, Deps: deps,
 		Identity: &tsrestgen.IdentityInfo{AuthDB: "notes-db", DescriptorModule: "@schemas/notes-db-types/identity"},
 	}
-	_, err := servergen.PlanTypeScript(input(identity, nil))
-	if want := "server notes serves notes, which authenticates with the identity runtime over notes-db, its authDb, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)"; err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("PlanTypeScript of an identity API on SQLite = %v, want %q", err, want)
+	plan, err := servergen.PlanTypeScript(input(identity, nil))
+	if err != nil || !plan.Identity() || len(plan.SQLiteDatabases()) != 1 || plan.SQLiteDatabases()[0].Store == "" || !slices.Equal(plan.IdentityStoreImports(), []string{"sqlDatabaseIdentityStore"}) {
+		t.Fatalf("PlanTypeScript of an identity API on SQLite = %+v, %v, want its store over the SQLite file", plan, err)
+	}
+	// main.ts builds the store over the file it opens, and its identity
+	// service over the store.
+	dir := t.TempDir()
+	if err := servergen.WriteTypeScript(plan, dir); err != nil {
+		t.Fatal(err)
+	}
+	main, err := os.ReadFile(filepath.Join(dir, servergen.TypeScriptMainFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := plan.SQLiteDatabases()[0]
+	for _, want := range []string{
+		"import { parseIdentityConfigJSON, sqlDatabaseIdentityStore, type IdentityConfig } from '@superschematic/http-runtime/identity';",
+		"const " + db.Var + " = openDatabase('notes-db', 'NOTES_DB_DATABASE', ",
+		"const " + db.Store + " = sqlDatabaseIdentityStore(" + db.Var + ", " + db.Descriptor + ");",
+		"identityService({ store: " + db.Store + ", ",
+	} {
+		if !strings.Contains(string(main), want) {
+			t.Errorf("main.ts of an identity API on SQLite holds no %q:\n%s", want, main)
+		}
 	}
 	worker := &tsrestgen.APIOutput{
 		SchemaName: "notes", PackageName: "@schemas/notes-api", HasEnvConfig: true, Deps: deps,
 		Workers: []tsrestgen.WorkerInfo{{Name: "IndexNotes", Method: "indexNotes", Queue: "NoteWritten", Concurrency: 1}},
 	}
-	plan, err := servergen.PlanTypeScript(input(worker, &servergen.WorkerInput{Name: "IndexNotes"}))
+	plan, err = servergen.PlanTypeScript(input(worker, &servergen.WorkerInput{Name: "IndexNotes"}))
 	if err != nil || plan.Worker == nil || plan.Worker.Database == nil || !plan.Worker.Database.SQLite {
 		t.Errorf("PlanTypeScript of a worker on SQLite = %+v, %v, want a worker that claims on the SQLite file", plan, err)
 	}
 }
 
 // tsNotesImplementation keeps notes in Deps.db, a SqlDatabase over the
-// SQLite file, creating its table when it starts, as a migration would.
-// Its job, PruneNotes, deletes the notes whose text is empty. putNote
-// enqueues a NoteWritten in the batch that writes the note, and its worker,
-// IndexNotes, logs each message, failing one of the note poison.
+// SQLite file the test migrates with the build's SQLite DDL, and reads
+// them through Deps.orm, the repositories of ts-notes-db on that file
+// (D116). Its job, PruneNotes, deletes the notes whose text is empty.
+// putNote enqueues a NoteWritten in the batch that writes the note, and its
+// worker, IndexNotes, logs each message, failing one of the note poison.
 const tsNotesImplementation = `import { notFound } from '@superschematic/http-runtime';
 import { enqueueStatement } from '@superschematic/http-runtime/d1';
+import { NotFoundError } from '@superschematic/http-runtime/d1';
 import { noteWrittenQueue } from '@schemas/ts-notes-db-types/queues';
 import type { Constructor, JobsConstructor, WorkersConstructor } from '@schemas/ts-notes-api';
 
 export const create: Constructor = async deps => {
-  await deps.db.exec('CREATE TABLE IF NOT EXISTS note (id TEXT PRIMARY KEY, text TEXT NOT NULL)');
   return {
     notes: {
       async getNote({ id }) {
-        const note = await deps.db.prepare('SELECT id, text FROM note WHERE id = ?').bind(id).first<{ id: string; text: string }>();
-        if (note === null) throw notFound('no note ' + id);
-        return note;
+        try {
+          const note = await deps.orm.note.getOne(id);
+          return { id: note.id, text: note.text };
+        } catch (error) {
+          if (error instanceof NotFoundError) throw notFound('no note ' + id);
+          throw error;
+        }
       },
       async putNote({ id, text }) {
         // The note and its message commit together, in one batch.
@@ -203,9 +230,11 @@ export const createJobs: JobsConstructor = deps => ({
 // server's and job's packages install in the workspace and type-check with
 // the implementation, fetch.ts and scheduled.ts among them, and both
 // bundle for workerd, the job's bundle running under workerd over a D1
-// stand-in. The server runs under Bun on a sqlite: URL: it
-// opens the file, answers /readyz, keeps a note in it and reads it back,
-// and stops cleanly. The job runs once on the same file and prunes the
+// stand-in, fetch.ts with the repositories over the D1 binding
+// (createOrm of ./orm/sqlite, D182). The server runs under Bun on a sqlite:
+// URL: it opens the file, answers /readyz, keeps a note in it and reads it
+// back through Deps.orm, the same repositories over the file, and
+// stops cleanly. The job runs once on the same file and prunes the
 // empty note. On a postgres:// URL, or a D1 binding, which only a Worker
 // reaches, the server refuses to start, naming the variable.
 func TestTypeScriptSQLiteEntrypointCompilesAndServes(t *testing.T) {

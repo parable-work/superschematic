@@ -952,12 +952,13 @@ func (r run) typeScriptDeps() (tsrestgen.DepsInfo, error) {
 
 // typeScriptORM is the type of the repositories the TypeScript API's
 // Deps.orm holds (D79), which the ./orm entry of db's TypeScript types
-// exports: db, the API's database, lists postgres first, so Deps.db is a
-// pool, generates TypeScript types, whose orm.ts runs on Postgres, and has
-// a table. Empty otherwise, and for a build that loads no dependency or has
-// no config for db.
+// exports: db, the API's database, generates TypeScript types, whose orm.ts
+// runs over Deps.db, a pool on Postgres or, for a DB service that lists
+// sqlite first, a SQLite file or a D1 binding on its statements there
+// (D116), and has a table. Empty otherwise, and for a build that loads no
+// dependency or has no config for db.
 func (r run) typeScriptORM(db, dialect string) (string, error) {
-	if dialect == registry.SQLDialectSQLite || r.Options.LoadDependency == nil {
+	if r.Options.LoadDependency == nil {
 		return "", nil
 	}
 	var cfg *schemaconfig.SchemaConfig
@@ -1378,6 +1379,17 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		}
 		if err := r.goServerSQLiteErr(db, schema); err != nil {
 			return deps, nil, err
+		}
+		// A Go API's Deps.DB is the ORM of its database's first dialect
+		// (D116): over a pool, or over the SQLite file.
+		if r.Options.DependencyConfig != nil {
+			if cfg, ok := r.Options.DependencyConfig(db); ok {
+				outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
+				if err != nil {
+					return deps, nil, fmt.Errorf("generator: schema config for %s: %w", db, err)
+				}
+				deps.SQLite = outputs.SQLDialects()[0] == registry.SQLDialectSQLite
+			}
 		}
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).

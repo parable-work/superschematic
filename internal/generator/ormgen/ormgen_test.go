@@ -159,8 +159,10 @@ func generateFixture(t *testing.T, svc string) *ORMOutput {
 		ModulePath:  "example.com/schemas/orm/" + svc,
 		TypesModule: "example.com/schemas/types/go/" + svc,
 		// fixture-queue-db lists the sqlite dialect, whose queues the ORM
-		// claims on SQLite too.
-		SQLite:   svc == queueFixture,
+		// claims on SQLite too; it, fixture-ledger-db, the tables both
+		// ORMs are held to, and fixture-workflow-db, whose writes run
+		// through the behaviors' core, have repositories on SQLite (D116).
+		SQLite:   svc == queueFixture || svc == tableParityFixture || svc == workflowFixture,
 		Registry: reg,
 		Clock:    codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
 	})
@@ -206,9 +208,9 @@ func TestWriteORMGolden(t *testing.T) {
 			"repository_role.go", "repository_session.go", "repository_user.go", "repository_user_api_key.go",
 			"repository_user_credential.go", "repository_user_role_grant.go",
 		}},
-		{"fixture-queue-db", []string{"repository_order.go", "repository_order_line.go", "repository_product.go", "queues.go", "queues_sqlite.go"}},
+		{"fixture-queue-db", []string{"repository_order.go", "repository_order_line.go", "repository_product.go", "queues.go", "queues_sqlite.go", "sqlite.go", "sqlite_order.go", "sqlite_order_line.go", "sqlite_product.go"}},
 		// The tables both ORMs are held to (D79).
-		{"fixture-ledger-db", []string{"repository_account.go", "repository_entry.go", "queues.go", "search.go"}},
+		{"fixture-ledger-db", []string{"repository_account.go", "repository_entry.go", "queues.go", "search.go", "queues_sqlite.go", "sqlite.go", "sqlite_account.go", "sqlite_entry.go"}},
 		// Encrypted<T> fields (D85): encrypted.go seals and opens them.
 		{"fixture-vault-db", []string{"repository_api_credential.go", "repository_plaid_item.go", "encrypted.go", "search.go"}},
 		// Tables and columns @table and @column name (D85).
@@ -223,7 +225,7 @@ func TestWriteORMGolden(t *testing.T) {
 		// Tables whose fields are behaviors (D103): rules.go embeds their
 		// layout, and each repository runs its writes and its fields'
 		// operations through the core.
-		{workflowFixture, []string{"repository_order.go", "repository_shipment.go", "rules.go"}},
+		{workflowFixture, []string{"repository_order.go", "repository_shipment.go", "rules.go", "sqlite.go", "sqlite_order.go", "sqlite_shipment.go"}},
 		// Tables that implement Timers (D103): their operations under
 		// Timers(), RunDeadline, no upsert, no repository of a sub-table,
 		// and the deadline queues.

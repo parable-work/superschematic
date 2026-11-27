@@ -15,7 +15,8 @@ types, repositories over Postgres or a SQLite file ([Rust](#rust)). The Go
 ORM and the TypeScript and Rust repositories run the same statements,
 which the compiler writes once. A service whose
 `outputs.sql.dialects` lists `sqlite` also gets SQLite DDL
-(`sql/<service>/sqlite/create.sql`; see [SQLite](/superschematic/reference/migrations/#sqlite)). This guide walks the acme
+(`sql/<service>/sqlite/create.sql`; see [SQLite](/superschematic/reference/migrations/#sqlite)),
+and the Go ORM's repositories on SQLite ([Go on SQLite](#go-on-sqlite)). This guide walks the acme
 shop's order and review tables in `shop-db`. [Your first project](/superschematic/first-project/database/)
 covers the basics of the users and products tables.
 
@@ -963,6 +964,25 @@ enqueues nothing. Postgres returns no such row, so the repository reads it
 back by its key in the same transaction and reports it `unchanged`. An
 `Encrypted<T>` field compares its plaintext, after the statement.
 
+The Rust repositories' `upsert_many(inputs, on, fields, options)` upserts
+many rows on Postgres and on a SQLite file, with the same statements and
+statuses (D89, D116). `fields` names each field by its member or its
+field, and `UpsertManyOptions` takes `only_if_changed` and `batch`:
+
+```rust
+let results = orm.entry()?.upsert_many(&page, &["account", "externalId"], &["amountCents", "memo"], UpsertManyOptions { only_if_changed: true, ..Default::default() })?;
+```
+
+On SQLite a batch is as many rows as SQLite binds the parameters of
+(32766 over the table's columns). SQLite's `VALUES` take no `DEFAULT`, so
+a batch whose inputs set different columns is a statement per set of
+columns, and the repository reads the rows that hold the batch's keys
+before them, which says which rows each inserted. Two inputs of one batch
+that hold one key are refused before anything runs, on both databases.
+The batches run in your transaction, which rolls back those before one
+that fails. A table that composes behaviors upserts a row at a time with
+`upsert_one`.
+
 ## Soft delete
 
 A table with nullable `deletedAt` and `deletedBy` fields, like `Review`, is
@@ -1372,7 +1392,9 @@ The types and the refusals (`rowrefs.Error` and its `Code`) are the
 schema runtime's `rowrefs` package; `bucket.ForAttachments` of the HTTP
 runtime is a listed bucket as the ORM reads it. A Go server serves
 neither as routes yet, as the TypeScript server does not: the
-implementation writes its routes over them.
+implementation writes its routes over them. They run on Postgres alone:
+on SQLite each call answers `ErrSQLiteUnsupported`
+([Go on SQLite](#go-on-sqlite)).
 
 ## State machines
 
@@ -2203,12 +2225,101 @@ The scope's type refuses a write. Postgres refuses one in a
 `ReadOnly()` on a database with no replica runs on the primary outside a
 transaction, so Postgres does not refuse a write in it.
 
+## Go on SQLite
+
+A DB service whose `outputs.sql.dialects` lists `sqlite` also gets its
+repositories on SQLite in the Go ORM (D116): `sqlite.go`, and a
+`sqlite_<table>.go` per table. They run the SQLite statements the Rust
+repositories run, and hold a value as the SQLite DDL stores it: a UUID as
+its hyphenated text, a timestamp in RFC 3339 in UTC to the millisecond, a
+boolean as 1 or 0, a list and a JSON value as JSON text, and a decimal as
+its text.
+
+`OpenSQLite(ctx, db)` opens them over a `*sql.DB` you opened with a
+driver. The ORM imports none. `SQLiteDSN(path)` is the data source name
+of a file as `modernc.org/sqlite` reads it: write-ahead logging, a busy
+timeout, foreign keys on, and transactions that begin `IMMEDIATE`, so a
+transaction that reads before it writes takes the write lock as it
+begins.
+
+```go
+raw, err := sql.Open("sqlite", orm.SQLiteDSN("shop_db.sqlite"))
+if err != nil {
+	return err
+}
+db, err := orm.OpenSQLite(ctx, raw)
+```
+
+A `*SQLiteDatabase` is a `DatabaseInterface`, and each table's repository
+its `ReviewRepositoryInterface`, so code written against the interfaces
+runs on either dialect. A generated Go API's `Deps.DB` is the ORM of its
+database's first dialect: over a pool, or over the SQLite file. The
+repositories read, write, filter, page and upsert as the Postgres ones do,
+call for call, and a SQLite constraint refuses a write as Postgres's
+`*pgconn.PgError` does: `23505` for a unique key, with its columns in the
+detail, `23503` for a foreign key, `23502` for a null, and `23514` for a
+check. What is Postgres's stays Postgres's:
+
+- `Query`, `QueryRow` and `Exec` answer pgx's rows and command tag, so on
+  SQLite they answer `ErrPostgresOnly`. `QueryContext` and `ExecContext`
+  on the database and on a transaction run raw SQL on SQLite, and
+  `SQL()` is the `*sql.DB` or the `*sql.Tx`.
+- A SQLite file has no read replica: `HasReadReplica()` is false, and
+  `ReadReplica()` and `ReadOnly()` are the database itself.
+- SQLite's transactions are serializable. `TransactionWith` checks its
+  isolation level and begins an ordinary transaction. A `*orm.SQLiteTx`
+  runs work after its commit as a `*orm.Tx` does (D166): `AfterCommit`,
+  `AfterCommitHook` and `CommitDuration`.
+- The declared queries answer `ErrPostgresOnly`.
+
+An upsert reads whether a row holds its key before the statement, in its
+transaction, since SQLite's upsert cannot say which rows it inserted.
+`UpsertMany` writes batches of as many rows as bind SQLite's 32766
+parameters, or `opts.Batch`, a statement per set of columns its inputs
+set, since a `VALUES` list on SQLite takes no `DEFAULT`, and reads the rows
+of each batch's keys before and after it, in one transaction (D89). Two
+inputs of one batch that hold one key are refused before it runs, with
+Postgres's SQLSTATE `21000`, as Postgres refuses to change a row twice in
+one statement.
+
+A table that composes behaviors writes its rows through the behaviors'
+core on SQLite too (D103): a create, an update, a delete and each use's
+operations run as the core's commands in the repository's transaction,
+over the rules module's SQLite store, and answer as they do on Postgres.
+Its upserts are refused with `ErrSQLiteUnsupported`, as the TypeScript
+repositories refuse its `upsertMany` there.
+
+A filter reaches through a one-to-many relation by its name, as on
+Postgres (D180), so a row rule's path through one holds on SQLite too. The
+repositories on SQLite keep to no audience, grants or access log, and
+write no references or attachments: the build refuses a DB service that
+lists `sqlite` and enables the Go types for an `@audience`,
+`@accessGrants`, `@accessLog`, `@references` or `@attachments` table,
+naming the decorator and the table
+([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)).
+The SQLite database and its transactions carry `References()` and
+`Attachments()` (D184), which a table's `Comments` gives a database too,
+and each of their calls answers `ErrSQLiteUnsupported`.
+
+A table SQLite does not hold has a repository that refuses every call with
+`ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
+`@versioned` table, an `Encrypted<T>` field, a `Mergeable` table, and a
+version graph's released rows. The SQLite DDL refuses a vector and a
+`@versioned` table for the whole service. A timestamp is held to the millisecond, so two rows written in one
+millisecond tie in an order by it, and their keys break the tie.
+
+An enqueue on SQLite takes the transaction itself
+(`EnqueueReviewWrittenSQLite(ctx, tx.(*orm.SQLiteTx), msg)`), so the
+message commits with the rows.
+
 ## TypeScript
 
-A DB service whose `outputs.types` lists TypeScript, and whose
-`outputs.sql.dialects` lists postgres, gets its tables' repositories in
-its types package's `./orm` entry (`@acme/shop-db-types/orm`), with the
-statements the Go ORM runs (D79). For each table it declares the row
+A DB service whose `outputs.types` lists TypeScript gets its tables'
+repositories in its types package's `./orm` entry
+(`@acme/shop-db-types/orm`), with the statements the Go ORM runs on
+Postgres (D79), and, when its `outputs.sql.dialects` lists sqlite, the same
+repositories on SQLite in its `./orm/sqlite` entry
+([On SQLite and D1](#on-sqlite-and-d1)). For each table it declares the row
 (`ReviewRow`), what a create and an update set (`ReviewCreate`,
 `ReviewUpdate`), the filter (`ReviewFilter`), the members a read orders by
 and a page sorts by, the unique keys, and the repository
@@ -2222,10 +2333,11 @@ whose total is then -1).
 
 <Snippet file="testdata/generated/types/typescript/shop-db/orm.ts" symbol="ReviewFilter" />
 
-An API whose database lists postgres first and has a table gets the
-repositories in its `Deps` as `orm`, beside the pool, `db`, which stays for
-the SQL they do not express and no [declared query](#declared-queries)
-holds. `shop-cart`, on
+An API whose database has a table gets the repositories in its `Deps` as
+`orm`, beside `db`, the pool or, for a database that lists sqlite first,
+the SQLite file under `stack dev` and the D1 binding on Workers, which
+stays for the SQL they do not express and no
+[declared query](#declared-queries) holds. `shop-cart`, on
 Bun, keeps a shopper's reviews and reorders through them, with no SQL of
 its own:
 
@@ -2299,11 +2411,35 @@ import { createOrm } from "@acme/shop-db-types/orm/sqlite";
 const orm = createOrm(openSqlite("shop.sqlite"), { fieldKeys: parseFieldKeys(secret) });
 ```
 
+`openNodeSqlite` of `./node-sqlite` opens the same file through
+`node:sqlite`, on Node.js and on Bun. A server's entrypoint opens the
+repositories itself: `main.ts` over the file under `stack dev`, and on
+Workers `fetch.ts` and `scheduled.ts` over the binding, so an API's
+`Deps.orm` is the repositories of its database's first dialect. The
+identity store of the user model runs over the same file
+(`sqlDatabaseIdentityStore`), taking its turns with the repositories; no
+store runs over D1 yet.
+
 A row holds each value as on Postgres. A statement binds a time as its RFC
 3339 text to the millisecond, as the SQLite DDL's defaults write one, so
-times compare in order as text, and a list as its JSON array. A read keeps
-to the caller's audience and grants, and `orm.references` and
-`orm.attachments` serve references and files, as on Postgres.
+times compare in order as text, and a list as its JSON array. A
+`Generic.JSON` column's filter compares the nodes `json_tree` reads of each
+value, as JSONB compares them. A read keeps to the caller's audience and
+grants, and `orm.references` and `orm.attachments` serve references and
+files, as on Postgres. A test runs one script of calls through bun:sqlite,
+node:sqlite, a D1 stand-in and Postgres and holds every answer to
+Postgres's.
+
+A write of several statements that are all known before the first runs
+goes as one unit, a savepoint of a transaction open on a file and one
+batch on D1: `createMany`, which inserts a row a statement, since a `VALUES`
+list on SQLite takes no `DEFAULT`; an upsert, which reads whether a row
+holds its key in the unit that upserts, since SQLite's upsert cannot say
+which rows it inserted; and `upsertMany`, whose batches are as many rows as
+bind 32766 parameters on a file and 100 on D1, a statement per set of
+columns, with the rows of each batch's keys read before and after it. Two
+inputs of one batch that hold one key are refused before it runs, as
+Postgres refuses to change a row twice in one statement (D89).
 
 | On SQLite and D1 | Why |
 | --- | --- |
@@ -2312,7 +2448,9 @@ to the caller's audience and grants, and `orm.references` and
 | on D1 a transaction's statements each commit as they run, and a throw rolls none back | D1 runs no interactive transaction; a write the repositories make in one statement, a trigger's work with it, is atomic there as anywhere, and an implementation that needs several so writes a batch |
 | no advisory lock | a transaction on SQLite holds the database's one write lock, and D1 runs each statement alone |
 | `fieldKeys` takes a `FieldKeyring` | reading a key secret needs `node:crypto`, which Bun has (`parseFieldKeys` of `./sqlite`) and a Worker does not, so an `Encrypted<T>` field is Postgres's and Bun's alone so far |
-| a table that composes behaviors is read, and a write of it is refused, as are upserts and `mergeInto` | the behaviors' core, an upsert's inserted flag and a merge's plan run on Postgres alone so far |
+| a table that composes behaviors writes through the core, over the rules module's SQLite store, and upserts a row at a time: its `upsertMany` is refused | the core's change set is one batch, a savepoint of the file's transaction and D1's atomic unit; the Rust repositories upsert such a table a row at a time too, and the Go ones on SQLite refuse its upserts |
+| on D1 a write whose later statement needs an earlier one's answer is refused by name: an upsert that seals an `Encrypted<T>` field, and `runEvent` | D1 runs no interactive transaction, so its statements would commit apart |
+| `mergeInto` is refused | a merge's plan runs on Postgres alone so far |
 | a table SQLite's repositories cannot hold is left out of the entry, with why | the Rust repositories leave out the same tables (`SQLiteTableRefusal`) |
 
 ### Relations in a read
@@ -2562,7 +2700,8 @@ repositories, a bulk, hard or soft delete, a script or psql. The trigger
 never refuses a write, and the API's `@behaviorWorker` of the table runs
 the messages after the commit, one row's in the order they were written.
 A Rust API's behavior worker claims on a SQLite file too (D116); no
-TypeScript or Go one claims on SQLite yet, and none on D1, where the
+TypeScript or Go one claims on SQLite yet, though the TypeScript
+repositories write a behavior table there, and none on D1, where the
 messages accumulate until one does. Such a table has no upserts when its behaviors
 keep sub-tables or arm deadlines. A table whose behaviors emit events
 about its rows (Schedules' runs, Pool's rechecks) gets an event queue,

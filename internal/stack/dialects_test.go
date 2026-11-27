@@ -13,9 +13,10 @@ import (
 // The database of a server, a job or a worker resolves to a dialect its
 // generated Deps reach (docs/stack-model.md, section 18.6, D64): a
 // TypeScript API's Deps.db is the client of its DB service's first
-// dialect, as a Rust API's is (D116), a Go API's Deps reach Postgres
-// alone, and a TypeScript API over the user model is refused on a
-// sqlite-first database.
+// dialect, as a Rust API's and a Go API's are (D116), with the
+// repositories on that dialect, a Go worker claims on Postgres alone, and a
+// TypeScript API over the user model keeps its users on a sqlite-first
+// database's file (D116).
 
 // notesStack is a stack of one API, notes, written in lang, on notes-db,
 // whose DB service lists dialects in order, with a local environment, Dev.
@@ -87,14 +88,32 @@ func TestATypeScriptAPIOnAnotherDialectThanItsFirstIsRefused(t *testing.T) {
 	}
 }
 
-// TestAGoAPIOnSQLiteIsRefused: a Go API's Deps reach Postgres alone, so a
-// sqlite-first database, which the local target keeps in a SQLite file, is
-// refused for its server.
-func TestAGoAPIOnSQLiteIsRefused(t *testing.T) {
+// TestAGoAPIRunsOnItsDatabasesFirstDialect: a Go API's Deps.DB is the ORM
+// of its database's first dialect (D116), as a Rust and a TypeScript one's
+// is: a sqlite-first database, which the local target keeps in a SQLite
+// file, resolves for its server, connected through the SQLite connector,
+// and one the fake target's Postgres sql platform holds is refused, naming
+// both dialects.
+func TestAGoAPIRunsOnItsDatabasesFirstDialect(t *testing.T) {
 	reg := assemble(t)
 	s, services := notesStack(registry.APILanguageGo, registry.SQLDialectSQLite, registry.SQLDialectPostgres)
-	_, errs := resolve(t, reg, s, services, "Dev")
-	mustFail(t, errs, stack.CodeUnrealizable, "server notes is a GO server on notes-db, and environment Dev places notes-db on notes-db, a sqlite database; a Go API's Deps reach Postgres alone, through the Go ORM (D64)")
+	env := mustResolve(t, reg, s, services, "Dev")
+	if db := env.Deployable("notes-db"); db == nil || db.Platform != "local.sqlite" || db.Dialect != registry.SQLDialectSQLite {
+		t.Fatalf("a Go server's sqlite-first notes-db = %+v, want it on local.sqlite", db)
+	}
+	id := ir.EdgeID(ir.EdgeSQL, "notes", "notes-db")
+	for _, e := range env.Edges {
+		if e.ID == id && e.Connector != "local.process-sqlite" {
+			t.Errorf("the sql edge %s goes through %q, want local.process-sqlite", id, e.Connector)
+		}
+	}
+
+	// The fake target's sql platform runs Postgres alone.
+	s, services = shop()
+	service(services, "shop-db").Dialects = []string{registry.SQLDialectSQLite, registry.SQLDialectPostgres}
+	service(services, "shop-api").Language = registry.APILanguageGo
+	_, errs := resolve(t, reg, s, services, "Staging")
+	mustFail(t, errs, stack.CodeUnrealizable, "server shop-api is a GO server on shop-db, whose DB service lists sqlite first, and environment Staging places shop-db on shop-db, a postgres database; a Go API's Deps.DB is the ORM of its database's first dialect (D64, D116)")
 }
 
 // TestARustAPIRunsOnItsDatabasesFirstDialect: a Rust API's Deps.db is the
@@ -119,16 +138,22 @@ func TestARustAPIRunsOnItsDatabasesFirstDialect(t *testing.T) {
 	mustFail(t, errs, stack.CodeUnrealizable, "server shop-api is a Rust server on shop-db, whose DB service lists sqlite first, and environment Staging places shop-db on shop-db, a postgres database; a Rust API's Deps.db is the client of its database's first dialect (D64, D116)")
 }
 
-// TestATypeScriptIdentityAPIOnASQLiteFirstDatabaseIsRefused: the identity
-// runtime's TypeScript store runs on Postgres, and none over SQLite is
-// built, so a TypeScript API over the user model on a sqlite-first
-// database is refused (D50).
-func TestATypeScriptIdentityAPIOnASQLiteFirstDatabaseIsRefused(t *testing.T) {
+// TestATypeScriptIdentityAPIRunsOnASQLiteFirstDatabase: the identity
+// runtime's TypeScript store runs over a SQLite file, beside the
+// repositories that share it (D116), so a TypeScript API over the user
+// model on a sqlite-first database resolves on the local target, its
+// server on the file, where it was refused before (D50).
+func TestATypeScriptIdentityAPIRunsOnASQLiteFirstDatabase(t *testing.T) {
 	reg := assemble(t)
 	s, services := notesStack(registry.APILanguageTypeScript, registry.SQLDialectSQLite, registry.SQLDialectPostgres)
 	service(services, "notes").Identity = true
-	_, errs := resolve(t, reg, s, services, "Dev")
-	mustFail(t, errs, stack.CodeUnrealizable, "server notes serves notes, which authenticates its users with the identity runtime over notes-db, whose DB service lists sqlite first; a TypeScript server's identity store runs on Postgres, and one over SQLite is not built (D50, D64)")
+	env := mustResolve(t, reg, s, services, "Dev")
+	if db := env.Deployable("notes-db"); db == nil || db.Platform != "local.sqlite" || db.Dialect != registry.SQLDialectSQLite {
+		t.Fatalf("notes-db = %+v, want it on local.sqlite", db)
+	}
+	if notes := env.Deployable("notes"); notes == nil || notes.Language != registry.APILanguageTypeScript {
+		t.Fatalf("notes = %+v, want a TypeScript server of the environment", notes)
+	}
 }
 
 // TestADatabaseOfTwoFirstDialectsStaysOnTheKindsPlatform: a database that
@@ -166,7 +191,8 @@ func backgroundNotes(lang string) (*ir.Stack, []stack.Service) {
 // worker and a Rust behavior worker of a sqlite-first database resolve on
 // the local target (D116), each connected to the database's SQLite file,
 // which the worker claims on and the behavior worker drains; the same in
-// Go stay refused, since a Go API's Deps reach Postgres alone.
+// Go the server and the job open the file too, and the workers, which
+// claim on Postgres alone, stay refused.
 func TestARustJobAndWorkerRunOnTheirDatabasesSQLiteFile(t *testing.T) {
 	reg := assemble(t)
 	s, services := backgroundNotes(registry.APILanguageRust)
@@ -197,9 +223,18 @@ func TestARustJobAndWorkerRunOnTheirDatabasesSQLiteFile(t *testing.T) {
 		}
 	}
 
+	// In Go, the server and the job open the file (D116), and the worker
+	// and the behavior worker, which claim on Postgres alone, are refused.
 	s, services = backgroundNotes(registry.APILanguageGo)
 	_, errs := resolve(t, reg, s, services, "Dev")
-	for _, refused := range []string{"server notes is a GO server", "job notes-prune-notes is a GO job", "worker notes-index-notes is a GO worker", "worker notes-note-timers is a GO worker"} {
-		mustFail(t, errs, stack.CodeUnrealizable, refused+" on notes-db, and environment Dev places notes-db on notes-db, a sqlite database; a Go API's Deps reach Postgres alone, through the Go ORM (D64)")
+	for _, refused := range []string{"worker notes-index-notes is a GO worker", "worker notes-note-timers is a GO worker"} {
+		mustFail(t, errs, stack.CodeUnrealizable, refused+" on notes-db, and environment Dev places notes-db on notes-db, a sqlite database; a Go worker claims its queue on Postgres alone (D64, D116)")
+	}
+	for _, err := range errs.Of(stack.CodeUnrealizable) {
+		for _, opens := range []string{"server notes is a GO server", "job notes-prune-notes is a GO job"} {
+			if strings.Contains(err.Message, opens) {
+				t.Errorf("a Go deployable that opens the file is refused: %s", err.Message)
+			}
+		}
 	}
 }
