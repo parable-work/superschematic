@@ -93,11 +93,17 @@ or its only type. A document may also be the type itself, with `name`,
   `status: Workflow<{ ... }>` is. One with no field is anchored on the
   type, as `implements` is. A General schema's behaviors read this way, so
   `@behavior` documents run unchanged.
+- An entry with no field, of a behavior whose declaration names a value
+  field, is anchored on a field of that name, as the table `format
+  --to=ts` writes the schema as has it (D117). A General schema's
+  Workflow is the field `status`, its use is `status`, and a type with a
+  `status` field of its own is refused. Numbering's is `label`.
 
 A behavior's fields read as a table's columns do. A field use's value is
 the field itself (`status`), and its other fields follow the field's name
 (`statusEnteredAt`). A type use's fields follow the behavior's storage key
-(`workflowStatus`). Only the behavior's operations change them.
+(`leaseHolder`, `commentsMessages`). Only the behavior's operations change
+them.
 
 The behaviors ported onto the core run here: Workflow, Reactions,
 Constants, StateRules, Approvals, Timers, Lease, Presence, Budget, Retries,
@@ -198,6 +204,53 @@ The server runs the queues after each request and the deadlines each
 second. A Rust host of its own mounts the same routes with
 `superschematic_rules_dev::server::router`, and authenticates as it
 likes.
+
+## Moving to runtime mode
+
+A schema worked out here moves on to runtime mode with a publish of the
+same schemas to a runtime database
+([Runtime mode](/superschematic/guides/runtime-mode/)). Its first plan
+starts from an empty database. `superschematic-dev move` makes that
+publish from a store:
+
+```bash
+cargo run -p superschematic-rules-dev --features server --bin superschematic-dev -- \
+  move --db dev.db --to runtime.db --service jobs-db --rows
+```
+
+| Flag | What it does |
+|------|--------------|
+| `--db FILE` | The development store's SQLite file, which a TypeScript store may have written too. |
+| `--postgres URL --schema NAME` | A store in a schema of a Postgres database, with the `postgres` feature. |
+| `--to FILE\|URL` | The runtime database: a SQLite file, or a `postgres://` URL with the `postgres` feature. |
+| `--service NAME` | The DB service the schemas publish as. The name they share unless given. |
+| `--rows` | Replay the store's rows too. |
+| `--allow HAZARD` | A hazard the publish allows, by its id; repeatable. |
+
+The schemas are each type's live version. A General schema publishes as
+the tables `format --to=ts` writes it as: the instance type a table, keyed
+by `id` where it marks no key, its Workflow the field `status`, and its
+other behaviors ones the table implements. The rows the store holds and
+the store itself are left as they are.
+
+Sample rows stay behind unless `--rows` asks for them. Then each row is
+replayed as a create through its type's rules, as the runtime host's
+runner:
+
+- A row carries its own fields and its id, and nothing a behavior keeps.
+  A Workflow starts in its initial state, a Numbering takes the next
+  number, and comments, leases and deadlines do not move.
+- A row is created after the rows its relations point at. A row of a
+  cycle of relations is refused as its create refuses it.
+- A create runs its type's rules, so a create that makes other rows, such
+  as Blueprint's steps, makes them again beside the replayed ones.
+- A row the runtime refuses is listed under `rows.refused` with its
+  refusal, and the rest move.
+
+Rows replay only into an empty runtime database, one no publish has
+reached. The command prints the publish's answer as JSON, with `rows`:
+how many were replayed and the ones refused. A Rust host calls
+`Runtime::publish_from` with any store.
 
 ## Routes
 

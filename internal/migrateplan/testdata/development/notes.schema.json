@@ -1,0 +1,32 @@
+{
+  "kind": "General",
+  "name": "notes",
+  "description": "A note that moves from draft through review to published, collects comments, and keeps its revisions. A change to it can be proposed for an editor to approve.",
+  "types": {
+    "Note": {
+      "name": "Note",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        {
+          "name": "Workflow",
+          "config": {
+            "states": ["draft", "review", "published", "archived"],
+            "transitions": [
+              { "from": "draft", "to": "review" },
+              { "from": "review", "to": "draft" },
+              { "from": "review", "to": "published", "permission": "notes.publish" },
+              { "from": "published", "to": "archived", "permission": "notes.publish" }
+            ]
+          }
+        },
+        { "name": "Comments" },
+        { "name": "Revisions", "config": { "review": { "permission": "notes.review" } } }
+      ],
+      "fields": [
+        { "name": "title", "description": "The note's title.", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "body", "description": "The note's text.", "typeRef": { "name": "string" } },
+        { "name": "tags", "description": "Words to find the note by.", "typeRef": { "name": "string", "isArray": true } }
+      ]
+    }
+  }
+}

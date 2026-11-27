@@ -616,7 +616,11 @@ service's types is refused. The naming is `--naming`'s, else the
 the defaults. A Postgres plan of documents that declare queries (`@query`)
 is refused, since it would not prepare them: plan the service directory.
 Documents plan as their service directory plans: the same model, and from
-the same model the same plan.
+the same model the same plan. Documents that are all General are
+development mode's, each an instance type and its behaviors, and plan as
+the tables of one DB service: `--service` names it, else it is the name
+they share
+([General documents](/superschematic/reference/migrations/#general-documents)).
 
 `--request <file>` answers a plan request, for a library that runs the
 binary, such as a runtime environment's handler at a publish (D117). It
@@ -627,7 +631,8 @@ the file or on stdin with `-`:
 | --- | --- | --- |
 | `version` | yes | `1` |
 | `dialect` | yes | `postgres` or `sqlite` |
-| `documents` | yes | every schema document of one DB service, each as `format --to=json` writes it |
+| `documents` | yes | every schema document of one DB service, each as `format --to=json` writes it, or development mode's General documents |
+| `service` | no | the DB service General documents lower into; the name they share when it is left out. A DB service's documents must name it when it is given |
 | `from` | yes | the model the database recorded, as `superschematic-migrate status --model` prints it, or `null` for an empty database |
 | `renames` | no | renames, as `--rename` takes them |
 | `failOn` | no | hazard classes, or `all`, as `--fail-on` takes them |
@@ -689,8 +694,34 @@ superschematic migrate plan --request - < request.json > response.json
 | `--print-model` | false | print the new version's model as canonical JSON, for `superschematic-migrate adopt`, and plan nothing; takes none of the plan flags. With `--from-database` it prints the file's model, and takes the `--rename` and `--drop` the plan from the file is given |
 | `--database-url` | `$SUPERSCHEMATIC_QUERIES_DATABASE_URL`, else Postgres in Docker | a Postgres server whose role may create a database, which the new version's queries are prepared on |
 | `--documents` | false | take the new version as the arguments: one DB service's schema documents, as `format --to=json` writes them, or `-` for stdin |
+| `--service` | the name the documents share | with `--documents`, the DB service development mode's General documents lower into |
 | `--request` | none | answer the plan request in this file, or on stdin with `-`, with one line of JSON on stdout |
 | `--naming` | `<service-dir>/../../superschematic.toml`; with `--documents`, the one found walking up from the first document | naming config file |
+
+## `migrate export --database-url <url> --out <service-dir>`
+
+Write a runtime database's schemas as a compiled project's DB service
+(D117). It reads the record of the database's last publish,
+`superschematic_runtime`, and the model the publish took the database to,
+through `superschematic-migrate record` on `PATH` or where
+`$SUPERSCHEMATIC_MIGRATE` names it, and writes `schema.config.ts`, a
+`src/<type>.schema.ts` per published document in the table form, and
+`model.json`, the recorded model. No row moves: the build's first plan,
+`migrate plan <service-dir> --from <service-dir>/model.json`, is empty
+unless the compiler changed
+([Export a runtime database](/superschematic/reference/migrations/#export-a-runtime-database)).
+
+```
+superschematic migrate export --database-url runtime.db --out schemas/services/notes-db
+superschematic migrate export --database-url postgres://migrator@db/tasks --out ./tasks-db
+```
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--database-url` | `$DATABASE_URL` | the runtime database: a `postgres://` URL, a SQLite file or a `d1://` URL, as the runner takes it |
+| `--out` | (required) | the service directory to write |
+| `--naming` | the `superschematic.toml` found walking up from `--out` | naming config file |
+| `--force` | false | replace files that exist |
 
 ## `queries verify <service-dir>`
 
@@ -796,6 +827,14 @@ superschematic format --to=json ./src/orders.schema.ts --force
 
 `format` discovers `superschematic.toml` by walking up from the file.
 There is no `--naming` flag.
+
+`--to=ts` writes a General file's type that composes behaviors on the
+type, development mode's `@behavior` form, as the table it publishes as
+in runtime and compiled mode (D117): a class keyed by `id` where it marks
+no key, a behavior whose declaration names a value field as that field's
+type (`status: Workflow<{ ... }>`), every other behavior one the class
+implements, and descriptions as comments. The file then belongs to a DB
+service. A type with a field named as such a value field is refused.
 
 The file is read with the binary's registry, so a file that uses a linked
 extension's kind, decorators, documents or behaviors converts between JSON
