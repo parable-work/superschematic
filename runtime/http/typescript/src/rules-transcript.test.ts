@@ -163,6 +163,10 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   // Aliased (D147): names unique across rows in a shared table, a removed
   // alias's and a deleted row's rows deleted.
   { file: 'core-aliased', floor: 46 },
+  // The core's bundles (D103's step 5): Reservation, Barrier, Mailbox and
+  // Assignment, each a table whose uses are the parts the loader expands
+  // the bundle into.
+  { file: 'core-bundles', floor: 84 },
   // The declarative vocabulary (D103's step 5): test.Votes, whose
   // declaration states its rules, which the transcript holds whole and the
   // core is handed (declare) before the replay.
