@@ -35,9 +35,12 @@ import (
 // carries a table's calendar sources and search index, and the schema
 // runtime's crosstable package reads them. A calendar source a Go server
 // reads is refused a title of an Encrypted<T> field, which the Go read
-// across tables takes from its column, and a Go server whose database
-// lists sqlite first is refused Recurrence and the calendar
-// (GoServerSQLiteErr), as Rust's is (D188).
+// across tables takes from its column. A Go server serves search,
+// Recurrence and the calendar on Postgres alone, so the build refuses
+// them over a database that lists sqlite first (GoServerSQLiteErr), as
+// Rust's refuses Recurrence and the calendar (D188): the loader lets a
+// database's TypeScript and Go types declare @searchable on SQLite (D186),
+// where only the TypeScript repositories search.
 //
 // Events and the notifier (D153) are served on Postgres (D190): the
 // generated ORM of a database that uses the notifier carries its tables'
@@ -89,10 +92,11 @@ func GoServerDatabaseErr(api, db *ir.Schema) error {
 // api, a Go server, that a Go server on a database that lists sqlite
 // first does not serve (D187, D192), or nil: a table that composes
 // Recurrence, whose operations and deadline worker the Go adapter runs on
-// Postgres, a calendar source, which the crosstable package reads on
-// Postgres alone, and the parties' and agents' tables, which the inbound
-// path and the dispatcher read by Postgres's statements. The generator
-// calls it with the database's dialects.
+// Postgres, a calendar source, and a @searchable table, which the
+// crosstable package reads and ranks with Postgres statements alone, and
+// the parties' and agents' tables, which the inbound path and the
+// dispatcher read by Postgres's statements. The generator calls it with
+// the database's dialects for every Go server over a database.
 func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 	if api == nil || db == nil || len(dialects) == 0 || dialects[0] != registry.SQLDialectSQLite {
 		return nil
@@ -109,6 +113,9 @@ func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 		if len(td.CalendarSources) > 0 {
 			features = append(features, name+": @calendarSource")
 		}
+		if td.Searchable != nil {
+			features = append(features, name+": @searchable")
+		}
 		for _, mark := range orchestrationMarks(td) {
 			features = append(features, name+": "+mark)
 		}
@@ -116,7 +123,7 @@ func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 	if len(features) == 0 {
 		return nil
 	}
-	return fmt.Errorf("the Go server of %s is over %s, whose DB service lists sqlite first, and serves %s on Postgres alone so far (D152, D157, D158, D187, D192); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", api.Name, db.Name, strings.Join(features, ", "), db.Name)
+	return fmt.Errorf("the Go server of %s is over %s, whose DB service lists sqlite first, and serves %s on Postgres alone so far (D152, D155, D157, D158, D187, D192); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", api.Name, db.Name, strings.Join(features, ", "), db.Name)
 }
 
 // checkGoTables refuses the table features of schema, a Go server's

@@ -533,6 +533,97 @@ fn a_relative_recurrence_reads_its_date_through_the_relation() {
     assert_eq!(answer["planned"], json!([]));
 }
 
+fn contract(host: &mut Host, ends_on: &str) {
+    host.memory.others.insert(
+        ("Contract".to_owned(), "c1".to_owned()),
+        Row {
+            own: json!({"endsOn": ends_on}).as_object().unwrap().clone(),
+            owned: Default::default(),
+            version: 1,
+        },
+    );
+}
+
+// A relative recurrence's date is another row's, whose write no write of
+// its own row says: setRecurrence with the rule the row holds plans again
+// from the date as it is now, and answers unchanged only when that dates
+// what the row already holds.
+#[test]
+fn set_recurrence_with_the_rule_a_relative_row_holds_follows_its_targets_date() {
+    let sixty_before = || json!({"anchor": "relative", "offset": "-P60D"});
+    let mut host = hosting(monthly(), json!({"contract": "c1"}));
+    contract(&mut host, "2026-05-30");
+    let set = result(call(
+        &mut host,
+        &manager(),
+        T0,
+        "setRecurrence",
+        sixty_before(),
+    ));
+    assert_eq!(set["planned"], json!(["2026-03-31T00:00"]));
+    // The contract's end moves a month on, by a write the filing never
+    // hears: the same rule again dates the occurrence from it, and the
+    // recurrence stays as it was set.
+    contract(&mut host, "2026-06-30");
+    let moved = result(call(
+        &mut host,
+        &manager(),
+        T0 + HOUR,
+        "setRecurrence",
+        sixty_before(),
+    ));
+    assert_eq!(moved["planned"], json!(["2026-05-01T00:00"]));
+    assert_eq!(moved.get("unchanged"), None);
+    assert_eq!(moved["recurrence"], set["recurrence"]);
+    assert_eq!(
+        states(&host),
+        vec![("2026-05-01T00:00".to_owned(), "upcoming".to_owned())]
+    );
+    // 2026-05-01T00:00 in New York (EDT) is 04:00Z.
+    let may = 1_777_608_000_000;
+    assert_eq!(host.row("f1").owned["Recurrence"]["nextDueAt"], json!(may));
+    assert_eq!(armed(&host, "open"), Some(may - 7 * DAY));
+    // With the date where the plan read it, the same rule changes nothing
+    // and writes nothing.
+    let version = host.row("f1").version;
+    let again = result(call(
+        &mut host,
+        &manager(),
+        T0 + 2 * HOUR,
+        "setRecurrence",
+        sixty_before(),
+    ));
+    assert_eq!(again["unchanged"], json!(true));
+    assert_eq!(again["planned"], json!(["2026-05-01T00:00"]));
+    assert_eq!(host.row("f1").version, version);
+    // An occurrence that has opened stays as it is, as a rule change
+    // leaves it: once May's has opened and the date moves again, the plan
+    // keeps it and dates the new one after it.
+    fire(&mut host, may - 7 * DAY);
+    assert_eq!(states(&host)[0].1, "open");
+    contract(&mut host, "2026-07-30");
+    let late = result(call(
+        &mut host,
+        &manager(),
+        may - 6 * DAY,
+        "setRecurrence",
+        sixty_before(),
+    ));
+    assert_eq!(late["kept"], json!(["2026-05-01T00:00"]));
+    assert_eq!(
+        late["planned"],
+        json!(["2026-05-01T00:00", "2026-05-31T00:00"])
+    );
+    assert_eq!(late.get("unchanged"), None);
+    assert_eq!(
+        states(&host),
+        vec![
+            ("2026-05-01T00:00".to_owned(), "open".to_owned()),
+            ("2026-05-31T00:00".to_owned(), "upcoming".to_owned())
+        ]
+    );
+}
+
 #[test]
 fn set_recurrence_holds_its_parameters() {
     let mut host = hosting(json!({"anchors": ["calendar"]}), json!({}));

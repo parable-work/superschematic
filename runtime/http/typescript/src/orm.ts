@@ -3460,14 +3460,33 @@ class TableRepository {
   }
 
   /**
+   * error as an operation of a row throws it when the row is one its caller
+   * is kept from (D156): the NotFoundError over the not_found refusal the
+   * core answers for a key no row holds, in the core's own words
+   * (`{type} {key} does not exist`, the key in its wire form), so a
+   * behavior's route answers the two alike, 404 not_found, and never says
+   * which. Any other error is returned as it is.
+   */
+  private keptNotFound(error: unknown, id: unknown): unknown {
+    if (!(error instanceof NotFoundError) || error.cause !== undefined) return error;
+    const refusal = new RulesRefusal({ code: 'not_found', status: 404, class: 'EngineError', message: `${this.def.name} ${this.wireKey(id)} does not exist` });
+    return Object.assign(error, { cause: refusal });
+  }
+
+  /**
    * Runs an operation of one of the table's uses on a row, in a transaction,
    * as options.caller presenting options.preconditions, and resolves to its
    * result; NotFoundError for a key no live row holds, and for a row the
    * caller does not see, or for an operation that writes, may not write
-   * (D156), as a read, an updateOne and a deleteOne of it are.
+   * (D156), as a read, an updateOne and a deleteOne of it are, each over
+   * the core's not_found refusal.
    */
   private async operate(useId: string, operation: string, writes: boolean, key: unknown, params: unknown, options: RulesCallOptions = {}): Promise<unknown> {
-    await this.requireReach(key, writes);
+    try {
+      await this.requireReach(key, writes);
+    } catch (error) {
+      throw this.keptNotFound(error, key);
+    }
     return this.atomically(async repo => {
       const host = repo.rulesHost();
       const action = { kind: 'operation' as const, key: repo.wireKey(key), useId, operation, params: params ?? {} };

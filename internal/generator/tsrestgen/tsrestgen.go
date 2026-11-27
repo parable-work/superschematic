@@ -791,6 +791,20 @@ func (o *APIOutput) HasDownloadsAny() bool {
 	return false
 }
 
+// ReadsBodyLimits reports whether buildRouter reads an operation's
+// RouterOptions.bodyLimits entry: every mounted operation's but a
+// @manualRouteRegistration one's, whose handler reads its own body. The
+// router declares the constant it reads them through only then, so a
+// consumer's noUnusedLocals finds none unused.
+func (o *APIOutput) ReadsBodyLimits() bool {
+	for _, endpoint := range o.Endpoints {
+		if endpoint.IdentityOperation != "" || !endpoint.ManualRouteRegistration {
+			return true
+		}
+	}
+	return false
+}
+
 // HasManualRoutes reports whether any operation is @manualRouteRegistration.
 func (o *APIOutput) HasManualRoutes() bool {
 	return len(o.ManualEndpoints) > 0

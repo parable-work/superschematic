@@ -151,6 +151,13 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     throw new Error('RouterOptions.orm is required: it runs the behavior operations of fixture-recurrence-api (D103)');
   }
   const router = new Hono<E>();
+  // The per-operation options, each read once: an optional chain on
+  // options for every operation deepens TypeScript's flow analysis of
+  // every later reference, which gives up on a function of some hundreds
+  // of operations (TS2563) and types every implementation as any.
+  const bodyLimits: NonNullable<typeof options.bodyLimits> = options.bodyLimits ?? {};
+  const rateLimits: NonNullable<typeof options.rateLimits> = options.rateLimits ?? {};
+  const timeouts: NonNullable<typeof options.timeouts> = options.timeouts ?? {};
   // The OpenAPI document at GET /api/openapi.json and its page at GET
   // /api/docs, as the Go and Rust servers serve them (D81).
   mountOpenAPI(router, openAPIJSON, 'fixture-recurrence-api', options);
@@ -173,9 +180,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<FilingRecurrenceCompleteResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.recurrenceComplete,
-      rateLimitPerMinute: options.rateLimits?.recurrenceComplete,
-      timeoutSeconds: options.timeouts?.recurrenceComplete,
+      bodyLimitBytes: bodyLimits.recurrenceComplete,
+      rateLimitPerMinute: rateLimits.recurrenceComplete,
+      timeoutSeconds: timeouts.recurrenceComplete,
     }
   );
   // Filing's Recurrence listOccurrences, a Recurrence (D103): the
@@ -197,9 +204,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<FilingRecurrenceListOccurrencesResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.recurrenceListOccurrences,
-      rateLimitPerMinute: options.rateLimits?.recurrenceListOccurrences,
-      timeoutSeconds: options.timeouts?.recurrenceListOccurrences,
+      bodyLimitBytes: bodyLimits.recurrenceListOccurrences,
+      rateLimitPerMinute: rateLimits.recurrenceListOccurrences,
+      timeoutSeconds: timeouts.recurrenceListOccurrences,
     }
   );
   // Filing's Recurrence moveOne, a Recurrence (D103): the
@@ -220,9 +227,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<FilingRecurrenceMoveOneResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.recurrenceMoveOne,
-      rateLimitPerMinute: options.rateLimits?.recurrenceMoveOne,
-      timeoutSeconds: options.timeouts?.recurrenceMoveOne,
+      bodyLimitBytes: bodyLimits.recurrenceMoveOne,
+      rateLimitPerMinute: rateLimits.recurrenceMoveOne,
+      timeoutSeconds: timeouts.recurrenceMoveOne,
     }
   );
   // Filing's Recurrence setRecurrence, a Recurrence (D103): the
@@ -244,9 +251,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<FilingRecurrenceSetRecurrenceResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.recurrenceSetRecurrence,
-      rateLimitPerMinute: options.rateLimits?.recurrenceSetRecurrence,
-      timeoutSeconds: options.timeouts?.recurrenceSetRecurrence,
+      bodyLimitBytes: bodyLimits.recurrenceSetRecurrence,
+      rateLimitPerMinute: rateLimits.recurrenceSetRecurrence,
+      timeoutSeconds: timeouts.recurrenceSetRecurrence,
     }
   );
   // Filing's Recurrence skip, a Recurrence (D103): the
@@ -268,9 +275,9 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       ) as Promise<FilingRecurrenceSkipResult>,
     options,
     {
-      bodyLimitBytes: options.bodyLimits?.recurrenceSkip,
-      rateLimitPerMinute: options.rateLimits?.recurrenceSkip,
-      timeoutSeconds: options.timeouts?.recurrenceSkip,
+      bodyLimitBytes: bodyLimits.recurrenceSkip,
+      rateLimitPerMinute: rateLimits.recurrenceSkip,
+      timeoutSeconds: timeouts.recurrenceSkip,
     }
   );
   // The MCP endpoint (outputs.api.mcp, D81): the visible @mcp tools at
