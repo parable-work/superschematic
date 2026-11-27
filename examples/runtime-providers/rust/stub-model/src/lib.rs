@@ -58,6 +58,7 @@ impl ModelProvider for Stub {
                         output_tokens: 1,
                         amount: None,
                     },
+                    provider_state: None,
                 });
             }
         }
@@ -77,6 +78,7 @@ impl ModelProvider for Stub {
                 output_tokens,
                 amount: None,
             },
+            provider_state: None,
         })
     }
 

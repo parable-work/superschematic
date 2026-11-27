@@ -14,7 +14,7 @@ stop switch ends every run in flight.
 
 | Built | Not built yet |
 | --- | --- |
-| `@agents("<part>")` on the orchestration's tables, which the build fills | Go and Rust runtimes; SQLite and D1 |
+| `@agents("<part>")` on the orchestration's tables, which the build fills | the Go runtime; SQLite and D1 |
 | run requests on a queue from routes, assignments, schedules, principals and inbound messages | a real container platform's sandbox provider and a model API's provider |
 | the run's token as a grant per target row, acting for its principal, its paths narrowed to a party's grant | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
 | autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | |
@@ -22,7 +22,8 @@ stop switch ends every run in flight.
 | budgets per agent and in total, warnings, pauses; stop switches | |
 | asking in a row's thread, with a follow-up row at the deadline | |
 | redacted transcripts in a bucket; credentials that stay in the sandbox | |
-| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | |
+| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | a generated Rust server that does the same |
+| the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres | |
 
 D158 and D183 in [docs/DECISIONS.md](https://github.com/parable-work/superschematic/blob/main/docs/DECISIONS.md)
 record the design and what is left. `examples/agent-orchestration` is
@@ -242,3 +243,52 @@ inbound message reach the model marked untrusted, and the run counts them.
 
 A transcript is kept 30 days after its run ends (`transcriptRetentionDays`);
 `prune` deletes it from the bucket. The run row stays.
+
+## In Rust
+
+The Rust HTTP runtime's `orm::agents` is the same dispatcher, on Postgres
+(D193). The Postgres definition of a generated Rust types crate carries
+each table's `@agents` part, so `Agents::new` finds the definitions, the
+runs, the policies, the approvals and the controls by itself, and the
+crate re-exports the module. The notifier takes the dispatcher's reply
+actions and its requests queue, so it is built after the dispatcher, and
+the dispatcher is given the notifier and the inbound path once they are:
+
+```rust
+use superschematic_http_runtime::orm::agents::{AgentTool, Agents, OperationClass};
+
+let requests = QueueDefinition::parse(queues::AGENT_RUN_REQUEST_QUEUE)?;
+let agents = Agents::new(orm::postgres::tables(pool.clone()), requests.clone(), "http://localhost:8080/api/agents")?
+    .with_providers(deps.providers.clone())
+    .with_tool("read_task", AgentTool::new("Reads a task.", schema, OperationClass::Read, Arc::new(ReadTask)))
+    .with_search(SearchOptions::default());
+let [(approve, approve_action), (deny, deny_action)] = agents.reply_actions();
+let notifier = Notifier::new(orm::postgres::tables(pool.clone()), dispatch)?
+    .with_reply("approval.requested", approve, approve_action)
+    .with_reply("approval.requested", deny, deny_action)
+    .with_agents(requests);
+let inbound = Inbound::new(orm::postgres::tables(pool.clone()), notifier.clone(), runs)?
+    .with_approval(agents.send_approval());
+agents.set_notifier(notifier.clone());
+agents.set_inbound(inbound.clone());
+
+// The agent routes, ahead of the API's router, and the MCP endpoint's gate.
+let router = agents.routes(Some(authenticator.clone())).merge(api_router);
+let mcp = EndpointOptions::default().with_call_gate(agents.mcp_gate());
+// The requests queue's worker.
+run_worker(agents.worker_queue(), move |message| { let agents = agents.clone(); async move { Ok(agents.handle(message).await?) } }, options, shutdown).await?;
+```
+
+A tool of the app is an `AgentToolRun`, given the repositories of a
+transaction that act as the run's principal. A run's token resolves
+through `principal_of`, or `authenticator(inner)` on the API's own routes.
+The MCP tool records of a generated Rust router carry each operation's
+`@autonomy`, which `mcp_gate` holds an agent run's call to once the app
+passes it in the router's MCP endpoint options; the generated Rust server
+does not build the dispatcher into its `Deps` yet. The sandbox's side is
+`providers::run_agent_instance`, under the runtime's `http-client`
+feature. The agent routes run each call's work in a task of its own, so a
+run cancelled while its turn runs, by a pause or a budget's cap, does not
+leave the work half done when its connection closes. A Rust types crate
+that lists `sqlite` is refused the orchestration, as the loader refuses it
+for every language.

@@ -347,6 +347,18 @@ pub mod postgres {
     // D191).
     pub use orm::notify;
 {{- end}}
+{{- if .ORM.Parties}}
+    // Parties, the inbound path and the conversations: a party's
+    // principal and identities, inbound messages, triage and sends (D157,
+    // D193).
+    pub use orm::{inbound, parties};
+{{- end}}
+{{- if .ORM.Agents}}
+    // The agent dispatcher over the database's orchestration tables: runs,
+    // their tokens, autonomy, approvals, budgets and stop switches (D158,
+    // D193).
+    pub use orm::agents;
+{{- end}}
 {{- if .BindsRules}}
     use orm::postgres::CoreClient;
     use rules::adapter;

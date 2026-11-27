@@ -15,9 +15,9 @@
 //! router of the checks that no client reaches.
 
 use super::{
-    caller_of, check_route_tools, outcome_of, problem_of, serve, tool_request, CallOutcome,
-    ConfirmationStore, Confirmations, Options, Problem, RouteTool, ServerInfo, Tool, ToolError,
-    ToolSet, MCP_MAX_BODY_BYTES, MCP_PATH,
+    caller_of, check_route_tools, outcome_of, problem_of, serve, tool_request, CallGate,
+    CallOutcome, ConfirmationStore, Confirmations, Options, Problem, RouteTool, ServerInfo, Tool,
+    ToolError, ToolSet, MCP_MAX_BODY_BYTES, MCP_PATH,
 };
 use crate::request_id::{request_id_of, request_ids};
 use crate::response::problem_body;
@@ -113,6 +113,10 @@ pub struct EndpointOptions {
     /// process's memory unless given, so a token is single-use per
     /// instance. A server of several instances passes one they share.
     pub confirmation_store: Option<Arc<dyn ConfirmationStore>>,
+    /// What holds each call before its route runs (D158): the agent
+    /// dispatcher's gate, which holds an agent run's call to its autonomy.
+    /// None runs every call its route admits.
+    pub call_gate: Option<Arc<dyn CallGate>>,
 }
 
 impl EndpointOptions {
@@ -127,6 +131,13 @@ impl EndpointOptions {
     #[must_use]
     pub fn with_confirmation_store(mut self, store: Arc<dyn ConfirmationStore>) -> Self {
         self.confirmation_store = Some(store);
+        self
+    }
+
+    /// The options with the gate each call passes before its route runs.
+    #[must_use]
+    pub fn with_call_gate(mut self, gate: Arc<dyn CallGate>) -> Self {
+        self.call_gate = Some(gate);
         self
     }
 }
@@ -145,6 +156,7 @@ impl fmt::Debug for EndpointOptions {
                 "confirmation_store",
                 &self.confirmation_store.as_ref().map(|_| ".."),
             )
+            .field("call_gate", &self.call_gate.as_ref().map(|_| ".."))
             .finish()
     }
 }
@@ -156,7 +168,13 @@ impl PartialEq for EndpointOptions {
             (Some(one), Some(other)) => std::ptr::addr_eq(Arc::as_ptr(one), Arc::as_ptr(other)),
             _ => false,
         };
+        let same_gate = match (&self.call_gate, &other.call_gate) {
+            (None, None) => true,
+            (Some(one), Some(other)) => std::ptr::addr_eq(Arc::as_ptr(one), Arc::as_ptr(other)),
+            _ => false,
+        };
         same_store
+            && same_gate
             && self.server_info == other.server_info
             && self.instructions == other.instructions
             && self.rate_limit_per_minute == other.rate_limit_per_minute
@@ -330,6 +348,7 @@ impl Mount<'_> {
             checks: self.checks,
             manual_routes: self.manual_routes,
             authenticator: self.authenticator,
+            call_gate: options.call_gate.clone(),
             server,
         });
         let route = controls.apply(post(answer).get(answer).delete(answer));
@@ -356,6 +375,8 @@ struct Endpoint {
     checks: Option<Router>,
     manual_routes: bool,
     authenticator: Option<Arc<dyn Authenticator>>,
+    // What holds each call before its route runs (D158).
+    call_gate: Option<Arc<dyn CallGate>>,
     // What the transport says about the server, without a request's caller
     // and id.
     server: Options,
@@ -508,6 +529,16 @@ impl ToolSet for RouterTools<'_> {
             Ok(request) => request,
             Err(problem) => return Ok(CallOutcome::Problem(problem)),
         };
+        // An agent run's call is held to its autonomy before its route runs
+        // (D158, D183).
+        if let Some(gate) = &self.endpoint.call_gate {
+            if let Some(problem) = gate
+                .check(self.principal.as_ref(), &entry.tool, arguments)
+                .await?
+            {
+                return Ok(CallOutcome::Problem(problem));
+            }
+        }
         let path = request.uri().path().to_owned();
         let response = handle(&self.endpoint.routes, request).await;
         Ok(outcome_of(&response, self.request_id, &path))

@@ -260,7 +260,9 @@ a reset code through the email adapter and sets the password with the
 identity service's `reset_password`. Rust has no ambient caller, so a
 recipient's read of the record opens the repositories for the recipient
 (`with_access`). The wall time of quiet hours and digests is read from
-Postgres, which holds the zone database. A route that names an agent is
-logged and reaches no one, as in TypeScript without an agent dispatcher:
-the Rust runtime does not serve agent runs yet. A Rust types crate that
-lists `sqlite` is refused the notifier, as every language is.
+Postgres, which holds the zone database. A route that names an agent puts
+a run request on the agent dispatcher's queue in the routing transaction,
+once `with_agents` gives the notifier that queue (D193); without it, the
+route's agent is logged and reaches no one. A party's address whose grants
+have all ended since it was verified is sent nothing. A Rust types crate
+that lists `sqlite` is refused the notifier, as every language is.
