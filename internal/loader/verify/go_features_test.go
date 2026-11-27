@@ -60,8 +60,6 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 		{"@event", func(td *ir.TypeDef) { td.Events = []*ir.EventDef{{Kind: "duty.due"}} }, "@event on Duty yet (D153, D180)"},
 		{"@notifier", func(td *ir.TypeDef) { td.Notifier = &ir.NotifierDef{} }, "@notifier on Duty yet (D153, D180)"},
 		{"@channelIdentities", func(td *ir.TypeDef) { td.ChannelIdentities = &ir.ChannelIdentitiesDef{} }, "@channelIdentities on Duty yet (D153, D180)"},
-		{"@references", func(td *ir.TypeDef) { td.RowReferences = &ir.RowReferencesDef{} }, "@references on Duty yet (D154, D180)"},
-		{"@attachments", func(td *ir.TypeDef) { td.Attachments = &ir.AttachmentsDef{} }, "@attachments on Duty yet (D154, D180)"},
 		{"@searchable", func(td *ir.TypeDef) { td.Searchable = &ir.SearchableDef{} }, "@searchable on Duty yet (D155, D180)"},
 		{"@party", func(td *ir.TypeDef) { td.Party = &ir.PartyDef{} }, "@party on Duty yet (D157, D180)"},
 		{"@conversations", func(td *ir.TypeDef) { td.Conversations = &ir.ConversationsDef{} }, "@conversations on Duty yet (D157, D180)"},
@@ -86,20 +84,31 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 		})
 	}
 
-	// Per-record access is served (D180).
-	served := table("Document", func(td *ir.TypeDef) { td.Audience = &ir.AudienceDef{} })
+	// Per-record access is served (D180), and references and attachments
+	// (D184).
+	served := table("Document", func(td *ir.TypeDef) {
+		td.Audience = &ir.AudienceDef{}
+		td.RowReferences = &ir.RowReferencesDef{}
+		td.Attachments = &ir.AttachmentsDef{Released: "FileReleased"}
+	})
 	served.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
 	served.Types["AccessEntry"] = &ir.TypeDef{Name: "AccessEntry", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
 	if got := goFeatureFindings(ir.NewSchema("app-api", ir.SchemaKindAPI), Input{GoServer: true, Database: served}); len(got) != 0 {
-		t.Fatalf("an audience, grants and the access log in Go: %v", got)
+		t.Fatalf("an audience, grants, the access log, references and attachments in Go: %v", got)
 	}
 
-	// An API's provider slots and an operation's autonomy.
+	// An API's provider slots are served, over providers of Go modules
+	// (D184); a provider of none, and an operation's autonomy, are not.
 	api := ir.NewSchema("app-api", ir.SchemaKindAPI)
 	api.Types["AppConfig"] = &ir.TypeDef{Name: "AppConfig", Owner: "src/config.ts", ProviderSlots: map[string]string{"SMS": "channel"}}
+	api.Providers = []*ir.RuntimeProvider{{Name: "relay-a", Implements: "channel", Path: "providers/relay-a", Module: "example.com/providers/relay-a"}}
+	if got := goFeatureFindings(api, Input{GoServer: true}); len(got) != 0 {
+		t.Fatalf("an API's slots over a Go provider: %v", got)
+	}
+	api.Providers = append(api.Providers, &ir.RuntimeProvider{Name: "relay-b", Implements: "channel", Path: "providers/relay-b"})
 	api.OperationSets = []*ir.OperationSet{{Name: "Duties", Operations: []*ir.FieldDef{{Name: "closeDuty", Autonomy: &ir.OperationAutonomy{}}}}}
 	got := goFeatureFindings(api, Input{GoServer: true})
-	if len(got) != 2 || !strings.Contains(got[0], "the provider slots of AppConfig (@providers) yet (D159, D180)") || !strings.Contains(got[1], "@autonomy on Duties.closeDuty yet (D158, D180)") {
-		t.Fatalf("an API's slots and autonomy: %v", got)
+	if len(got) != 2 || !strings.Contains(got[0], "the Go server of app-api cannot link runtime provider relay-b (providers/relay-b): its directory holds no Go module") || !strings.Contains(got[1], "@autonomy on Duties.closeDuty yet (D158, D180)") {
+		t.Fatalf("a provider of no Go module and autonomy: %v", got)
 	}
 }

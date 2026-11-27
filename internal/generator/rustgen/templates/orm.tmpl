@@ -73,7 +73,7 @@ use {{.HTTPRuntimeIdent}}::orm;
 pub use orm::{
     Caller, Constraint, ConstraintKind, Equals, Error, FieldCell, FieldKeyring, FieldKeys,
     FindOptions, Found, OrderBy, Ordered, PageOptions, ReferencedBy, Refusal, RowPage, Text,
-    UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
+    UpsertManyOptions, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
 };
 
 {{if gt (len .Scalars) 0 -}}
@@ -340,6 +340,22 @@ pub mod postgres {
     // What the references and attachments of the database's rows read and
     // answer (D154).
     pub use orm::rowfeatures;
+{{- end}}
+{{- if .ORM.Calendar}}
+    // The calendar read, feed and routes over the database's calendar
+    // sources (D152, D188).
+    pub use orm::calendar;
+{{- end}}
+{{- if .ORM.Searchable}}
+    // Search across the database's @searchable tables, its indexing and
+    // its route (D155, D188).
+    pub use orm::search_tables;
+{{- end}}
+{{- if .ORM.Notifications}}
+    // The notifier over the database's events, its notifier tables and its
+    // channel identities: raising, routing, delivering and replies (D153,
+    // D191).
+    pub use orm::notify;
 {{- end}}
 {{- if .BindsRules}}
     use orm::postgres::CoreClient;

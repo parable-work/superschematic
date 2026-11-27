@@ -66,6 +66,16 @@ func TestWriteTypesGolden(t *testing.T) {
 		// src/orm.rs carries them, and the repositories open references()
 		// and attachments().
 		{service: "fixture-references-db", core: true},
+		// Search across tables (D155, D188): each @searchable table's index
+		// in the Postgres definition, which orm::search_tables reads.
+		{service: "fixture-search-db", core: true},
+		// The calendar (D152, D188): a date source and a Recurrence's
+		// occurrences source, on Postgres alone, which orm::calendar reads.
+		{service: "fixture-recurrence-db", core: true, sqlite: true},
+		// Events and notifications (D153, D191): each table's events and
+		// what it is to the notifier, in the Postgres definition, which
+		// orm::notify reads.
+		{service: "fixture-notifications-db", core: true},
 	}
 
 	for _, tc := range cases {

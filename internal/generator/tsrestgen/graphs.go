@@ -160,13 +160,13 @@ func (o *APIOutput) GraphFacadeModule() string {
 // graph's refs through RouterOptions.orm, and takes each graph's facade
 // from the same types package.
 func (o *APIOutput) checkGraphDeps(deps DepsInfo) error {
-	if len(o.GraphSets) == 0 || depsORM(deps) {
+	if len(o.GraphSets) == 0 || (depsORM(deps) && deps.Dialect != SQLiteDialect) {
 		return nil
 	}
 	set := o.GraphSets[0]
 	why := fmt.Sprintf("enable outputs.types.typescript in %s's config", set.Database)
 	if deps.Dialect == SQLiteDialect {
-		why = fmt.Sprintf("%s lists sqlite first, and the repositories and the graph's facade run on Postgres alone (D138)", set.Database)
+		why = fmt.Sprintf("%s lists sqlite first, and the graph's facade runs on Postgres alone (D138)", set.Database)
 	}
 	return fmt.Errorf("tsrestgen: %s serves the operations of %s's version graph (@graphOperations on %s), which run through Deps.orm and the graph's facade, both of which %s's TypeScript types export for Postgres; %s", o.SchemaName, set.Root, set.Set, set.Database, why)
 }

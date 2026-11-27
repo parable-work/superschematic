@@ -67,6 +67,8 @@ var repositoryMembers = []string{
 	"clearActor", "runDeadline", "runChange", "runEvent", "refusePreconditions",
 	"viewer", "sees", "held", "accessConditions", "filterConditions", "reachFilter", "requireReach", "requireCreatedReach", "refuseHeldUpsert",
 	"wakeChanges",
+	// The repositories on SQLite and D1 (D182).
+	"refuseOnD1", "createRows", "upsertBatchesOnSQLite", "keyRead", "keysStatement",
 }
 
 // ORMUse is a use of a behavior on a table as orm.ts writes it: ID, the

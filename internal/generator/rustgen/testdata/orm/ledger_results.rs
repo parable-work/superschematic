@@ -81,10 +81,12 @@ fn refusal(err: &Error) -> Value {
         }
         Error::Constraint(constraint) => json!(format!("{:?}", constraint.kind)),
         Error::Busy(_) => json!("busy"),
+        Error::AccessRefused(_) => json!("access refused"),
         Error::Refused(refusal) => json!({"refused": refusal.code}),
         Error::Encryption(_) => json!("encryption"),
         Error::Definition(message) => json!({"definition": message}),
         Error::Database(message) => json!({"database": message}),
+        Error::AccessRefused(_) => json!("access refused"),
     }
 }
 
@@ -575,6 +577,51 @@ macro_rules! script {
         calls.push((
             "upsertEntryKeep",
             answer($run!(entries.upsert_one(&upsert, &on, &EntryUpdate::default(), UpsertOptions::default())), upserted),
+        ));
+
+        // Upserts of many rows (D89): a sync of three lines in batches of
+        // two, the first of which upsertEntry wrote; again, one line
+        // changed, only if changed; one that sets no field; lines that set
+        // different columns; and two lines of one key in one batch.
+        let line = |n: u8, external: &str, amount: i64| EntryCreate {
+            external_id: Some(external.to_owned()),
+            ..entry(n, bank, amount, "2026-10-27")
+        };
+        let all = |rows: Vec<Upserted<EntryRow>>| json!(rows.into_iter().map(upserted).collect::<Vec<_>>());
+        let sync = vec![line(20, "x1", 650), line(21, "x2", 700), line(22, "x3", 800)];
+        let in_twos = UpsertManyOptions { batch: Some(2), ..Default::default() };
+        calls.push(("upsertEntries", answer($run!(entries.upsert_many(&sync, &on, &["amountCents"], in_twos)), all)));
+        let mut changed = sync.clone();
+        changed[1].amount_cents = 750;
+        calls.push((
+            "upsertEntriesOnlyIfChanged",
+            answer(
+                $run!(entries.upsert_many(&changed, &on, &["amountCents"], UpsertManyOptions { only_if_changed: true, ..Default::default() })),
+                all,
+            ),
+        ));
+        calls.push(("upsertEntriesKeep", answer($run!(entries.upsert_many(&changed, &on, &[], UpsertManyOptions::default())), all)));
+        let mut mixed = vec![line(23, "x3", 850), line(24, "x4", 900)];
+        mixed[1].memo = Some("Lunch".to_owned());
+        calls.push(("upsertEntriesMixed", answer($run!(entries.upsert_many(&mixed, &on, &["amountCents", "memo"], UpsertManyOptions::default())), all)));
+        calls.push((
+            "upsertEntriesTwice",
+            answer($run!(entries.upsert_many(&[line(25, "x5", 1), line(26, "x5", 2)], &on, &["amountCents"], UpsertManyOptions::default())), all),
+        ));
+        calls.push(("upsertEntriesOfAKey", answer($run!(entries.upsert_many(&sync, &on, &["id"], UpsertManyOptions::default())), all)));
+        // More lines than D1 binds the parameters of in one statement, the
+        // TypeScript and Go scripts' call (D89); again, every other line
+        // changed, only if changed.
+        let mut many: Vec<EntryCreate> = (0..30u8).map(|i| line(40 + i, &format!("m{i}"), 1000 + i64::from(i))).collect();
+        calls.push(("upsertManyEntries", answer($run!(entries.upsert_many(&many, &on, &["amountCents"], UpsertManyOptions::default())), all)));
+        for (i, changed) in many.iter_mut().enumerate() {
+            if i % 2 == 0 {
+                changed.amount_cents += 100;
+            }
+        }
+        calls.push((
+            "upsertManyEntriesAgain",
+            answer($run!(entries.upsert_many(&many, &on, &["amountCents"], UpsertManyOptions { only_if_changed: true, ..Default::default() })), all),
         ));
 
         // Deletes: one that stamps the row, which a read then leaves out,

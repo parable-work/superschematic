@@ -1,22 +1,27 @@
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PING_TIMEOUT_MS, isSqlDatabase, ping, type SqlDatabase } from './d1';
+import { openNodeSqlite } from './node-sqlite';
 import { openSqlite, sqliteFile, type SqliteDatabase } from './sqlite';
 
 /*
-SqlDatabase over bun:sqlite (D64): what stack dev opens a sqlite-first
-database with, held to the D1 behaviors an implementation could rely on.
+SqlDatabase over bun:sqlite and over node:sqlite (D64, D116): what stack dev
+opens a sqlite-first database with, held to the D1 behaviors an
+implementation could rely on, on either driver.
 */
 
 const opened: SqliteDatabase[] = [];
 const dirs: string[] = [];
 
+/** The driver the cases of each describe open their files with. */
+let opener: (path: string) => SqliteDatabase = openSqlite;
+
 function open(): SqliteDatabase {
   const dir = mkdtempSync(join(tmpdir(), 'sqlite-test-'));
   dirs.push(dir);
-  const db = openSqlite(join(dir, 'shop.db'));
+  const db = opener(join(dir, 'shop.db'));
   opened.push(db);
   return db;
 }
@@ -39,7 +44,15 @@ async function shop(): Promise<SqliteDatabase> {
   return db;
 }
 
-describe('openSqlite', () => {
+for (const [name, openWith] of [
+  ['openSqlite', openSqlite],
+  ['openNodeSqlite', openNodeSqlite],
+] as const) {
+describe(name, () => {
+  beforeEach(() => {
+    opener = openWith;
+  });
+
   test('is a SqlDatabase', async () => {
     const db = open();
     expect(isSqlDatabase(db)).toBe(true);
@@ -157,7 +170,30 @@ describe('openSqlite', () => {
     await expect(db.prepare('SELECT 1').first()).rejects.toThrow('is closed');
     await expect(db.exec('SELECT 1')).rejects.toThrow('is closed');
   });
+
+  test('a batch in a transaction its caller began is a savepoint of it, which a failure rolls back alone', async () => {
+    const db = await shop();
+    const insert = db.prepare('INSERT INTO product (sku, name, in_stock) VALUES (?, ?, 1)');
+    await db.exec('BEGIN IMMEDIATE');
+    await insert.bind('tea', 'Tea').run();
+    await db.batch([insert.bind('cocoa', 'Cocoa')]);
+    await expect(db.batch([insert.bind('coffee', 'Coffee'), insert.bind('tea', 'Tea again')])).rejects.toThrow('UNIQUE');
+    await db.exec('COMMIT');
+    const { results } = await db.prepare('SELECT sku FROM product ORDER BY sku').all();
+    expect(results).toEqual([{ sku: 'cocoa' }, { sku: 'tea' }]);
+  });
+
+  test("a run's changes are the rows the statement itself changed, as D1 counts them, not a trigger's", async () => {
+    const db = await shop();
+    await db.exec('CREATE TABLE log (sku TEXT NOT NULL)\nCREATE TRIGGER logged AFTER UPDATE ON product BEGIN INSERT INTO log (sku) VALUES (NEW.sku); INSERT INTO log (sku) VALUES (NEW.sku); END');
+    await db.prepare("INSERT INTO product (sku, name, in_stock) VALUES ('tea', 'Tea', 1), ('cocoa', 'Cocoa', 1)").run();
+    expect((await db.prepare('UPDATE product SET in_stock = 0').run()).meta.changes).toBe(2);
+    expect(await db.prepare('SELECT count(*) AS n FROM log').first('n')).toBe(4);
+    // A read after a write changes nothing.
+    expect((await db.prepare('SELECT sku FROM product').all()).meta.changes).toBe(0);
+  });
 });
+}
 
 describe('sqliteFile', () => {
   test('reads the file a sqlite: URL names, as the migration runner does', () => {

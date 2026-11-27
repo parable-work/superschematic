@@ -223,11 +223,23 @@ type ORMOutput struct {
 	// written when Rules is set.
 	RulesReplacePath string
 
+	// SQLite is a database whose DB service lists the sqlite dialect
+	// (Options.SQLite): sqlite.go then holds the SQLite database, and each
+	// repository has a table on SQLite (Repository.SQLite) whose
+	// repository sqlite_<table>.go writes (D116).
+	SQLite bool
+
 	// Access is the database's per-record access (D156, D180), nil for a
 	// database with no @audience, @accessGrants or @accessLog table: it
 	// writes access.go, and go.mod requires the schema runtime, whose
 	// access package holds the principal.
 	Access *AccessModel
+
+	// RowFeatures are the database's references and attachments (D154,
+	// D184), nil for a database with no @references or @attachments table
+	// and no Comments: it writes rowrefs.go, and go.mod requires the
+	// schema runtime, whose rowrefs package runs them.
+	RowFeatures *RowFeaturesModel
 }
 
 // TxStatements are sqlutil's statements of a transaction of options and a
@@ -461,6 +473,15 @@ type Repository struct {
 	// claimed message and runs the project's handler in one transaction;
 	// "" for any other table.
 	EventQueue string
+
+	// SQLite is the table on SQLite, for a database whose DB service lists
+	// the sqlite dialect (D116); nil for any other. sqliteTargets are the
+	// tables of the database by type, whose keys a relation's column holds,
+	// and sqliteAccess why per-record access refuses the table there
+	// (sqliteAccessRefusal), or "".
+	SQLite        *SQLiteTable
+	sqliteTargets map[string]sqliteTarget
+	sqliteAccess  string
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -1164,6 +1185,10 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	rowFeatures, err := rowFeaturesOf(schema, tables, repositories)
+	if err != nil {
+		return nil, err
+	}
 
 	hasSoftDeletes := false
 	hasVersionedRepositories := false
@@ -1309,6 +1334,25 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		Queries:                  queries,
 		Rules:                    rules,
 		Access:                   access,
+		RowFeatures:              rowFeatures,
+		SQLite:                   opts.SQLite,
+	}
+	if opts.SQLite {
+		// Each table's repository on SQLite (D116), whose relations name
+		// their targets' keys by the members of their rows, and read
+		// whether a target row holds a key.
+		targets := make(map[string]sqliteTarget, len(output.Repositories))
+		for _, repo := range output.Repositories {
+			targets[repo.TypeName] = sqliteTarget{member: repo.PrimaryKeyField, table: repo.TableName, quoted: repo.QuotedTableName, key: repo.QuotedPrimaryKey}
+		}
+		for i := range output.Repositories {
+			repo := &output.Repositories[i]
+			repo.sqliteTargets = targets
+			repo.sqliteAccess = sqliteAccessRefusal(access, repo.TypeName)
+			if repo.SQLite, err = sqliteTableOf(repo); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	return output, nil

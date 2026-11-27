@@ -914,10 +914,17 @@ where
                     () = self.freed.notified() => continue,
                 }
             }
-            let claimed = tokio::select! {
-                () = stop.cancelled() => return Ok(()),
-                claimed = timed(self.queue.claim(free, self.lease)) => claimed,
-            };
+            // The claim runs to its answer, within its own timeout, and is
+            // not dropped at a stop: a claim the database had made would
+            // hold its messages until their lease ran out, with no handler
+            // (D188). Claimed at a stop, they go back at once.
+            let claimed = timed(self.queue.claim(free, self.lease)).await;
+            if stop.is_cancelled() {
+                if let Ok(claims) = claimed {
+                    self.release_claims(claims).await;
+                }
+                return Ok(());
+            }
             let claims = match claimed {
                 Ok(claims) => claims,
                 Err(err) => {
@@ -1240,6 +1247,21 @@ where
             return;
         }
         self.release_unfinished().await;
+    }
+
+    /// Releases the messages a claim answered with after the stop, whose
+    /// handlers never start, so they are due again at once rather than
+    /// when their lease runs out.
+    async fn release_claims(&self, claims: Vec<Claim<Q::Message>>) {
+        for claim in claims {
+            if let Err(err) = timed(self.queue.release(&claim.id, &claim.token)).await {
+                tracing::error!(
+                    message = claim.id.as_str(),
+                    error = %err,
+                    "release failed: the message is due again when its claim expires"
+                );
+            }
+        }
     }
 
     /// Drops the handlers still running once the grace is over, and

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/parable-work/superschematic/internal/generator"
+	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/queueops"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
@@ -49,30 +50,41 @@ Examples:
 	return cmd
 }
 
-// queueBackfills are the backfill statements of the DB service's queue,
-// from its schema as this checkout has it, with the sqlgen options a
-// build passes (queueops.BackfillStatements).
-func (c *deployContext) queueBackfills(service, queue string) ([]string, error) {
+// queueSchema is the DB service's schema as this checkout has it, with the
+// sqlgen options a build passes, which the statements of a backfill and of
+// a queue on SQLite are written from.
+func (c *deployContext) queueSchema(service string) (*ir.Schema, sqlgen.Options, error) {
 	schema, cfg, err := c.version.load(service)
 	if err != nil {
-		return nil, err
+		return nil, sqlgen.Options{}, err
 	}
 	outputs, err := registry.ParseOutputs(cfg.Outputs, c.version.reg)
 	if err != nil {
-		return nil, fmt.Errorf("schema config for %s: %w", service, err)
+		return nil, sqlgen.Options{}, fmt.Errorf("schema config for %s: %w", service, err)
 	}
 	var deps map[string]*ir.Schema
 	for _, dep := range cfg.Dependencies {
 		depSchema, _, err := c.version.load(dep.Name)
 		if err != nil {
-			return nil, fmt.Errorf("load dependency %s of %s: %w", dep.Name, service, err)
+			return nil, sqlgen.Options{}, fmt.Errorf("load dependency %s of %s: %w", dep.Name, service, err)
 		}
 		if deps == nil {
 			deps = make(map[string]*ir.Schema, len(cfg.Dependencies))
 		}
 		deps[dep.Name] = depSchema
 	}
-	statements, err := queueops.BackfillStatements(schema, generator.SQLOptions(cfg, outputs, deps, c.version.names), queue)
+	return schema, generator.SQLOptions(cfg, outputs, deps, c.version.names), nil
+}
+
+// queueBackfills are the backfill statements of the DB service's queue in
+// dialect, from its schema as this checkout has it, with the sqlgen
+// options a build passes (queueops.BackfillStatements).
+func (c *deployContext) queueBackfills(service, queue string, dialect queueops.Dialect) ([]string, error) {
+	schema, opts, err := c.queueSchema(service)
+	if err != nil {
+		return nil, err
+	}
+	statements, err := queueops.BackfillStatements(schema, opts, queue, dialect)
 	if err != nil {
 		return nil, err
 	}

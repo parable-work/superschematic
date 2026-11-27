@@ -179,7 +179,7 @@ func sourceLive(table *sqlutil.TableModel) string {
 // Encrypted<T> fields (D85), or its access package, which holds the
 // principal a database with per-record access keeps its reads to (D180).
 func (o *ORMOutput) RequiresSchemaRuntime() bool {
-	return o.HasEncryptedFields || o.Access != nil
+	return o.HasEncryptedFields || o.Access != nil || o.RowFeatures != nil
 }
 
 // attachManyRelations gives each repository the one-to-many relations its
@@ -221,4 +221,26 @@ func attachManyRelations(repositories []Repository, tables []sqlutil.TableModel,
 // table or grants.
 func (o *ORMOutput) HeldByAccess() bool {
 	return o.Access != nil && o.Access.Held
+}
+
+// sqliteAccessRefusal is why the repository of typeName refuses every
+// call on SQLite under the database's per-record access (D156), or "": the
+// Go repositories on SQLite (D116) keep to no audience and no grant's
+// reach, so in a database whose reads keep to a caller (Held) every table's
+// would read rows a held caller may not, and the server records its calls
+// in the access log on Postgres alone. The loader refuses such a service's
+// Go types on sqlite by decorator and table (verify/sqlite_features.go,
+// D182); this holds a generation that did not read the service's config,
+// whose Go ORM the DB kind writes always, to repositories that refuse,
+// naming why, as a table SQLite does not hold has.
+func sqliteAccessRefusal(access *AccessModel, typeName string) string {
+	switch {
+	case access == nil:
+		return ""
+	case access.Held:
+		return "its database keeps its rows to per-record access (D156), an audience or grants, which the Go repositories on SQLite do not hold yet (D180, D182)"
+	case access.Log == typeName:
+		return "it is the @accessLog table, which the Go server records its calls in on Postgres alone (D180)"
+	}
+	return ""
 }

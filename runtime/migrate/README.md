@@ -399,22 +399,26 @@ Runs a queue document: one operator's operation on the dead messages of a
 queue a DB service declares (`@queue`, D53): list them, make them ready
 again, or delete them. `superschematic stack queue` writes the document
 and runs the runner on the environment's database. It carries the
-statements the compiler writes for the queue's table on Postgres
-(`sqlutil.PostgresQueueOperatorStatements`), so the runner writes no SQL
-of its own, as it writes none of a plan's. A queue's messages are claimed
-on Postgres alone (D53, amended), and so are these: a URL of another
-dialect is refused before the runner connects.
+statements the compiler writes for the queue's table in its database's
+dialect (`sqlutil.PostgresQueueOperatorStatements`,
+`sqlutil.SQLiteQueueOperatorStatements`), so the runner writes no SQL of
+its own, as it writes none of a plan's. A document of SQLite's statements
+names its dialect and runs on a SQLite file or a `d1://` database (D68);
+one that names none is Postgres's. A URL of another dialect than the
+document's, and a Cloud SQL instance for SQLite's, are refused before the
+runner connects.
 
 | Member | Type | Meaning |
 | --- | --- | --- |
 | `version` | integer | `1`. |
 | `service` | string | The DB service that declares the queue. |
 | `queue` | string | The queue's `@queue` class. |
+| `dialect` | string | `sqlite` for SQLite's statements; absent, or `postgres`, for Postgres's. |
 | `operation` | string | `dead`, `retry`, `drop` or `backfill`. |
 | `limit` | integer | `dead` only: how many dead messages to list at most, one or more. |
 | `ids` | array | `retry` and `drop`: the IDs of the dead messages to take, UUIDs in lower case, each once. |
 | `all` | boolean | `retry` and `drop`, in place of `ids`: every dead message. |
-| `statements` | object | `dead`, `states`, `retry`, `retryAll`, `drop` and `dropAll`: the queue's statements. Each that takes messages by ID takes them as `$1`, a text array. `backfill`, for `backfill` alone: one statement per table whose `@enqueueOnChange` enqueues the queue, each of which enqueues its messages and returns one row, how many (D88). |
+| `statements` | object | `dead`, `states`, `retry`, `retryAll`, `drop` and `dropAll`: the queue's statements. Each that takes messages by ID takes them as `$1`, a text array, on Postgres, and as `?1`, the text of a JSON array, on SQLite, where `retry` and `drop` change each message named or none and `states` answers an empty state for a message the operation would have changed. `backfill`, for `backfill` alone: one statement per table whose `@enqueueOnChange` enqueues the queue, each of which enqueues its messages and returns how many, one row on Postgres and a row of 1 per message on SQLite, which the runner adds up (D88). |
 
 `dead` lists the oldest deaths first, in a read-only transaction. `retry`
 makes each message ready again, due now, with no attempts and no claim,

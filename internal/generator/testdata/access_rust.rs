@@ -3,7 +3,8 @@
 //! fixture-access-db's Rust repositories on Postgres, in a schema of the
 //! test's own at ACCESS_TEST_DATABASE_URL with the database's create.sql
 //! applied. The cases are the TypeScript server's (tsrestgen's
-//! access_runtime.test.ts), but the calendar feed's.
+//! access_runtime.test.ts), the calendar feed's among them (D152, D188),
+//! which the runtime's orm::calendar routes serve beside the router.
 //!
 //! A request names its caller in its Authorization header: a grant's
 //! token runs as the grant's holder (GrantAuthenticator);
@@ -20,8 +21,9 @@ use api::runtime::access::{
     access_log_of, active_grants, issue_grant, revoke_grant, ActiveGrantsFilter, EndsWhen,
     GrantAuthenticator, IssueGrant, Logged,
 };
+use api::runtime::orm::calendar::{calendar_routes, CalendarRoutes};
 use api::runtime::orm::postgres::{deadpool_postgres, tokio_postgres, Repositories};
-use api::runtime::orm::{AccessCaller, FieldKeyring, FindOptions, Values};
+use api::runtime::orm::{AccessCaller, FieldKeyring, FindOptions, UpsertManyOptions, UpsertOptions, Values};
 use api::runtime::postgres::Pool;
 use api::runtime::{bearer_token, ActingFor, ApiError, Authenticator, Principal, PrincipalKind};
 use api::{build_router, Handlers, Implementations};
@@ -349,6 +351,22 @@ async fn per_record_access() {
         })
         .await;
     assert_eq!(counted, (Some(2), Some(1)));
+    // An upsert, of one row or of many, through repositories that keep to a
+    // caller is refused: its update could reach a row the caller does not
+    // see (D156, D89).
+    let refused = app
+        .system(async |db| {
+            let client = db.client();
+            let held = Repositories::new(client, db.definition()).unwrap().with_access(AccessCaller::of(Some(&other)));
+            let documents = held.table("Document").unwrap();
+            let input = json!({"title": "Upserted"}).as_object().cloned().unwrap();
+            let one = documents.upsert_one(&input, &["id"], &Values::new(), UpsertOptions::default()).await.unwrap_err().to_string();
+            let many = documents.upsert_many(std::slice::from_ref(&input), &["id"], &["title"], UpsertManyOptions::default()).await.unwrap_err().to_string();
+            (one, many)
+        })
+        .await;
+    assert!(refused.0.contains("upsert_one of Document: the table's rows keep to the operation's caller (D156)"), "{}", refused.0);
+    assert!(refused.1.contains("upsert_many of Document: the table's rows keep to the operation's caller (D156)"), "{}", refused.1);
     // The repository, outside any operation, reads every row, as a job
     // does.
     let read = app
@@ -580,6 +598,85 @@ async fn per_record_access() {
     // A grant's holder whose role holds no reveal sees it masked.
     assert_eq!(app.ok(Method::GET, &contract_path, &token, None).await["terms"], "[secret]");
     case("a reveal opens the value for a holder of its permission and writes an access-log row");
+
+    // A calendar feed shows only the rows its token's principal reads,
+    // busy or in full, and a rotated or revoked one is refused (D152).
+    let calendar = calendar_routes(CalendarRoutes::new(tables.clone(), Arc::new(Callers)));
+    let send = async |method: Method, path: &str, as_: Option<&str>, body: Option<Value>| -> (u16, String, String) {
+        let mut request = Request::builder().method(method).uri(path);
+        if let Some(as_) = as_ {
+            request = request.header(http::header::AUTHORIZATION, format!("Bearer {as_}"));
+        }
+        let body = match body {
+            Some(body) => {
+                request = request.header(http::header::CONTENT_TYPE, "application/json");
+                Body::from(body.to_string())
+            }
+            None => Body::empty(),
+        };
+        let response = calendar.clone().oneshot(request.body(body).unwrap()).await.unwrap();
+        let status = response.status().as_u16();
+        let kind = response.headers().get(http::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or_default().to_owned();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (status, kind, String::from_utf8(bytes.to_vec()).unwrap())
+    };
+    app.system(async |db| {
+        db.table("Role").unwrap().create_one(&values(json!({"name": "calendarFeed", "permissions": ["documents.calendar"]}))).await.unwrap();
+    })
+    .await;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+    let at = |seconds: u64| api::runtime::orm::calendar::iso(i64::try_from(seconds * 1000).unwrap());
+    let window = format!("from={}&to={}", at(now - 86_400), at(now + 86_400));
+    // The read: each caller's documents of the day, as each reads them.
+    let read = async |as_: &str| -> Vec<String> {
+        let (status, _, text) = send(Method::GET, &format!("/api/calendar?{window}"), Some(as_), None).await;
+        assert_eq!(status, 200, "{text}");
+        let body: Value = serde_json::from_str(&text).unwrap();
+        body["data"]["entries"].as_array().unwrap().iter().map(|e| e["title"].as_str().unwrap().to_owned()).collect()
+    };
+    let owner_reads = read(&people.owner()).await;
+    assert!(owner_reads.contains(&"Secret plan".to_owned()) && owner_reads.contains(&"Public plan".to_owned()), "{owner_reads:?}");
+    let other_reads = read(&people.other()).await;
+    assert!(other_reads.contains(&"Public plan".to_owned()));
+    assert!(!other_reads.contains(&"Secret plan".to_owned()));
+    // The other user's feed, in full, read by a client with no header.
+    let issue = async |as_: &str, detail: &str| -> Value {
+        let (status, _, text) = send(Method::POST, "/api/calendar/feeds", Some(as_), Some(json!({"role": "calendarFeed", "detail": detail}))).await;
+        assert_eq!(status, 201, "{text}");
+        serde_json::from_str::<Value>(&text).unwrap()["data"].clone()
+    };
+    let other_feed = issue(&people.other(), "full").await;
+    assert!(other_feed["token"].as_str().unwrap().starts_with("grant_"));
+    let other_path = other_feed["path"].as_str().unwrap().to_owned();
+    let (status, kind, ics) = send(Method::GET, &other_path, None, None).await;
+    assert_eq!(status, 200);
+    assert!(kind.contains("text/calendar"), "{kind}");
+    assert!(ics.contains("SUMMARY:Public plan"), "{ics}");
+    assert!(!ics.contains("Secret plan"));
+    // The owner's busy feed holds the owner's private document, as Busy
+    // and a reference, and no title.
+    let owner_feed = issue(&people.owner(), "busy").await;
+    let (_, _, busy) = send(Method::GET, owner_feed["path"].as_str().unwrap(), None, None).await;
+    assert!(!busy.contains("plan"), "{busy}");
+    assert_eq!(busy.matches("BEGIN:VEVENT").count(), read(&people.owner()).await.len());
+    let reference = busy.split("SUMMARY:Busy (").nth(1).and_then(|rest| rest.split(')').next()).unwrap();
+    assert!(reference.len() == 8 && reference.chars().all(|c| "ABCDEFGHJKLMNPQRSTUVWXYZ23456789".contains(c)), "{reference}");
+    // A feed's token is no credential of any other route.
+    assert_eq!(app.status(Method::GET, "/api/documents", other_feed["token"].as_str().unwrap(), None).await, 401);
+    // Rotated: the old URL is refused, the new one reads.
+    let (status, _, text) = send(Method::POST, &format!("/api/calendar/feeds/{}/rotate", other_feed["id"].as_str().unwrap()), Some(&people.other()), None).await;
+    assert_eq!(status, 200, "{text}");
+    let rotated = serde_json::from_str::<Value>(&text).unwrap()["data"].clone();
+    assert_eq!(send(Method::GET, &other_path, None, None).await.0, 401);
+    let rotated_path = rotated["path"].as_str().unwrap().to_owned();
+    assert_eq!(send(Method::GET, &rotated_path, None, None).await.0, 200);
+    // Another user cannot revoke it; its holder can, and it is refused.
+    let rotated_id = format!("/api/calendar/feeds/{}", rotated["id"].as_str().unwrap());
+    assert_eq!(send(Method::DELETE, &rotated_id, Some(&people.owner()), None).await.0, 404);
+    assert_eq!(send(Method::DELETE, &rotated_id, Some(&people.other()), None).await.0, 204);
+    assert_eq!(send(Method::GET, &rotated_path, None, None).await.0, 401);
+    assert_eq!(send(Method::GET, "/api/calendar/feed/grant_unknown.ics", None, None).await.0, 401);
+    case("a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused");
 
     drop(app);
     database.admin.batch_execute(&format!("DROP SCHEMA IF EXISTS {} CASCADE", database.schema)).await.unwrap();
