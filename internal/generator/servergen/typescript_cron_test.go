@@ -275,9 +275,10 @@ func TestTypeScriptCronD1(t *testing.T) {
 // TestTypeScriptCronRefusals: a job on Workers whose API's database lists
 // postgres first opens it through Hyperdrive, so its bundle runs with Node's
 // modules, and so does a worker on a bundle platform, whose Workers
-// entrypoint is drain.ts; a worker on Workers over a database that lists
-// sqlite first is refused, since its claims run on Postgres alone there
-// (D92, D53 amended).
+// entrypoint is drain.ts (D92, D53 amended). A worker on Workers over a
+// database that lists sqlite first claims over its D1 binding (#702): its
+// drain.ts runs with no Node module and no Hyperdrive, and installs the
+// wakes its enqueues send (D151).
 func TestTypeScriptCronRefusals(t *testing.T) {
 	in := cronInput(t, func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 		o.Deps.Database = "shop-db"
@@ -303,9 +304,35 @@ func TestTypeScriptCronRefusals(t *testing.T) {
 	if err != nil || !s.NodeCompat() || s.BundleEntry() != servergen.TypeScriptDrainFile {
 		t.Errorf("a worker on Workers over a Postgres database = %+v, %v; want drain.ts, with Node's modules", s, err)
 	}
-	want := "stack edge-stack: worker shop-api-reindex of shop-api claims the queue of shop-db, which lists sqlite first, and an environment places the worker on Cloudflare Workers, whose drain.ts claims on Postgres through Hyperdrive alone"
-	if _, err := servergen.PlanTypeScript(worker("sqlite")); err == nil || !strings.Contains(err.Error(), want) {
-		t.Errorf("PlanTypeScript = %v, want it to say %q", err, want)
+	d1 := worker("sqlite")
+	s, err = servergen.PlanTypeScript(d1)
+	if err != nil || s.NodeCompat() || s.BundleEntry() != servergen.TypeScriptDrainFile || !s.WakesQueues() {
+		t.Fatalf("a worker on Workers over a D1 database = %+v, %v; want drain.ts, with no Node module, waking its queues", s, err)
+	}
+	if err := servergen.WriteTypeScript(s, d1.Dir); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(d1.Dir, servergen.TypeScriptDrainFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	drain := string(data)
+	for _, want := range []string{
+		"import { claimsOver, type SqlDatabase } from '@superschematic/http-runtime/d1';",
+		"const shopDbDatabase = d1Database('SHOP_DB_DATABASE', shopApiConfig.SHOP_DB_DATABASE);",
+		"const queue = claimsOver(shopDbDatabase, cartAbandonedQueue);",
+		"await drain({ cron: controller.cron });",
+		"function d1Database(field: string, db: DatabaseConnection): SqlDatabase {",
+		"installQueueWakes(env);",
+	} {
+		if !strings.Contains(drain, want) {
+			t.Errorf("drain.ts over D1 does not hold %q:\n%s", want, drain)
+		}
+	}
+	for _, refused := range []string{"hyperdrive", "postgresQueue", "from 'pg'", "nextDue"} {
+		if strings.Contains(drain, refused) {
+			t.Errorf("drain.ts over D1 holds %q:\n%s", refused, drain)
+		}
 	}
 }
 

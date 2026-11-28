@@ -163,8 +163,9 @@ func New(n naming.Naming) *Registry {
 	if err := r.RegisterRuntimeFeature(notificationsFeature()); err != nil {
 		panic("registry: core runtime features: " + err.Error())
 	}
-	// Agent runs need a sandbox provider and a model provider (D158).
-	for _, feature := range agentFeatures() {
+	// Agent runs need a sandbox provider and a model provider (D158), and
+	// search over attachments' text a file processor (D154, #702).
+	for _, feature := range append(agentFeatures(), filesFeature()) {
 		if err := r.RegisterRuntimeFeature(feature); err != nil {
 			panic("registry: core runtime features: " + err.Error())
 		}

@@ -95,6 +95,11 @@ describe('loadSecrets', () => {
     await expect(loadSecrets(e, ['STRIPE_KEY'])).rejects.toThrow('the Secrets Store secret STRIPE_KEY: the store is unavailable');
     expect(await loadSecrets(e, ['STRIPE_KEY'])).toEqual({ STRIPE_KEY: 'sk_live' });
     await expect(loadSecrets(e, ['MISSING'])).rejects.toThrow('the Worker has no binding MISSING');
+    // An optional secret the environment binds no secret for is left out
+    // (#702); a required one is still refused.
+    expect(await loadSecrets(e, ['STRIPE_KEY', 'VAULT_TOKEN'], ['VAULT_TOKEN'])).toEqual({ STRIPE_KEY: 'sk_live' });
+    expect(await stackEnvWithSecrets(e, ['STRIPE_KEY', 'VAULT_TOKEN'], ['VAULT_TOKEN'])).not.toHaveProperty('VAULT_TOKEN');
+    await expect(loadSecrets(e, ['VAULT_TOKEN'], [])).rejects.toThrow('the Worker has no binding VAULT_TOKEN');
   });
 });
 

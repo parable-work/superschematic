@@ -51,13 +51,21 @@ import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from '
 import { {{ join .WorkersRuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
 import { {{ join .WorkersImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers';
 import { startWorkersTelemetry } from '{{ .Naming.HTTPRuntimeNpmPackage }}/workers-telemetry';
+{{- if .PostgresDatabases }}
 import { hyperdrivePool, withHyperdrive } from '{{ .Naming.HTTPRuntimeNpmPackage }}/hyperdrive';
+{{- end }}
+{{- if $db.SQLite }}
+import { claimsOver, type SqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';
+{{- else }}
 import { postgresQueue } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+{{- end }}
 import { runFiring, WAKE_HORIZON_MS, WAKE_IDLE_MS, workerConcurrency, workerDrainSeconds } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 {{- if .Buckets }}
 import { openR2Bucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/r2';
 {{- end }}
+{{- if .PostgresDatabases }}
 import type { Pool } from 'pg';
+{{- end }}
 import { {{ .Worker.Definition }} } from '{{ .Worker.Module }}';
 {{- template "ts-orm-imports" . }}
 import * as {{ $api.Module }} from '{{ $api.Package }}';
@@ -112,9 +120,14 @@ configure({{ tsQuote $api.Service }}, () => {{ $api.Module }}.{{ $api.ConfigLoad
 export default {
   async scheduled(controller: ScheduledController, _env: unknown, ctx: ExecutionContext): Promise<void> {
     try {
+{{- if .PostgresDatabases }}
       // The firing opens its database connections through Hyperdrive and
       // ends them as it ends (D92).
       await withHyperdrive(() => drain({ cron: controller.cron }));
+{{- else }}
+      // The firing reaches its database through its D1 binding (#702).
+      await drain({ cron: controller.cron });
+{{- end }}
     } finally {
       ctx.waitUntil(queueWakesSettled().then(() => telemetry.flush()));
     }
@@ -138,7 +151,7 @@ export class {{ .QueueWakeClass }} extends WorkflowEntrypoint<unknown, WakeParam
     if (dueAt > Date.now()) await step.sleepUntil('until due', new Date(dueAt));
     await step.do('drain', { retries: { limit: 0, delay: 0 }, timeout: drainSeconds * 1000 + GRACE_MS + 60_000 }, async () => {
       try {
-        await withHyperdrive(() => drain({ wake: event.instanceId }));
+        await {{ if .PostgresDatabases }}withHyperdrive(() => drain({ wake: event.instanceId })){{ else }}drain({ wake: event.instanceId }){{ end }};
       } finally {
         await queueWakesSettled();
         await telemetry.flush();
@@ -160,7 +173,7 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 {{- if .SecretBindings }}
   // The string bindings, and the value of each Secrets Store secret the
   // config names, awaited once per isolate.
-  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]);
+  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ with .OptionalSecretBindings }}, [{{ range $i, $s := . }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ end }});
 {{- else }}
   // The string bindings.
   const values = stackEnvOf(env);
@@ -183,10 +196,22 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 {{- end }}
 {{- end }}
 
+{{- if .PostgresDatabases }}
+
   // The API's database, over the hyperdrive binding its connection names
   // (D92), which connects within the firing alone.
 {{- range .PostgresDatabases }}
   const {{ .Var }} = hyperdriveDatabase({{ tsQuote .Service }}, {{ tsQuote .Field }}, {{ .From }});
+{{- end }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+  // The API's database, over the d1 binding its connection names (#702):
+  // the queue's claims run over it as under stack dev over a SQLite file,
+  // each in the connection's turn with the repositories' (D189).
+{{- range .SQLiteDatabases }}
+  const {{ .Var }} = d1Database({{ tsQuote .Field }}, {{ .From }});
+{{- end }}
 {{- end }}
 {{- template "ts-workers-memory-stores" . }}
 
@@ -198,7 +223,12 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 {{- else }}
   const workers = await construct({{ tsQuote $api.Service }}, 'workers', () => {{ $api.Impl }}.createWorkers({{ $api.Deps }}));
 {{- end }}
-  const queue = postgresQueue({{ $db.Var }}, {{ .Worker.Definition }});
+  const queue = {{ if $db.SQLite }}claimsOver{{ else }}postgresQueue{{ end }}({{ $db.Var }}, {{ .Worker.Definition }});
+{{- if .Worker.Upkeep }}
+  // The notifier's upkeep beside the queue's prune: every channel adapter's
+  // health on its schedule, and the deliveries past their retention.
+  const upkeep = {{ $api.Module }}.notifierUpkeepOf({{ $api.Deps }});
+{{- end }}
   logger.info('worker started', { api: {{ tsQuote $api.Service }}, class: {{ tsQuote .Worker.Name }}, queue: queue.name, concurrency, drainSeconds, ...on });
   // The window's end stops the claims, as SIGTERM stops main.ts's; a wake's
   // run stops sooner, once the queue was idle a while.
@@ -218,8 +248,10 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
         complete: (id, token) => queue.complete(id, token),
         fail: (id, token, cause) => queue.fail(id, token, cause),
         release: (id, token) => queue.release(id, token),
-        prune: {{ if .Worker.Transcripts }}async limit => (await queue.prune(limit)) + (await {{ $api.Deps }}.agents.prune(limit)){{ else }}limit => queue.prune(limit){{ end }},
+        prune: {{ if .Worker.Transcripts }}async limit => (await queue.prune(limit)) + (await {{ $api.Deps }}.agents.prune(limit)){{ else if .Worker.Upkeep }}async limit => (await queue.prune(limit)) + (await upkeep(limit)){{ else }}limit => queue.prune(limit){{ end }},
+{{- if not $db.SQLite }}
         nextDue: () => queue.nextDue(),
+{{- end }}
       },
     ],
     { windowMs: drainSeconds * 1000, concurrency, graceMs: GRACE_MS, logger, ...(on.wake === undefined ? {} : { wake: { idleMs: WAKE_IDLE_MS, horizonMs: WAKE_HORIZON_MS } }) }
@@ -230,7 +262,14 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
 
 {{ template "ts-construct" . }}
 
+{{- if .PostgresDatabases }}
+
 {{ template "ts-hyperdrive" . }}
+{{- end }}
+{{- if .SQLiteDatabases }}
+
+{{ template "ts-d1-database" . }}
+{{- end }}
 {{- if or .Clients .Buckets }}
 
 /**
