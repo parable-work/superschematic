@@ -6887,6 +6887,24 @@ export const shopDbRules: RulesLayout = {
         ]
       }
     }
+  },
+  "permissions": {
+    "users": "user",
+    "user": {
+      "field": "id",
+      "column": "id",
+      "type": "Identity.UUID"
+    },
+    "credentials": "user_credential",
+    "credentialUser": "user_id",
+    "disabledAt": "disabled_at",
+    "pendingAt": "pending_at",
+    "grants": "user_role_grant",
+    "grantUser": "user_id",
+    "grantRole": "role_id",
+    "roles": "role",
+    "roleKey": "id",
+    "rolePermissions": "permissions"
   }
 };
 

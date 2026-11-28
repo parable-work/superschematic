@@ -78,17 +78,15 @@ superschematic-topcoat build-all --cache schemas/services
 
 <Snippet file="testdata/generated/logs/build-all-cache.txt" />
 
-After `rm -rf schemas/dist`, the same command restores each service but
-five:
+After `rm -rf schemas/dist`, the same command restores every service:
 
 <Snippet file="testdata/generated/logs/build-all-restore.txt" />
 
 A key covers the services a schema names in its decorators' arguments,
 which its build records under `schemas/dist`: each stack names the APIs
-it deploys, and `shop-stock`'s `@requireService` names `shop-orders`.
-With that record gone, the three stacks and `shop-stock` build once more,
-and so does `shop-orders`, whose key covers that of `shop-stock`, the API
-it calls. The cache keeps each result.
+it deploys, and `shop-stock`'s `@requireService` names `shop-orders`. A
+cache entry keeps that record, so with `schemas/dist` gone the command
+reads it from the entry, restores the service and writes the record back.
 
 The cache lives in your XDG cache directory; `--cache-root`, `SUPERSCHEMATIC_BUILD_CACHE_DIR` or
 `[cache] root` in the naming file move it. Because the key covers the
