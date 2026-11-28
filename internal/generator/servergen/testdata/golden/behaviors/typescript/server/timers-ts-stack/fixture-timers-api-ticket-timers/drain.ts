@@ -133,6 +133,7 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
   // The string bindings.
   const values = stackEnvOf(env);
   const fixtureTimersApiConfig = configure('fixture-timers-api', () => fixtureTimersApiApi.loadEnvConfig(values));
+
   // The API's database, over the hyperdrive binding its connection names
   // (D92), which connects within the firing alone.
   const fixtureTimersDbPool = hyperdriveDatabase('fixture-timers-db', 'FIXTURE_TIMERS_DB_DATABASE', fixtureTimersApiConfig.FIXTURE_TIMERS_DB_DATABASE);

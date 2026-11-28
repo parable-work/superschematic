@@ -184,7 +184,7 @@ func TestTypeScriptCronEntrypointWiring(t *testing.T) {
 		"const TRIES: number = 3;",
 		"const logger = createLogger({ stack: 'edge-stack', job: 'shop-api-reindex' });",
 		"// shop-api's config holds Secret<T> fields, which a Worker reads only within\n// an invocation, so each try loads it.",
-		"const values = await stackEnvWithSecrets(env, ['STRIPE_KEY']);",
+		"const values = await stackEnvWithSecrets(env, ['STRIPE_KEY'], ['STRIPE_KEY']);",
 		"const shopApiConfig = configure('shop-api', () => shopApiApi.loadBackgroundEnvConfig(values));",
 		"const shopPricingClient = newShopPricingClient(shopApiConfig.SHOP_PRICING_SERVICE);",
 		"const shopMediaBucket = openR2Bucket(binding(env, bindingName('SHOP_MEDIA_BUCKET', shopApiConfig.SHOP_MEDIA_BUCKET.binding), 'r2'), shopApiConfig.SHOP_MEDIA_BUCKET);",

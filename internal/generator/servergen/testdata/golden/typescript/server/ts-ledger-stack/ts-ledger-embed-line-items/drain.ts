@@ -143,6 +143,7 @@ async function drain(on: { readonly cron?: string; readonly wake?: string }): Pr
   // The string bindings.
   const values = stackEnvOf(env);
   const tsLedgerConfig = configure('ts-ledger', () => tsLedgerApi.loadEnvConfig(values));
+
   // The API's database, over the hyperdrive binding its connection names
   // (D92), which connects within the firing alone.
   const tsLedgerDbPool = hyperdriveDatabase('ts-ledger-db', 'TS_LEDGER_DB_DATABASE', tsLedgerConfig.TS_LEDGER_DB_DATABASE);
