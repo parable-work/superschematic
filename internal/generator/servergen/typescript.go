@@ -532,6 +532,12 @@ type TypeScriptAPI struct {
 	Grants         bool
 	AccessLog      bool
 
+	// CallerKeys is true when a provider the API's config lists calls the
+	// app with its key (#744): the router's authenticator is the API
+	// package's callerAuthenticator, outermost, around the grants' or the
+	// implementation's.
+	CallerKeys bool
+
 	// MCP is true when the server serves the API's MCP endpoint (D81).
 	MCP bool
 

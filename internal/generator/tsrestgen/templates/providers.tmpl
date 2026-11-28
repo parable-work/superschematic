@@ -5,8 +5,21 @@
 // the provider packages its config lists. The entrypoints fill
 // Deps.providers with providersOf.
 
+{{- if .Deps.Providers.CallerKeys }}
+import type { Authenticator, Logger } from '{{ .RuntimePackage }}';
+import {
+  extensionAuthenticator,
+  extensionKeysOf,
+  providersFrom,
+  type ExtensionKey,
+  type ProviderDefinition,
+  type Providers,
+  type RuntimeInterface,
+} from '{{ .RuntimePackage }}/providers';
+{{- else }}
 import type { Logger } from '{{ .RuntimePackage }}';
 import { providersFrom, type ProviderDefinition, type Providers, type RuntimeInterface } from '{{ .RuntimePackage }}/providers';
+{{- end }}
 {{- range .Deps.Providers.Packages }}
 import {{ .Ident }} from '{{ .Import }}';
 {{- end }}
@@ -41,3 +54,28 @@ export function providersOf(config: EnvConfig, log?: Logger): Providers {
     ...(log ? { log } : {}),
   });
 }
+{{- if .Deps.Providers.CallerKeys }}
+
+/**
+ * The keys the providers config names call the app with (#744): one per
+ * slot whose provider lists CALLER_KEY and whose <SLOT>_CALLER_KEY config
+ * sets, with the provider's name and role.
+ */
+export function extensionKeys(config: EnvConfig): readonly ExtensionKey[] {
+  return extensionKeysOf({
+    slots: providerSlots,
+    config: config as unknown as Readonly<Record<string, unknown>>,
+    definitions: providerDefinitions(),
+  });
+}
+
+/**
+ * The authenticator of {{ .SchemaName }}'s routes around inner (#744): a request
+ * whose Bearer token is one of extensionKeys(config) runs as that provider,
+ * with its role alone, and any other goes on to inner, the grants' or the
+ * implementation's. The entrypoints wrap it outermost.
+ */
+export function callerAuthenticator(config: EnvConfig, inner: Authenticator): Authenticator {
+  return extensionAuthenticator(extensionKeys(config), inner);
+}
+{{- end }}

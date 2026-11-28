@@ -1,0 +1,16 @@
+# relay-ts-api on its default TypeScript server, on the local target.
+kind: Stack
+types:
+  Relays:
+    name: Relays
+    role: EmbeddedStruct
+    stack:
+      deploy:
+        - { name: relay-ts-api, kind: API }
+      expose:
+        - service: { name: relay-ts-api, kind: API }
+  Local:
+    name: Local
+    role: EmbeddedStruct
+    environment:
+      target: local

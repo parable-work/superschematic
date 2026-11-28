@@ -260,10 +260,15 @@ pub fn define_provider(
     if !name_ok(&definition.name) {
         return fail("a name is lower-case letters and digits in words joined by hyphens".into());
     }
-    for key in definition.config.keys() {
+    for (key, spec) in &definition.config {
         if !key_ok(key) {
             return fail(format!(
                 "config key {key:?} is upper-case letters, digits and underscores"
+            ));
+        }
+        if key == super::CALLER_KEY && !spec.secret {
+            return fail(format!(
+                "config key {key} is the key the provider calls the app with, which an environment sets as a secret; declare it secret (#744)"
             ));
         }
     }
@@ -603,6 +608,10 @@ mod tests {
         assert!(
             refused(base().with_setting("url", ProviderSettingSpec::plain()))
                 .contains("upper-case")
+        );
+        assert!(
+            refused(base().with_setting("CALLER_KEY", ProviderSettingSpec::plain()))
+                .contains("the key the provider calls the app with")
         );
         assert!(refused(base().with_operations(["send"])).contains("no optional operation send"));
         assert!(refused(

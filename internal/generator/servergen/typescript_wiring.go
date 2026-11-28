@@ -37,6 +37,11 @@ func (api *TypeScriptAPI) planRuntime(o *tsrestgen.APIOutput, stem string, taken
 	if !background {
 		api.Grants = o.Deps.Routes.Grants && api.Identity == ""
 		api.AccessLog = o.Deps.Routes.AccessLog
+		// A provider that calls the app with its key runs as itself on
+		// the routes the implementation's authenticator establishes
+		// (#744); an API whose identity service establishes its callers
+		// takes no key yet.
+		api.CallerKeys = api.Providers && o.Deps.Providers.CallerKeys && api.Authenticate != ""
 	}
 }
 
@@ -91,10 +96,21 @@ func (a *TypeScriptAPI) RouteAuthenticator() string {
 // AuthenticatorFactory is the expression a server builds the router's
 // authenticator with: the implementation's authenticate over Deps, inside
 // grantAuthenticator for a database with grants (D156), which hands a run's
-// token on to it (D194).
+// token on to it (D194), and inside the API package's callerAuthenticator,
+// outermost, when a provider its config lists calls the app (#744).
 func (a *TypeScriptAPI) AuthenticatorFactory() string {
+	inner := "await " + a.Impl + ".authenticate(" + a.Deps + ")"
 	if a.Grants {
-		return "async () => grantAuthenticator({ orm: " + a.Deps + ".orm, inner: await " + a.Impl + ".authenticate(" + a.Deps + "), runTokens: 'inner' })"
+		inner = "grantAuthenticator({ orm: " + a.Deps + ".orm, inner: " + inner + ", runTokens: 'inner' })"
+	}
+	if a.CallerKeys {
+		// Outermost: a provider's key runs as the provider, with its role
+		// alone, and any other token goes on to the grants' or the
+		// implementation's authenticator (#744).
+		return "async () => " + a.Module + ".callerAuthenticator(" + a.Config + ", " + inner + ")"
+	}
+	if a.Grants {
+		return "async () => " + inner
 	}
 	return "() => " + a.Impl + ".authenticate(" + a.Deps + ")"
 }

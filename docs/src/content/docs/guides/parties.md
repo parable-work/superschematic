@@ -187,10 +187,10 @@ connects outward, to the network and to the app, so its host needs no
 open port. `examples/runtime-providers`'s `chat-bridge` is one. The app
 sends through the network's API. The bridge's loop (`runBridge`) posts
 each message the network received to `POST /webhooks/<slot>/inbound`
-with the slot's relay key, which the adapter checks. The API resolves
-that key to the provider's own principal (`extensionAuthenticator`),
-whose role is `messages.relay`, so it can relay messages and nothing
-else. A sender is a handle, which a channel identity of kind `handle`
+with the slot's relay key, its `CALLER_KEY` (#744), which the adapter
+checks. The generated server resolves that key to the provider's own
+principal (`extensionAuthenticator`, outermost), whose role is
+`messages.relay`, so it can relay messages and nothing else. A sender is a handle, which a channel identity of kind `handle`
 names, and its message takes the same path as a text's.
 
 ## Act on a run request

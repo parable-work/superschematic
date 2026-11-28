@@ -57,7 +57,7 @@ async function world(): Promise<World> {
       CHAT: 'chat-bridge',
       CHAT_URL: 'https://chat.test',
       CHAT_TOKEN: new SecretValue(RELAY_TOKEN),
-      CHAT_RELAY_KEY: new SecretValue(RELAY_KEY),
+      CHAT_CALLER_KEY: new SecretValue(RELAY_KEY),
     },
     definitions: [smsRelayA({ fetch }), chatBridge({ fetch })],
   });

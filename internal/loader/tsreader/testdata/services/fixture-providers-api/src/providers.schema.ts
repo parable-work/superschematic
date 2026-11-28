@@ -15,6 +15,8 @@ export abstract class ProvidersApiConfig {
   SMS_ACCOUNT: Nullable<string>;
   SMS_SENDER: Nullable<string>;
   SMS_TOKEN: Nullable<Secret<string>>;
+  // The key sms-relay-a calls the app with, to read its deliveries (#744).
+  SMS_CALLER_KEY: Nullable<Secret<string>>;
 
   VAULT: Nullable<string>;
   VAULT_URL: Nullable<string>;

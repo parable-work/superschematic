@@ -33,6 +33,11 @@ type ProvidersInfo struct {
 	Settings []ProviderSettingInfo
 	// Crates are the provider crates the API's config lists, by name.
 	Crates []ProviderCrateInfo
+	// CallerKeys is set when a crate the config lists calls the app with
+	// a key of its own, its CALLER_KEY setting (#744): providers.rs has
+	// caller_authenticator, which a server wraps its routes'
+	// authenticator in, outermost.
+	CallerKeys bool
 }
 
 // ProviderSlotInfo is one slot.
@@ -125,6 +130,7 @@ func providersOf(schema *ir.Schema, outputDir string) (*ProvidersInfo, error) {
 			return nil, err
 		}
 		info.Crates = append(info.Crates, ProviderCrateInfo{Name: p.Name, Crate: p.Crate, Path: filepath.ToSlash(rel), Manifest: rustutil.RawString(string(data))})
+		info.CallerKeys = info.CallerKeys || p.CallsTheApp()
 	}
 	sort.Slice(info.Crates, func(i, j int) bool { return info.Crates[i].Name < info.Crates[j].Name })
 

@@ -581,6 +581,13 @@ type API struct {
 	// API package's ProvidersOf.
 	Providers bool
 
+	// CallerKeys is true for a server's API whose routes take a provider's
+	// key, a provider its config lists calling the app (#744): the API
+	// package's CallerAuthenticator wraps the auth step of its routes,
+	// outermost, around the grants' or its AuthMiddleware, or is the step
+	// of an API with neither.
+	CallerKeys bool
+
 	// Wiring is the runtime the entrypoint wires over the API's database
 	// (D190, D192, D187, D180), nil for none (go_wiring.go).
 	Wiring *apigen.DepsWiring
@@ -941,6 +948,10 @@ func Plan(in Input) (*Server, error) {
 			apis[i].Graphs = o.HasGraphEndpoints()
 			apis[i].RowFeatures = o.HasRowFeatureEndpoints()
 			apis[i].Attachments = o.RowFeatureBucket() != ""
+			// A provider that calls the app with its key runs as itself on
+			// the API's routes (#744); an API whose identity service
+			// establishes its callers takes no key yet.
+			apis[i].CallerKeys = apis[i].Providers && o.Deps.Providers.CallerKeys && !o.Auth.Identity
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)

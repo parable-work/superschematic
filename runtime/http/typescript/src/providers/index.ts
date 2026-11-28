@@ -8,7 +8,7 @@ the providers its environment configures with providersFrom.
 */
 
 export { SECRET_MASK, SecretValue, type Revealable } from '../secret.js';
-export { contractOf, extensionSubject, providerConfigField, RUNTIME_CONTRACTS, type RuntimeContract, type RuntimeInterface } from './contracts.js';
+export { CALLER_KEY, contractOf, extensionSubject, providerConfigField, RUNTIME_CONTRACTS, type RuntimeContract, type RuntimeInterface } from './contracts.js';
 export {
   applyInjection,
   Injection,
@@ -47,12 +47,14 @@ export {
   ProviderContractError,
   ProviderSettingError,
   ProviderSettings,
+  type ExtensionKey,
   type ProviderContext,
   type ProviderDefinition,
   type ProviderInterfaces,
   type ProviderSettingSpec,
 } from './define.js';
 export {
+  extensionKeysOf,
   ProviderConfigError,
   ProviderNotConfiguredError,
   providersFrom,

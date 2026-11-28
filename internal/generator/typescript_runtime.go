@@ -53,6 +53,7 @@ func (r run) typeScriptProviders() (*tsrestgen.DepsProviders, error) {
 		}
 		idents[ident] = true
 		out.Packages = append(out.Packages, tsrestgen.DepsProviderPackage{Name: p.Name, Ident: ident, Import: rel})
+		out.CallerKeys = out.CallerKeys || p.CallsTheApp()
 	}
 	return out, nil
 }

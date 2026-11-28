@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -266,6 +267,7 @@ func TestDefineHoldsADefinitionToTheBuildsRules(t *testing.T) {
 		{Definition{Name: "relay", Implements: "payments", Create: create}, "which is no runtime interface"},
 		{Definition{Name: "relay", Implements: Channel, Role: []string{"messages"}, Create: create}, "names an area"},
 		{Definition{Name: "relay", Implements: Channel, Config: map[string]SettingSpec{"url": {}}, Create: create}, "upper-case"},
+		{Definition{Name: "relay", Implements: Channel, Config: map[string]SettingSpec{CallerKey: {}}, Create: create}, "the key the provider calls the app with"},
 		{Definition{Name: "relay", Implements: Channel}, "create is not a function"},
 	} {
 		var contract *ContractError
@@ -460,6 +462,59 @@ func TestAnExtensionAuthenticatesByItsKeyWithItsRoleAlone(t *testing.T) {
 	}
 	if code := call("messages.relay", "other"); code != http.StatusUnauthorized {
 		t.Fatalf("another key: %d", code)
+	}
+}
+
+// TestExtensionKeysOfAreTheSlotsWhoseProviderCallsTheApp (#744): a slot
+// whose provider lists CALLER_KEY and whose config sets it gives an entry
+// of the provider's name and role; a slot whose provider lists none, or
+// whose key is unset, gives none. A request bearing the key runs as the
+// provider, and any other goes on to the auth step inside.
+func TestExtensionKeysOfAreTheSlotsWhoseProviderCallsTheApp(t *testing.T) {
+	key := fmt.Sprintf("key-%d", time.Now().UnixNano())
+	create := func(context.Context, Settings, Context) (any, error) { return nil, nil }
+	bridge := MustDefine(Definition{Name: "chat-bridge", Implements: Channel, Role: []string{"messages.relay"}, Create: create,
+		Config: map[string]SettingSpec{CallerKey: {Secret: true}, "TOKEN": {Secret: true}}})
+	relay := MustDefine(Definition{Name: "sms-relay", Implements: Channel, Role: []string{"messages.relay"}, Create: create,
+		Config: map[string]SettingSpec{"TOKEN": {Secret: true}}})
+	options := Options{
+		Slots: map[string]Interface{"CHAT": Channel, "SMS": Channel, "OTHER": Channel},
+		Config: map[string]ConfigValue{
+			"CHAT": Text("chat-bridge"), "CHAT_CALLER_KEY": Secret(key), "CHAT_TOKEN": Secret("t"),
+			"SMS": Text("sms-relay"), "SMS_TOKEN": Secret("t"), "SMS_CALLER_KEY": Secret("unread"),
+		},
+		Definitions: []Definition{bridge, relay},
+	}
+	keys := ExtensionKeysOf(options)
+	if len(keys) != 1 || keys[0].Provider != "chat-bridge" || !reflect.DeepEqual(keys[0].Role, []string{"messages.relay"}) || keys[0].Key.Reveal() != key {
+		t.Fatalf("ExtensionKeysOf = %+v, want chat-bridge's alone", keys)
+	}
+	if printed := fmt.Sprintf("%v %+v %#v", keys, keys, keys); strings.Contains(printed, key) {
+		t.Fatal("a printed key shows its value")
+	}
+	unset := options
+	unset.Config = maps.Clone(options.Config)
+	delete(unset.Config, "CHAT_CALLER_KEY")
+	if keys := ExtensionKeysOf(unset); len(keys) != 0 {
+		t.Fatalf("a slot whose key is unset gives %+v", keys)
+	}
+
+	inner := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r.WithContext(session.ContextWithCaller(r.Context(), access.Principal{Subject: "user-1", Kind: access.KindUser})))
+		})
+	}
+	var seen access.Principal
+	handler := ExtensionAuthenticator(keys, inner)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = session.GetCaller(r.Context())
+	}))
+	for token, want := range map[string]string{key: "extension:chat-bridge", "another token": "user-1"} {
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Authorization", "Bearer "+token)
+		handler.ServeHTTP(httptest.NewRecorder(), r)
+		if seen.Subject != want {
+			t.Errorf("a request bearing %s runs as %q, want %q", map[bool]string{true: "the key", false: "another token"}[token == key], seen.Subject, want)
+		}
 	}
 }
 

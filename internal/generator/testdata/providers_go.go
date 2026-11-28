@@ -46,7 +46,6 @@ const (
 	accountAuth = "account-token-value"
 	vaultToken  = "vault-token-value"
 	password    = "correct-horse-battery-staple"
-	bridgeKey   = "bridge-key-value"
 )
 
 // received is what a stub service was sent.
@@ -213,6 +212,9 @@ func TestProviders(t *testing.T) {
 	base.Previews = "text-preview"
 	devCfg := base
 	devCfg.Sms, devCfg.SmsUrl, devCfg.SmsToken = "sms-relay-a", a.URL, relayToken
+	// The key sms-relay-a calls the app with (#744), made here, so no
+	// fixture holds one.
+	devCfg.SmsCallerKey = fmt.Sprintf("caller-%d", time.Now().UnixNano())
 	cloudCfg := base
 	cloudCfg.Sms, cloudCfg.SmsUrl, cloudCfg.SmsAccount, cloudCfg.SmsToken = "sms-relay-b", b.URL, "ac-1", accountAuth
 
@@ -329,10 +331,37 @@ func TestProviders(t *testing.T) {
 		if err != nil || len(seen) != 1 || seen[openID] == nil {
 			t.Fatalf("the provider read %d notes: %v", len(seen), err)
 		}
-		// A provider that calls the app with its key is its principal at
-		// a generated route too (D180's caller).
+		// A provider that calls the app with its key, SMS_CALLER_KEY, is
+		// its principal at a generated route too (D180's caller), through
+		// the auth step the entrypoint wraps outermost (#744); any other
+		// token goes on to the step inside, here one that knows a person.
+		keys := api.ExtensionKeysOf(devCfg)
+		if len(keys) != 1 || keys[0].Provider != "sms-relay-a" || !slices.Equal(keys[0].Role, []string{"messages.relay"}) {
+			t.Fatalf("the config's caller keys: %+v", keys)
+		}
+		if printed := fmt.Sprintf("%v %+v", keys, keys); strings.Contains(printed, devCfg.SmsCallerKey) {
+			t.Fatal("a printed key shows its value")
+		}
+		if keys := api.ExtensionKeysOf(cloudCfg); len(keys) != 0 {
+			t.Fatalf("a slot whose provider calls no app gives %+v", keys)
+		}
+		var callers []string
+		people := func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("Authorization") == "Bearer person-token" {
+					r = r.WithContext(session.ContextWithCaller(r.Context(), access.Principal{Subject: "person-1", Kind: access.KindUser}))
+				}
+				next.ServeHTTP(w, r)
+			})
+		}
 		router := chi.NewRouter()
-		router.Use(providers.ExtensionAuthenticator([]providers.ExtensionKey{{Key: providers.NewSecret(bridgeKey), Provider: "sms-relay-a", Role: []string{"messages.relay"}}}, nil))
+		router.Use(api.CallerAuthenticator(devCfg, people))
+		router.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				callers = append(callers, session.GetCaller(r.Context()).Subject)
+				next.ServeHTTP(w, r)
+			})
+		})
 		if err := api.RegisterRoutes(router, api.Config{DB: db, Logger: zap.NewNop()}); err != nil {
 			t.Fatal(err)
 		}
@@ -342,7 +371,12 @@ func TestProviders(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		for token, status := range map[string]int{bridgeKey: http.StatusOK, "other": http.StatusUnauthorized} {
+		for _, call := range []struct {
+			token  string
+			status int
+			caller string
+		}{{devCfg.SmsCallerKey, http.StatusOK, "extension:sms-relay-a"}, {"person-token", http.StatusOK, "person-1"}, {"other", http.StatusUnauthorized, ""}} {
+			token, status := call.token, call.status
 			req, _ := http.NewRequest(http.MethodGet, server.URL+"/api/tickets/"+ticket.Id.String(), nil)
 			req.Header.Set("Authorization", "Bearer "+token)
 			res, err := http.DefaultClient.Do(req)
@@ -351,8 +385,8 @@ func TestProviders(t *testing.T) {
 			}
 			body, _ := io.ReadAll(res.Body)
 			_ = res.Body.Close()
-			if res.StatusCode != status {
-				t.Fatalf("GET tickets/{id} with %s: %d %s", token, res.StatusCode, body)
+			if res.StatusCode != status || callers[len(callers)-1] != call.caller {
+				t.Fatalf("GET tickets/{id} with %s: %d %s as %q", map[bool]string{true: "the caller key", false: token}[token == devCfg.SmsCallerKey], res.StatusCode, body, callers[len(callers)-1])
 			}
 		}
 	})

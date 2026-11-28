@@ -149,6 +149,25 @@ type RuntimeProvider struct {
 	Role []string `json:"role,omitempty"`
 }
 
+// ProviderCallerKey is the reserved setting of a provider that calls the
+// app over HTTP with a key of its own (#744): the field <SLOT>_CALLER_KEY
+// of the API's @envVars class, a Secret<string>, which each language's
+// generated server reads into its extension authenticator, so a request
+// whose Bearer token is the key runs as the provider, with its role alone.
+// A provider that never calls the app lists none.
+const ProviderCallerKey = "CALLER_KEY"
+
+// CallsTheApp reports whether the provider calls the app with a key of its
+// own: its config lists ProviderCallerKey.
+func (p *RuntimeProvider) CallsTheApp() bool {
+	for _, c := range p.Config {
+		if c.Key == ProviderCallerKey {
+			return true
+		}
+	}
+	return false
+}
+
 // ProviderConfigKey is one setting a runtime provider reads.
 type ProviderConfigKey struct {
 	// Key is the setting's name: upper-case letters, digits and
@@ -211,6 +230,9 @@ func (p *RuntimeProvider) Check() error {
 			return fmt.Errorf("%s: config key %s is declared twice", where, c.Key)
 		}
 		keys[c.Key] = true
+		if c.Key == ProviderCallerKey && !c.Secret {
+			return fmt.Errorf("%s: config key %s is the key the provider calls the app with, which an environment sets as a secret; declare it {\"secret\": true} (#744)", where, c.Key)
+		}
 	}
 	for _, perm := range p.Role {
 		segs := strings.Split(perm, ".")

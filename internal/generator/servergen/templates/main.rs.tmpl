@@ -245,11 +245,20 @@ async fn run() -> Result<(), Failure> {
     // router mounts behind each one's route controls (D51).
 {{ rustLet .ManualRoutes (printf "%s::create_manual_routes(%s.clone())" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"manual routes of %s: {err}\"))?" .Service) }}
 {{- end }}
+{{- if .CallerProviders }}
+{{ .CallerProvidersLet }}
+{{- end }}
 {{ rustLet .Handlers (printf "%s::create(%s)" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"implementation of %s: {err}\"))?" .Service) }}
 {{- if and .Wiring .Wiring.Handlers }}
     // Its routes establish their callers in the grants' authenticator
     // around its own, and its access log records each call (#610).
 {{ .WiredHandlersLet }}
+{{- end }}
+{{- if .CallerProviders }}
+    // A provider that calls the app with its key, its slot's CALLER_KEY,
+    // runs as the provider with its role alone, before any other
+    // authenticator (#744).
+{{ .CallerHandlersLet }}
 {{- end }}
 {{- if .Identity }}
     // The identity runtime authenticates its callers and serves its user

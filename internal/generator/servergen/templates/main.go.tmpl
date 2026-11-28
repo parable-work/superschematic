@@ -131,11 +131,23 @@ func run(logger *zap.Logger) error {
 	// Authenticator, around {{ if .Identity }}the identity runtime's middleware{{ else if .Public }}its AuthMiddleware{{ else }}no auth step of its own{{ end }}.
 	{{ .AuthenticateVar }} := {{ .Package }}.Authenticator({{ .Var }}Deps, {{ .Database.Var }}, {{ .WiringVar }}, {{ if .Identity }}{{ .Var }}Identity.Middleware{{ else if .Public }}{{ .Var }}Auth{{ else }}nil{{ end }})
 {{- end }}
+{{- if .CallerKeys }}
+	// A provider that calls the app with its key, its slot's CALLER_KEY,
+	// runs as the provider with its role alone, before any other auth step
+	// (#744).
+{{- if .DeclaresRouteAuth }}
+	{{ .RouteAuthVar }} := {{ .Package }}.CallerAuthenticator(*{{ .Var }}Config, nil)
+{{- else }}
+	{{ .RouteAuthVar }} = {{ .Package }}.CallerAuthenticator(*{{ .Var }}Config, {{ .RouteAuthVar }})
+{{- end }}
+{{- end }}
 	{{ .Var }}Router := chi.NewRouter()
 {{- if not .Public }}
 	{{ .Var }}Router.Use(runtimemiddleware.Logger({{ .Var }}Logger, {{ .Package }}.ContextWithLogger))
 {{- end }}
-{{- if and .UsesAuthenticate .Wiring.Authenticates (not .Public) }}
+{{- if and .CallerKeys (not .Public) }}
+	{{ .Var }}Router.Use({{ .RouteAuthVar }})
+{{- else if and .UsesAuthenticate .Wiring.Authenticates (not .Public) }}
 	{{ .Var }}Router.Use({{ .AuthenticateVar }})
 {{- end }}
 	err = {{ .Package }}.RegisterRoutes({{ .Var }}Router, {{ .Package }}.Config{

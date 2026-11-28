@@ -1,0 +1,19 @@
+{
+  "name": "@fixture-providers/relay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A channel adapter that sends nowhere and calls the app with a key of its own, its slot's CALLER_KEY (#744).",
+  "type": "module",
+  "main": "./index.ts",
+  "license": "Apache-2.0",
+  "superschematic": {
+    "provider": {
+      "name": "relay",
+      "implements": "channel",
+      "config": {
+        "CALLER_KEY": { "secret": true, "description": "The key the relay calls the app with." }
+      },
+      "role": ["messages.relay"]
+    }
+  }
+}

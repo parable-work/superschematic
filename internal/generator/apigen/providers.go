@@ -34,6 +34,12 @@ type DepsProviders struct {
 	// "principal" for an ORM with per-record access (orm.WithPrincipal),
 	// "" for none, which binds the session's caller alone.
 	Bind string
+
+	// CallerKeys is set when a provider the config lists calls the app
+	// with a key of its own, its CALLER_KEY setting (#744): providers.go
+	// has ExtensionKeysOf and CallerAuthenticator, which a server wraps
+	// its routes' auth step in, outermost.
+	CallerKeys bool
 }
 
 // DepsProviderSlot is one provider slot: its config field and the
@@ -154,6 +160,7 @@ func ProvidersOf(schema *ir.Schema, env *envgen.ConfigOutput, principal bool) (*
 			return nil, err
 		}
 		out.Modules = append(out.Modules, DepsProviderModule{Name: p.Name, Module: p.Module, Alias: alias, Manifest: string(data), Dir: p.Dir})
+		out.CallerKeys = out.CallerKeys || p.CallsTheApp()
 	}
 	return out, nil
 }

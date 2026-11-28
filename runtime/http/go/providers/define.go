@@ -104,6 +104,9 @@ func Define(d Definition) (Definition, error) {
 		if !keyForm.MatchString(key) {
 			return Definition{}, contractErrorf("%s: config key %q is upper-case letters, digits and underscores", where, key)
 		}
+		if key == CallerKey && !d.Config[key].Secret {
+			return Definition{}, contractErrorf("%s: config key %s is the key the provider calls the app with, which an environment sets as a secret; declare it Secret (#744)", where, key)
+		}
 	}
 	for _, permission := range d.Role {
 		segments := strings.Split(permission, ".")

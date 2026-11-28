@@ -59,6 +59,12 @@ const AudienceFile = "audience.ts"
 type DepsProviders struct {
 	Slots    []DepsProviderSlot
 	Packages []DepsProviderPackage
+
+	// CallerKeys is set when a package the config lists calls the app
+	// with a key of its own, its CALLER_KEY setting (#744): providers.ts
+	// exports extensionKeys and callerAuthenticator, which a server wraps
+	// its routes' authenticator in, outermost.
+	CallerKeys bool
 }
 
 // DepsProviderSlot is one provider slot: its config field and the
