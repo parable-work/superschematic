@@ -419,9 +419,9 @@ docs:
 # fixture-seats-db, fixture-schedules-db and fixture-pool-db, whose types
 # and tables compose the core's behaviors (D10, D104): --emit-ir carries all
 # twenty-eight, Seats, Reconcile, Schedules and Pool on their tables, and
-# json-schema admits them, and Links, Search, Queue and Branches too, whose
-# declarations stay registered though the build refuses them (D103 folds
-# them into schema features); fixture-commerce-currency-json holds a
+# json-schema admits them, but not Links, Search, Queue and Branches, which
+# D103 folds into schema features and whose declarations went with the
+# engine (D103, #587); fixture-commerce-currency-json holds a
 # commerce currency in a Finance.Currency own field (D70). It builds
 # fixture-behaviors-json, a General schema.
 cli-smoke: $(CORE_BIN)
@@ -470,8 +470,8 @@ cli-smoke: $(CORE_BIN)
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 	@for b in Links Search Queue Branches; do \
-		grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
-			|| { echo "cli-smoke: json-schema does not admit $$b, whose declaration stays registered"; exit 1; }; done
+		! grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
+			|| { echo "cli-smoke: json-schema admits $$b, which no registry declares since the engine went"; exit 1; }; done
 
 # examples/migrations: plans its DB service from v1 to v2 for Postgres and
 # SQLite with the core alone, gates the plans on their hazards, and applies
