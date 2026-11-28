@@ -230,7 +230,7 @@ func (Extension) Register(r *registry.Registry) error {
 const targetValues = `{
   "type": "object",
   "properties": {
-    "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+    "port": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535}
   },
   "additionalProperties": false
 }`

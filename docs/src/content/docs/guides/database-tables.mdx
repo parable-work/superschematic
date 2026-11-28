@@ -4185,9 +4185,9 @@ moves to the next business day.
 | `weekendDays` | the days a due date moves off; `saturday` and `sunday` when absent |
 | `holidays` | `{ table, calendarField, dateField, field }`: the holiday table your app fills, and this table's field that names a row's calendar |
 | `relative` | `{ via, type, field }`: the to-one relation, the table it points at, and that table's date field |
-| `opensBefore` | how long before its due an occurrence opens (ISO 8601, `P14D`); with none it opens when the one before it falls due |
-| `remindBefore` | how long before its due an occurrence reminds |
-| `overdueAfter` | how long after its due an open occurrence is missed; at its due when absent |
+| `opensBefore` | how long before its due an occurrence opens, a `Temporal.Period` (ISO 8601, `P14D`); with none it opens when the one before it falls due |
+| `remindBefore` | how long before its due an occurrence reminds, a `Temporal.Period` |
+| `overdueAfter` | how long after its due an open occurrence is missed, a `Temporal.Period`; at its due when absent |
 | `permission` | the permission `complete` and `listOccurrences` need |
 | `managePermission` | the permission `setRecurrence`, `skip` and `moveOne` need; `permission` when absent |
 
