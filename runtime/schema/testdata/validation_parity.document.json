@@ -217,6 +217,21 @@
         "typescript": "number[]"
       }
     },
+    "File_MediaType": {
+      "description": "IANA media type (MIME type): type/subtype with optional parameters, normalized to lowercase (e.g., image/png, text/csv;charset=utf-8)",
+      "maxLength": 255,
+      "type": "string",
+      "x-example": "image/png",
+      "x-hasCustomNormalize": true,
+      "x-hasCustomParse": true,
+      "x-hasCustomValidate": true,
+      "x-scalar": "File_MediaType",
+      "x-typeMapping": {
+        "go": "FileMediaType",
+        "json_schema": "string",
+        "sql": "VARCHAR(255)"
+      }
+    },
     "File_SizeBytes": {
       "description": "File size in bytes (non-negative, BIGINT-backed)",
       "maximum": 9007199254740991,
@@ -379,6 +394,21 @@
         "go": "GenericText",
         "json_schema": "string",
         "sql": "TEXT"
+      }
+    },
+    "Geo_CountryCode": {
+      "description": "Officially assigned ISO 3166-1 alpha-2 country code (e.g., US, DE, JP)",
+      "maxLength": 2,
+      "minLength": 2,
+      "pattern": "^[A-Z]{2}$",
+      "type": "string",
+      "x-example": "US",
+      "x-hasCustomValidate": true,
+      "x-scalar": "Geo_CountryCode",
+      "x-typeMapping": {
+        "go": "GeoCountryCode",
+        "json_schema": "string",
+        "sql": "VARCHAR(2)"
       }
     },
     "Geo_Location": {
@@ -690,6 +720,19 @@
         "go": "NetworkIpAddress",
         "json_schema": "string",
         "sql": "INET"
+      }
+    },
+    "Network_Port": {
+      "description": "TCP or UDP port number, 1 through 65535",
+      "maximum": 65535,
+      "minimum": 1,
+      "type": "integer",
+      "x-example": "443",
+      "x-scalar": "Network_Port",
+      "x-typeMapping": {
+        "go": "NetworkPort",
+        "json_schema": "integer",
+        "sql": "INTEGER"
       }
     },
     "Network_Uri": {
@@ -1144,6 +1187,21 @@
         "sql": "BIGINT"
       }
     },
+    "Temporal_LocalDateTime": {
+      "description": "Date and time of day with no zone or offset (a wall-clock reading), normalized to 'YYYY-MM-DDTHH:MM:SS'. Accepts 'T', 't' or a space between the date and the time, and a time without seconds. Refuses a value that carries a zone or an offset.",
+      "maxLength": 40,
+      "type": "string",
+      "x-example": "2026-10-31T09:00:00",
+      "x-hasCustomNormalize": true,
+      "x-hasCustomParse": true,
+      "x-hasCustomValidate": true,
+      "x-scalar": "Temporal_LocalDateTime",
+      "x-typeMapping": {
+        "go": "TemporalLocalDateTime",
+        "json_schema": "string",
+        "sql": "TIMESTAMP"
+      }
+    },
     "Temporal_Milliseconds": {
       "description": "Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis.",
       "maximum": 9007199254740991,
@@ -1183,6 +1241,23 @@
         "go": "TemporalMonth",
         "json_schema": "string",
         "sql": "VARCHAR(2)"
+      }
+    },
+    "Temporal_Period": {
+      "description": "ISO 8601 duration: an amount of calendar time in years, months, weeks, days, hours, minutes and seconds (e.g., P2D, P1M, PT30M)",
+      "maxLength": 64,
+      "minLength": 3,
+      "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+      "type": "string",
+      "x-example": "P2D",
+      "x-hasCustomNormalize": true,
+      "x-hasCustomParse": true,
+      "x-hasCustomValidate": true,
+      "x-scalar": "Temporal_Period",
+      "x-typeMapping": {
+        "go": "TemporalPeriod",
+        "json_schema": "string",
+        "sql": "VARCHAR(64)"
       }
     },
     "Temporal_Quarter": {
