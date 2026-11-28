@@ -84,6 +84,8 @@ pub struct ChannelIdentity {
     pub opted_out_at: Option<TemporalDateTime>,
 }
 
+/// A text may only acknowledge, since its sender id can be spoofed; an
+/// email may run what its sender may. Keyed by the unique channel kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ChannelTrust {
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -234,6 +236,9 @@ fn default_notice_preference_urgency() -> String {
     "*".to_string()
 }
 
+/// Everyone hears by SMS, then email, unless their own row says otherwise:
+/// a row of no principal, seed data (#625), identified by whom and what it
+/// is for, since no unique constraint holds the rows.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NoticePreference {
     #[serde(default, skip_serializing_if = "Option::is_none")]
