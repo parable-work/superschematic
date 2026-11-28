@@ -652,7 +652,7 @@ class {{.ClassName}}:
 
         if pattern and isinstance(value, str):
             try:
-                if re.search(pattern, value) is None:
+                if re.search(pattern, value, re.ASCII) is None:
                     field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})
             except re.error:
                 field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})
@@ -822,7 +822,7 @@ class {{.ClassName}}:
             {{- if .ValidateMax}} max_value={{.ValidateMax}},{{- end}}
             {{- if .ValidateMinLength}} min_length={{.ValidateMinLength}},{{- end}}
             {{- if .ValidateMaxLength}} max_length={{.ValidateMaxLength}},{{- end}}
-            {{- if .ValidatePattern}} pattern={{printf "%q" (pythonPattern .ValidatePattern)}},{{- end}}
+            {{- if .ValidatePattern}} pattern={{printf "%q" .ValidatePattern}},{{- end}}
             {{- if .ValidateListMin}} list_min={{.ValidateListMin}},{{- end}}
             {{- if .ValidateListMax}} list_max={{.ValidateListMax}},{{- end}}
         )
@@ -838,7 +838,7 @@ class {{.ClassName}}:
                 {{- if .ValidateMax}} max_value={{.ValidateMax}},{{- end}}
                 {{- if .ValidateMinLength}} min_length={{.ValidateMinLength}},{{- end}}
                 {{- if .ValidateMaxLength}} max_length={{.ValidateMaxLength}},{{- end}}
-                {{- if .ValidatePattern}} pattern={{printf "%q" (pythonPattern .ValidatePattern)}},{{- end}}
+                {{- if .ValidatePattern}} pattern={{printf "%q" .ValidatePattern}},{{- end}}
                 {{- if .ValidateListMin}} list_min={{.ValidateListMin}},{{- end}}
                 {{- if .ValidateListMax}} list_max={{.ValidateListMax}},{{- end}}
             )
@@ -1150,7 +1150,7 @@ array it holds, and an object is sent by wire name as its type reads it.
 {{- if .ValidateMax}}, max_value={{.ValidateMax}}{{end}}
 {{- if .ValidateMinLength}}, min_length={{.ValidateMinLength}}{{end}}
 {{- if .ValidateMaxLength}}, max_length={{.ValidateMaxLength}}{{end}}
-{{- if .ValidatePattern}}, pattern={{printf "%q" (pythonPattern .ValidatePattern)}}{{end}}
+{{- if .ValidatePattern}}, pattern={{printf "%q" .ValidatePattern}}{{end}}
 {{- if .ValidateListMin}}, list_min={{.ValidateListMin}}{{end}}
 {{- if .ValidateListMax}}, list_max={{.ValidateListMax}}{{end}}
 {{- end}}

@@ -20,8 +20,22 @@ use superschematic_rules_adapter::{Column, Convert};
 use superschematic_rules_handler::document::{Field, Kind};
 use superschematic_rules_handler::values::{base62, instant_of, iso_of, uuid_of};
 
-/// The database a store's statements are written for: the adapter's.
-pub use superschematic_rules_adapter::sql::Dialect;
+/// The database a store's statements are written for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Dialect {
+    Sqlite,
+    Postgres,
+}
+
+impl Dialect {
+    /// The dialect as a plan names it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Dialect::Sqlite => "sqlite",
+            Dialect::Postgres => "postgres",
+        }
+    }
+}
 
 /// The IR types whose wire form is base62 and whose column holds the
 /// hyphenated text (D79).

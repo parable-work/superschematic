@@ -12,7 +12,7 @@ publish.workspace = true
 default = []
 # The runtime store in a Postgres database, whose publish runs the Go runner,
 # superschematic-migrate, beside it.
-postgres = ["dep:postgres", "dep:superschematic-engine-pg", "superschematic-rules-adapter/postgres"]
+postgres = ["dep:postgres", "dep:bytes"]
 
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
@@ -22,10 +22,8 @@ serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve
 superschematic-rules = { path = "../rules" }
 superschematic-rules-behaviors = { path = "../rules-behaviors" }
 superschematic-rules-handler = { path = "../rules-handler" }
-# The layout document's types, as the compiled adapter reads it, and the
-# SQL text it writes (its sql module): the dialect, a quoted identifier and
-# a placeholder. With the postgres feature, its store feature too, for the
-# value it binds as text; the client is the one postgres is over.
+# The layout document's types alone, as the compiled adapter reads it; no
+# store feature, so no client of its own.
 superschematic-rules-adapter = { path = "../rules-adapter" }
 # The runner that applies a SQLite plan in the process that serves the file
 # (D116), the one a deploy of an embedded environment uses.
@@ -36,8 +34,9 @@ rusqlite = { version = "0.40.2", features = ["bundled", "functions"] }
 # The store in a Postgres database, through the synchronous client the
 # development store uses; off by default.
 postgres = { version = "0.19.14", optional = true }
-# The class of a server's error, and the TLS a URL's sslmode asks for.
-superschematic-engine-pg = { path = "../pg", features = ["tls"], optional = true }
+# The buffer a parameter sent as text writes into, already in the client's
+# tree.
+bytes = { version = "1.11", optional = true }
 # A request's id and a create's key when it names none.
 uuid = { version = "1.28.0", features = ["v4"] }
 

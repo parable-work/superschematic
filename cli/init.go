@@ -200,6 +200,7 @@ func writeNewFile(path string, content []byte) error {
 var (
 	npmScopePattern     = regexp.MustCompile(`^@[a-z0-9][a-z0-9._-]*$`)
 	goModuleRootPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._~-]*(/[A-Za-z0-9._~-]+)*$`)
+	projectWordPattern  = regexp.MustCompile(`[^a-z0-9]+`)
 )
 
 func checkNpmScope(scope string) error {
@@ -231,11 +232,12 @@ func checkCheckout(dir string) error {
 	return nil
 }
 
-// initProject is the name the defaults derive from: the slug
-// (naming.Slug) of the directory that holds the schemas root, or "" when
-// nothing is left.
+// initProject is the name the defaults derive from: the directory that
+// holds the schemas root, in lower case with each run of other characters
+// a hyphen, or "" when nothing is left.
 func initProject(schemasRoot string) string {
-	return naming.Slug(filepath.Base(filepath.Dir(schemasRoot)))
+	word := projectWordPattern.ReplaceAllString(strings.ToLower(filepath.Base(filepath.Dir(schemasRoot))), "-")
+	return strings.Trim(word, "-")
 }
 
 // enclosingCheckout returns the superschematic checkout at or above dir,

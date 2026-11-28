@@ -318,7 +318,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Dialects:  dialects,
 			Settings:  json.RawMessage(databaseSettings),
 			NameOf: func(ctx registry.PlatformContext) any {
-				return ir.Kebab(ctx.Deployable.Name)
+				return kebab(ctx.Deployable.Name)
 			},
 			AddressOf: func(ctx registry.PlatformContext) any {
 				return ir.Output{Resource: ctx.Deployable.Name + ".instance", Name: "connectionName"}
@@ -704,7 +704,7 @@ var resourceTypes = map[string]string{
 // serverName names a server after its deployable, suffixed with each
 // parameter's value under a parameter: `shop-api`, `shop-api-<pr>`.
 func serverName(ctx registry.PlatformContext) any {
-	parts := []any{ir.Kebab(ctx.Deployable.Name)}
+	parts := []any{kebab(ctx.Deployable.Name)}
 	for _, param := range ctx.Environment.Parameters {
 		parts = append(parts, "-", ir.Parameter(param))
 	}
@@ -1200,7 +1200,7 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 // environment gets a bucket of its own (D54).
 func bucketName(ctx registry.PlatformContext) any {
 	project, _ := ctx.Environment.Values["project"].(string)
-	parts := []any{project, "-", ir.Kebab(ctx.Environment.Stack), "-", ir.Kebab(ctx.Deployable.Name)}
+	parts := []any{project, "-", kebab(ctx.Environment.Stack), "-", kebab(ctx.Deployable.Name)}
 	for _, param := range ctx.Environment.Parameters {
 		parts = append(parts, "-", ir.Parameter(param))
 	}
@@ -1250,7 +1250,7 @@ func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
 // store, so the name holds no parameter (D75).
 func memoryStoreName(ctx registry.PlatformContext) any {
 	project, _ := ctx.Environment.Values["project"].(string)
-	return Join(project, "-", ir.Kebab(ctx.Environment.Stack), "-", ir.Kebab(ctx.Deployable.Name))
+	return Join(project, "-", kebab(ctx.Environment.Stack), "-", kebab(ctx.Deployable.Name))
 }
 
 // lowerMemoryStore lowers a memory store to an instance with TLS in the
@@ -1399,6 +1399,8 @@ func Join(parts ...any) any {
 	return out
 }
 
+// kebab lowercases a name and joins its words with hyphens: Orders is
+// orders, shop-api stays shop-api.
 // ImageRepository is the repository path the fake platforms write as a
 // deployable's image, with no tag or digest, which a deploy pins
 // (stackdeploy.PinImages) and the fake builder returns at a digest. It
@@ -1407,8 +1409,26 @@ func Join(parts ...any) any {
 // account's name: a deploy that pins an image no node holds fails here
 // as it does on a real target.
 func ImageRepository(deployable string) string {
-	return "images.fake.test/" + ir.Kebab(deployable)
+	return "images.fake.test/" + kebab(deployable)
 }
 
-// snake is ir.Kebab with underscores.
-func snake(name string) string { return strings.ReplaceAll(ir.Kebab(name), "-", "_") }
+func kebab(name string) string {
+	var b strings.Builder
+	for i, r := range name {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			if i > 0 && name[i-1] != '-' && name[i-1] != '_' {
+				b.WriteByte('-')
+			}
+			b.WriteRune(r - 'A' + 'a')
+		case r == '_':
+			b.WriteByte('-')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// snake is kebab with underscores.
+func snake(name string) string { return strings.ReplaceAll(kebab(name), "-", "_") }

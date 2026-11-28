@@ -34,7 +34,7 @@ func (c *FakeCI) Identity(env *ir.ResolvedEnvironment, role registry.CIRole) *re
 		kind = WorkloadIdentity
 	}
 	return &registry.CIIdentity{Kind: kind, Fields: map[string]string{
-		"provider": "projects/" + number + "/locations/global/workloadIdentityPools/" + ir.Kebab(env.Stack) + "-ci/providers/ci",
-		"account":  ir.Kebab(env.Stack) + "-" + string(role) + "@" + project + ".fake.test",
+		"provider": "projects/" + number + "/locations/global/workloadIdentityPools/" + kebab(env.Stack) + "-ci/providers/ci",
+		"account":  kebab(env.Stack) + "-" + string(role) + "@" + project + ".fake.test",
 	}}
 }

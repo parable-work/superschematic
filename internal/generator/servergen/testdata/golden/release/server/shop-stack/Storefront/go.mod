@@ -24,7 +24,7 @@ require (
 	example.com/schemas/implementation/shop-reviews v0.0.0-00010101000000-000000000000
 	example.com/schemas/orm/shop-db v0.0.0-00010101000000-000000000000
 	example.com/schemas/sdk/go/shop-api v0.0.0-00010101000000-000000000000
-	github.com/go-chi/chi/v5 v5.4.0
+	github.com/go-chi/chi/v5 v5.3.2
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/parable-work/superschematic/runtime/http/go v1.2.3
 	github.com/redis/go-redis/v9 v9.23.0

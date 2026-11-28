@@ -35,7 +35,18 @@ pub(crate) trait Db {
     fn has_table(&mut self, table: &str) -> Result<bool, Refusal>;
 }
 
-pub(crate) use superschematic_rules_adapter::sql::{placeholder, quote};
+/// An identifier quoted as Postgres and SQLite both read one.
+pub(crate) fn quote(identifier: &str) -> String {
+    format!("\"{}\"", identifier.replace('"', "\"\""))
+}
+
+/// The nth placeholder of a dialect: `?n` on SQLite, `$n` on Postgres.
+pub(crate) fn placeholder(dialect: Dialect, n: usize) -> String {
+    match dialect {
+        Dialect::Sqlite => format!("?{n}"),
+        Dialect::Postgres => format!("${n}"),
+    }
+}
 
 /// A time in epoch milliseconds as a statement writes it into a queue's
 /// `due_at`: SQLite's ISO text, as the queue's default writes it, or a

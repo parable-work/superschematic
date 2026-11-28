@@ -8,7 +8,7 @@ import type { ScalarValidationResult, ValidationError } from 'superscalar/valida
 // amended; D100).
 export { parseTextMarkdownStrict, normalizeTextMarkdownStrict } from 'superscalar/scalars';
 
-const TextMarkdownPattern = new RegExp("^[\\t\\n\\f\\r \\x00-\\x08\\v\\x0e-\\x1f!-\\u{10ffff}]*$", "u");
+const TextMarkdownPattern = new RegExp("^[\\s\\S]*$", "u");
 
 /**
  * Validates a Text.Markdown value

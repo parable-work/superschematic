@@ -7,7 +7,6 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/profile"
 )
 
@@ -60,7 +59,7 @@ func newServiceProgram(servicePath string, prof *profile.Profiler, cache *Progra
 				continue
 			}
 			switch {
-			case name == dir+"/"+schemaconfig.FormTS.FileName():
+			case name == dir+"/schema.config.ts":
 				sp.configFile = file
 			case strings.HasSuffix(name, ".schema.ts") && strings.HasPrefix(name, dir+"/src/"):
 				sp.schemaFiles = append(sp.schemaFiles, file)

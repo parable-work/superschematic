@@ -83,13 +83,11 @@ opentelemetry-otlp = { version = "0.33.1", default-features = false, features = 
 opentelemetry-http = { version = "0.33.1", default-features = false, optional = true }
 tracing-opentelemetry = { version = "0.34.0", default-features = false, optional = true }
 # The memorystore-redis feature's client (D75): the redis crate's async
-# client on tokio, without its default features, so it sends no command a
-# managed server refuses beyond what a connection needs. Its TLS is
-# native-tls, the TLS of the http-client feature that memorystore-redis
-# turns on and of the postgres feature, so a build has one TLS stack. A
-# connection's CA replaces the system's roots, as it would with rustls
-# (redis 1.8.1 reads every certificate of a PEM bundle on either).
-redis = { version = "1.8.1", default-features = false, features = ["tokio-comp", "tokio-native-tls-comp"], optional = true }
+# client on tokio, over TLS with rustls, without its default features, so
+# it sends no command a managed server refuses beyond what a connection
+# needs. rustls takes ring, already in the tree, as its crypto provider.
+redis = { version = "1.8.0", default-features = false, features = ["tokio-comp", "tokio-rustls-comp"], optional = true }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std", "tls12"], optional = true }
 
 [features]
 # HttpFetcher: the default JWKS fetcher of JwtServiceAuthenticator and the
@@ -137,7 +135,7 @@ gcs = ["http-client", "dep:http-body"]
 # metadata server, which the gcs feature's client asks for, as each new
 # connection's password. The memorystore module, the provider-neutral
 # interface and the in-process store, needs no feature.
-memorystore-redis = ["gcs", "dep:redis", "tokio/rt", "tokio/net"]
+memorystore-redis = ["gcs", "dep:redis", "dep:rustls", "tokio/rt", "tokio/net"]
 # A stack server's log (D57): one JSON object per line on stdout, in the
 # TypeScript logger's shape, as a layer over tracing-subscriber's registry.
 logging = ["dep:tracing-subscriber"]

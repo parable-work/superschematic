@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"go.yaml.in/yaml/v3"
+	"gopkg.in/yaml.v3"
 	"reflect"
 	"regexp"
 	"strings"

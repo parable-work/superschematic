@@ -219,6 +219,11 @@ type TypeDef struct {
 	// for every other type. See [RoleSeed].
 	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
 
+	// SeedRows are the rows a DB table's @seedRows declares (#625, #667),
+	// which create.sql inserts and a migration plan inserts when new. Nil
+	// for every other type. See [SeedRows].
+	SeedRows *SeedRows `json:"seedRows,omitempty" yaml:"seedRows,omitempty"`
+
 	// Mergeable marks a DB table whose repository folds one row into
 	// another, the core Mergeable trait (D147): mergeInto repoints every
 	// relation of the schema that references the row merged away, deletes

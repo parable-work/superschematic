@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"go.yaml.in/yaml/v3"
+	"gopkg.in/yaml.v3"
 )
 
 func TestProjectionPredicateForms(t *testing.T) {

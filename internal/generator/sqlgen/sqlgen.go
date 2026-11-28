@@ -307,6 +307,10 @@ type DDLOutput struct {
 	// RoleSeeds are the roles a UserRole table's @seedRoles declares, in
 	// declaration order (seeds.go, D88).
 	RoleSeeds []RoleSeed
+
+	// SeedRows are the rows each table's @seedRows declares, in table
+	// order, then declaration order (seed_rows.go, #625).
+	SeedRows []SeedRow
 }
 
 // Options configures DDL generation.
@@ -597,6 +601,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	seedRows, err := buildSeedRows(tableTypes, tables)
+	if err != nil {
+		return nil, err
+	}
 	projections, err := buildProjections(schema, opts.Dependencies, tableMap, scalarMapping)
 
 	if err != nil {
@@ -666,7 +674,8 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		SearchTriggers:      searchTriggers,
 		SearchChildTriggers: searchChildTriggers,
 		RoleSeeds:           roleSeeds,
-		Projections:         projections,
+		SeedRows:            seedRows,
+		Projections:        projections,
 		Timestamp:           opts.Clock.RFC3339(),
 		RawSQL:              rawSQL,
 

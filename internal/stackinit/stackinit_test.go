@@ -96,8 +96,6 @@ func TestDefaultName(t *testing.T) {
 	assert.Equal(t, "acme-stack", stackinit.DefaultName([]string{"shop-api", "billing-api"}, acme, root))
 	assert.Equal(t, "notes-app-stack", stackinit.DefaultName([]string{"shop-api", "billing-api"}, naming.Default(), root))
 	assert.Equal(t, "stack", stackinit.DefaultName([]string{"shop-api", "billing-api"}, naming.Default(), filepath.Join(string(filepath.Separator), "schemas")))
-	// A directory whose slug starts with a digit names no stack.
-	assert.Equal(t, "stack", stackinit.DefaultName([]string{"shop-api", "billing-api"}, naming.Default(), filepath.Join(string(filepath.Separator), "work", "3d Prints", "schemas")))
 	for _, name := range []string{"shop-stack", "notes-app-stack", "acme-stack", "stack"} {
 		require.NoError(t, stackinit.CheckName(name))
 	}

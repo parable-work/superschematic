@@ -322,8 +322,7 @@ const MAX_UPLOAD_SECONDS = 7 * 24 * 60 * 60;
 /** How long after an upload's URL expires its never-completed file is released. */
 const RELEASE_GRACE_SECONDS = 60 * 60;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
-/** A media type a file may have (D154): a lowercase type/subtype without parameters. */
-export const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/u;
+const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/u;
 
 /** The ORM's references and attachments members over host, as the database declares them. */
 export function rowFeatureMembers(host: RowFeatureHost): Partial<ReferencesMembers & AttachmentsMembers> {
@@ -648,30 +647,15 @@ function attachmentColumnsOf(holder: AttachmentsHolderDefinition, sql: Sql): str
   ].join(', ');
 }
 
-/** Whether a declaration's mediaTypes admit mediaType: each is a type/subtype, a family's type/* or any type's; none admits any. */
-export function mediaTypeAllowed(allowed: readonly string[] | undefined, mediaType: string): boolean {
+function mediaTypeAllowed(allowed: readonly string[] | undefined, mediaType: string): boolean {
   if (!allowed || allowed.length === 0) return true;
   const family = mediaType.split('/')[0];
   return allowed.some(one => one === mediaType || one === '*/*' || (one.endsWith('/*') && one.slice(0, -2) === family));
 }
 
-/**
- * Whether name is a file's name (D154): 1 to 255 Unicode code points, as
- * every length counts them (D14, amended) and the Go runtime does, not
- * UTF-16 units; none of them a slash, a backslash or a control character
- * (U+0000 to U+001F, U+007F); and not white space alone, Unicode's
- * White_Space as Go's strings.TrimSpace reads it.
- * runtime/http/testdata/attachments_parity.json holds the vectors both run.
- */
-export function isFileName(name: unknown): boolean {
-  if (typeof name !== 'string') return false;
-  const length = [...name].length;
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: a file's name holds no control character
-  return length >= 1 && length <= 255 && !/[/\\\u0000-\u001f\u007f]/u.test(name) && !/^\p{White_Space}*$/u.test(name);
-}
-
 function checkName(name: string): void {
-  if (!isFileName(name)) {
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: a file's name holds no control character
+  if (typeof name !== 'string' || name.length < 1 || name.length > 255 || /[/\\\u0000-\u001f\u007f]/u.test(name) || name.trim() === '') {
     throw new RowFeatureError('invalid', `a file's name is 1 to 255 characters with no /, \\ or control character, not ${JSON.stringify(name)}`);
   }
 }

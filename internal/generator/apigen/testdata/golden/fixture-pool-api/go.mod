@@ -18,7 +18,7 @@ module example.com/schemas/api/fixture-pool-api
 go 1.27.3
 
 require (
-	github.com/go-chi/chi/v5 v5.4.0
+	github.com/go-chi/chi/v5 v5.3.2
 	example.com/schemas/orm/fixture-pool-db v0.0.0-00010101000000-000000000000
 	example.com/schemas/types/go/fixture-pool-api v0.0.0-00010101000000-000000000000
 	github.com/parable-work/superschematic/runtime/http/go v0.0.0-00010101000000-000000000000

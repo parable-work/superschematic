@@ -70,7 +70,8 @@ the rest:
     plan runs it, as D83 lets any piece run again;
   - the roles @seedRoles keeps, which are rows: the model holds none, so
     the plan seeds each, with the insert that leaves a role of its name
-    alone.
+    alone; and the rows @seedRows seeds (#625), which the plan seeds again
+    with the insert that leaves a row of its key alone.
 
 What a table's definition holds and the model has no form of is listed in
 Table.Unmodeled, and a plan from it rebuilds the table as the schema

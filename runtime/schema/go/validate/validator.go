@@ -78,15 +78,7 @@ func New(schema *ir.Schema, opts ...Option) *Validator {
 
 	for _, scalar := range schema.Scalars {
 		if scalar.Pattern != "" {
-			// Compile, never MustCompile: a schema can declare a scalar
-			// of its own with any pattern, and any IR can reach New. A
-			// pattern that does not compile is a nil entry, which
-			// refuses every value, as a field's does.
-			re, err := regexp.Compile(scalar.Pattern)
-			if err != nil {
-				re = nil
-			}
-			v.patterns[scalar.Pattern] = re
+			v.patterns[scalar.Pattern] = regexp.MustCompile(scalar.Pattern)
 		}
 	}
 

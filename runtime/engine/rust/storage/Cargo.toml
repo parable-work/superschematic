@@ -18,20 +18,16 @@ default = ["sqlite", "postgres"]
 # is known (3.x with STRICT tables, RETURNING and FTS5).
 sqlite = ["dep:rusqlite"]
 # Postgres through the synchronous postgres crate over tokio-postgres 0.7,
-# the client the version graph's Rust engine uses, with the TLS and error
-# classes of the engine's Postgres layer.
-postgres = ["dep:postgres", "dep:bytes", "dep:superschematic-engine-pg"]
+# the client the version graph's Rust engine uses.
+postgres = ["dep:postgres", "dep:bytes"]
 
 [dependencies]
 bytes = { version = "1.11", optional = true }
 postgres = { version = "0.19.14", optional = true }
-# The class of a server's error, and the TLS a connection string's sslmode
-# asks for.
-superschematic-engine-pg = { path = "../pg", features = ["tls"], optional = true }
 rusqlite = { version = "0.40.2", optional = true, features = ["bundled"] }
 # Advisory lock keys and the suffix of a Postgres identifier cut to 63
 # bytes, both SHA-256 so they are the same in every process and release.
-sha2 = "0.11.1"
+sha2 = "0.10.9"
 
 [lints]
 workspace = true

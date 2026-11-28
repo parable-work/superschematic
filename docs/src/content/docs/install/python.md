@@ -113,9 +113,8 @@ and every model they hold, in lists and maps too, each nested error
 under its path (`lines[0].quantity`). It keys its errors by the
 snake_case names; `validate_all(by_alias=True)` keys them by the JSON
 names, nested fields included, as the Go and TypeScript validators do.
-`str()` of the result lists each error. A `pattern` rule holds the
-pattern rewritten so `re` matches what Go's RE2 matches: `\d`, `\w`, `\s`
-and `\b` are ASCII classes and `$` is the end of the text, as every other
+`str()` of the result lists each error. A `pattern` rule matches with
+`re.ASCII`, so `\d`, `\w` and `\b` are ASCII classes, as every other
 language's validators read them.
 
 ## Consume a generated SDK

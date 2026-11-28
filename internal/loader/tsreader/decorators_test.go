@@ -44,10 +44,6 @@ func decoratorTestService(t *testing.T, kind string, files map[string]string) st
 	for rel, contents := range files {
 		all[rel] = contents
 	}
-	// A service has one config form, so a schema.config.ts replaces the JSON.
-	if _, ok := files["schema.config.ts"]; ok {
-		delete(all, "schema.config.json")
-	}
 	for rel, contents := range all {
 		path := filepath.Join(dir, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -20,9 +20,7 @@ such module calls:
 - `code_points`: lengths count Unicode code points.
 - `Pattern`: a `pattern` rule compiled once. `\d`, `\w`, `\s` and `\b` are
   read as ASCII, as Go's RE2 reads them, where the `regex` crate would read
-  them as Unicode, and `\Q...\E`, octal escapes, `\p{^L}`, `\<`, `\>` and
-  a `{` that opens no repetition mean what they mean to RE2.
-  `../testdata/pattern_dialect.json` holds the cases every runtime checks.
+  them as Unicode.
 - `index_path`, `key_path` and `bracket_key_path`.
 - `Rule`, with `check_list_rules` and `check_value_rules`: a field's own
   `@validate` rules, each on a value of its own JSON type.

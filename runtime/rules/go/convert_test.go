@@ -7,8 +7,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // The conversions between the core's JSON and a column's value: the UUID
@@ -53,9 +51,9 @@ func TestUUIDCodec(t *testing.T) {
 			t.Errorf("uuidToColumn(%q) = %q, want a refusal", bad, got)
 		}
 	}
-	raw := uuid.New()
-	if column := hyphenatedBytes(raw); column != raw.String() {
-		t.Errorf("hyphenatedBytes(%x) = %q, want %q", raw, column, raw.String())
+	raw := randomUUID()
+	if raw[6]>>4 != 4 || raw[8]>>6 != 2 {
+		t.Errorf("randomUUID() = %x, want a version 4 variant 1 UUID", raw)
 	}
 	wire := base62(new(big.Int).SetBytes(raw[:]))
 	if column, err := uuidToColumn(wire); err != nil || column != hyphenatedBytes(raw) {

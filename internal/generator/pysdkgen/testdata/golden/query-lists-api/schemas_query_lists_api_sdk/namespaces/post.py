@@ -358,7 +358,7 @@ class PostNamespace:
 
         if pattern and isinstance(value, str):
             try:
-                if re.search(pattern, value) is None:
+                if re.search(pattern, value, re.ASCII) is None:
                     field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})
             except re.error:
                 field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})
@@ -480,7 +480,7 @@ class PostNamespace:
             if ranks:
                 query_params["ranks"] = self._query_list_value(ranks)
         if codes is not None:
-            self._validate_query_list(codes, "codes", "str", min_length=2, max_length=4, pattern="^[a-z]+\\Z")
+            self._validate_query_list(codes, "codes", "str", min_length=2, max_length=4, pattern="^[a-z]+$")
             if codes:
                 query_params["codes"] = self._query_list_value(codes)
         if tags is not None:

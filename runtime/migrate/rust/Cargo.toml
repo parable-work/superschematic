@@ -25,7 +25,7 @@ name = "superschematic_migrate"
 rusqlite = { version = "0.40.2", default-features = false, features = ["bundled", "backup"] }
 # The SHA-256 of a model, a plan and a step's statements, as the version
 # graph and the engine hash.
-sha2 = "0.11.1"
+sha2 = "0.10.9"
 
 [dev-dependencies]
 # The tests edit plan documents and seal them again. arbitrary_precision

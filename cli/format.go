@@ -11,7 +11,6 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
-	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/yamlreader"
@@ -189,8 +188,10 @@ func readTSDocument(path string, reg *registry.Registry) (*schemafile.Document, 
 // nearest ancestor holding a schema.config.{ts,json,yaml}.
 func findServiceRoot(dir string) (string, error) {
 	for {
-		if _, _, ok, err := schemaconfig.Locate(dir); err != nil || ok {
-			return dir, err
+		for _, name := range []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"} {
+			if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+				return dir, nil
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {

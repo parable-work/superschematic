@@ -242,10 +242,6 @@ func mediaTypeAllowed(allowed []string, kind string) bool {
 	return false
 }
 
-// checkName holds a file's name to 1 to 255 code points (D14, amended:
-// lengths count code points), none of them /, \ or a control character,
-// and not white space alone. TypeScript's isFileName applies the same rule;
-// runtime/http/testdata/attachments_parity.json holds the vectors both run.
 func checkName(name string) error {
 	if n := utf8.RuneCountInString(name); n < 1 || n > 255 || badName.MatchString(name) || strings.TrimSpace(name) == "" {
 		return refuse(CodeInvalid, nil, "a file's name is 1 to 255 characters with no /, \\ or control character, not %q", name)

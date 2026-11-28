@@ -468,6 +468,51 @@ the subject `role/<table>/<name>`:
 
 `create.sql` inserts every seeded role.
 
+## Seeded rows
+
+`@seedRows<T>(rows, { key? })` on any table of a DB service declares rows
+the table holds from its first migration on (#625): policy an app keeps as
+data, such as everyone's notice preference or a channel kind's trust. Each
+row gives its fields' values by name: text, a number, a boolean, `null`, a
+list for a list field, any JSON value for a JSON field. A field a row
+leaves out takes its column's default. The build checks each value as it
+checks a default, and refuses a field that is a relation, a list of
+related rows, or a secret.
+
+```ts
+@seedRows<ChannelTrust>([
+  { channelKind: "sms", level: "low", permissions: [] },
+  { channelKind: "email", level: "standard", permissions: null },
+])
+@notifier("channelTrust")
+export abstract class ChannelTrust {}
+```
+
+A row is identified by its key: the fields `key` names, else the table's
+key when every row gives it, else the first unique field, then the first
+unique index, that every row gives. A table with none of them names its
+key; two rows of one key are refused. `null` is a value of a key, so
+`{ key: ["principal", "eventKind", "urgency"] }` identifies a row of no
+principal.
+
+Each row's insert, in `create.sql` and in a plan, on Postgres and on
+SQLite, adds it unless the table holds a row of its key, and skips one
+another unique constraint refuses (`INSERT ... SELECT ... WHERE NOT EXISTS
+... ON CONFLICT DO NOTHING`), so it may run again and changes nothing the
+second time. Each is a step of its own with the subject
+`row/<table>/<key>`, the key its fields' values as a JSON object:
+
+| Change | Plan |
+| --- | --- |
+| a row is seeded | the insert in `expand`, with no hazard |
+| a seeded row's other values change | nothing: once seeded the row is the app's to edit, and a changed seed reaches only a database that does not hold its key |
+| a seeded row's key changes | the insert of the new key; the row of the old key stays |
+| a seed is removed | nothing: the row stays |
+
+A plan from a SQLite file read back (`--from-database`) holds no rows, so
+it plans every seeded row's insert again, which leaves the rows there
+alone.
+
 ## Raw SQL
 
 `@rawSql` declares SQL the DB service runs after the objects its schema
@@ -979,7 +1024,8 @@ or a column the schema names otherwise is matched with `--rename`
 A table, a column or an index the schema does not declare is in the model
 like any other, and the plan drops it in `contract`, with its hazards.
 The roles `@seedRoles` keeps are rows, so the plan seeds each; the insert
-leaves a role that is there alone.
+leaves a role that is there alone. So are the rows `@seedRows` seeds,
+whose inserts leave a row of their key alone.
 
 Some of what a table's definition may hold has no form in a model: a
 `UNIQUE` written in the definition, whose index SQLite lets no statement

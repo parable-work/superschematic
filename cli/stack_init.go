@@ -403,7 +403,7 @@ func clearStackDir(tree *stackInitTree, dir string) error {
 	if _, ok := tree.serviceAt(dir); !ok {
 		return nil
 	}
-	for _, name := range schemaconfig.FileNames {
+	for _, name := range []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return err
 		}

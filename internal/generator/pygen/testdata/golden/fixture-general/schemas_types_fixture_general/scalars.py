@@ -89,14 +89,14 @@ IdentityName = Annotated[
 ]
 
 # Network.Url - Valid HTTP/HTTPS URL
-_NetworkUrl_pattern = re.compile(r"^https?://[0-9A-Z_a-z\-\{\}]+(\.[0-9A-Z_a-z\-\{\}]+)+([:/?#][0-9A-Z_a-z\-\._\~:/?#\[\]@!\$\&'\(\)\*\+,;=\{\}%]*)?\Z")
+_NetworkUrl_pattern = re.compile(r"^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$", re.ASCII)
 
 def _validate_network_url_pattern(v: Any) -> Any:
     """Validate Network.Url against its pattern."""
     if v is None:
         return v
     s = str(v)
-    if not _NetworkUrl_pattern.search(s):
+    if not _NetworkUrl_pattern.match(s):
         raise ValueError("invalid format for Network.Url")
     return v
 
@@ -115,7 +115,7 @@ NetworkUrl = Annotated[
     Field(
         description="Valid HTTP/HTTPS URL",
         max_length=2048,
-        pattern=re.compile(r"^https?://[0-9A-Z_a-z\-\{\}]+(\.[0-9A-Z_a-z\-\{\}]+)+([:/?#][0-9A-Z_a-z\-\._\~:/?#\[\]@!\$\&'\(\)\*\+,;=\{\}%]*)?\Z"),
+        pattern=re.compile(r"^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$", re.ASCII),
     ),
     AfterValidator(_validate_network_url_pattern),
     AfterValidator(_validate_network_url_length),

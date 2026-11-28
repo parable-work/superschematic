@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
+	"gopkg.in/yaml.v3"
 
 	ir "github.com/parable-work/superschematic/ir"
 )

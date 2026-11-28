@@ -10,7 +10,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/profile"
 )
 
@@ -91,7 +90,7 @@ func (c *ProgramCache) Close() {
 func workspaceRootFileNames(serviceDirs []string) ([]string, error) {
 	var files []string
 	for _, dir := range serviceDirs {
-		configPath := filepath.Join(dir, schemaconfig.FormTS.FileName())
+		configPath := filepath.Join(dir, "schema.config.ts")
 		if info, err := os.Stat(configPath); err == nil && !info.IsDir() {
 			files = append(files, filepath.ToSlash(configPath))
 		}

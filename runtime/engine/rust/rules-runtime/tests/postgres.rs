@@ -12,19 +12,12 @@ mod common;
 
 use std::collections::BTreeMap;
 
-use postgres::Client;
+use postgres::{Client, NoTls};
 use serde_json::json;
-use superschematic_engine_pg::tls_for;
 use superschematic_rules::Code;
 use superschematic_rules_runtime::{Publish, Runtime};
 
 use common::{binaries, skipped};
-
-/// A connection with the TLS the URL's sslmode asks for.
-fn connect(url: &str) -> Result<Client, postgres::Error> {
-    let (url, tls) = tls_for(url).expect("the TLS");
-    Client::connect(&url, tls)
-}
 
 /// A database of its own on the test server, dropped with it.
 struct Database {
@@ -40,7 +33,7 @@ impl Database {
             return None;
         };
         let name = format!("rules_runtime_{test}_{}", std::process::id());
-        let mut client = connect(&admin).expect("the test server");
+        let mut client = Client::connect(&admin, NoTls).expect("the test server");
         client
             .batch_execute(&format!("DROP DATABASE IF EXISTS {name} WITH (FORCE)"))
             .expect("an earlier run's database dropped");
@@ -56,13 +49,13 @@ impl Database {
     }
 
     fn client(&self) -> Client {
-        connect(&self.url).expect("the test's database")
+        Client::connect(&self.url, NoTls).expect("the test's database")
     }
 }
 
 impl Drop for Database {
     fn drop(&mut self) {
-        if let Ok(mut client) = connect(&self.admin) {
+        if let Ok(mut client) = Client::connect(&self.admin, NoTls) {
             let _ = client.batch_execute(&format!(
                 "DROP DATABASE IF EXISTS {} WITH (FORCE)",
                 self.name

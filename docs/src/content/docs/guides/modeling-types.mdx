@@ -202,33 +202,26 @@ its lines and checks the country code:
 | Constraint | Applies to |
 | --- | --- |
 | `min`, `max` | numbers |
-| `minLength`, `maxLength`, `pattern` | strings; lengths count and patterns match Unicode code points, and a pattern is RE2's syntax, as Go's `regexp` reads it: its `\d`, `\w`, `\s` and `\b` are ASCII classes |
+| `minLength`, `maxLength`, `pattern` | strings; lengths count and patterns match Unicode code points, and a pattern's `\d`, `\w` and `\b` are ASCII classes |
 | `listMin`, `listMax` | lists (`Validate<T[], { ... }>`); `[]` satisfies a required list |
 | `uploadMaxBytes` | file-upload scalars |
 | `precision`, `scale` | `Generic.Decimal`, a value or each element of a list: at most `scale` digits after the point, 0 unless set, and at most `precision - scale` before it; a DB column is `NUMERIC(p,s)` |
 | `dimensions` | `Embedding.Vector`, a value or each element of a list: exactly that many numbers; a DB column is pgvector's `vector(n)` |
 
-The build checks a pattern with Go's `regexp`, and the generated
-validators and SDKs and the schema runtimes match it as Go does.
-TypeScript's `RegExp` and Python's `re` read some of RE2's syntax
-otherwise, so their validators and SDKs hold the pattern rewritten and
-their runtimes rewrite it before they compile it: `$` and `\z` are the end
-of the text, not a place before a final newline; `.` is any character but
-`\n`; `\s` is `[\t\n\f\r ]`; `\pL`, `\p{Greek}`, `[[:alpha:]]`,
-`\Q...\E`, an escaped punctuation mark such as `\_` and a lone `{` work;
-and `(?i)`, `(?m)`, `(?s)` and `(?U)` apply as RE2 applies them. Two things
-differ. Python's `re` has no Unicode scripts, so in the Python runtime a
-pattern with `\p{Greek}` refuses every value (the generated Python
-validators spell the script out). A `(?i)` anywhere but at the pattern's
-start becomes a `(?i:...)` group, which a JavaScript engine compiles only
-with regexp modifiers (Node 23, Bun); an older one refuses every value.
-The TypeScript API server's check of a path or query parameter still
-compiles the pattern as written, with the `u` flag.
+TypeScript compiles every `pattern` with the `u` flag, so a pattern must
+also be valid in that flag's stricter syntax: no escaped character that
+has no special meaning (`\-` outside a class, `\_`), no lone `{` or `}`,
+and no incomplete quantifier. The build checks a pattern with Go's
+`regexp` alone. A pattern that only the `u` flag refuses passes the build,
+and then the TypeScript runtime, SDK and API server refuse every value,
+and the generated validator throws.
 
 `minLength`, `maxLength`, `listMin`, `listMax`, `uploadMaxBytes`,
 `precision`, `scale` and `dimensions` are whole numbers. A fraction fails the load and names the key and the value
 (`Validate maxLength must be a finite JavaScript-safe integer literal, got 2.5`)
-rather than being cut to a whole number.
+rather than being cut to a whole number. A pattern's `\s` is ASCII
+whitespace in Go, Python and Rust, and Unicode whitespace in TypeScript,
+so the validators differ only on a non-ASCII space.
 
 A decimal's digits count on its canonical form, superscalar's: no sign,
 no leading zero before the point (`0` has none) and no trailing zero after

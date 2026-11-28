@@ -233,14 +233,14 @@ GenericJSON = Annotated[
 ]
 
 # Identity.UUID - UUID v4 with automatic base62 encoding for client-facing APIs
-_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z")
+_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII)
 
 def _validate_identity_uuid_pattern(v: Any) -> Any:
     """Validate Identity.UUID against its pattern."""
     if v is None:
         return v
     s = str(v)
-    if not _IdentityUUID_pattern.search(s):
+    if not _IdentityUUID_pattern.match(s):
         raise ValueError("invalid format for Identity.UUID")
     return v
 
@@ -249,21 +249,21 @@ IdentityUUID = Annotated[
     str,
     Field(
         description="UUID v4 with automatic base62 encoding for client-facing APIs",
-        pattern=re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z"),
+        pattern=re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII),
     ),
     BeforeValidator(_custom_parse_identity_uuid),
     AfterValidator(_validate_identity_uuid_pattern),
 ]
 
 # Identity.UserID - UUID v4 string as base62
-_IdentityUserID_pattern = re.compile(r"^[0-9A-Za-z]{1,22}\Z")
+_IdentityUserID_pattern = re.compile(r"^[0-9A-Za-z]{1,22}$", re.ASCII)
 
 def _validate_identity_user_id_pattern(v: Any) -> Any:
     """Validate Identity.UserID against its pattern."""
     if v is None:
         return v
     s = str(v)
-    if not _IdentityUserID_pattern.search(s):
+    if not _IdentityUserID_pattern.match(s):
         raise ValueError("invalid format for Identity.UserID")
     return v
 
@@ -272,7 +272,7 @@ IdentityUserID = Annotated[
     str,
     Field(
         description="UUID v4 string as base62",
-        pattern=re.compile(r"^[0-9A-Za-z]{1,22}\Z"),
+        pattern=re.compile(r"^[0-9A-Za-z]{1,22}$", re.ASCII),
     ),
     BeforeValidator(_custom_parse_identity_user_id),
     AfterValidator(_validate_identity_user_id_pattern),
@@ -326,7 +326,7 @@ TemporalDuration = Annotated[
     Field(
         description="Duration for timeouts and intervals",
         max_length=32,
-        pattern=re.compile(r"^([0-9]+(\.[0-9]+)?(ns|us|\xb5s|ms|s|m|h))+\Z"),
+        pattern=re.compile(r"^(\d+(\.\d+)?(ns|us|µs|ms|s|m|h))+$", re.ASCII),
     ),
     BeforeValidator(_custom_parse_temporal_duration),
     BeforeValidator(_custom_normalize_temporal_duration),
@@ -334,14 +334,14 @@ TemporalDuration = Annotated[
 ]
 
 # Temporal.Time - Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.
-_TemporalTime_pattern = re.compile(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?[\t\n\f\r ]?[AaPp][Mm])\Z")
+_TemporalTime_pattern = re.compile(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$", re.ASCII)
 
 def _validate_temporal_time_pattern(v: Any) -> Any:
     """Validate Temporal.Time against its pattern."""
     if v is None:
         return v
     s = str(v)
-    if not _TemporalTime_pattern.search(s):
+    if not _TemporalTime_pattern.match(s):
         raise ValueError("invalid format for Temporal.Time")
     return v
 
@@ -350,7 +350,7 @@ TemporalTime = Annotated[
     str,
     Field(
         description="Time of day, normalized to 24-hour 'HH:MM:SS'. Accepts 24-hour 'HH:MM' or 'HH:MM:SS' (hours 00-23), or 12-hour 'H:MM'/'HH:MM' with optional ':SS' and a required AM/PM suffix in any case (hours 1-12), so '1:05pm' and '1:05 PM' are both '13:05:00'. Seconds and the space before AM/PM are optional.",
-        pattern=re.compile(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?[\t\n\f\r ]?[AaPp][Mm])\Z"),
+        pattern=re.compile(r"^(?:(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9])?|(?:0?[1-9]|1[0-2]):[0-5][0-9](?::[0-5][0-9])?\s?[AaPp][Mm])$", re.ASCII),
     ),
     AfterValidator(_validate_temporal_time_pattern),
 ]

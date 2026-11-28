@@ -18,17 +18,13 @@ type SchemaConfig = schemaconfig.SchemaConfig
 // ServiceDependency names another schema service this service depends on.
 type ServiceDependency = schemaconfig.ServiceDependency
 
-// readConfig reads the service config in the one form it has
-// (schemaconfig.Locate refuses a service with two). The walker argument
-// supplies the checker used for the static defineConfig read; it is only
-// required for the TypeScript form. The JSON and YAML forms are validated
-// against the JSON Schema generated from @superschematic/schema-config and
+// readConfig reads the service config, preferring the TypeScript form. The
+// walker argument supplies the checker used for the static defineConfig read;
+// it is only required for the TypeScript form. The JSON and YAML forms are
+// validated against the JSON Schema generated from @superschematic/schema-config and
 // decoded by the schemaconfig package.
 func readConfig(w *walker, servicePath string, configFile *astSourceFile) (*SchemaConfig, error) {
 	if configFile != nil {
-		if _, _, _, err := schemaconfig.Locate(servicePath); err != nil {
-			return nil, err
-		}
 		return readConfigTS(w, configFile)
 	}
 	return schemaconfig.ReadFile(servicePath, w.reg)

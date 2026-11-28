@@ -10,9 +10,8 @@
 use std::collections::BTreeMap;
 
 use postgres::types::ToSql;
-use postgres::Client;
+use postgres::{Client, NoTls};
 use serde_json::{Map, Value};
-use superschematic_engine_pg::tls_for;
 use superschematic_rules::{
     Code, Refusal, RowChange, SharedRow, SharedRowChange, SubRow, SubRowChange,
 };
@@ -77,16 +76,14 @@ fn is_identifier(name: &str) -> bool {
 impl PgStore {
     /// The store in a schema of the database a URL names, its tables
     /// created when they are not there, for the behaviors `declarations`
-    /// declares. It connects with the TLS the URL's `sslmode` asks for
-    /// ([`superschematic_engine_pg::read_ssl_mode`]).
+    /// declares.
     pub fn open(url: &str, schema: &str, declarations: &Declarations) -> Result<Self, Refusal> {
         if !is_identifier(schema) {
             return Err(Refusal::invalid_argument(format!(
                 "\"{schema}\" is no schema name: a letter or _, then letters, digits and _"
             )));
         }
-        let (url, tls) = tls_for(url).map_err(|error| Refusal::internal(error.to_string()))?;
-        let mut client = Client::connect(&url, tls).map_err(failed)?;
+        let mut client = Client::connect(url, NoTls).map_err(failed)?;
         let s = schema;
         client
             .batch_execute(&format!(

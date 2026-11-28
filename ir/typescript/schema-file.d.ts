@@ -878,6 +878,11 @@ export interface SearchableDef {
   title: string;
 }
 
+export interface SeedRows {
+  key?: string[];
+  rows: { [key: string]: unknown }[];
+}
+
 export interface ServerDecl {
   serves: ServiceRef[];
 }
@@ -1041,6 +1046,7 @@ export interface TypeDef {
   runRequests?: RunRequestsDef;
   searchable?: SearchableDef;
   seedRoles?: RoleSeed[];
+  seedRows?: SeedRows;
   server?: ServerDecl;
   source?: SourceRef;
   sqlName?: string;

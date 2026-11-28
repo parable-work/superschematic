@@ -8,7 +8,6 @@ import (
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
-	"github.com/parable-work/superschematic/internal/generator/patterndialect"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -46,12 +45,6 @@ func customTemplateFuncs() template.FuncMap {
 			default:
 				return fmt.Sprintf("%v", val)
 			}
-		},
-		// A schema pattern is RE2's syntax: the RegExp matches what RE2
-		// matches (patterndialect).
-		"jsRegExp": func(pattern interface{}) string {
-			source, flags := patterndialect.JavaScript(fmt.Sprint(pattern))
-			return "new RegExp(" + jsonQuote(source) + ", " + jsonQuote(flags) + ")"
 		},
 		"hasFieldLevelValidations": func(field FieldInfo) bool {
 			return len(fieldRules(field)) > 0

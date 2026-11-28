@@ -223,11 +223,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	var schema *ir.Schema
 	var cfg *schemaconfig.SchemaConfig
 	var vin verify.Input
-	ts, err := runsTSFrontend(servicePath, tsFiles)
-	if err != nil {
-		return nil, nil, err
-	}
-	if ts {
+	if runsTSFrontend(servicePath, tsFiles) {
 		// The TypeScript frontend owns its program, config read, walk, and
 		// validation; cross-service imports land in schema.Imports.
 		var tsInput *verify.Input
@@ -826,6 +822,11 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	if len(refused) > 0 {
 		return nil, refused[0]
 	}
+	// After the pass, which holds each field a seed row names to the
+	// table's, the fields the expansions filled among them (#625).
+	if err := validateSeedRowValues(schema, vin.ExternalEnums); err != nil {
+		return nil, err
+	}
 	added := versiongraph.Expand(schema)
 	added = append(added, identity.Expand(schema)...)
 	added = append(added, identity.ExpandRoutes(schema, vin.AuthDB, vin.Naming.OrDefault().IdentityPermissionPrefix)...)
@@ -994,18 +995,17 @@ func HasTSFrontend(servicePath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return runsTSFrontend(servicePath, tsFiles)
+	return runsTSFrontend(servicePath, tsFiles), nil
 }
 
 // runsTSFrontend is HasTSFrontend over the service's classified TypeScript
-// schema files. It refuses a service with more than one config form
-// (schemaconfig.Locate).
-func runsTSFrontend(servicePath string, tsFiles []string) (bool, error) {
-	_, form, _, err := schemaconfig.Locate(servicePath)
-	if err != nil {
-		return false, err
+// schema files.
+func runsTSFrontend(servicePath string, tsFiles []string) bool {
+	if len(tsFiles) > 0 {
+		return true
 	}
-	return len(tsFiles) > 0 || form == schemaconfig.FormTS, nil
+	_, err := os.Stat(filepath.Join(servicePath, "schema.config.ts"))
+	return err == nil
 }
 
 func classifySchemaFiles(servicePath string) (dataFiles, tsFiles []string, err error) {

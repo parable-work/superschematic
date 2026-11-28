@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	ir "github.com/parable-work/superschematic/ir"
-	"go.yaml.in/yaml/v3"
+	"gopkg.in/yaml.v3"
 )
 
 // TestPageVerifyFindingsReachTheTypeScriptAuthor: the loader holds a

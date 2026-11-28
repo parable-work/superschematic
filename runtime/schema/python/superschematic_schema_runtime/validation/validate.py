@@ -14,7 +14,6 @@ from ..errors import (
     has_errors as _has_errors,
     new_validation_errors,
 )
-from .pattern import compile_pattern
 from .registry import ScalarValidatorRegistry, create_default_scalar_validator_registry
 from .resolver import resolve_schema
 from .types import FieldDef, ScalarDef, Schema, SchemaInput, TypeDef, UnionDef, json_shape_of
@@ -139,7 +138,7 @@ def _validate_string_constraints(
         )
     if scalar.pattern:
         try:
-            if not compile_pattern(scalar.pattern).search(value):
+            if not re.search(scalar.pattern, value, re.ASCII):
                 errors.append(
                     ValidationError(
                         validator="pattern",
@@ -370,7 +369,7 @@ def _validate_field_level_string_constraints(
         )
     if field.validate_pattern:
         try:
-            if not compile_pattern(field.validate_pattern).search(value):
+            if not re.search(field.validate_pattern, value, re.ASCII):
                 out.append(
                     ValidationError(
                         validator="pattern",

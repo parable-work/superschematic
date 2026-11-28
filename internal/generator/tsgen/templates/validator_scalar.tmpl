@@ -18,7 +18,7 @@ import { {{if .Scalar.UsesLibValidate}}validate{{.Scalar.Symbol}} as validate{{.
 export { parse{{.Scalar.Symbol}}Strict, normalize{{.Scalar.Symbol}}Strict } from '{{$.Module.Naming.ScalarNpmPackage}}/scalars';
 
 {{if .Scalar.Pattern}}
-const {{.Scalar.Symbol}}Pattern = {{jsRegExp .Scalar.Pattern}};
+const {{.Scalar.Symbol}}Pattern = new RegExp({{jsonString .Scalar.Pattern}}, "u");
 {{end}}
 {{if .Scalar.ReservedWords}}
 const {{.Scalar.Symbol}}ReservedWords = new Set<string>([

@@ -421,8 +421,28 @@ func intValue(v any) (int, bool) {
 	return 0, false
 }
 
+// kebab lowercases a deployable's name and joins its words with hyphens:
+// Orders is orders, shop-api stays shop-api.
+func kebab(name string) string {
+	var b strings.Builder
+	for i, r := range name {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			if i > 0 && name[i-1] != '-' && name[i-1] != '_' {
+				b.WriteByte('-')
+			}
+			b.WriteRune(r - 'A' + 'a')
+		case r == '_':
+			b.WriteByte('-')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // processName names a server's process after its deployable.
-func processName(ctx registry.PlatformContext) any { return ir.Kebab(ctx.Deployable.Name) }
+func processName(ctx registry.PlatformContext) any { return kebab(ctx.Deployable.Name) }
 
 // processAddress is the server's loopback URL.
 func processAddress(ctx registry.PlatformContext) any {
@@ -431,7 +451,7 @@ func processAddress(ctx registry.PlatformContext) any {
 
 // databaseDeployableName names a database deployable after itself; its
 // databases are named after the schemas it hosts.
-func databaseDeployableName(ctx registry.PlatformContext) any { return ir.Kebab(ctx.Deployable.Name) }
+func databaseDeployableName(ctx registry.PlatformContext) any { return kebab(ctx.Deployable.Name) }
 
 // databaseAddress is the container's published address.
 func databaseAddress(ctx registry.PlatformContext) any {
@@ -540,7 +560,7 @@ func memoryStoreDeployableName(ctx registry.PlatformContext) any {
 	if len(ctx.Deployable.Services) == 1 {
 		return ctx.Deployable.Services[0].Name
 	}
-	return ir.Kebab(ctx.Deployable.Name)
+	return kebab(ctx.Deployable.Name)
 }
 
 // memoryStoreAddress is the memory store container's URL.

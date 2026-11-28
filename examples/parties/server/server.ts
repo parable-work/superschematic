@@ -12,18 +12,17 @@ method here.
 
 Left to the app: what the inbound path is built with beyond that
 (createRuntimeOptions: the inbound address and the approval policy of a
-send), the roles' seed rows, the staff's
-sends, timeline and triage, and Runs, the worker that acts on a run
-request when no agent does.
+send), the staff's sends, timeline and triage, and Runs, the worker that
+acts on a run request when no agent does. The roles and each channel
+kind's trust are seed rows of jobs-db's schema (@seedRows, #625), which
+its migrations write.
 
 The imports name the packages `superschematic build-all` writes for the
 example's two services.
 */
-import pg from 'pg';
 import type { Principal } from '@superschematic/http-runtime';
 import type { RunRequest } from '@superschematic/http-runtime/postgres';
 import type { Deps, RuntimeOptionsConstructor } from '@schemas/jobs-api-api';
-import { createOrm } from '@schemas/jobs-db-types/orm';
 
 /**
  * The inbound path's options beside what the generated server fills: the
@@ -39,21 +38,6 @@ export const createRuntimeOptions: RuntimeOptionsConstructor = deps => ({
     approve: () => 'allow',
   },
 });
-
-/**
- * The roles are seed data (D157): a contractor reaches the job its grant
- * names and writes reports on it; the office may message parties and
- * settle triage.
- */
-export async function seedRoles(pool: pg.Pool): Promise<void> {
-  const sys = createOrm(pool).asSystem();
-  for (const role of [
-    { name: 'contractor', permissions: ['reports.write'], reaches: ['Report:job'] },
-    { name: 'office', permissions: ['parties.message', 'parties.triage'], reaches: null },
-  ]) {
-    if (!(await sys.role.findOne({ name: { eq: role.name } }))) await sys.role.createOne(role);
-  }
-}
 
 /**
  * The staff's side of the conversations, each as its caller: writing to a

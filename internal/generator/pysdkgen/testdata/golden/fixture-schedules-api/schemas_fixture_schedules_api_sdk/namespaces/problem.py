@@ -380,7 +380,7 @@ class ProblemNamespace:
 
         if pattern and isinstance(value, str):
             try:
-                if re.search(pattern, value) is None:
+                if re.search(pattern, value, re.ASCII) is None:
                     field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})
             except re.error:
                 field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})
@@ -722,7 +722,7 @@ class ProblemSchedulesOperations:
 
         if pattern and isinstance(value, str):
             try:
-                if re.search(pattern, value) is None:
+                if re.search(pattern, value, re.ASCII) is None:
                     field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})
             except re.error:
                 field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})
@@ -1178,7 +1178,7 @@ class ProblemStatusOperations:
 
         if pattern and isinstance(value, str):
             try:
-                if re.search(pattern, value) is None:
+                if re.search(pattern, value, re.ASCII) is None:
                     field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})
             except re.error:
                 field_errors.append({"validator": "pattern", "message": f"{field_name} has an invalid format."})

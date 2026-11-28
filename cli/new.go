@@ -15,7 +15,6 @@ import (
 	"github.com/parable-work/superschematic/internal/buildplan"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
-	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/sentinel"
 	"github.com/parable-work/superschematic/internal/stackinit"
 	ir "github.com/parable-work/superschematic/ir"
@@ -180,7 +179,7 @@ func runNewService(cmd *cobra.Command, a *app, flags *newServiceFlags, name stri
 			return err
 		}
 	}
-	for _, other := range []string{schemaconfig.FormJSON.FileName(), schemaconfig.FormYAML.FileName()} {
+	for _, other := range []string{"schema.config.json", "schema.config.yaml"} {
 		if _, err := os.Stat(filepath.Join(dir, other)); err == nil {
 			exist = append(exist, displayPath(filepath.Join(dir, other)))
 		}

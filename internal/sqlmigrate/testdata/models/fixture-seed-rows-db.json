@@ -1,0 +1,194 @@
+{
+  "dialect": "postgres",
+  "extensions": [
+    "citext",
+    "pgcrypto"
+  ],
+  "rows": [
+    {
+      "insert": "INSERT INTO region (code, \"name\")\nSELECT 'eu'::CITEXT, 'Europe'::TEXT\nWHERE NOT EXISTS (SELECT 1 FROM region WHERE code = 'eu'::CITEXT)\nON CONFLICT DO NOTHING",
+      "key": "{\"code\":\"eu\"}",
+      "origin": "Region",
+      "table": "region"
+    },
+    {
+      "insert": "INSERT INTO region (code, \"name\")\nSELECT 'us'::CITEXT, 'United States'::TEXT\nWHERE NOT EXISTS (SELECT 1 FROM region WHERE code = 'us'::CITEXT)\nON CONFLICT DO NOTHING",
+      "key": "{\"code\":\"us\"}",
+      "origin": "Region",
+      "table": "region"
+    },
+    {
+      "insert": "INSERT INTO reminder (member, kind, lead_minutes, quiet_start)\nSELECT NULL::UUID, '*'::TEXT, 30::BIGINT, '22:00'::TIME\nWHERE NOT EXISTS (SELECT 1 FROM reminder WHERE member IS NULL AND kind = '*'::TEXT)\nON CONFLICT DO NOTHING",
+      "key": "{\"kind\":\"*\",\"member\":null}",
+      "origin": "Reminder",
+      "table": "reminder"
+    },
+    {
+      "insert": "INSERT INTO reminder (member, kind, lead_minutes)\nSELECT NULL::UUID, 'deadline'::TEXT, 120::BIGINT\nWHERE NOT EXISTS (SELECT 1 FROM reminder WHERE member IS NULL AND kind = 'deadline'::TEXT)\nON CONFLICT DO NOTHING",
+      "key": "{\"kind\":\"deadline\",\"member\":null}",
+      "origin": "Reminder",
+      "table": "reminder"
+    },
+    {
+      "insert": "INSERT INTO tier (slug, title, seats, listed, features)\nSELECT 'free'::CITEXT, 'Free'::TEXT, 1::BIGINT, TRUE::BOOLEAN, ARRAY['inbox']::TEXT[]\nWHERE NOT EXISTS (SELECT 1 FROM tier WHERE slug = 'free'::CITEXT)\nON CONFLICT DO NOTHING",
+      "key": "{\"slug\":\"free\"}",
+      "origin": "Tier",
+      "table": "tier"
+    },
+    {
+      "insert": "INSERT INTO tier (slug, title, seats, listed, features, limits)\nSELECT 'team'::CITEXT, 'Team'::TEXT, 10::BIGINT, TRUE::BOOLEAN, ARRAY['inbox', 'calendar']::TEXT[], '{\"exports\":true,\"storageGb\":50}'::JSONB\nWHERE NOT EXISTS (SELECT 1 FROM tier WHERE slug = 'team'::CITEXT)\nON CONFLICT DO NOTHING",
+      "key": "{\"slug\":\"team\"}",
+      "origin": "Tier",
+      "table": "tier"
+    },
+    {
+      "insert": "INSERT INTO tier (slug, title, seats, listed, features, note)\nSELECT 'internal'::CITEXT, 'Staff''s own'::TEXT, 0::BIGINT, FALSE::BOOLEAN, '{}'::TEXT[], NULL::TEXT\nWHERE NOT EXISTS (SELECT 1 FROM tier WHERE slug = 'internal'::CITEXT)\nON CONFLICT DO NOTHING",
+      "key": "{\"slug\":\"internal\"}",
+      "origin": "Tier",
+      "table": "tier"
+    }
+  ],
+  "service": "fixture-seed-rows-db",
+  "tables": [
+    {
+      "columns": [
+        {
+          "name": "code",
+          "origin": "Region.code",
+          "type": "CITEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Region.name",
+          "type": "TEXT"
+        }
+      ],
+      "comment": "A region, keyed by the code each row gives as the table's key.",
+      "kind": "entity",
+      "name": "region",
+      "origin": "Region",
+      "primaryKey": {
+        "columns": [
+          "code"
+        ],
+        "name": "region_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Reminder.id",
+          "type": "UUID"
+        },
+        {
+          "name": "member",
+          "nullable": true,
+          "origin": "Reminder.member",
+          "type": "UUID"
+        },
+        {
+          "default": "'*'",
+          "name": "kind",
+          "origin": "Reminder.kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "lead_minutes",
+          "origin": "Reminder.leadMinutes",
+          "type": "BIGINT"
+        },
+        {
+          "name": "quiet_start",
+          "nullable": true,
+          "origin": "Reminder.quietStart",
+          "type": "TIME"
+        }
+      ],
+      "comment": "A reminder's lead time for a member, or for everyone: a row of no\nmember is the default each member without one of their own takes. No\nunique constraint holds the rows, so the seed names the fields that\nidentify one, a null member among them.",
+      "kind": "entity",
+      "name": "reminder",
+      "origin": "Reminder",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "reminder_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "gen_random_uuid()",
+          "name": "id",
+          "origin": "Tier.id",
+          "type": "UUID"
+        },
+        {
+          "name": "slug",
+          "origin": "Tier.slug",
+          "type": "CITEXT"
+        },
+        {
+          "name": "title",
+          "origin": "Tier.title",
+          "type": "TEXT"
+        },
+        {
+          "name": "seats",
+          "origin": "Tier.seats",
+          "type": "BIGINT"
+        },
+        {
+          "name": "listed",
+          "origin": "Tier.listed",
+          "type": "BOOLEAN"
+        },
+        {
+          "default": "'{}'",
+          "name": "features",
+          "origin": "Tier.features",
+          "type": "TEXT[]"
+        },
+        {
+          "name": "limits",
+          "nullable": true,
+          "origin": "Tier.limits",
+          "type": "JSONB"
+        },
+        {
+          "name": "note",
+          "nullable": true,
+          "origin": "Tier.note",
+          "type": "TEXT"
+        },
+        {
+          "default": "CURRENT_TIMESTAMP",
+          "name": "created_at",
+          "origin": "Tier.createdAt",
+          "type": "TIMESTAMPTZ"
+        }
+      ],
+      "comment": "A tier a workspace subscribes to. The rows are keyed by slug, the\nunique field every row gives; each holds text, a number, a boolean, a\nlist, JSON and a null, and leaves its key and createdAt to their\ncolumns' defaults.",
+      "kind": "entity",
+      "name": "tier",
+      "origin": "Tier",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "tier_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "slug"
+          ],
+          "name": "tier_slug_key"
+        }
+      ]
+    }
+  ],
+  "version": 1
+}

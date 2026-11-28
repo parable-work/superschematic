@@ -17,10 +17,8 @@ resolver = "2"
 # over SQLite, a file or a database in memory (rules-dev); runtime mode is
 # the same handler over each type's own table, a publish a migration
 # (rules-runtime). The handler's WebAssembly binding (rules-handler-wasm)
-# is what @superschematic/rules-handler loads. The Postgres layer the storage,
-# runtime and development mode and the adapter share (pg) classifies a
-# server's error and opens a connection with the TLS its sslmode asks.
-members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "pg", "rules", "rules-adapter", "rules-behaviors", "rules-dev", "rules-handler", "rules-handler-wasm", "rules-runtime", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
+# is what @superschematic/rules-handler loads.
+members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "rules", "rules-adapter", "rules-behaviors", "rules-dev", "rules-handler", "rules-handler-wasm", "rules-runtime", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
 
 [workspace.package]
 version = "0.0.0"

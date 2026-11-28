@@ -138,7 +138,7 @@ def _custom_validate_{{pythonScalarModule .}}(v: Any) -> Any:
 {{range .Scalars}}
 # {{.Name}}{{if scalarDoc .}} - {{pythonComment (scalarDoc .)}}{{end}}
 {{if and .Pattern (not .HasCustomValidate) -}}
-_{{pythonScalarSymbol .}}_pattern = re.compile(r"{{pythonRawString (pythonPattern .Pattern)}}")
+_{{pythonScalarSymbol .}}_pattern = re.compile(r"{{pythonRawString .Pattern}}", re.ASCII)
 
 
 def _validate_{{pythonScalarModule .}}_pattern(v: Any) -> Any:
@@ -146,7 +146,7 @@ def _validate_{{pythonScalarModule .}}_pattern(v: Any) -> Any:
     if v is None:
         return v
     s = str(v)
-    if not _{{pythonScalarSymbol .}}_pattern.search(s):
+    if not _{{pythonScalarSymbol .}}_pattern.match(s):
         raise ValueError("invalid format for {{.Name}}")
     return v
 {{end}}
@@ -235,7 +235,7 @@ def _parse_{{pythonScalarModule .}}_value(v: Any) -> decimal.Decimal:
         raise ValueError("{{.Name}} is the text of a decimal or a decimal.Decimal, not a {}".format(type(v).__name__))
     if not _SCALAR_MODULE_AVAILABLE:
         {{- if .Pattern}}
-        if not _{{pythonScalarSymbol .}}_pattern.search(text.strip()):
+        if not _{{pythonScalarSymbol .}}_pattern.match(text.strip()):
             raise ValueError("invalid format for {{.Name}}")
         {{- end}}
         return decimal.Decimal(text.strip())
@@ -371,7 +371,7 @@ def _validate_location(v: Any) -> Dict[str, float]:
         min_length={{.MinLength}},
         {{- end}}
         {{- if .Pattern}}
-        pattern=re.compile(r"{{pythonRawString (pythonPattern .Pattern)}}"),
+        pattern=re.compile(r"{{pythonRawString .Pattern}}", re.ASCII),
         {{- end}}
         {{- if .Minimum}}
         ge={{.Minimum}},

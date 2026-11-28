@@ -213,14 +213,7 @@ mod on_postgres {
     //! create roles and databases.
 
     use super::*;
-    use ::postgres::Client;
-    use superschematic_engine_pg::tls_for;
-
-    /// A connection with the TLS the URL's sslmode asks for.
-    fn connect(url: &str) -> Result<Client, ::postgres::Error> {
-        let (url, tls) = tls_for(url).expect("the TLS");
-        Client::connect(&url, tls)
-    }
+    use ::postgres::{Client, NoTls};
 
     const PASSWORD: &str = "runtime-job";
 
@@ -247,7 +240,7 @@ mod on_postgres {
                 server: format!("rules_job_server_{test}_{id}"),
             };
             roles.drop_all();
-            let mut client = connect(&roles.admin).expect("the test server");
+            let mut client = Client::connect(&roles.admin, NoTls).expect("the test server");
             for statement in [
                 format!("CREATE ROLE {} LOGIN PASSWORD '{PASSWORD}'", roles.migrator),
                 format!("CREATE ROLE {} LOGIN PASSWORD '{PASSWORD}'", roles.server),
@@ -268,7 +261,7 @@ mod on_postgres {
         }
 
         fn drop_all(&self) {
-            if let Ok(mut client) = connect(&self.admin) {
+            if let Ok(mut client) = Client::connect(&self.admin, NoTls) {
                 let _ = client.batch_execute(&format!(
                     "DROP DATABASE IF EXISTS {} WITH (FORCE)",
                     self.database
@@ -390,7 +383,7 @@ mod on_postgres {
     /// The migrator owns each table; the server may read and write it and
     /// create none, and may only read the runner's state and the record.
     fn check_grants(roles: &Roles, tables: &[&str]) {
-        let mut migrator = connect(&roles.url(&roles.migrator)).expect("migrator");
+        let mut migrator = Client::connect(&roles.url(&roles.migrator), NoTls).expect("migrator");
         let present: Vec<String> = migrator
             .query(
                 "SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY($1)",
@@ -426,7 +419,7 @@ mod on_postgres {
                 "and writes no {table}"
             );
         }
-        let mut server = connect(&roles.url(&roles.server)).expect("server");
+        let mut server = Client::connect(&roles.url(&roles.server), NoTls).expect("server");
         let refused = server
             .batch_execute("CREATE TABLE intruder (id int)")
             .expect_err("a server runs no DDL");
