@@ -1365,6 +1365,44 @@ mod pg {
         let request = search_tool_request(args)?;
         search_tables(repositories, principal, &request, options).await
     }
+
+    /// Search as a tool of a generated router's MCP endpoint (#617):
+    /// [`search_mcp_tool`], each call run as the endpoint's caller over the
+    /// database's repositories ([`call_search_tool`]).
+    #[derive(Clone)]
+    pub struct SearchTool {
+        /// The database's pool and definition.
+        pub tables: Tables,
+        /// The permissions each table's rows need, and embeddings.
+        pub options: SearchOptions,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::mcp::EndpointTool for SearchTool {
+        fn tool(&self) -> crate::mcp::Tool {
+            serde_json::from_value(search_mcp_tool()).expect("the search tool is a tool")
+        }
+
+        async fn call(
+            &self,
+            principal: &Principal,
+            arguments: &Map<String, Value>,
+        ) -> Result<crate::mcp::CallOutcome, crate::mcp::ToolError> {
+            let failed =
+                |err: &dyn std::fmt::Display| crate::mcp::ToolError::Failed(err.to_string().into());
+            let definition = self.tables.definition().map_err(|err| failed(&err))?;
+            let client = self.tables.pool().get().await.map_err(|err| failed(&err))?;
+            let repositories =
+                Repositories::new(&client, definition).map_err(|err| failed(&err))?;
+            match call_search_tool(&repositories, Some(principal), arguments, &self.options).await {
+                Ok(result) => Ok(crate::mcp::CallOutcome::Result(json!(result))),
+                Err(Error::Invalid(message)) => Ok(crate::mcp::CallOutcome::Problem(
+                    crate::response::problem_body(&ApiError::bad_request(message), None),
+                )),
+                Err(err) => Err(failed(&err)),
+            }
+        }
+    }
 }
 
 #[cfg(test)]

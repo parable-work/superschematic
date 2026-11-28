@@ -51,7 +51,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/microsoft/typescript-go v0.0.0 // indirect
 	github.com/microsoft/typescript-go/shim v0.0.0 // indirect
-	github.com/parable-work/superscalar/go v0.0.0-20261119204639-51d50302d5dd // indirect
+	github.com/parable-work/superscalar/go v0.0.0-20261127170532-5fe84bd97aa3 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/planetscale/vtprotobuf v0.6.1-0.20240319094008-0393e58bdf10 // indirect
 	github.com/robfig/cron/v3 v3.0.1 // indirect

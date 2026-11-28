@@ -114,7 +114,8 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 	}
 
 	// An API's provider slots are served, over providers of Go modules
-	// (D184); a provider of none, and an operation's autonomy, are not.
+	// (D184), and an operation's autonomy (#621); a provider of none is
+	// not.
 	api := ir.NewSchema("app-api", ir.SchemaKindAPI)
 	api.Types["AppConfig"] = &ir.TypeDef{Name: "AppConfig", Owner: "src/config.ts", ProviderSlots: map[string]string{"SMS": "channel"}}
 	api.Providers = []*ir.RuntimeProvider{{Name: "relay-a", Implements: "channel", Path: "providers/relay-a", Module: "example.com/providers/relay-a"}}
@@ -124,7 +125,7 @@ func TestGoOutputsRefuseThePlatformFeaturesGoDoesNotServe(t *testing.T) {
 	api.Providers = append(api.Providers, &ir.RuntimeProvider{Name: "relay-b", Implements: "channel", Path: "providers/relay-b"})
 	api.OperationSets = []*ir.OperationSet{{Name: "Duties", Operations: []*ir.FieldDef{{Name: "closeDuty", Autonomy: &ir.OperationAutonomy{}}}}}
 	got := goFeatureFindings(api, Input{GoServer: true})
-	if len(got) != 2 || !strings.Contains(got[0], "the Go server of app-api cannot link runtime provider relay-b (providers/relay-b): its directory holds no Go module") || !strings.Contains(got[1], "does not serve @autonomy on Duties.closeDuty yet (D158, D183, D192): it holds an agent run's calls of the API's MCP tools, and a Go server serves no MCP endpoint") {
-		t.Fatalf("a provider of no Go module and autonomy: %v", got)
+	if len(got) != 1 || !strings.Contains(got[0], "the Go server of app-api cannot link runtime provider relay-b (providers/relay-b): its directory holds no Go module") {
+		t.Fatalf("a provider of no Go module, and autonomy: %v", got)
 	}
 }
