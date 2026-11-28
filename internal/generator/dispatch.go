@@ -1295,6 +1295,11 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 		}
 		output.AddIndirectModules(closure)
 	}
+	// Its router serves the visible @mcp tools at POST /api/mcp (D81,
+	// #660).
+	if output.MCP, err = r.goMCP(output); err != nil {
+		return nil, fmt.Errorf("generator: go api for %s: %w", r.Config.Name, err)
+	}
 	return output, nil
 }
 
@@ -1888,7 +1893,7 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 		}
 		held = schema != nil && (len(schema.AudienceTables()) > 0 || schema.AccessGrantsTable() != nil)
 	}
-	if !r.Schema.HasTableOperations() && !graphs && !held {
+	if !r.Schema.HasTableOperations() && !graphs && !held && !r.rustWires(db) {
 		return nil
 	}
 	if r.Options.DependencyConfig != nil {

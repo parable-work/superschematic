@@ -3,6 +3,9 @@
 /// Lowercase hexadecimal SHA-256 digest
 pub type CryptoSHA256 = String;
 
+/// IANA media type (MIME type): type/subtype with optional parameters, normalized to lowercase (e.g., image/png, text/csv;charset=utf-8)
+pub type FileMediaType = String;
+
 /// File size in bytes (non-negative, BIGINT-backed)
 pub type FileSizeBytes = i64;
 

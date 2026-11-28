@@ -10,12 +10,13 @@ pulumi extensions.
 
 | Path | What it is |
 |---|---|
-| `schemas/services/smoke-db` | DB, Postgres alone: the user model and its seeded `member` role (D50, D88), `LineItem` with a three-dimension vector column and an hnsw index (D84), the keyed queue `DrainLineItem`, one message waiting and one claim per line item (`serialize`, D80), the declared query `lineItemTotals` (D86), verified into `queries.lock`, and three tables with a behavior each (D151): `FollowUp` (Timers, a deadline five seconds after its create), `CheckIn` (Schedules, a wake-up five seconds on) and `Alert` (Reactions, raised when its level changes to high); `LineItem`'s files (`@attachments`, at most 1 MiB) and its references to other line items (`@references`), and the queue `FileReleased` a file's delete enqueues on (D154) |
-| `schemas/services/smoke-api` | API over `smoke-db`, served in TypeScript: approval-gated registration with cookie sessions, the first registrant the administrator, and user administration; line items written with their name's embedding, the declared query, `nearest`, and an enqueue in a transaction; the worker `DrainLineItems`, and an enqueue due five seconds on; the behavior workers `FollowUpTimers`, `CheckInWakeUps` and `AlertReactions`, and the routes that make and read their rows; a line item's file upload, its completion, its filing onto another line item and a line item's backlinks, and the worker `ReleaseFiles` (D154); and the job `SyncAllLinkedAccounts`, whose deployable, `smoke-api-sync-all-linked-accounts`, is longer than a GCP service account's id, so gcp names it short (D97) |
+| `schemas/services/smoke-db` | DB, Postgres alone: the user model and its seeded `member` role (D50, D88), `LineItem` with a three-dimension vector column and an hnsw index (D84), the keyed queue `DrainLineItem`, one message waiting and one claim per line item (`serialize`, D80), the declared query `lineItemTotals` (D86), verified into `queries.lock`, and three tables with a behavior each (D151): `FollowUp` (Timers, a deadline five seconds after its create), `CheckIn` (Schedules, a wake-up five seconds on) and `Alert` (Reactions, raised when its level changes to high); `LineItem`'s files (`@attachments`, at most 1 MiB) and its references to other line items (`@references`), and the queue `FileReleased` a file's delete enqueues on (D154); and, in `platform.schema.ts`, `Bill` (Recurrence, each day's occurrence reminding twenty seconds before it is due, D152), the notifier's tables and the channel identities (D153), `Memo`, `@searchable` through the queue `SearchIndexing` (D155), and the inbound path's: `Grant`, the party `Payee`, the conversations and the run requests' queue (D156, D157) |
+| `schemas/services/smoke-api` | API over `smoke-db`, served in TypeScript: approval-gated registration with cookie sessions, the first registrant the administrator, and user administration; line items written with their name's embedding, the declared query, `nearest`, and an enqueue in a transaction; the worker `DrainLineItems`, and an enqueue due five seconds on; the behavior workers `FollowUpTimers`, `CheckInWakeUps` and `AlertReactions`, and the routes that make and read their rows; a line item's file upload, its completion, its filing onto another line item and a line item's backlinks, and the worker `ReleaseFiles` (D154); and the job `SyncAllLinkedAccounts`, whose deployable, `smoke-api-sync-all-linked-accounts`, is longer than a GCP service account's id, so gcp names it short (D97); and, in `platform.schema.ts`, the `SMS` channel slot, a bill and its occurrences, the route and the preference the check writes, a memo, a payee with a grant and triage, and the workers `BillReminders`, `Notify`, `IndexSearch` and `Runs` |
 | `schemas/services/smoke-files` | Bucket: the files a line item holds, which a client uploads straight to through URLs `smoke-api` signs; on Cloudflare an R2 bucket, on gcp a Cloud Storage bucket, under `stack dev` the emulator's |
 | `schemas/services/smoke-web` | Site: a page that says where `smoke-api` is on its origin and who is signed in, with no SDK in its bundle |
 | `schemas/services/smoke-stack` | Stack: `smoke-api` and the site on one origin (`origins`, D91); `Dev` on the local target, `Gcp` on gcp and `Cloudflare` on cloudflare, whose project, region, account and Hyperdrive config are placeholders that resolve offline |
-| `typescript/smoke-api` | `smoke-api`'s implementation; `embed.ts` stands in for an embedding model |
+| `typescript/smoke-api` | `smoke-api`'s implementation; `embed.ts` stands in for an embedding model, and `platform.ts` holds what plan2's features leave to the app |
+| `providers/stub-relay` | a stub SMS channel adapter (D159), which every environment's `SMS` names: it sends to no phone and answers each message delivered, and reads the texts the check posts to `/webhooks/sms/inbound` as a relay would, checking no signature |
 | `web/smoke-web` | the site's page |
 | `scripts/smoke.sh` | deploys an environment, checks it and destroys it; `Dev` runs `stack dev` instead |
 | `scripts/smoke-check.ts` | the checks, through the site's origin, on Bun |
@@ -56,7 +57,23 @@ through the site's origin as the site's page would make them:
    the bytes back and holds them to their SHA-256; and the file filed onto
    another line item with no second upload, which then lists the first
    among its backlinks (D154);
-9. sign-out.
+9. the follow-up's deadline fired within ten seconds of its due, under
+   `stack dev` and on Cloudflare, where its write wakes the worker's
+   Workflow (D151);
+10. a bill whose first occurrence reminds twenty seconds before its due:
+    the behavior worker `BillReminders` fires the remind deadline
+    (D152), and the notifier routes its event, by a route the
+    administrator wrote, to the bill's owner, whose notice is in the
+    inbox and goes out by SMS through the stub relay, by the phone and
+    preference the member wrote (D153);
+11. a memo search finds by its words once the worker `IndexSearch`
+    indexed it, and by its new words, not its old, once it changed
+    (D155);
+12. a text through the stub relay's callback from a payee with a grant on
+    a line item, which the worker `Runs`, acting as the payee, files onto
+    the line item, so it lists the message among its backlinks; and a
+    text from a number no one holds, held in triage (D157);
+13. sign-out.
 
 It prints each sign-in's time and the time from the enqueue to the
 drain: on Cloudflare a sign-in hashes with the identity runtime's own
