@@ -143,7 +143,7 @@ func lowerJob(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if err := addBinding(version, map[string]any{"type": bindingPlainText, "name": BundleBinding, "text": ir.BundleDigestToken}); err != nil {
 		return registry.Lowered{}, fmt.Errorf("job %s: %w", d.Name, err)
 	}
-	waits, err := addWakes(d, version)
+	waits, err := addWakes(d, version, false)
 	if err != nil {
 		return registry.Lowered{}, err
 	}

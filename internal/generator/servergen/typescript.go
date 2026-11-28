@@ -563,6 +563,12 @@ type TypeScriptAPI struct {
 	// serves none, and for a job's, a worker's and a deriver's.
 	AttachmentsBucket string
 
+	// Triage is true when the API serves the inbound path's triage
+	// (#746): main.ts hands Deps.inbound to the router as
+	// RouterOptions.inbound. False for an API that serves none, and for a
+	// job's, a worker's and a deriver's.
+	Triage bool
+
 	// Calls are Deps' clients.
 	Calls []TypeScriptCall
 
@@ -1114,6 +1120,14 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			// (#723).
 			api.AttachmentsBucket = o.RowFeatureBucketField()
 		}
+		if o.HasTriage() && !background {
+			// The triage operations run through the inbound path the
+			// runtime builds into Deps (#746, #702).
+			if !o.HasInbound() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose triage operations (#746) run through Deps.inbound, and its Deps holds no inbound path", in.Stack, s.Kind, in.Server, o.SchemaName)
+			}
+			api.Triage = true
+		}
 		if s.Worker != nil {
 			if api.Database == nil {
 				return nil, fmt.Errorf("stack %s: worker %s of %s opens no pool on %s, whose queue it claims", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
@@ -1347,6 +1361,10 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 	if a.AttachmentsBucket != "" {
 		// Its file operations sign their URLs of the bucket (#723).
 		out = append(out, "attachmentsBucket: "+a.Deps+"."+a.AttachmentsBucket)
+	}
+	if a.Triage {
+		// Its triage operations run through the inbound path (#746).
+		out = append(out, "inbound: "+a.Deps+".inbound")
 	}
 	return out
 }

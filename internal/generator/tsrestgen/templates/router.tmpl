@@ -113,6 +113,17 @@
 // file of another row, is 404 not_found; a refusal of the declaration's
 // rules is the 422 of its code.
 {{- end }}
+{{- if .HasTriage }}
+//
+// The operations of its @triageOperations set (#746) are each an operation
+// of the inbound path's triage over {{ .Deps.Database }}'s conversations and have no
+// implementation method: the route runs the runtime's triageOperation, with
+// its entry of triageOperations, through options.inbound, the inbound path
+// (Deps.inbound), as the request's caller, who holds the set's permission
+// and the inbound path's triage permission. A message the path names that
+// was never held in triage is 404 not_found, and a settle or dismiss of one
+// no longer held 409.
+{{- end }}
 {{- if .Identity }}
 //
 // The API's authDb, {{ .Identity.AuthDB }}, has a User table (D50): the identity
@@ -337,6 +348,21 @@ export const rowFeatureOperations = {
 {{- end }}
 } as const satisfies Partial<Record<OperationName, RowFeatureOperation>>;
 {{- end }}
+{{- if .HasTriage }}
+
+/**
+ * What each triage operation runs (#746): the messages table, the party
+ * table a settle settles a message onto, and the operation of the inbound
+ * path's triage.
+ */
+export const triageOperations = {
+{{- range .Endpoints }}
+{{- if .Triage }}
+  {{ .Key }}: {{ .Triage.Literal }},
+{{- end }}
+{{- end }}
+} as const satisfies Partial<Record<OperationName, TriageOperation>>;
+{{- end }}
 
 {{ if .Identity -}}
 export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'>, OpenAPIOptions {
@@ -403,6 +429,13 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
    * completion reads the object back.
    */
   attachmentsBucket: Bucket;
+{{- end }}
+{{- if .HasTriage }}
+  /**
+   * The inbound path of {{ .Deps.Database }} (Deps.inbound, #746), whose triage
+   * the triage operations run, as the request's caller.
+   */
+  inbound: TriageInbound;
 {{- end }}
 {{- if .HasGraphs }}
   /**
@@ -538,7 +571,7 @@ export const identityOAuth: OAuthOptions = {{ .Identity.OAuth }};
 {{ $runtime = "runtime" -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
   const runtime = identityRouterOptions(options);
-{{- else if or .RouterNeedsORM .HasPrincipalRateLimit -}}
+{{- else if or .RouterNeedsORM .HasPrincipalRateLimit .HasTriage -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E>): Hono<E> {
 {{- else -}}
 export function buildRouter<E extends Env = Env>(implementations: Implementations, options: RouterOptions<E> = {}): Hono<E> {
@@ -546,6 +579,11 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- if .RouterNeedsORM }}
   if (!options.orm) {
     throw new Error({{ tsString (printf "RouterOptions.orm is required: it runs %s of %s (%s)" .ORMRuns .SchemaName .ORMDecisions) }});
+  }
+{{- end }}
+{{- if .HasTriage }}
+  if (!options.inbound) {
+    throw new Error({{ tsString (printf "RouterOptions.inbound is required: it runs the triage operations of %s (#746), Deps.inbound" .SchemaName) }});
   }
 {{- end }}
 {{- range .GraphSets }}
@@ -671,6 +709,24 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     router,
     operationSpecs.{{ .Key }},
     (ctx, request) => rowFeatureOperation(options.orm, rowFeatureOperations.{{ .Key }}, ctx, request{{ if .RowFeature.TakesBucket }}, options.attachmentsBucket{{ end }}),
+    {{ $runtime }},
+    {
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
+    }
+  );
+{{- else if .Triage }}
+  // {{ .Triage.Operation }}, of the inbound path's triage (#746): the runtime's handler runs it through the
+  // inbound path, as the request's caller.
+  mountOperation(
+    router,
+    operationSpecs.{{ .Key }},
+{{- if .Page }}
+    (ctx, request) => triageOperation(options.inbound, triageOperations.{{ .Key }}, ctx, request, readPage(ctx.query, operationSpecs.{{ .Key }}.page)),
+{{- else }}
+    (ctx, request) => triageOperation(options.inbound, triageOperations.{{ .Key }}, ctx, request),
+{{- end }}
     {{ $runtime }},
     {
       bodyLimitBytes: bodyLimits.{{ .Key }},

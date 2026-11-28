@@ -303,6 +303,8 @@ func identityRoutesDeclared(name string, set *ir.OperationSet) error {
 		return fmt.Errorf("@%s contradicts @graphOperations on the same class: a class takes one of them", name)
 	case set.RowFeatureOperations != nil:
 		return fmt.Errorf("@%s contradicts @rowFeatureOperations on the same class: a class takes one of them", name)
+	case set.TriageOperations != nil:
+		return fmt.Errorf("@%s contradicts @triageOperations on the same class: a class takes one of them", name)
 	}
 	return nil
 }

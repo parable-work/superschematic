@@ -98,10 +98,9 @@ func FeedScopeOf(targetType string) CalendarFeedScope {
 
 // IssueCalendarFeed is what IssueCalendarFeedOf takes: the user the feed
 // reads as, its principal's subject; the UserRole row whose permissions
-// bound what it reads; its scope; when it starts, now when zero, so a
-// caller with its own clock (CalendarRoutesOptions.Now) issues a feed that
-// has started by that clock; and when it expires, CalendarFeedDays on from
-// its start when zero.
+// bound what it reads; its scope; when it starts, now when zero; and when
+// it expires, CalendarFeedDays on when zero. A route's feed starts at the
+// route's clock, which reads it by that clock too.
 type IssueCalendarFeed struct {
 	Holder   string
 	Role     string
@@ -141,11 +140,7 @@ func IssueFeed(ctx context.Context, h Host, input IssueCalendarFeed) (IssuedCale
 	}
 	ends := input.EndsAt
 	if ends.IsZero() {
-		start := input.StartsAt
-		if start.IsZero() {
-			start = time.Now()
-		}
-		ends = start.Add(CalendarFeedDays * 24 * time.Hour)
+		ends = time.Now().Add(CalendarFeedDays * 24 * time.Hour)
 	}
 	id, token, err := grants.Issue(ctx, access.IssueGrantInput{
 		Holder:     input.Holder,

@@ -212,6 +212,11 @@ type EndpointInfo struct {
 	// rowFeatureOperation over RouterOptions.orm, and the implementation
 	// has no method for it.
 	RowFeature *RowFeatureRoute
+	// Triage is the triage operation the endpoint runs (#746), nil for
+	// every other: the router mounts it with the runtime's triageOperation
+	// over RouterOptions.inbound, and the implementation has no method for
+	// it.
+	Triage *TriageRoute
 }
 
 // TableRoute is a table operation (D106) as the router mounts it: the
@@ -1097,6 +1102,9 @@ func (o *APIOutput) RuntimeImport() string {
 		values = append(values, "rowFeatureOperation")
 	}
 	values = append(values, o.TableHandlers()...)
+	if o.HasTriage() {
+		values = append(values, "triageOperation")
+	}
 	var types []string
 	if o.RowFeatureBucket() != "" {
 		types = append(types, "Bucket")
@@ -1119,6 +1127,9 @@ func (o *APIOutput) RuntimeImport() string {
 	}
 	if o.HasTableOperations() {
 		types = append(types, "TableOperation")
+	}
+	if o.HasTriage() {
+		types = append(types, "TriageInbound", "TriageOperation")
 	}
 	if len(values) == 0 {
 		return "import type { " + strings.Join(types, ", ") + " } from " + tsString(o.RuntimePackage) + ";"
@@ -1281,6 +1292,20 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 			}
 			endpoint.Key = keyOf(ep)
 			output.Endpoints = append(output.Endpoints, endpoint)
+			continue
+		}
+		// A triage operation runs through the inbound path (#746), with
+		// the runtime's handler and no implementation method: the
+		// interfaces leave it out, and the router mounts it over
+		// RouterOptions.inbound.
+		if ep.Operation != nil && ep.Operation.TriageOperation != nil {
+			endpoint, err := b.triageEndpoint(ep, ep.Operation.TriageOperation)
+			if err != nil {
+				return nil, err
+			}
+			endpoint.Key = keyOf(ep)
+			output.Endpoints = append(output.Endpoints, endpoint)
+			output.HasPages = output.HasPages || endpoint.Page != nil
 			continue
 		}
 		if ep.Operation != nil && ep.Operation.TableOperation != nil {

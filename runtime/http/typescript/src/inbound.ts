@@ -10,7 +10,7 @@ import type { ChannelAdapter, InboundAttachment, InboundAuthentication, InboundM
 import type { Providers } from './providers/registry.js';
 import type { QueueDefinition } from './queue-core.js';
 import { claimsOver, enqueue, workerQueueOf, type QueueSource } from './queue-orm.js';
-import type { Attachments, RowRef } from './rowfeatures.js';
+import type { Attachment, Attachments, RowRef } from './rowfeatures.js';
 import { sha256Hex } from './sha256.js';
 import type { WorkerQueue } from './worker.js';
 
@@ -183,8 +183,15 @@ export interface Inbound {
   principalOf(party: PartyRef, options?: { readonly grant?: string }): Promise<Principal>;
   /** Files a message onto a row as acts, which must read it: the row points back at the message, and holds the message's files. */
   file(input: { readonly message: string; readonly to: RowRef; readonly as: Principal; readonly role?: string }): Promise<void>;
-  /** The messages held in triage, newest first; as holds the triage permission. */
-  triage(as: Principal, options?: { readonly limit?: number }): Promise<MessageRow[]>;
+  /**
+   * The messages held in triage, newest first; as holds the triage
+   * permission. offset skips that many first, and channel keeps those that
+   * came on one kind of channel (sms, email, chat), as the generated triage
+   * routes page them (#746).
+   */
+  triage(as: Principal, options?: { readonly limit?: number; readonly offset?: number; readonly channel?: string }): Promise<MessageRow[]>;
+  /** The ready files a message came with, oldest first, and none when the messages table has no @attachments; as holds the triage permission (#746). */
+  attachmentsOf(as: Principal, message: string): Promise<Attachment[]>;
   /** Closes a message's triage; as holds the triage permission. */
   settle(as: Principal, message: string): Promise<void>;
   /**
@@ -747,7 +754,22 @@ export function createInbound(options: InboundOptions): Inbound {
     file,
     async triage(as, opts = {}) {
       requirePermission(as, triagePermission, 'read triage');
-      return (await messages().findMany({ triage: { eq: 'open' } }, { limit: opts.limit ?? 50, count: false, orderBy: [{ field: 'at', desc: true }] })).rows as MessageRow[];
+      const where = { triage: { eq: 'open' }, ...(opts.channel ? { via: { eq: opts.channel } } : {}) };
+      return (
+        await messages().findMany(where, {
+          limit: opts.limit ?? 50,
+          ...(opts.offset ? { offset: opts.offset } : {}),
+          count: false,
+          orderBy: [{ field: 'at', desc: true }, { field: 'id', desc: true }],
+        })
+      ).rows as MessageRow[];
+    },
+    async attachmentsOf(as, message) {
+      requirePermission(as, triagePermission, 'read triage');
+      // Only a messages table with @attachments holds files; no other is asked.
+      const attachments: Attachments | undefined = sys().attachments;
+      if (!attachments || !attachments.holds(messageType)) return [];
+      return (await attachments.list({ table: messageType, key: message })) as Attachment[];
     },
     async settle(as, id) {
       requirePermission(as, triagePermission, 'settle triage');

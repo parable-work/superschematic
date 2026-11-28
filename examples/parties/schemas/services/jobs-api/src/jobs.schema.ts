@@ -1,7 +1,7 @@
 import { Nullable, Secret } from "@superschematic/schema";
-import { worker } from "@superschematic/api";
+import { triageOperations, worker } from "@superschematic/api";
 import { envVars, providers } from "@superschematic/schema-config";
-import { NoticeWork, RunRequest } from "@schemas/jobs-db";
+import { Contact, NoticeWork, RunRequest } from "@schemas/jobs-db";
 
 // The API's config (D159). SMS and MAIL are channel slots: each
 // environment names the adapter that serves each, and the settings after
@@ -23,6 +23,13 @@ export abstract class JobsApiConfig {
 
   INBOUND_ADDRESS: Nullable<string>;
 }
+
+// The office's triage as routes (#746): what came from no one the
+// deployment trusts, a page at a time; one message with its photos;
+// settling one onto a contact, its number entered by hand or verified by a
+// code; and dismissing one. Each needs parties.triage, the office's.
+@triageOperations(Contact)
+export abstract class Triage {}
 
 // Runs the notifier, which sends a party's verification code and a user's
 // echo (D153).
