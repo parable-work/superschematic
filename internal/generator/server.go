@@ -204,6 +204,9 @@ func (r run) generateServers() error {
 	for _, w := range workers {
 		switch w.Language {
 		case APILanguageGo:
+			if err := r.checkGoQueue(st.Name, w, services); err != nil {
+				return err
+			}
 			worker, _, err := r.planEntrypoint(st.Name, w, cloudSQL[w.Name], nil)
 			if err != nil {
 				return err
@@ -693,7 +696,12 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 			}
 			var methods []string
 			queues, events := false, false
+			runtime := r.rustRuntimeQueues(services, api)
 			for _, worker := range implemented[api] {
+				if worker.BehaviorWorker == nil && runtime[worker.Queue] {
+					// A runtime part handles its queue's messages (#620).
+					continue
+				}
 				if worker.BehaviorWorker == nil {
 					queues = true
 					methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
@@ -703,6 +711,9 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 					events = true
 					methods = append(methods, fmt.Sprintf("      async fn %s(&self, event: types::%s, run: &EventRun<'_>) -> Result<(), BoxError> {\n          // handle %s\n      }", rustutil.ToSnakeCase(event.Method), event.Event, handles(worker, event)))
 				}
+			}
+			if len(methods) == 0 {
+				continue
 			}
 			names := "Deps, Workers, BoxError and " + rustrestgen.DatabaseTypesModule + ", the Rust types of the database that declares each queue, are %s's"
 			switch {
@@ -1227,10 +1238,18 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 	var scaffolds []scaffold
 	var versionGraph, rules bool
 	var modules []servergen.Module
+	// The API whose router answers the server's POST /api/mcp (D81, #660).
+	mcp := ""
 	for _, ref := range s.Services {
 		output, err := r.servedAPI(stackName, s.Name, ref.Name)
 		if err != nil {
 			return nil, nil, err
+		}
+		if output.MCP != nil && s.Kind == ir.DeployableServer {
+			if mcp != "" {
+				return nil, nil, fmt.Errorf("stack %s: server %s serves %s and %s, which both turn on outputs.api.mcp, and one server answers POST %s for one API; serve them from two servers, or turn mcp off in one (D81)", stackName, s.Name, mcp, ref.Name, tsrestgen.MCPPath)
+			}
+			mcp = ref.Name
 		}
 		apiModules := r.goServerModules(output, s.Job != nil)
 		impl, newModule, err := r.implementation(ref.Name)
@@ -1490,6 +1509,9 @@ func (r run) planRust(stackName string, s *ir.ResolvedDeployable, cors map[strin
 				if err := r.checkRustManualRoutes(stackName, output); err != nil {
 					return nil, nil, nil, err
 				}
+			}
+			if err := r.checkRustWiring(stackName, output); err != nil {
+				return nil, nil, nil, err
 			}
 		}
 		impl, err := servergen.ReadRustImplementation(r.Options.Naming, ref.Name, dir)

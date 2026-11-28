@@ -16,11 +16,13 @@ package servergen
 // planWiring gives each API the runtime its entrypoint wires: a server
 // every API's whose database has one, a job and a worker only an API's
 // that Deps holds the notifier of, or whose worker's queue the runtime
-// handles. A behavior worker that builds no Deps wires none.
+// handles. A behavior worker that builds no Deps wires none. The wiring is
+// the same over a pool and over a SQLite file (#717): the API package's
+// functions take the ORM the entrypoint opened.
 func (s *Server) planWiring(in Input) {
 	for i, a := range s.APIs {
 		w := in.APIs[i].Output.Deps.Wiring
-		if w == nil || a.Database == nil || a.Database.SQLite {
+		if w == nil || a.Database == nil {
 			continue
 		}
 		switch {

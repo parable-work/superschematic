@@ -555,12 +555,51 @@ const { items, total, more } = await searchTables(orm, principal, { q: "walnut d
 // items: [{ table: "Task", key, title, matched: "body", snippet: [{ text: "a " }, { text: "walnut", match: true }, ...], place: 1 }, ...]
 ```
 
-A row matches when it holds every word of `q`, folded to lower case, and
+A row matches when it holds every term of `q`, folded to lower case, and
 the hits come best first: Postgres's `ts_rank_cd` over the weighed words,
 then table and key, as the engine's Search ranks. `tables` keeps to some
 tables, and `scope` to the rows whose scope field holds one of its values.
 A snippet comes in parts, each match marked, so no markup in a row reaches
 a page.
+
+`q` reads as a search box does (#740), the same in TypeScript, Go and
+Rust, on Postgres and on SQLite:
+
+| `q` | Finds the rows that hold |
+| --- | --- |
+| `walnut desk` | both words, anywhere |
+| `"walnut desk"` | the phrase, its words side by side |
+| `wal*` | a word that starts with `wal` |
+| `walnut -pine` | walnut, and not pine; `-"pine table"` keeps out a phrase |
+| `oak OR pine` | either word: `OR`, upper case, joins the terms beside it, so `walnut oak OR pine` is walnut, and oak or pine |
+
+A `+` before a term says it is required, as every term is. A term with no
+letter or digit is dropped, and so is an `OR` with no term before it. A
+query of excluded terms alone finds nothing, and the first 16 terms count.
+Each term is a phrase of the words the database finds in it, so
+`o'brien` is the phrase `o brien` on both.
+
+With `foldDiacritics`, a word finds its accented forms: `cafe` finds the
+word written with an e acute, and so does the word itself.
+
+```ts
+export default defineConfig({
+  name: "records",
+  kind: SchemaKind.DB,
+  outputs: { sql: { dialects: ["postgres", "sqlite"], search: { foldDiacritics: true } } },
+});
+```
+
+On Postgres the index's words and a search's query go through the
+`unaccent` dictionary, in a text search configuration the migrations make,
+`search_unaccent`. The migration makes the `unaccent` extension where the
+database lacks it, in the schema `superschematic_extensions`, which a role
+with `CREATE` on the database may do; a database that will not have it
+fails the migration and says so. On SQLite the FTS5 table removes
+diacritics. Turning it on or off migrates the index: on Postgres its GIN
+index is built again, and on SQLite its FTS5 table is filled again from
+the index rows. It is off unless set, so a database that searches already
+is not migrated for it.
 
 Access is checked inside the query, so `total` and every page are exact
 and a hidden row never shows as a gap:
@@ -601,6 +640,21 @@ first 200 hits by reciprocal rank fusion of their text place and their
 similarity; the hits and the total stay the rows that hold the words. A
 model that fails leaves the text order.
 
+A search with a `vector` and no term to hold ranks by the vector alone
+(#740): every row the caller may read whose embedding is of the model, by
+cosine similarity, best first, with the exact total. Each hit is matched
+by its title, which is its snippet. Excluded terms still keep rows out:
+`{ q: "-draft", vector }`.
+
+```ts
+// vector: an embedding of the model the options name, from any source.
+const near = await searchTables(orm, principal, { q: "", vector }, options);
+```
+
+It reads every embedded row the caller may read, once per search, with no
+vector index, so it serves an index of moderate size. Embeddings, and a
+search by vector, are Postgres's alone; SQLite refuses them.
+
 | Settled | Why |
 | --- | --- |
 | the index lives in each database | the access check reads each row's audience and, for a grant, the row itself, in the query that ranks |
@@ -630,8 +684,10 @@ let found = search_tables(Repositories::new(&client)?.untyped(), Some(&principal
 ```
 
 `search_routes(SearchRoutes::new(tables, authenticator))` serves
-`GET /api/search`, and `search_mcp_tool` with `call_search_tool` the MCP
-tool; an app merges the route into its router. A party's or an agent run's
+`GET /api/search`, and `SearchTool` the MCP tool (`search_mcp_tool`,
+`call_search_tool`). A generated Rust server merges the route, serves the
+tool and runs a `@worker` of a `@searchable` declaration's queue through
+`index_search` itself (#617), with the options `Wire::search` answers. A party's or an agent run's
 search, through `access::GrantAuthenticator`, keeps to the rows its grants
 reach, as in TypeScript.
 
@@ -668,8 +724,10 @@ options its implementation's `NewWiring` answers in `Wiring.Search`; and a
 `@worker` of a `@searchable` declaration's queue hands each message to
 `IndexSearch` with `Wiring.Indexing`, with no method of the
 implementation's ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)).
-A Go server serves no MCP endpoint (D81, D116), so it serves neither
-tool. `ReindexSearch` builds every row's index row again.
+A Go server with `outputs.api.mcp` on serves the tool on its MCP endpoint
+(#616): the API package's `MCPTools` calls `CallSearchTool` as the
+endpoint's caller with its roles' permissions, with `Wiring.Search`'s
+options. `ReindexSearch` builds every row's index row again.
 Over a database that lists `sqlite`, the SQLite database's `CrossTables()`
 searches the file as the TypeScript runtime does on SQLite
 ([On SQLite and D1](#on-sqlite-and-d1), [Go on SQLite](#go-on-sqlite)).
@@ -2545,9 +2603,11 @@ version on SQLite, and its history by the SQLite DDL's row triggers
 (D189). The Go repository reads no history there, as the TypeScript one
 reads none: `GetVersion`, `GetVersions`, `ListVersions`, `GetAsOf` and the
 `ListAsOfBy...` reads answer `ErrSQLiteUnsupported`. The generated Go
-server's wiring of the notifier and its workers over a database that
-lists `sqlite` first is a follow-up: the implementation builds them over
-`Deps.DB` itself.
+server and its workers wire them over a database that lists `sqlite`
+first as over a pool (#717): the API package's `Wire`, `Authenticator`,
+`Routes` and runtime queues take the ORM's `SQLiteDatabase`, and every
+worker, the app's `@worker`, a table's behavior worker and the runtime's
+own, claims its queue on the SQLite file.
 
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
@@ -3312,7 +3372,11 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
   most `proofWithinMs` before the sign-off; `user-verification`, a passkey
   with user verification on the sign-off itself. The authenticator reports
   the caller's `assurance` (`{ signedInAt?, userVerified? }` on the
-  principal); a principal without one proves nothing.
+  principal); a principal without one proves nothing. The identity
+  runtime's session principal reports `signedInAt`, the time the session
+  signed in, in TypeScript, Go and Rust; an API key's principal reports
+  none. No authenticator reports `userVerified` yet, since the identity
+  runtime has no passkeys, so `user-verification` is never met.
 - **Whom it excludes.** `excludeCreator` as above, by the caller's subject
   or whom it counts as. `excludeCreatorPerson: true` also refuses the
   person the creator acted for, the subject the table's own `createdFor`
@@ -3322,7 +3386,12 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
   guard, so a signer a later write lists stops counting.
 - **The permission again** (`recheckPermission: true`). Each guard reads
   each signer's permission now, so a signer who lost it stops counting;
-  without it the permission is read at the sign-off.
+  without it the permission is read at the sign-off. The repositories read
+  it from the identity runtime's tables in the same database: a person
+  holds the permissions of every role granted to them, and none while
+  disabled or waiting for approval. A signer who is no user of that
+  database, an Agent among them, holds none, and so does every signer of a
+  database without the identity tables.
 - **When it applies** (`when`). A list of conditions on own fields, all of
   which must hold: `{ field, test, values, negate? }`, `test` one of
   `every-matches` and `any-matches` (glob patterns: `*` within a path
@@ -4119,9 +4188,9 @@ moves to the next business day.
 | `weekendDays` | the days a due date moves off; `saturday` and `sunday` when absent |
 | `holidays` | `{ table, calendarField, dateField, field }`: the holiday table your app fills, and this table's field that names a row's calendar |
 | `relative` | `{ via, type, field }`: the to-one relation, the table it points at, and that table's date field |
-| `opensBefore` | how long before its due an occurrence opens (ISO 8601, `P14D`); with none it opens when the one before it falls due |
-| `remindBefore` | how long before its due an occurrence reminds |
-| `overdueAfter` | how long after its due an open occurrence is missed; at its due when absent |
+| `opensBefore` | how long before its due an occurrence opens, a `Temporal.Period` (ISO 8601, `P14D`); with none it opens when the one before it falls due |
+| `remindBefore` | how long before its due an occurrence reminds, a `Temporal.Period` |
+| `overdueAfter` | how long after its due an open occurrence is missed, a `Temporal.Period`; at its due when absent |
 | `permission` | the permission `complete` and `listOccurrences` need |
 | `managePermission` | the permission `setRecurrence`, `skip` and `moveOne` need; `permission` when absent |
 
@@ -4227,9 +4296,10 @@ let calendar = read_calendar(Repositories::new(&client)?.untyped(), Some(&princi
 let routes = calendar_routes(CalendarRoutes::new(Tables::new(pool, postgres_definition), authenticator));
 ```
 
-`call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes,
-and `issue_calendar_feed`, `rotate_calendar_feed` and
-`revoke_calendar_feed` are the feed's operations.
+`call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes
+(`CalendarTool`), and `issue_calendar_feed`, `rotate_calendar_feed` and
+`revoke_calendar_feed` are the feed's operations. A generated Rust server
+merges the calendar's routes and serves its tool itself on Postgres (#617).
 
 A Rust server whose database lists `sqlite` first serves Recurrence there
 too (#615): the router's `recurrence` routes run the operations through
@@ -4272,9 +4342,10 @@ stack's Go server mounts `CalendarRoutes` itself at `/api/calendar`,
 behind the API's auth step but for a feed's fetch, with the options its
 implementation's `NewWiring` answers in `Wiring.Calendar`
 ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server));
-it serves no MCP endpoint, so no calendar tool. A calendar source titled
-by an `Encrypted<T>` field opens each title under the database's field
-keys (`WithFieldKeys`), as its repository's read does. Over a
+with `outputs.api.mcp` on, its MCP endpoint serves the calendar tool
+through `MCPTools`, as the endpoint's caller (#616). A calendar source
+titled by an `Encrypted<T>` field opens each title under the database's
+field keys (`WithFieldKeys`), as its repository's read does. Over a
 database that lists `sqlite`, Recurrence's operations run through the core
 in the SQLite repositories' transactions, and the SQLite database's
 `CrossTables()` reads the calendar and serves its feed on the file

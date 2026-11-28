@@ -23,7 +23,7 @@
           "$ref": "#/definitions/ApiLanguage"
         },
         "mcp": {
-          "description": "Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript API and a Rust API serve it; the build refuses it on a Go API, where support follows. Unset is off.",
+          "description": "Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript, a Rust and a Go API serve it (#660). Unset is off.",
           "type": "boolean"
         },
         "mcpConfirmationKey": {
@@ -326,6 +326,10 @@
           "description": "An update of a table with an updatedBy field needs an acting user, as a create of a table with createdBy does: without one the ORMs refuse it (NoUserError in TypeScript, ErrNoUserInContext in Go) where they would leave a nullable updatedBy as it was (D87). Unset is false.",
           "type": "boolean"
         },
+        "search": {
+          "$ref": "#/definitions/SqlSearchConfig",
+          "description": "The database's search index (#740): how the words of its"
+        },
         "sourceSchema": {
           "description": "The Postgres schema that holds the tables the views read: each view selects <sourceSchema>.<table> for its source table and every joined table, so it does not depend on the migration runner's search_path. Unset leaves the tables unqualified.",
           "type": "string"
@@ -337,6 +341,17 @@
         "viewOwner": {
           "description": "The Postgres role the migrations create the views as: SET ROLE around the view DDL and RESET ROLE after it, so the schema's default privileges for that role apply. The migration runner must be a member of the role. Unset creates the views as the runner.",
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "SqlSearchConfig": {
+      "additionalProperties": false,
+      "description": "The search index of a DB service (D155, #740).",
+      "properties": {
+        "foldDiacritics": {
+          "description": "Fold diacritics, so a word finds its accented forms: on Postgres the index's words and a search's query go through the unaccent dictionary (the migrations make a text search configuration, search_unaccent, and the unaccent extension where the database lacks it), and on SQLite the FTS5 table removes diacritics. Turning it on or off migrates the index: its GIN index is built again on Postgres, and its FTS5 table on SQLite. Unset is false.",
+          "type": "boolean"
         }
       },
       "type": "object"

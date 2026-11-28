@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode"
 
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
 	"github.com/parable-work/superschematic/runtime/schema/go/rowrefs"
@@ -21,10 +20,11 @@ audience a JSON array of ids (D182), and its words an FTS5 table beside it
 (Searchable.FTS, search_index_fts), which the index table's triggers keep
 in the statement that writes an index row.
 
-- The words: each word with a letter or a digit is a quoted FTS5 phrase of
-  the words the unicode61 tokenizer finds in it (folded to lower case, no
-  diacritic removed and none stemmed, as the simple configuration reads
-  them), every one required, and only in the four texts.
+- The words: the plan's FTS5 expression (query.go, #740), each term a
+  quoted FTS5 phrase of the words the unicode61 tokenizer finds in it
+  (folded to lower case and none stemmed, as the simple configuration
+  reads them; diacritics removed where the build folds them), groups OR
+  and excluded terms NOT, only in the four texts.
 - The order: bm25 with the weights Postgres gives the title, the body, the
   conversation and the files (1, 0.4, 0.2, 0.1), best first, then the table
   and the key. A hit's Matched is the first of the four texts that holds
@@ -66,20 +66,6 @@ var ftsTexts = []string{"title", "body", "comments", "files"}
 // re-rank and are stored on Postgres alone (D186).
 var ErrSQLiteEmbeddings = errors.New("embeddings re-rank and are stored on Postgres alone; a search on SQLite and D1 ranks by its words (D186)")
 
-// ftsPhrases are a query's words as an FTS5 expression, each a quoted
-// phrase, every one required; "" for words with no letter or digit, which
-// match nothing on Postgres either.
-func ftsPhrases(words []string) string {
-	var phrases []string
-	for _, word := range words {
-		if !strings.ContainsFunc(word, func(r rune) bool { return unicode.IsLetter(r) || unicode.IsNumber(r) }) {
-			continue
-		}
-		phrases = append(phrases, `"`+strings.ReplaceAll(word, `"`, `""`)+`"`)
-	}
-	return strings.Join(phrases, " ")
-}
-
 // sqliteAudienceConditions are audienceConditions on SQLite: the index
 // row's copied audience, a JSON array, held to the caller's ids through
 // json_each.
@@ -113,12 +99,12 @@ func sqliteAudienceConditions(effective, agents string, formats *SearchIndexAudi
 }
 
 // searchOnSQLite is SearchTables on SQLite (D186): the rows whose FTS5
-// words hold every word, of those caller may read, ranked by bm25, one page
+// words match the plan's expression (#740), of those caller may read, ranked by bm25, one page
 // of them and how many there are, each with where the words matched first
 // and a snippet of that text.
-func searchOnSQLite(ctx context.Context, h Host, caller Caller, words []string, sources []string, all map[string]Searchable, scope []string, limit, offset int) (SearchResult, error) {
+func searchOnSQLite(ctx context.Context, h Host, caller Caller, plan SearchPlan, sources []string, all map[string]Searchable, scope []string, limit, offset int) (SearchResult, error) {
 	empty := SearchResult{Items: []SearchHit{}}
-	phrases := ftsPhrases(words)
+	phrases := FTSQuery(plan)
 	if phrases == "" {
 		return empty, nil
 	}

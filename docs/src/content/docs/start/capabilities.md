@@ -29,7 +29,7 @@ service's config lists, and regenerates it on every change:
 - the HTTP server: routing, argument decoding, validation, permission
   checks, rate, body and time limits, pagination, webhook signature checks
 - OpenAPI, client SDKs in four languages, MCP tool documents, and on a
-  TypeScript or a Rust API an MCP endpoint that serves the tools
+  TypeScript, a Rust or a Go API an MCP endpoint that serves the tools
 - environment variable loaders, and the server entrypoints, Dockerfiles
   and CI of a stack
 
@@ -125,6 +125,7 @@ breaks your code, the type checker of each language points at the line.
 | Users, sessions, sign-in | a table that `implements User<{ login }>` and one that `implements UserRole`; an API whose `authDb` is that database, with a `@userSessions` class | the `Session` and credential tables, the sign-in, sign-out and password routes, roles and grants | nothing | [Users and sessions](/superschematic/guides/users-and-sessions/#turn-it-on) |
 | User and role administration | `@userAdministration` | the routes that manage users, roles and grants | nothing | [Users and sessions](/superschematic/guides/users-and-sessions/#serve-the-session-routes) |
 | Roles every database starts with | `@seedRoles([{ name, permissions }])` on the `UserRole` table | the rows in `create.sql`, and the plan steps that keep them in step | nothing | [Users and sessions](/superschematic/guides/users-and-sessions/#seed-the-roles) |
+| Rows any table starts with: defaults, trust levels, lookup rows | `@seedRows<T>([{ field: value }], { key? })` on the table | the rows in `create.sql` on Postgres and SQLite, and a plan step for each new one; none ever overwrites a row an app edited | nothing | [Schema migrations](/superschematic/reference/migrations/#seeded-rows) |
 | A program that calls as a user | `@userSessions({ apiKeys: true })` | the routes that make, list and revoke a user's named, revocable keys, each holding the user's permissions or a subset | nothing | [Users and sessions](/superschematic/guides/users-and-sessions/#api-keys) |
 | Rows only some callers see, on every read and write | `@audience<T>({ owner, inheritFrom, agents })` on a table, on Postgres | the audience columns and the trigger that passes a parent's audience to its children; the TypeScript server's repositories, searches and relations keep to the caller's rows, and a row they do not see is a 404 | nothing | [API routes](/superschematic/guides/api-routes/#a-tables-audience) |
 | A caller who is no user, reaching one row and what its role reaches from it, until a date | a class marked `@accessGrants()`, and `reaches` on the `UserRole` table's roles | the grants' table; `issueGrant`, `grantAuthenticator` and `revokeGrant` in the TypeScript runtime, which read the grant on every call | the call that issues each grant | [API routes](/superschematic/guides/api-routes/#grants) |
@@ -164,7 +165,7 @@ The core's runtime for these is TypeScript, over Postgres.
 | A static front end | a Site service | the config, served in each environment, that holds each API's address, and CORS on each API it calls | the front end | [Static sites](/superschematic/guides/static-sites/#declare-a-site) |
 | A front end and its APIs on one origin, for a cookie session with no CORS | `origins: [{ site, apis }]` in `@stack` | each API under `/api/<service>` on the site's address, in `stack dev`, on gcp's load balancer and through the site's Worker on Cloudflare, and the config that names it there | nothing | [Static sites](/superschematic/guides/static-sites/#one-origin) |
 | Clients in Go, TypeScript, Python, Rust | a line per language in `outputs.sdk` | an SDK with the server's checks, pages, errors and retries | nothing | [Client SDKs](/superschematic/guides/client-sdks/#generate-them) |
-| Tools an AI agent can call | `@mcp` on operations | MCP tool documents beside the SDKs, and with `outputs.api.mcp` a TypeScript or a Rust API's endpoint at `POST /api/mcp`, which runs an `invocationPolicy: "ask"` tool only once the person confirms the call | nothing; with an `ask` tool, the secret `outputs.api.mcpConfirmationKey` names, set per environment | [MCP tools](/superschematic/reference/mcp-tools/) |
+| Tools an AI agent can call | `@mcp` on operations | MCP tool documents beside the SDKs, and with `outputs.api.mcp` a TypeScript, a Rust or a Go API's endpoint at `POST /api/mcp`, which runs an `invocationPolicy: "ask"` tool only once the person confirms the call | nothing; with an `ask` tool, the secret `outputs.api.mcpConfirmationKey` names, set per environment | [MCP tools](/superschematic/reference/mcp-tools/) |
 | Labels and controls for forms | `@docs`, `@purpose`, `@display`, `@uiControl` | the metadata a schema form reads | nothing | [Documentation](/superschematic/reference/documentation/) |
 
 ## Running and deploying

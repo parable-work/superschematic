@@ -11,7 +11,8 @@ import (
 // operations. Before this check a Go server left each of them out with no
 // word: no calendar or Recurrence operations, no events or notifier, no
 // references, attachments or search, no parties, conversations, run
-// requests or agents, no provider slots and no autonomy.
+// requests or agents, no provider slots and no autonomy, which are all
+// served now.
 //
 // A DB service's Go types are not refused. The DB kind generates its Go
 // ORM always, and the build needs the Go types for it (outputs.types.go),
@@ -49,8 +50,8 @@ import (
 // Postgres (D192): the generated ORM of a database with them hosts the
 // HTTP runtime's inbound and agents packages through the notifier's host,
 // so a database with them and no notifier is refused. An operation's
-// @autonomy stays refused: it holds an agent run's calls of the API's MCP
-// tools, and a Go server serves no MCP endpoint (D81, D116).
+// @autonomy is served too (#621): the Go server's MCP endpoint (#660)
+// holds an agent run's call of its tool to it.
 //
 // On SQLite the three are served too (#618, part 3 of Go on SQLite, as
 // TypeScript serves them since D189): the SQLite database's Notifications
@@ -138,26 +139,15 @@ func orchestrationMarks(td *ir.TypeDef) []string {
 // checkGoOperations refuses the features of schema, an API's, its Go
 // server does not serve: a runtime provider its config lists whose
 // directory holds no Go module (D159, D184), which a Go server cannot
-// link, and an operation's @autonomy (D158, D183), which holds an agent
-// run's calls of the API's MCP tools, and a Go server serves no MCP
-// endpoint (D81, D116); the agents package's MCPGate is the gate for the
-// day it does (D192). Provider slots are served (D184): the server
-// imports each listed provider's module and builds its Providers into
-// Deps.
+// link. Provider slots are served (D184): the server imports each listed
+// provider's module and builds its Providers into Deps. An operation's
+// @autonomy (D158, D183) is served (#621): its MCP tool carries it, and
+// the Go server's MCP endpoint (#660) holds an agent run's call of the
+// tool to it through the dispatcher's MCPCallGate.
 func checkGoOperations(schema *ir.Schema, where string, r *Result) {
 	for _, p := range schema.Providers {
 		if p != nil && p.Module == "" {
 			r.errorf(schema.Name, "%s cannot link runtime provider %s (%s): its directory holds no Go module; a Go server imports a provider's Go module, whose go.mod names it and whose root package exports Definition() (D159, D184), so add one, or serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\")", where, p.Name, p.Path)
-		}
-	}
-	for _, set := range schema.OperationSets {
-		if set == nil {
-			continue
-		}
-		for _, op := range set.Operations {
-			if op != nil && op.Autonomy != nil {
-				r.errorf(schema.Name, "%s does not serve @autonomy on %s.%s yet (D158, D183, D192): it holds an agent run's calls of the API's MCP tools, and a Go server serves no MCP endpoint (D81, D116); serve the API in TypeScript (outputs.api.language: \"TYPESCRIPT\"), or leave the @autonomy out", where, set.Name, op.Name)
-			}
 		}
 	}
 }

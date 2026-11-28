@@ -27,6 +27,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::Arc;
 
 /// The caller an [`Authenticator`] established for a request.
 #[derive(Clone, Default, PartialEq)]
@@ -280,6 +281,30 @@ pub trait Authenticator: Send + Sync + 'static {
     ) -> Result<(), ApiError> {
         let _ = (principal, operation, method);
         Ok(())
+    }
+}
+
+/// A shared authenticator is the one it shares, so a wrapper of one
+/// (`access::Logged`, say) takes an `Arc<dyn Authenticator>` as it takes
+/// any other: the generated server wraps the implementation's this way
+/// (#610).
+#[async_trait]
+impl<A: Authenticator + ?Sized> Authenticator for Arc<A> {
+    async fn authenticate(&self, request: &Parts) -> Result<Option<Principal>, ApiError> {
+        (**self).authenticate(request).await
+    }
+
+    fn permits(&self, held: &[String], required: &[String]) -> bool {
+        (**self).permits(held, required)
+    }
+
+    async fn called(
+        &self,
+        principal: Option<&Principal>,
+        operation: &str,
+        method: &Method,
+    ) -> Result<(), ApiError> {
+        (**self).called(principal, operation, method).await
     }
 }
 

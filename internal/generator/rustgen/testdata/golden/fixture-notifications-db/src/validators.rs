@@ -102,6 +102,41 @@ pub mod scalars {
         }
     }
 
+    /// Validates a `File.MediaType` value.
+    pub fn validate_file_media_type(value: Option<&Value>) -> rt::ScalarResult {
+        let value = match value {
+            None | Some(Value::Null) => return Ok(()),
+            Some(value) => value,
+        };
+        let Some(text) = value.as_str() else {
+            return Err(vec![ValidationError::new("type", "expected string value")]);
+        };
+        let mut errors = Vec::new();
+        let length = rt::code_points(text);
+        if length > 255 {
+            errors.push(ValidationError::new("maxLength", "must be at most 255 characters"));
+        }
+        // The scalar core checks the rules above again, so it runs only when
+        // they pass: one failing value, one error.
+        if errors.is_empty() {
+            return core_check("File.MediaType", value);
+        }
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors)
+        }
+    }
+
+    /// Validates a `File.MediaType` value that must be present.
+    pub fn validate_file_media_type_required(value: Option<&Value>) -> rt::ScalarResult {
+        match value {
+            None | Some(Value::Null) => Err(vec![ValidationError::required()]),
+            Some(Value::String(text)) if text.is_empty() => Err(vec![ValidationError::required()]),
+            _ => validate_file_media_type(value),
+        }
+    }
+
     /// Validates a `File.SizeBytes` value.
     pub fn validate_file_size_bytes(value: Option<&Value>) -> rt::ScalarResult {
         let value = match value {

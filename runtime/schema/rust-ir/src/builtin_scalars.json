@@ -260,6 +260,32 @@
         "json_schema": "array"
       }
     },
+    "File_MediaType": {
+      "name": "File_MediaType",
+      "description": "IANA media type (MIME type): type/subtype with optional parameters, normalized to lowercase (e.g., image/png, text/csv;charset=utf-8)",
+      "primitive": "String",
+      "minLength": 0,
+      "maxLength": 255,
+      "pattern": "",
+      "format": "",
+      "reservedWords": [],
+      "caseInsensitive": false,
+      "reservedWordsCaseInsensitive": false,
+      "reservedWordsMatchPartial": false,
+      "minimum": null,
+      "maximum": null,
+      "example": "image/png",
+      "fileUpload": null,
+      "imageConstraints": null,
+      "hasCustomNormalize": true,
+      "hasCustomValidate": true,
+      "hasCustomParse": true,
+      "typeMappings": {
+        "go": "FileMediaType",
+        "json_schema": "string",
+        "sql": "VARCHAR(255)"
+      }
+    },
     "File_SizeBytes": {
       "name": "File_SizeBytes",
       "description": "File size in bytes (non-negative, BIGINT-backed)",
@@ -572,6 +598,32 @@
         "sql": "TEXT"
       }
     },
+    "Geo_CountryCode": {
+      "name": "Geo_CountryCode",
+      "description": "Officially assigned ISO 3166-1 alpha-2 country code (e.g., US, DE, JP)",
+      "primitive": "String",
+      "minLength": 2,
+      "maxLength": 2,
+      "pattern": "^[A-Z]{2}$",
+      "format": "",
+      "reservedWords": [],
+      "caseInsensitive": false,
+      "reservedWordsCaseInsensitive": false,
+      "reservedWordsMatchPartial": false,
+      "minimum": null,
+      "maximum": null,
+      "example": "US",
+      "fileUpload": null,
+      "imageConstraints": null,
+      "hasCustomNormalize": false,
+      "hasCustomValidate": true,
+      "hasCustomParse": false,
+      "typeMappings": {
+        "go": "GeoCountryCode",
+        "json_schema": "string",
+        "sql": "VARCHAR(2)"
+      }
+    },
     "Geo_Location": {
       "name": "Geo_Location",
       "description": "Geographic location with latitude and longitude",
@@ -832,6 +884,32 @@
         "sql": "INET"
       }
     },
+    "Network_Port": {
+      "name": "Network_Port",
+      "description": "TCP or UDP port number, 1 through 65535",
+      "primitive": "Int",
+      "minLength": 0,
+      "maxLength": 0,
+      "pattern": "",
+      "format": "",
+      "reservedWords": [],
+      "caseInsensitive": false,
+      "reservedWordsCaseInsensitive": false,
+      "reservedWordsMatchPartial": false,
+      "minimum": 1,
+      "maximum": 65535,
+      "example": "443",
+      "fileUpload": null,
+      "imageConstraints": null,
+      "hasCustomNormalize": false,
+      "hasCustomValidate": false,
+      "hasCustomParse": false,
+      "typeMappings": {
+        "go": "NetworkPort",
+        "json_schema": "integer",
+        "sql": "INTEGER"
+      }
+    },
     "Network_Uri": {
       "name": "Network_Uri",
       "description": "RFC 3986 URI for connection strings and non-HTTP resources",
@@ -1066,6 +1144,32 @@
         "sql": "BIGINT"
       }
     },
+    "Temporal_LocalDateTime": {
+      "name": "Temporal_LocalDateTime",
+      "description": "Date and time of day with no zone or offset (a wall-clock reading), normalized to 'YYYY-MM-DDTHH:MM:SS'. Accepts 'T', 't' or a space between the date and the time, and a time without seconds. Refuses a value that carries a zone or an offset.",
+      "primitive": "String",
+      "minLength": 0,
+      "maxLength": 40,
+      "pattern": "",
+      "format": "",
+      "reservedWords": [],
+      "caseInsensitive": false,
+      "reservedWordsCaseInsensitive": false,
+      "reservedWordsMatchPartial": false,
+      "minimum": null,
+      "maximum": null,
+      "example": "2026-10-31T09:00:00",
+      "fileUpload": null,
+      "imageConstraints": null,
+      "hasCustomNormalize": true,
+      "hasCustomValidate": true,
+      "hasCustomParse": true,
+      "typeMappings": {
+        "go": "TemporalLocalDateTime",
+        "json_schema": "string",
+        "sql": "TIMESTAMP"
+      }
+    },
     "Temporal_Milliseconds": {
       "name": "Temporal_Milliseconds",
       "description": "Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis.",
@@ -1142,6 +1246,32 @@
         "go": "TemporalMonth",
         "json_schema": "string",
         "sql": "VARCHAR(2)"
+      }
+    },
+    "Temporal_Period": {
+      "name": "Temporal_Period",
+      "description": "ISO 8601 duration: an amount of calendar time in years, months, weeks, days, hours, minutes and seconds (e.g., P2D, P1M, PT30M)",
+      "primitive": "String",
+      "minLength": 3,
+      "maxLength": 64,
+      "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+      "format": "",
+      "reservedWords": [],
+      "caseInsensitive": false,
+      "reservedWordsCaseInsensitive": false,
+      "reservedWordsMatchPartial": false,
+      "minimum": null,
+      "maximum": null,
+      "example": "P2D",
+      "fileUpload": null,
+      "imageConstraints": null,
+      "hasCustomNormalize": true,
+      "hasCustomValidate": true,
+      "hasCustomParse": true,
+      "typeMappings": {
+        "go": "TemporalPeriod",
+        "json_schema": "string",
+        "sql": "VARCHAR(64)"
       }
     },
     "Temporal_Quarter": {
@@ -1415,6 +1545,7 @@
     "Crypto_RSAPublicKey": "string",
     "Crypto_SHA256": "string",
     "Design_Color": "string",
+    "File_MediaType": "string",
     "File_SizeBytes": "integer",
     "Finance_Currency": "string",
     "Finance_Money": "integer",
@@ -1426,6 +1557,7 @@
     "Generic_Probability": "number",
     "Generic_StringMap": "json",
     "Generic_Text": "string",
+    "Geo_CountryCode": "string",
     "Git_PathPattern": "string",
     "Identity_Name": "string",
     "Identity_Slug": "string",
@@ -1435,6 +1567,7 @@
     "Network_DnsLabel": "string",
     "Network_DomainName": "string",
     "Network_IpAddress": "string",
+    "Network_Port": "integer",
     "Network_Uri": "string",
     "Network_Url": "string",
     "Ordering_Rank": "integer",
@@ -1447,6 +1580,7 @@
     "Temporal_Milliseconds": "integer",
     "Temporal_Minutes": "integer",
     "Temporal_Month": "string",
+    "Temporal_Period": "string",
     "Temporal_Quarter": "string",
     "Temporal_QuarterYear": "string",
     "Temporal_RecurrenceRule": "string",

@@ -404,11 +404,19 @@ func TestWorkerRefusals(t *testing.T) {
 		mustFail(t, errs, stack.CodeInvalidStack, "worker FulfilOrders of shop-orders handles queue OrderPlaced, and shop-orders connects to no database")
 	})
 	t.Run("a Go worker's queue on SQLite", func(t *testing.T) {
+		// A Go worker claims on its database's SQLite file (#717): its
+		// dialect refuses it nothing. (The fake target has no connector to
+		// its SQLite platform; TestAJobAndWorkerRunOnTheirDatabasesSQLiteFile
+		// resolves one on the local target.)
 		s, services := workerShop()
 		service(services, "shop-db").Dialects = []string{registry.SQLDialectSQLite}
 		settingsFor(s.Environment("Staging"), stacktest.Of(stacktest.ShopDB)).Platform = stacktest.LitePlatform
 		_, errs := resolve(t, reg, s, services, "Staging")
-		mustFail(t, errs, stack.CodeUnrealizable, "worker shop-orders-fulfil-orders is a GO worker on shop-db, and environment Staging places shop-db on shop-db, a sqlite database; a Go worker claims its queue on Postgres alone (D64, D116)")
+		for _, err := range errs.Of(stack.CodeUnrealizable) {
+			if strings.Contains(err.Message, "shop-orders-fulfil-orders") {
+				t.Errorf("the Go worker on SQLite is refused: %s", err.Message)
+			}
+		}
 	})
 	t.Run("a queue on a platform where no worker claims", func(t *testing.T) {
 		s, services := workerShop()

@@ -74,7 +74,7 @@ func behaviorCaller(ctx context.Context) rules.Caller {
 				}
 			}
 		}
-		return rules.Caller{Subject: runtimesession.GetPrincipalID(ctx), Permissions: permissions}
+		return principalCaller(ctx, permissions)
 	}
 	if caller, ok := serviceauth.CallerFromContext(ctx); ok {
 		return rules.Caller{Subject: caller.Deployable, StandsIn: true}
@@ -214,14 +214,18 @@ func respondBehaviorError(w gohttp.ResponseWriter, r *gohttp.Request, err error)
 {{- $w := . }}
 
 {{ .QueuesDoc $.Deps.Database }}
-func {{ .QueuesFunc }}(db *orm.Database, {{ if .Behavior.Emits }}workers Workers, {{ end }}logger *zap.Logger) []worker.Queue {
+func {{ .QueuesFunc }}(db *orm.{{ if $.Deps.SQLite }}SQLite{{ end }}Database, {{ if .Behavior.Emits }}workers Workers, {{ end }}logger *zap.Logger) []worker.Queue {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	caller := rules.Caller{Subject: {{ printf "%q" .Behavior.Subject }}{{ with .Behavior.Permissions }}, Permissions: []string{ {{- range $i, $p := . }}{{ if $i }}, {{ end }}{{ printf "%q" $p }}{{ end -}} }{{ end }}}
 	var queues []worker.Queue
 {{- with .Behavior.DeadlineQueue }}
+{{- if $.Deps.SQLite }}
+	deadlines := orm.New{{ . }}SQLiteQueue(db.SQL())
+{{- else }}
 	deadlines := db.{{ . }}Queue()
+{{- end }}
 	queues = append(queues, worker.Queue{
 		Name:  {{ printf "%q" . }},
 		Lease: orm.{{ . }}Lease,
@@ -256,14 +260,24 @@ func {{ .QueuesFunc }}(db *orm.Database, {{ if .Behavior.Emits }}workers Workers
 		Fail:     deadlines.Fail,
 		Release:  deadlines.Release,
 		Prune:    deadlines.Prune,
+{{- if $.Deps.SQLite }}
+		// On SQLite (#717) there are no advisory locks and no next due
+		// time: in drain mode the worker takes no slot and stops once its
+		// queues are idle (D145).
+{{- else }}
 		// In drain mode the worker takes one slot, its first queue's, and
 		// waits for a message due soon (D145).
 		Slot:    deadlines.Slot,
 		NextDue: deadlines.NextDue,
+{{- end }}
 	})
 {{- end }}
 {{- with .Behavior.ChangeQueue }}
+{{- if $.Deps.SQLite }}
+	changes := orm.New{{ . }}SQLiteQueue(db.SQL())
+{{- else }}
 	changes := db.{{ . }}Queue()
+{{- end }}
 	queues = append(queues, worker.Queue{
 		Name:  {{ printf "%q" . }},
 		Lease: orm.{{ . }}Lease,
@@ -298,13 +312,19 @@ func {{ .QueuesFunc }}(db *orm.Database, {{ if .Behavior.Emits }}workers Workers
 		Fail:     changes.Fail,
 		Release:  changes.Release,
 		Prune:    changes.Prune,
+{{- if not $.Deps.SQLite }}
 		Slot:     changes.Slot,
 		NextDue:  changes.NextDue,
+{{- end }}
 	})
 {{- end }}
 {{- if .Behavior.Emits }}
 {{- with .Behavior.EventQueue }}
+{{- if $.Deps.SQLite }}
+	events := orm.New{{ . }}SQLiteQueue(db.SQL())
+{{- else }}
 	events := db.{{ . }}Queue()
+{{- end }}
 	queues = append(queues, worker.Queue{
 		Name:  {{ printf "%q" . }},
 		Lease: orm.{{ . }}Lease,
@@ -341,8 +361,10 @@ func {{ .QueuesFunc }}(db *orm.Database, {{ if .Behavior.Emits }}workers Workers
 		Fail:     events.Fail,
 		Release:  events.Release,
 		Prune:    events.Prune,
+{{- if not $.Deps.SQLite }}
 		Slot:     events.Slot,
 		NextDue:  events.NextDue,
+{{- end }}
 	})
 {{- end }}
 {{- end }}

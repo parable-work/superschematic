@@ -195,6 +195,8 @@ func TestHazardClasses(t *testing.T) {
 		{plan: "add-seed-roles", op: "seedRole", phase: Expand},
 		{plan: "seed-roles-gain", op: "updateRole", phase: Expand, want: []HazardClass{destructive}, reason: "gains identity.users.write"},
 		{plan: "seed-roles-lose", op: "updateRole", phase: Contract, want: []HazardClass{destructive}, reason: "loses identity.users.write"},
+		// The rows @seedRows seeds (#625): an insert takes no hazard.
+		{plan: "seed-rows-added", op: "seedRow", phase: Expand},
 
 		{plan: "add-projection", op: "createView", phase: Expand},
 		{plan: "change-projection", op: "replaceView", phase: Expand, want: []HazardClass{apiBreaking}},

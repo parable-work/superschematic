@@ -10,19 +10,19 @@ inbox (GET /api/inbox, POST /api/inbox/:id/read and /ack), and hands each
 message of the notifier's dispatch queue to notifier.handle, so the Notify
 worker has no method here.
 
-Left to the app: the reply "done 142" (createRuntimeOptions), the
-notifier's seed rows, password reset's routes (D81), and the workers of its
-own queue and of Duty's Recurrence events.
+Left to the app: the reply "done 142" (createRuntimeOptions), password
+reset's routes (D81), and the workers of its own queue and of Duty's
+Recurrence events. The notifier's defaults, everyone's preference and each
+channel kind's trust, are seed rows of tickets-db's schema (@seedRows,
+#625), which its migrations write.
 
 The imports name the packages `superschematic build-all` writes for the
 example's two services.
 */
-import pg from 'pg';
 import { passwordReset, type Notifier, type ReplyAction } from '@superschematic/http-runtime/postgres';
 import type { ManualRouteHandler } from '@superschematic/http-runtime/hono';
 import type { IdentityService } from '@superschematic/http-runtime/identity';
 import type { Deps, RuntimeOptionsConstructor } from '@schemas/tickets-api-api';
-import { createOrm } from '@schemas/tickets-db-types/orm';
 
 /**
  * What "done 142" runs: the ticket marked done, as its sender, held to
@@ -46,25 +46,6 @@ const markDone: ReplyAction = {
 export const createRuntimeOptions: RuntimeOptionsConstructor = () => ({
   notifier: { replies: { 'ticket.overdue': { done: markDone }, 'ticket.assigned': { done: markDone } } },
 });
-
-/**
- * The notifier's defaults, which are seed data (D153): everyone hears by
- * SMS, then email, outside 22:00 to 07:00; a text may only acknowledge,
- * since a sender id can be spoofed, and an email may run what its sender
- * may. Written once, at deploy; a person's own rows override them.
- */
-export async function seedNotifications(pool: pg.Pool): Promise<void> {
-  const sys = createOrm(pool).asSystem();
-  if (!(await sys.noticePreference.findOne({ principal: { isNull: true } }))) {
-    await sys.noticePreference.createOne({ principal: null, eventKind: '*', urgency: '*', channels: ['sms', 'email'], quietStart: '22:00', quietEnd: '07:00', timeZone: 'UTC' });
-  }
-  for (const row of [
-    { channelKind: 'sms', level: 'low', permissions: [] },
-    { channelKind: 'email', level: 'standard', permissions: null },
-  ]) {
-    if (!(await sys.channelTrust.findOne({ channelKind: { eq: row.channelKind } }))) await sys.channelTrust.createOne(row);
-  }
-}
 
 /**
  * Password reset (D81): a code by email, then the new password, the

@@ -219,6 +219,11 @@ type TypeDef struct {
 	// for every other type. See [RoleSeed].
 	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
 
+	// SeedRows are the rows a DB table's @seedRows declares (#625, #667),
+	// which create.sql inserts and a migration plan inserts when new. Nil
+	// for every other type. See [SeedRows].
+	SeedRows *SeedRows `json:"seedRows,omitempty" yaml:"seedRows,omitempty"`
+
 	// Mergeable marks a DB table whose repository folds one row into
 	// another, the core Mergeable trait (D147): mergeInto repoints every
 	// relation of the schema that references the row merged away, deletes
@@ -343,6 +348,12 @@ type TypeDef struct {
 	// triggers and the runtime's indexing write, and for which no
 	// repository is generated.
 	SearchIndex bool `json:"searchIndex,omitempty" yaml:"searchIndex,omitempty" jsonschema:"-"`
+
+	// SearchFolds marks a search index whose words fold diacritics
+	// (outputs.sql.search.foldDiacritics, #740): on Postgres its GIN
+	// expression and a search's query are in [SearchFoldedConfig], and on
+	// SQLite its FTS5 table removes diacritics.
+	SearchFolds bool `json:"searchFolds,omitempty" yaml:"searchFolds,omitempty" jsonschema:"-"`
 
 	// Query is the @query declaration of a RoleQuery type: a named SQL
 	// statement of the DB service, with its params and row types (D86).

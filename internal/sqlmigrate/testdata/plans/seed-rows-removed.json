@@ -1,0 +1,10 @@
+{
+  "dialect": "postgres",
+  "from": "897a90573f5ebb5a5ef73dda94d25e9de09c2eb7f4d02f43e60a13886a2c805e",
+  "hash": "89caabc5bd3872179dc1057ebbbeb235b5d3db8151409b9d87bc0220810fe21c",
+  "service": "shop-db",
+  "steps": [],
+  "to": "86ebecb38b74a85fe538023ce7c9adb9b99f27264eef5013366e02c42cb441ae",
+  "toModel": null,
+  "version": 1
+}

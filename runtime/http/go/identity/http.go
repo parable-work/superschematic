@@ -34,6 +34,11 @@ func WithPrincipal(ctx context.Context, p Principal) context.Context {
 	ctx = session.ContextWithPrincipalID(ctx, p.ID)
 	ctx = session.ContextWithPrincipalName(ctx, p.Name)
 	ctx = session.ContextWithSessionID(ctx, p.SessionID)
+	if p.SignedInAt != nil {
+		// When the session signed in, which an Approvals requirement's
+		// recent-sign-in proof reads (D200).
+		ctx = session.ContextWithAssurance(ctx, session.Assurance{SignedInAt: p.SignedInAt})
+	}
 	return session.ContextWithRoles(ctx, p.Roles)
 }
 

@@ -109,7 +109,7 @@ export type ApiOutputConfig = {
   readonly language?: ApiLanguage;
   readonly scaffoldsOutputDir?: string;
   /**
-   * Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript API and a Rust API serve it; the build refuses it on a Go API, where support follows. Unset is off.
+   * Serve the operations the mcp decorator makes visible tools over MCP at POST /api/mcp (D81): the caller authenticates as on the API's other routes, and each tools/call runs through the route of its operation. A TypeScript, a Rust and a Go API serve it (#660). Unset is off.
    */
   readonly mcp?: boolean;
   /**
@@ -169,6 +169,20 @@ export type SqlOutputConfig = {
    * An update of a table with an updatedBy field needs an acting user, as a create of a table with createdBy does: without one the ORMs refuse it (NoUserError in TypeScript, ErrNoUserInContext in Go) where they would leave a nullable updatedBy as it was (D87). Unset is false.
    */
   readonly requireUpdatedBy?: boolean;
+  /**
+   * The database's search index (#740): how the words of its @searchable tables are read.
+   */
+  readonly search?: SqlSearchConfig;
+};
+
+/**
+ * The search index of a DB service (D155, #740).
+ */
+export type SqlSearchConfig = {
+  /**
+   * Fold diacritics, so a word finds its accented forms: on Postgres the index's words and a search's query go through the unaccent dictionary (the migrations make a text search configuration, search_unaccent, and the unaccent extension where the database lacks it), and on SQLite the FTS5 table removes diacritics. Turning it on or off migrates the index: its GIN index is built again on Postgres, and its FTS5 table on SQLite. Unset is false.
+   */
+  readonly foldDiacritics?: boolean;
 };
 
 /**

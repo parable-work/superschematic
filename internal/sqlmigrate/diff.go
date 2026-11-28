@@ -165,6 +165,7 @@ func (d *differ) diff() error {
 	d.diffViews(d.groupAlterations())
 	d.diffRawSQL()
 	d.diffRoles()
+	d.diffRows()
 	return nil
 }
 

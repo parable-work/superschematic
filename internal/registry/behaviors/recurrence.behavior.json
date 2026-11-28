@@ -126,17 +126,26 @@
       "opensBefore": {
         "description": "How long before its due an occurrence opens, an ISO 8601 duration (P14D); with none it opens when the occurrence before it falls due, the first when it is planned.",
         "type": "string",
-        "minLength": 2
+        "x-superschematic-scalar": "Temporal.Period",
+        "minLength": 3,
+        "maxLength": 64,
+        "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$"
       },
       "remindBefore": {
         "description": "How long before its due an occurrence reminds, an ISO 8601 duration (P3D): the deadline remind.",
         "type": "string",
-        "minLength": 2
+        "x-superschematic-scalar": "Temporal.Period",
+        "minLength": 3,
+        "maxLength": 64,
+        "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$"
       },
       "overdueAfter": {
         "description": "How long after its due an open occurrence is missed, an ISO 8601 duration (P1D); at its due when absent.",
         "type": "string",
-        "minLength": 2
+        "x-superschematic-scalar": "Temporal.Period",
+        "minLength": 3,
+        "maxLength": 64,
+        "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$"
       },
       "permission": {
         "description": "The permission complete and listOccurrences need; any caller when absent.",

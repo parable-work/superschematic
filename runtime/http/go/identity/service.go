@@ -227,6 +227,9 @@ type Principal struct {
 	// principal.
 	APIKeyID  string
 	Transport Transport
+	// SignedInAt is when the session signed in, its CreatedAt (D200); nil
+	// for an API key's principal, which signs no one in.
+	SignedInAt *time.Time
 }
 
 // The operations' inputs and results, by the contract's field names
@@ -604,10 +607,11 @@ func (s *Service) AuthenticateToken(ctx context.Context, token string, transport
 		return Principal{}, err
 	}
 	sessionRoles := toSessionRoles(roles)
+	signedInAt := sess.CreatedAt
 	return Principal{
 		ID: rec.User.ID, Login: rec.User.Login, Name: rec.User.Name,
 		Roles: sessionRoles, Permissions: EffectivePermissions(sessionRoles),
-		SessionID: sess.ID, Transport: transport,
+		SessionID: sess.ID, Transport: transport, SignedInAt: &signedInAt,
 	}, nil
 }
 

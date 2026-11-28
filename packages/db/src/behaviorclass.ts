@@ -36,7 +36,10 @@
 //     object that sets additionalProperties false, its optional members
 //     left out of required; Record<string, X> an object of X; X[] an array;
 //     a union of literals an enum; T | null T's type with "null" beside it;
-//     another union oneOf; and JsonSchema<T, K> adds the keywords K holds;
+//     another union oneOf; JsonSchema<T, K> adds the keywords K holds; and
+//     a superscalar scalar (Temporal.Period) is its JSON type with the
+//     bounds and the pattern it declares and its name under
+//     x-superschematic-scalar;
 //   - a property is a field, its type the column's (string, number,
 //     boolean, or a superscalar scalar such as Temporal.DateTime), and
 //     @valueField, @fromCreate, @computed, @volatile and @perReader say the

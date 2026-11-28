@@ -17,6 +17,7 @@ import { openSqlite, parseFieldKeys, type SqliteDatabase } from '@superschematic
 import type { Principal } from '@superschematic/http-runtime';
 import type { FixtureSearchDbOrm } from './orm';
 import { createOrm } from './orm-sqlite';
+import { paritySearches, parityAnswer, writeParityCorpus } from './search_parity';
 import { alice, bob } from './harness';
 
 const party = '3cKSm7Pv2EM8Wl4z4XvMh1';
@@ -252,6 +253,14 @@ describe('search across tables on SQLite', () => {
     expect((await found(user(bob), 'walnut')).keys.some(key => key.startsWith('Note:'))).toBe(false);
     expect(await reindexSearch(orm, { tables: ['Note'], batch: 1 })).toBe(3);
     expect((await found(user(bob), 'walnut')).keys).toEqual(before);
+  });
+
+  test("the parity file's searches answer the same titles in every runtime (#740)", async () => {
+    await writeParityCorpus('sqlite', (text, values) => sql(text, values));
+    const answers: Record<string, unknown> = {};
+    for (const search of paritySearches) answers[search.name] = await parityAnswer(searchTables, orm, user(alice), search);
+    if (process.env.SEARCH_PARITY_PRINT) console.log(JSON.stringify(answers));
+    expect(answers).toEqual(Object.fromEntries(paritySearches.map(search => [search.name, search.sqlite ?? null])));
   });
 });
 

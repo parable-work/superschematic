@@ -402,18 +402,9 @@ async fn world(options: Options) -> World {
                         .await?;
                 }
             }
-            r.untyped()
-                .table("NoticePreference")?
-                .create_one(&values(json!({ "principal": null, "eventKind": "*", "urgency": "*", "channels": ["sms", "email"] })))
-                .await?;
-            r.untyped()
-                .table("ChannelTrust")?
-                .create_one(&values(json!({ "channelKind": "sms", "level": "low", "permissions": [] })))
-                .await?;
-            r.untyped()
-                .table("ChannelTrust")?
-                .create_one(&values(json!({ "channelKind": "email", "level": "standard", "permissions": null })))
-                .await?;
+            // Everyone's preference (SMS, then email) and each channel
+            // kind's trust (SMS low, email standard) are the schema's seed
+            // rows (#625), which create.sql wrote.
             r.untyped()
                 .table("NoticeRoute")?
                 .create_one(&values(json!({

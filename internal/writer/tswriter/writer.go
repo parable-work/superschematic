@@ -157,7 +157,7 @@ var symbolPackages = map[string]string{
 	"index": "@superschematic/db", "rawSql": "@superschematic/db", "key": "@superschematic/db",
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
 	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db", "enqueueOnChange": "@superschematic/db",
-	"seedRoles": "@superschematic/db", "agents": "@superschematic/db",
+	"seedRoles": "@superschematic/db", "seedRows": "@superschematic/db", "agents": "@superschematic/db",
 	"calendarSource": "@superschematic/db", "event": "@superschematic/db", "notifier": "@superschematic/db",
 	"channelIdentities": "@superschematic/db", "references": "@superschematic/db", "attachments": "@superschematic/db",
 	"searchable": "@superschematic/db", "audience": "@superschematic/db", "accessGrants": "@superschematic/db",
@@ -561,6 +561,23 @@ func seedRolesArgs(seeds []*ir.RoleSeed) string {
 		roles = append(roles, objectLiteral([]string{"name: " + quote(seed.Name), "permissions: [" + strings.Join(permissions, ", ") + "]"}))
 	}
 	return "[" + strings.Join(roles, ", ") + "]"
+}
+
+// seedRowsArgs renders @seedRows's rows (#625), each as the JSON value the
+// IR holds, keys sorted, and its key when the schema names one.
+func seedRowsArgs(seeds *ir.SeedRows) string {
+	rows := make([]string, 0, len(seeds.Rows))
+	for _, row := range seeds.Rows {
+		var value any
+		if data, err := json.Marshal(row); err == nil && json.Unmarshal(data, &value) == nil {
+			rows = append(rows, valueLiteral(value))
+		}
+	}
+	args := "[" + strings.Join(rows, ", ") + "]"
+	if len(seeds.Key) > 0 {
+		args += ", " + objectLiteral([]string{"key: " + stringListLiteral(seeds.Key)})
+	}
+	return args
 }
 
 // emitJob renders a job as the class the reader reads it from (D52):

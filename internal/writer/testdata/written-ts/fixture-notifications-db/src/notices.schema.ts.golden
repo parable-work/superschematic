@@ -1,4 +1,4 @@
-import { AutoGenerate, User, UserRole, audience, channelIdentities, event, key, notifier, queue, references, unique } from "@superschematic/db";
+import { AutoGenerate, User, UserRole, audience, channelIdentities, event, key, notifier, queue, references, seedRows, unique } from "@superschematic/db";
 import { Nullable } from "@superschematic/schema";
 import { Contact, Identity, Temporal } from "superscalar";
 
@@ -38,6 +38,9 @@ export abstract class Approval {
 @channelIdentities()
 export abstract class ChannelIdentity {}
 
+// A text may only acknowledge, since its sender id can be spoofed; an
+// email may run what its sender may. Keyed by the unique channel kind.
+@seedRows<ChannelTrust>([{ channelKind: "sms", level: "low", permissions: [] }, { channelKind: "email", level: "standard", permissions: null }])
 @notifier("channelTrust")
 export abstract class ChannelTrust {}
 
@@ -48,6 +51,10 @@ export abstract class Delivery {}
 @notifier("inbox")
 export abstract class Notice {}
 
+// Everyone hears by SMS, then email, unless their own row says otherwise:
+// a row of no principal, seed data (#625), identified by whom and what it
+// is for, since no unique constraint holds the rows.
+@seedRows<NoticePreference>([{ channels: ["sms", "email"], eventKind: "*", principal: null, urgency: "*" }], { key: ["principal", "eventKind", "urgency"] })
 @notifier("preferences")
 export abstract class NoticePreference {}
 

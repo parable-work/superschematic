@@ -13,6 +13,18 @@ import (
 // the outputs block and its checks (registry.ParseOutputs), so a list
 // they would refuse is read as far as it names dialects, and a config of
 // another kind has none.
+// searchFoldsDiacritics is a DB service's outputs.sql.search.foldDiacritics
+// (#740): whether its search index folds diacritics.
+func searchFoldsDiacritics(cfg *schemaconfig.SchemaConfig) bool {
+	if cfg == nil || cfg.Kind != ir.SchemaKindDB {
+		return false
+	}
+	sql, _ := cfg.Outputs["sql"].(map[string]any)
+	search, _ := sql["search"].(map[string]any)
+	fold, _ := search["foldDiacritics"].(bool)
+	return fold
+}
+
 func sqlDialects(cfg *schemaconfig.SchemaConfig) []string {
 	if cfg == nil || cfg.Kind != ir.SchemaKindDB {
 		return nil

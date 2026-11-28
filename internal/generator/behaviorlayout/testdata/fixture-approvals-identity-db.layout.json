@@ -1,0 +1,233 @@
+{
+  "types": {
+    "Change": {
+      "type": "Change",
+      "table": "change",
+      "key": {
+        "field": "id",
+        "column": "id",
+        "type": "Identity.UUID"
+      },
+      "version": "_version",
+      "own": [
+        {
+          "field": "title",
+          "column": "title",
+          "type": "string"
+        }
+      ],
+      "uses": [
+        {
+          "id": "Approvals",
+          "behavior": "Approvals",
+          "member": "approvals",
+          "fields": [],
+          "operations": [
+            {
+              "name": "signOff",
+              "writes": true
+            },
+            {
+              "name": "withdrawSignOff",
+              "writes": true
+            },
+            {
+              "name": "listSignOffs",
+              "writes": false
+            }
+          ],
+          "tables": [
+            {
+              "name": "signOffs",
+              "table": "change_approvals_sign_offs",
+              "row": "change_id",
+              "key": {
+                "name": "number",
+                "field": "number",
+                "column": "number",
+                "type": "string"
+              },
+              "fields": [
+                {
+                  "name": "state",
+                  "field": "state",
+                  "column": "state",
+                  "type": "string"
+                },
+                {
+                  "name": "subject",
+                  "field": "subject",
+                  "column": "subject",
+                  "type": "string"
+                },
+                {
+                  "name": "kind",
+                  "field": "kind",
+                  "column": "kind",
+                  "type": "string"
+                },
+                {
+                  "name": "actingFor",
+                  "field": "actingFor",
+                  "column": "acting_for",
+                  "type": "string"
+                },
+                {
+                  "name": "actingForKind",
+                  "field": "actingForKind",
+                  "column": "acting_for_kind",
+                  "type": "string"
+                },
+                {
+                  "name": "agent",
+                  "field": "agent",
+                  "column": "agent",
+                  "type": "string"
+                },
+                {
+                  "name": "signedInAt",
+                  "field": "signedInAt",
+                  "column": "signed_in_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "userVerified",
+                  "field": "userVerified",
+                  "column": "user_verified",
+                  "type": "boolean"
+                },
+                {
+                  "name": "held",
+                  "field": "held",
+                  "column": "held",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "values",
+                  "field": "values",
+                  "column": "values",
+                  "type": "Generic.JSON"
+                },
+                {
+                  "name": "note",
+                  "field": "note",
+                  "column": "note",
+                  "type": "string"
+                },
+                {
+                  "name": "at",
+                  "field": "at",
+                  "column": "at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                },
+                {
+                  "name": "consumedAt",
+                  "field": "consumedAt",
+                  "column": "consumed_at",
+                  "type": "Temporal.DateTime",
+                  "convert": "epochMillis"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "status",
+          "behavior": "Workflow",
+          "anchor": "status",
+          "member": "status",
+          "fields": [
+            {
+              "name": "status",
+              "field": "status",
+              "column": "status",
+              "type": "string",
+              "value": true
+            },
+            {
+              "name": "enteredAt",
+              "field": "statusEnteredAt",
+              "column": "status_entered_at",
+              "type": "Temporal.DateTime",
+              "convert": "epochMillis"
+            }
+          ],
+          "operations": [
+            {
+              "name": "transition",
+              "writes": true
+            }
+          ]
+        }
+      ],
+      "spec": {
+        "name": "Change",
+        "uses": [
+          {
+            "behavior": "Approvals",
+            "config": {
+              "gates": {
+                "ready": {
+                  "count": 1,
+                  "excludeCreator": false,
+                  "permission": "changes.approve",
+                  "recheckPermission": true,
+                  "resetOn": []
+                }
+              }
+            },
+            "anchor": "type"
+          },
+          {
+            "behavior": "Workflow",
+            "config": {
+              "states": [
+                "open",
+                "ready"
+              ],
+              "transitions": [
+                {
+                  "from": "open",
+                  "to": "ready"
+                },
+                {
+                  "from": "ready",
+                  "to": "open"
+                }
+              ]
+            },
+            "anchor": {
+              "field": "status"
+            }
+          }
+        ],
+        "fields": [
+          {
+            "name": "title",
+            "type": "string"
+          }
+        ]
+      }
+    }
+  },
+  "permissions": {
+    "users": "account",
+    "user": {
+      "field": "id",
+      "column": "id",
+      "type": "Identity.UUID"
+    },
+    "credentials": "user_credential",
+    "credentialUser": "user_id",
+    "disabledAt": "disabled_at",
+    "pendingAt": "pending_at",
+    "grants": "user_role_grant",
+    "grantUser": "user_id",
+    "grantRole": "role_id",
+    "roles": "role",
+    "roleKey": "id",
+    "rolePermissions": "permissions"
+  }
+}
