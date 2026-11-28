@@ -126,9 +126,17 @@ func run(logger *zap.Logger) error {
 		return fmt.Errorf("service authenticator of {{ .Service }}: %w", err)
 	}
 {{- end }}
+{{- if .UsesAuthenticate }}
+	// The auth step of its routes (D180, D192): the API package's
+	// Authenticator, around {{ if .Identity }}the identity runtime's middleware{{ else if .Public }}its AuthMiddleware{{ else }}no auth step of its own{{ end }}.
+	{{ .AuthenticateVar }} := {{ .Package }}.Authenticator({{ .Var }}Deps, {{ .Database.Var }}, {{ .WiringVar }}, {{ if .Identity }}{{ .Var }}Identity.Middleware{{ else if .Public }}{{ .Var }}Auth{{ else }}nil{{ end }})
+{{- end }}
 	{{ .Var }}Router := chi.NewRouter()
 {{- if not .Public }}
 	{{ .Var }}Router.Use(runtimemiddleware.Logger({{ .Var }}Logger, {{ .Package }}.ContextWithLogger))
+{{- end }}
+{{- if and .UsesAuthenticate .Wiring.Authenticates (not .Public) }}
+	{{ .Var }}Router.Use({{ .AuthenticateVar }})
 {{- end }}
 	err = {{ .Package }}.RegisterRoutes({{ .Var }}Router, {{ .Package }}.Config{
 {{- if or .Public .Behaviors .Tables .Graphs }}
@@ -139,10 +147,13 @@ func run(logger *zap.Logger) error {
 		Graphs: {{ .Package }}.GraphsOf({{ .Database.Var }}),
 {{- end }}
 {{- if and .Public (not .Identity) }}
-		AuthMiddleware: {{ .Var }}Auth,
+		AuthMiddleware: {{ if .UsesAuthenticate }}{{ .AuthenticateVar }}{{ else }}{{ .Var }}Auth{{ end }},
 {{- end }}
 {{- if .Identity }}
 		Identity: {{ .Var }}Identity,
+{{- if and .UsesAuthenticate .Wiring.Authenticates }}
+		AuthMiddleware: {{ .AuthenticateVar }},
+{{- end }}
 {{- end }}
 {{- if .ServiceAuth }}
 		ServiceAuthenticator: {{ .Var }}ServiceAuthenticator,
@@ -169,6 +180,11 @@ func run(logger *zap.Logger) error {
 	if err != nil {
 		return fmt.Errorf("routes of {{ .Service }}: %w", err)
 	}
+{{- if and .Wiring .Wiring.Serves }}
+	// The routes the runtime serves beside its own (D190, D192, D187):
+	// {{ if .Wiring.Builds }}the inbox and the relays' callbacks{{ if .Wiring.Agents }}, the agent routes{{ end }}{{ if or .Wiring.Calendar .Wiring.Search }}, {{ end }}{{ end }}{{ if .Wiring.Calendar }}the calendar{{ if .Wiring.Search }} and {{ end }}{{ end }}{{ if .Wiring.Search }}search{{ end }}.
+	{{ .WiredVar }} := {{ .Package }}.Routes({{ .Var }}Deps, {{ .Database.Var }}, {{ .WiringVar }}, {{ .AuthenticateVar }})
+{{- end }}
 {{- if .CORS }}
 	{{ .Var }}CORS, err := corsPolicy({{ quote .Service }})
 	if err != nil {
@@ -181,6 +197,9 @@ func run(logger *zap.Logger) error {
 	handler := newHandler(logger, &draining, []served{
 {{- range .APIs }}
 		{ {{- quote .Service }}, {{ .Var }}Router},
+{{- if and .Wiring .Wiring.Serves }}
+		{ {{- quote .Service }}, {{ .WiredVar }}},
+{{- end }}
 {{- end }}
 	}, []dependency{
 {{- range .Databases }}

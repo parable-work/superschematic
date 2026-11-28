@@ -70,6 +70,19 @@ func IndexSearch(ctx context.Context, h Host, message SearchIndexing, options Se
 	if !ok {
 		return IndexedUnknown, nil
 	}
+	if onSQLite(h) {
+		if options.Embeddings != nil {
+			return "", fmt.Errorf("indexSearch: %w", ErrSQLiteEmbeddings)
+		}
+		written, err := indexOnSQLite(ctx, h, d, message)
+		if err != nil {
+			return "", err
+		}
+		if !written {
+			return IndexedRemoved, nil
+		}
+		return IndexedRow, nil
+	}
 	indexed, err := indexRows(ctx, h, message.SourceTable, d, []string{message.SourceKey}, options)
 	if err != nil {
 		return "", err
@@ -359,6 +372,17 @@ func ReindexSearch(ctx context.Context, h Host, options ReindexOptions) (int, er
 			continue
 		}
 		d := defs[table]
+		if onSQLite(h) {
+			if options.Embeddings != nil {
+				return count, fmt.Errorf("reindexSearch: %w", ErrSQLiteEmbeddings)
+			}
+			n, err := reindexOnSQLite(ctx, h, table, d, batch)
+			count += n
+			if err != nil {
+				return count, err
+			}
+			continue
+		}
 		after := ""
 		for {
 			sql := fmt.Sprintf("SELECT %s::text AS key FROM %s ORDER BY %s LIMIT %d", d.Key, d.Table, d.Key, batch)

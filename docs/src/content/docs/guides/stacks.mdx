@@ -1014,7 +1014,10 @@ for a reason time cures has its table waited out, a second, doubling to
 thirty, while the other tables go on; one the core refuses for good, a
 caller without the permission among them, ends the deriver with the
 error. The database lists `postgres` first, since the repositories a
-deriver runs over are Postgres's.
+deriver runs over are Postgres's. A TypeScript or Go deriver of a table
+with `@audience` reads and settles every row, as a job does, and the
+rows keep to their audience for every other caller
+([A table's audience](/superschematic/guides/api-routes/#a-tables-audience)).
 
 An element sets `enabled`, `instances` (0 or 1) and `concurrency`:
 

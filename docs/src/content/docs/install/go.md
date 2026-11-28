@@ -491,8 +491,11 @@ Written against the interfaces, one implementation runs on either
 dialect: a transaction's `ExecContext` and `QueryContext` run raw SQL on
 SQLite, where `Exec` and `Query`, which answer pgx's types, are
 Postgres's ([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)).
-Resolution refuses a Go worker on a SQLite file, which claims its queue
-on Postgres alone, and the build refuses an engine database there.
+Resolution refuses a generated Go worker on a SQLite file, which claims its
+queue on Postgres alone, and the build refuses an engine database there.
+The runtime's own queues claim on SQLite: the notifier's, the run
+requests' and the dispatcher's (#618), so an implementation runs their
+workers over `Deps.DB` itself.
 
 ## Consume a generated SDK
 

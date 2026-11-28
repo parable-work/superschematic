@@ -7,7 +7,7 @@ APIs.
 */ -}}
 
 {{- define "ts-deps" -}}
-  const {{ if .Agents }}{{ .AgentsBase }}: Omit<{{ .Module }}.Deps, 'agents'>{{ else }}{{ .Deps }}: {{ .Module }}.Deps{{ end }} = {
+  const {{ if .Runtime }}{{ .DepsBase }}: {{ .Module }}.DepsBase{{ else }}{{ .Deps }}: {{ .Module }}.Deps{{ end }} = {
 {{- if .Config }}
     config: {{ .Config }},
 {{- end }}
@@ -30,15 +30,42 @@ APIs.
 {{- range .MemoryStores }}
     {{ .Field }}: {{ .Store.Var }},
 {{- end }}
+{{- if .Providers }}
+    // The providers its config names (D159), which refuse a slot that
+    // names a provider the server does not link, or a setting unset.
+    providers: await construct({{ tsQuote .Service }}, 'providers', () => {{ .Module }}.providersOf({{ .Config }}, logger.child({ api: {{ tsQuote .Service }} }))),
+{{- end }}
     logger: logger.child({ api: {{ tsQuote .Service }} }),
   };
+{{- if .Runtime }}
+  // The runtime pieces its database declares, built over the repositories
+  // with the options its implementation answers (the API package's
+  // runtime.ts): an implementation that exports no createRuntimeOptions
+  // builds them with none.
+  const {{ .RuntimeOptions }} = await construct({{ tsQuote .Service }}, 'runtime options', () => {{ .Module }}.runtimeOptionsOf({{ .Impl }})({{ .DepsBase }}));
 {{- if .Agents }}
-  // Its agent dispatcher (D158, D183), over its repositories and its
-  // requests queue, with the options the implementation answers.
-  const {{ .Deps }}: {{ .Module }}.Deps = {{ .Module }}.withAgents(
-    {{ .AgentsBase }},
-    await construct({{ tsQuote .Service }}, 'agent options', () => {{ .Impl }}.createAgentOptions({{ .AgentsBase }}))
-  );
+  // Its agent dispatcher's (D158, D183), over its repositories and its
+  // requests queue.
+  const {{ .AgentOptions }} = await construct({{ tsQuote .Service }}, 'agent options', () => {{ .Impl }}.createAgentOptions({{ .DepsBase }}));
+{{- end }}
+  const {{ .Deps }}: {{ .Module }}.Deps = await construct({{ tsQuote .Service }}, 'runtime', () => {{ .Module }}.withRuntime({{ .DepsBase }}, {{ .RuntimeOptions }}{{ if .Agents }}, {{ .AgentOptions }}{{ end }}));
+{{- end }}
+{{- end }}
+
+{{- define "ts-runtime-routes" }}
+{{- if .RuntimeRoutes }}
+  // The routes of its runtime pieces beside the router's (runtime.ts),
+  // which answer before it: the agent routes a run's sandbox instance
+  // calls, and the approvals' approve and deny (D158); the relays'
+  // callbacks and the inbox (D153); the calendar (D152); search (D155):
+  // each that its database declares, its caller authenticated as the
+  // router's are.
+  const {{ .RuntimeRoutes }} = {{ .Module }}.runtimeRoutes({{ .Deps }}, {{ .RuntimeOptions }}, { authenticate: {{ .RouteAuthenticator }} });
+  app.use('*', async (c, next) => {
+    const answered = await {{ .RuntimeRoutes }}(c.req.raw);
+    if (answered) return answered;
+    await next();
+  });
 {{- end }}
 {{- end }}
 

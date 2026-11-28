@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	ir "github.com/parable-work/superschematic/ir"
+	"github.com/parable-work/superschematic/tasks"
 )
 
 // The generated CI (docs/stack-model.md, section 11.3, D47): a CI renderer
@@ -254,8 +255,26 @@ type CIRendererSpec struct {
 	Dir string
 
 	// Render returns the files of the stack's workflow. It is pure: the
-	// same request gives the same bytes, with no timestamp.
+	// same request gives the same bytes, with no timestamp. nil is a
+	// renderer that renders no stack.
 	Render func(CIRequest) ([]CIFile, error)
+
+	// RenderTasks returns the files of a Tasks service's workflow (D203):
+	// what runs the tasks of the task file on the renderer's CI. It is
+	// pure, and reads no release: the workflow is committed, and a
+	// committed file that changed with the binary's version would be
+	// stale after every upgrade. nil is a renderer that renders no Tasks
+	// service.
+	RenderTasks func(CITasksRequest) ([]CIFile, error)
+}
+
+// CITasksRequest is what a CI renderer renders of a Tasks service: its
+// name, which names the workflow, and its task file. The renderer's own
+// part of the file is a task section it registers (TaskSectionSpec),
+// which the file holds under `sections.<name>`.
+type CITasksRequest struct {
+	Service string
+	File    *tasks.File
 }
 
 // RegisterCIRenderer adds a CI renderer. It refuses a malformed or
@@ -271,7 +290,7 @@ func (r *Registry) RegisterCIRenderer(spec CIRendererSpec) error {
 	if _, dup := r.stack.ciRenderers[spec.Name]; dup {
 		return fmt.Errorf("registry: CI renderer %q is already registered", spec.Name)
 	}
-	if spec.Render == nil {
+	if spec.Render == nil && spec.RenderTasks == nil {
 		return fmt.Errorf("registry: CI renderer %q has no Render function", spec.Name)
 	}
 	if err := checkRepositoryPath(spec.Dir); err != nil {

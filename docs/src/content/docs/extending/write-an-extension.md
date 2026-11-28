@@ -597,6 +597,14 @@ and checks those rules when it reads the file.
 Augment `TaskSections` and `FileSections` of `@superschematic/tasks` to
 type the two parts, as `InputKinds` above.
 
+A section is also how a CI renderer reads what is its CI's. The core's
+`github` renderer registers the `github` section and writes a workflow
+from the task file, a job per task
+([Run the tasks on GitHub Actions](/superschematic/guides/tasks/#run-the-tasks-on-github-actions)).
+A renderer for another CI gives its `CIRendererSpec` a `RenderTasks`,
+registers a section for its triggers and placement, and is named under
+`outputs.tasks.ci`.
+
 acme's test `TestAForgeReusesWorkByKeyAcrossCommits`
 (`ext/tasks_test.go`) is a reader in miniature: it decodes the committed
 file with the public `tasks` package, runs `tasks plan` across commits,
@@ -1233,7 +1241,7 @@ make up the surface, each spec carrying the extension's `Name()`:
 | `RegisterTarget(registry.TargetSpec)` | a platform per deployable kind, the JSON Schema of an environment's values, the default DNS platform, the provisioner, the properties schema of each resource type its platforms emit, and policy rules over the resolved resource graph |
 | `RegisterDNSPlatform(registry.DNSPlatformSpec)` | a DNS provider for an environment's domain records, which need not be the target's provider: its values schema, a pure `Lower` from records to resources, the schemas of the resource types it brings, and the credentials its provider reads |
 | `RegisterProvisioner(registry.ProvisionerSpec)` | a tool that applies a resolved environment: `Render` writes the tool's program where a person can read it, and `Plan`, `Apply`, `Destroy` and `Outputs` run it; `Tools` lists the command-line tools it runs, which a generated CI job installs |
-| `RegisterCIRenderer(registry.CIRendererSpec)` | a CI system a stack's workflow is written for: the directory it installs into and a pure `Render` from the stack, its resolved environments with their CI identities, its options from `outputs.ci` and the release, to files. The core registers `github` |
+| `RegisterCIRenderer(registry.CIRendererSpec)` | a CI system a workflow is written for: the directory it installs into, a pure `Render` from a stack, its resolved environments with their CI identities, its options from `outputs.ci` and the release, to files, and a pure `RenderTasks` from a Tasks service's task file to files (`outputs.tasks.ci`). A renderer gives one or both. The core registers `github` |
 
 Resolution checks every resource against the schema of its type, so a
 target checks in the provider schemas it emits from a pinned provider

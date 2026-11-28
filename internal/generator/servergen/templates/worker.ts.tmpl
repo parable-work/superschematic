@@ -71,9 +71,9 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
 
   // {{ $api.Service }}: its workers, built from its Deps.
   {{ template "ts-deps" $api }}
-{{- if .Worker.Dispatcher }}
-  // A queue of the agent dispatcher's (D158, D183): its Deps' dispatcher
-  // takes each message as it is, and the implementation has no method for it.
+{{- if .Worker.Handler }}
+  // A queue of {{ .Worker.HandlerPiece }}: its handler takes each
+  // message as it is, and the implementation has no method for it.
 {{- else }}
   const workers = await construct({{ tsQuote $api.Service }}, 'workers', () => {{ $api.Impl }}.createWorkers({{ $api.Deps }}));
 {{- end }}
@@ -89,7 +89,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
           id: claim.id,
           token: claim.token,
           attempt: claim.attempt,
-          handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, claim, () => {{ if .Worker.Dispatcher }}{{ $api.Module }}.dispatchAgentMessage({{ $api.Deps }}, claim.message){{ else }}workers.{{ .Worker.Method }}(claim.message, handlerSignal){{ end }}),
+          handle: (handlerSignal: AbortSignal) => telemetry.message(queue.name, claim, () => {{ if .Worker.Handler }}{{ $api.Module }}.{{ .Worker.Handler }}({{ $api.Deps }}, claim.message{{ if .Worker.HandlerOptions }}, {{ $api.RuntimeOptions }}{{ end }}){{ else }}workers.{{ .Worker.Method }}(claim.message, handlerSignal){{ end }}),
         })),
       extend: (id, token, leaseSeconds) => queue.extend(id, token, leaseSeconds),
       complete: (id, token) => queue.complete(id, token),

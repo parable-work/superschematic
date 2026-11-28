@@ -38,6 +38,9 @@ import (
 {{- if .HasDerivers }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/deriver"
 {{- end }}
+{{- if and .Deps.Wiring.Constructs .Deps.Wiring.Agents }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/agents"
+{{- end }}
 
 	api "{{ .ModulePath }}"
 {{- if .HasWorkerEvents }}
@@ -67,6 +70,28 @@ func New(deps api.Deps) (api.Implementations, error) {
 }
 
 var _ api.Constructor = New
+{{- if .Deps.Wiring.Constructs }}
+
+// NewWiring answers the options the runtime of {{ .Deps.Database }} is built with
+// beside what the generated wiring gives it (D190, D192, D187): the reply
+// actions of your events, the paths of the routes, the permission of each
+// calendar source and searchable table. Its signature is the generated one,
+// api.WiringConstructor. Every entrypoint calls it with the API's Deps.
+{{- if .Deps.Wiring.Agents }}
+// The agent dispatcher needs the URL the sandbox reaches the agent routes
+// at, this server's, and the providers its sandbox and model slots name;
+// until then a run's start finds no sandbox, and fails.
+{{- end }}
+func NewWiring(deps api.Deps) (api.Wiring, error) {
+	return api.Wiring{
+{{- if .Deps.Wiring.Agents }}
+		Agents: agents.Options{Endpoint: "http://localhost:8080/api/agents"},
+{{- end }}
+	}, nil
+}
+
+var _ api.WiringConstructor = NewWiring
+{{- end }}
 {{- if .HasManualRoutes }}
 
 // NewManualRoutes builds the handlers of the @manualRouteRegistration

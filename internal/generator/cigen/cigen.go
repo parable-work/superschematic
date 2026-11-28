@@ -92,6 +92,9 @@ func Generate(c registry.GenerateContext) error {
 		if !ok {
 			return fmt.Errorf("stack %s: outputs.ci names CI renderer %q, which is not registered (registered CI renderers: %s)", st.Name, name, strings.Join(c.Registry.CIRenderers(), ", "))
 		}
+		if spec.Render == nil {
+			return fmt.Errorf("stack %s: outputs.ci names CI renderer %q, which renders no stack", st.Name, name)
+		}
 		opts := c.Outputs.CI[name].WithDefaults(spec)
 		files, err := spec.Render(registry.CIRequest{
 			Stack:        ciStack,

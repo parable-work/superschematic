@@ -99,7 +99,7 @@ It writes `<schemas-root>/services/<name>/`:
 | `Bucket` | `{}` |
 | `Site` | none |
 | `MemoryStore` | Go and TypeScript `types`, its definitions in each ([Memory stores](/superschematic/guides/memory-stores/#declare-a-store)) |
-| `Tasks` | `{}`; `tasks: { install }` commits its task file ([Tasks](/superschematic/guides/tasks/#declare-the-service)) |
+| `Tasks` | `{}`; `tasks: { install }` commits its task file, and `tasks: { ci: { github: {} } }` writes a workflow that runs its tasks ([Tasks](/superschematic/guides/tasks/#declare-the-service)) |
 
 A Bucket and a Site declare nothing in schema files, so they get no
 starter schema: an API lists a bucket in its `buckets`, and a site's
@@ -1774,7 +1774,10 @@ superschematic catalog scalars > scalars.md
 ## `tasks <tasks-service-dir>`
 
 Write the task file of a Tasks service, or check the committed one
-(D203). [Tasks](/superschematic/guides/tasks/) is the guide.
+(D203). [Tasks](/superschematic/guides/tasks/) is the guide. A service
+whose config names a CI renderer (`outputs.tasks.ci`) has a workflow
+beside its task file, and the command writes and checks both
+([Run the tasks on GitHub Actions](/superschematic/guides/tasks/#run-the-tasks-on-github-actions)).
 
 ```
 superschematic tasks ./schemas/services/repo-tasks
@@ -1816,6 +1819,8 @@ the key `null`.
 | `--base` | none | the commit the plan's commit lands on; a task whose work fields differ from the base's is keyed on both definitions and on the inputs of both |
 | `--repo` | `.` | a directory of the repository |
 | `--naming` | built-in names | naming config file |
+| `--sandbox` | false | hold the process to a resolver's rules while it resolves: no program, no socket, and no file opened, created, renamed or removed. A seccomp filter, on Linux on amd64 and arm64; the flag fails anywhere else ([The sandbox](/superschematic/guides/tasks/#the-sandbox)) |
+| `--profile` | false | write what the plan cost to standard error: the time to read the commit, and for each resolver kind the inputs the tasks name, how many differ, the files they hold and the time |
 
 It fails when a task names an input kind no resolver of the binary
 resolves, when a path with no wildcard covers no tracked file, and when
@@ -1843,6 +1848,29 @@ lacks.
 | Flag | Default | Meaning |
 | --- | --- | --- |
 | `--naming` | `<service-dir>/../../superschematic.toml` | naming config file |
+
+### `tasks reach <schemas-root>`
+
+Measure how narrow a schema input's set is over a repository's history
+([Measure a schema input's reach](/superschematic/guides/tasks/#measure-a-schema-inputs-reach)).
+
+```
+superschematic tasks reach ./schemas
+superschematic tasks reach ./schemas --commits 500 --json
+```
+
+It walks the commits that changed the schemas root, back from `--rev`
+along first parents, and compares every service's schema input at each
+commit with its parent's. It prints how many commits changed every
+schema input, some of them and none, and how many changed a file of the
+root that belongs to no service. It reads commits through git and
+nothing of the working tree, loads no schema and runs no build.
+
+| Flag | Default | Meaning |
+| --- | --- | --- |
+| `--commits` | `100` | the most commits to measure |
+| `--rev` | `HEAD` | the commit to walk back from |
+| `--json` | false | write every measured commit as one JSON document |
 
 ## Extension commands
 

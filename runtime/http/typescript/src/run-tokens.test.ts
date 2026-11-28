@@ -115,6 +115,16 @@ describe("an agent run's token (D194)", () => {
     }
   });
 
+  test("with runTokens inner, a run's token goes to inner: the dispatcher's authenticator resolves it, and another has none", async () => {
+    const { orm, agents } = world();
+    const { token } = await issueGrant(orm, { holder: RUN, holderKind: 'agent', role: 'worker-agent', targetType: 'Task', targetId: 'task-a' });
+    const viaDispatcher = grantAuthenticator({ orm, inner: agents.authenticator(), runTokens: 'inner' });
+    expect(await viaDispatcher(bearer(token))).toMatchObject({ subject: RUN, kind: 'agent' });
+    const viaApp = grantAuthenticator({ orm, inner: async () => null, runTokens: 'inner' });
+    expect(await viaApp(bearer(token))).toBeNull();
+    expect(await grantAuthenticator({ orm, runTokens: 'inner' })(bearer(token))).toBeNull();
+  });
+
   test('the authenticator that admits a run is no export of the package', () => {
     expect(Object.keys(postgres)).toContain('grantAuthenticator');
     expect(Object.keys(postgres).filter(name => /admitting/iu.test(name))).toEqual([]);

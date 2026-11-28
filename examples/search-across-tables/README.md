@@ -39,7 +39,10 @@ against Postgres in `TestSearchTablesEndToEnd`
 same text across six tables, and each gets exactly the rows its list reads
 show.
 
-Search across tables is the TypeScript repositories', on Postgres: the
-Go and Rust repositories do not search across tables yet, and the
-generated router does not mount the search route, which
-`server/server.ts` wires.
+The example has no API, so `server/server.ts` wires search over the
+repositories by hand. The generated TypeScript server of an API over a
+Postgres database with a `@searchable` table does it itself: it mounts
+`searchRoutes` at `/api/search` beside its router, serves the `search`
+tool on its MCP endpoint, and hands each message of a `@worker` of the
+declaration's queue to `indexSearch`, with the options the
+implementation's `createRuntimeOptions` gives (`search: { embeddings }`).

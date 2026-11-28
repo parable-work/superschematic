@@ -96,6 +96,20 @@ type DepsInfo struct {
 	// agent orchestration (D158, D183), its repositories in Deps.orm; nil
 	// otherwise.
 	Agents *DepsAgents
+
+	// Providers are the runtime providers Deps holds when the API's config
+	// names provider slots (D159), nil otherwise.
+	Providers *DepsProviders
+
+	// Notifier is the notifier Deps holds when Database declares one
+	// (D153), and Inbound the inbound path when it declares conversations
+	// and run requests (D157); nil otherwise.
+	Notifier *DepsNotifier
+	Inbound  *DepsInbound
+
+	// Routes are the runtime's routes over Database the server mounts, and
+	// the grants and the access log around its router (D152, D155, D156).
+	Routes DepsRoutes
 }
 
 // DepsAgents is the agent dispatcher in Deps (D158, D183): createAgents
@@ -124,8 +138,8 @@ func (a *DepsAgents) Dispatches(queue string) bool {
 	return a != nil && queue != "" && (queue == a.Requests || queue == a.RunRequests)
 }
 
-// AgentsFile is the module of the API package that builds Deps.agents
-// (D183), which index.ts exports.
+// AgentsFile is the module of the API package that built Deps.agents
+// before runtime.ts did (D183): a build removes it.
 const AgentsFile = "agents.ts"
 
 // AgentOptionsFunc is the function an implementation of an API whose Deps
@@ -241,7 +255,7 @@ func (o *APIOutput) DepsSQLite() bool {
 
 // depsFields are the members every Deps may hold beside its clients and
 // its buckets.
-var depsFields = []string{"config", "db", "orm", "engine", "logger", "agents"}
+var depsFields = []string{"config", "db", "orm", "engine", "logger", "agents", "providers", "notifier", "inbound"}
 
 // SetDeps sets what Deps holds, refusing a client, a bucket or a memory
 // store whose member
@@ -292,10 +306,18 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if deps.Agents != nil && !depsORM(deps) {
 		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), which runs over the repositories %s's TypeScript types export for Postgres, and holds none", o.SchemaName, deps.Database)
 	}
-	// A @worker of the dispatcher's queues is the dispatcher's (D183).
+	if err := o.checkRuntimeDeps(deps); err != nil {
+		return err
+	}
+	// A @worker of the dispatcher's queues is the dispatcher's (D183), one
+	// of the notifier's dispatch queue the notifier's (D153), and one of a
+	// @searchable declaration's queue search's (D155).
 	workers := make([]WorkerInfo, len(o.Workers))
 	for i, w := range o.Workers {
-		w.Dispatcher = w.Behavior == nil && deps.Agents.Dispatches(w.Queue)
+		w.Runtime = ""
+		if w.Behavior == nil {
+			w.Runtime = runtimeOf(deps, w.Queue)
+		}
 		workers[i] = w
 	}
 	o.Workers = workers
@@ -373,12 +395,19 @@ type WorkerInfo struct {
 	// the generator writes, which the Workers interface has no method for.
 	Behavior *apigen.BehaviorWorkerInfo
 
-	// Dispatcher is set for a @worker of the agent dispatcher's queues
-	// (D183), the requests queue or the run requests queue, whose handler
-	// is Deps.agents.handle: the Workers interface has no method for it.
+	// Runtime names the runtime piece whose handler takes the @worker's
+	// messages (WorkerAgents, WorkerNotifier, WorkerSearch): the agent
+	// dispatcher's for its requests queue or the run requests queue
+	// (D183), the notifier's for its dispatch queue (D153), search's for a
+	// @searchable declaration's queue (D155). The Workers interface has no
+	// method for it. Empty for a worker the implementation handles.
 	// SetDeps sets it.
-	Dispatcher bool
+	Runtime string
 }
+
+// Dispatcher reports whether the worker's handler is the agent
+// dispatcher's (D183).
+func (w WorkerInfo) Dispatcher() bool { return w.Runtime == WorkerAgents }
 
 // jobsOf reads the API's jobs, sorted by name.
 func jobsOf(schema *ir.Schema) []JobInfo {
@@ -422,7 +451,7 @@ func workersOf(schema *ir.Schema, deps map[string]*ir.Schema) []WorkerInfo {
 func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
 	var out []WorkerInfo
 	for _, w := range o.Workers {
-		if w.Behavior == nil && !w.Dispatcher {
+		if w.Behavior == nil && w.Runtime == "" {
 			out = append(out, w)
 		}
 	}
@@ -434,7 +463,7 @@ func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
 func (o *APIOutput) DispatcherWorkers() []WorkerInfo {
 	var out []WorkerInfo
 	for _, w := range o.Workers {
-		if w.Dispatcher {
+		if w.Dispatcher() {
 			out = append(out, w)
 		}
 	}

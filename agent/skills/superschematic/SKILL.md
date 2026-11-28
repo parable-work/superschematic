@@ -283,8 +283,9 @@ path for when the store is unavailable.
   your own (D147). A create gives the name; change it with
   `name.rename`, which keeps the old one as an alias, and keep the rest
   with `name.addAlias` and `name.removeAlias`; find a row by any of them
-  with `name.resolve({ name })`. A name another row holds is refused with
-  that row's key (`name_taken`), and a merge moves the aliases.
+  with `name.resolve({ name })`, which answers no row its caller may not
+  read. A name another row holds is refused (`name_taken`) naming nothing
+  of that row, and a merge moves the aliases.
 - **A link to a row of any table, or a file, is a declaration.** Put
   `@references<T>({ tables?, cleared? })` or `@attachments<T>({ released })`
   on the table and use `orm.references` (`add`, `of`, `referencedBy`) and
@@ -899,7 +900,9 @@ Most are load errors; knowing them saves a build round-trip:
   `account_pool_pick`); it answers `{ member: { key, availability, order,
   preferred } }`, the open members `prefer` keeps first, then its near
   ones, then the rest, or `{ member: null, until }`: wait until `until` on
-  a deadline of your own, never in a loop that picks again. When the
+  a deadline of your own, never in a loop that picks again. On an
+  `@audience` table a member the caller does not see is answered as
+  `{ member: null }`, so `match` the caller's own (`{ owner }`). When the
   provider refuses, call `pool.markOut(key, { until?, reason })` with the
   time it names (thirty minutes when it names none); an out member keeps
   the later time. An out member comes back only through

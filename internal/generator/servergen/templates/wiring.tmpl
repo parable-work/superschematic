@@ -230,6 +230,26 @@ exactly as a server does.
 {{- end }}
 		Logger: {{ .Var }}Logger,
 	}
+{{- with .Wiring }}
+{{- if .Constructs }}
+	// The options the runtime of {{ $.Database.Service }} is built with (D190, D192,
+	// D187), which the implementation answers from its Deps.
+	{{ $.WiringVar }}, err := {{ $.Impl }}.NewWiring({{ $.Var }}Deps)
+	if err != nil {
+		return fmt.Errorf("wiring of {{ $.Service }}: %w", err)
+	}
+{{- else }}
+	{{ $.WiringVar }} := {{ $.Package }}.Wiring{}
+{{- end }}
+{{- if .Builds }}
+	// Its notifier{{ if .Agents }}, agent dispatcher{{ end }}{{ if .Inbound }} and inbound path{{ end }}, over the ORM of
+	// {{ $.Database.Service }} and its providers (D190, D192).
+	{{ $.Var }}Deps, err = {{ $.Package }}.Wire({{ $.Var }}Deps, {{ $.Database.Var }}, {{ $.WiringVar }})
+	if err != nil {
+		return fmt.Errorf("runtime of {{ $.Service }}: %w", err)
+	}
+{{- end }}
+{{- end }}
 {{- end }}
 
 {{- define "functions" }}

@@ -485,6 +485,9 @@ export {
   type ReplyOutcome,
   type Urgency,
 } from './notify.js';
+// The notifier's routes (D153, D157): each channel slot's relay callbacks and
+// the in-app inbox, which a generated server mounts.
+export { notifierRoutes, slotSegment, type NotifierRoutesOptions } from './notify-routes.js';
 // Agent orchestration (D158): the dispatcher of agent runs, their tokens,
 // autonomy, budgets and stop switches, over the @agents tables.
 export {

@@ -312,6 +312,12 @@ func RegisterCore(reg *registry.Registry) error {
 	if err := reg.RegisterCIRenderer(cigen.GitHub()); err != nil {
 		return err
 	}
+	// The part of a task file the github renderer reads when it renders a
+	// Tasks service: the workflow's triggers and each job's placement
+	// (D203).
+	if err := reg.RegisterTaskSection(cigen.GitHubTaskSection()); err != nil {
+		return err
+	}
 	// The Tasks kind's input resolvers, `path` and `schema`, and the hook
 	// that installs each Tasks service's file on every build-all (D203).
 	if err := inttasks.Register(reg); err != nil {
