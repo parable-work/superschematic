@@ -22,6 +22,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -314,7 +315,7 @@ func recurrenceCases(t *testing.T, db recurrenceDB, query queryFunc) map[string]
 		}
 		holidays++
 		id := mustID(t, keyOf(2, holidays))
-		if _, err := db.GetHolidayRepository().CreateOne(ctx, &orm.HolidayCreate{Id: &id, Calendar: calendar, Date: on, Name: "Closed"}); err != nil {
+		if _, err := db.GetHolidayRepository().CreateOne(ctx, &orm.HolidayCreate{Id: &id, Calendar: calendar, Date: &on, Name: "Closed"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -624,6 +625,123 @@ func recurrenceCases(t *testing.T, db recurrenceDB, query queryFunc) map[string]
 		}
 		stamp := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
 		answers["calendar read"] = map[string]any{"entries": read.Entries, "more": read.More, "contracts": len(only.Entries), "ics": crosstable.CalendarICS(read.Entries, crosstable.DetailFull, stamp, "Filings")}
+	})
+
+	monthly := func(rule string) orm.CreateOptions {
+		return orm.CreateOptions{Behaviors: map[string]any{"recurrence": orm.FilingRecurrenceCreateParams{Recurrence: &orm.FilingRecurrenceCreateParamsRecurrence{Anchor: "calendar", Rule: ptr(rule), Start: ptr(londonDay(30))}}}}
+	}
+	t.Run("a recurrence given at create is set in the create, its occurrences planned and its deadlines armed, and held to filings.manage", func(t *testing.T) {
+		// The create gives the Recurrence Filing implements its recurrence,
+		// by its member (#729), in one command.
+		id := mustID(t, keyOf(1, 900))
+		if _, err := db.GetFilingRepository().CreateOne(as(manager), &orm.FilingCreate{Id: &id, Title: "Given at create"}, monthly("FREQ=MONTHLY")); err != nil {
+			t.Fatal(err)
+		}
+		rows := occurrences(t, id)
+		if len(rows) == 0 || rows[0].Key != londonDay(30) || rows[0].Revision != 1 {
+			t.Fatalf("the occurrences: %+v", rows)
+		}
+		armed := deadlines(t, id)
+		if armed["open"] != rows[0].OpensAt {
+			t.Errorf("armed %v, want open at %d", armed, rows[0].OpensAt)
+		}
+		refused := map[string]string{}
+		for name, who := range map[string]string{"forbidden": staff, "invalid": manager} {
+			rule := "FREQ=MONTHLY"
+			if name == "invalid" {
+				rule = "FREQ=SOMETIMES"
+			}
+			other := mustID(t, keyOf(1, 901))
+			_, err := db.GetFilingRepository().CreateOne(as(who), &orm.FilingCreate{Id: &other, Title: "Refused"}, monthly(rule))
+			var refusal *rules.Refusal
+			if !errors.As(err, &refusal) {
+				t.Fatalf("%s: %v", name, err)
+			}
+			refused[name] = string(refusal.Code)
+			if got := occurrences(t, other); len(got) != 0 {
+				t.Errorf("%s: a refused create kept %d occurrences", name, len(got))
+			}
+		}
+		if refused["forbidden"] != "forbidden" || refused["invalid"] != "invalid_argument" {
+			t.Errorf("the refusals: %v", refused)
+		}
+		answers["created"] = map[string]any{"rows": rows, "armed": armed, "refused": refused}
+	})
+
+	t.Run("a holiday calendar whose weekend is Friday and Saturday moves a due date off Saturday to the Sunday", func(t *testing.T) {
+		// The gulf calendar's rows name its weekend (#729): a weekday and
+		// no date, so a Saturday due date moves after to the Sunday, where
+		// the default weekend moves it to the Monday.
+		for n, weekday := range []string{"friday", "saturday"} {
+			id := mustID(t, keyOf(2, 900+n))
+			if _, err := db.GetHolidayRepository().CreateOne(ctx, &orm.HolidayCreate{Id: &id, Calendar: "gulf", Weekday: weekday, Name: "Weekend"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		at := today.Add(40 * day)
+		for at.Weekday() != time.Saturday {
+			at = at.Add(day)
+		}
+		start := at.Format("2006-01-02") + "T09:00"
+		var dues []occurrence
+		for calendar, want := range map[string]time.Time{"gulf": at.Add(day), "": at.Add(2 * day)} {
+			id := newFiling(t, "", calendar, nil)
+			if _, err := db.GetFilingRepository().Recurrence().SetRecurrence(as(manager), id, orm.FilingRecurrenceSetRecurrenceParams{Anchor: "calendar", Rule: ptr("FREQ=YEARLY"), Start: ptr(start)}); err != nil {
+				t.Fatal(err)
+			}
+			first := occurrences(t, id)[0]
+			if first.Key != start || first.Due != want.Format("2006-01-02")+"T09:00" || first.Shifted != "weekend" {
+				t.Errorf("calendar %q: the first occurrence %+v, want due %s", calendar, first, want.Format("2006-01-02"))
+			}
+			dues = append(dues, first)
+		}
+		sort.Slice(dues, func(i, j int) bool { return dues[i].Due < dues[j].Due })
+		answers["weekend of a calendar"] = dues
+	})
+
+	t.Run("a write of a contract end date writes a change of each filing that names it, which moves nothing of the filing", func(t *testing.T) {
+		// The trigger of the relative anchor's table (#626): a write of the
+		// contract's end writes a message of the filing's change queue, its
+		// images before and after alike; one that leaves the end as it was
+		// writes none.
+		ends, err := types.ParseTemporalDate(today.Add(120 * day).Format("2006-01-02"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		contractID := mustID(t, keyOf(3, 900))
+		contract, err := db.GetContractRepository().CreateOne(ctx, &orm.ContractCreate{Id: &contractID, Title: "Lease", EndsOn: ends})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := newFiling(t, "", "", contract)
+		if _, err := db.GetFilingRepository().Recurrence().SetRecurrence(as(manager), id, orm.FilingRecurrenceSetRecurrenceParams{Anchor: "relative", Offset: ptr("-P60D")}); err != nil {
+			t.Fatal(err)
+		}
+		untouched := func() int64 {
+			rows, err := query(ctx, `SELECT count(*) FROM filing_change_queue WHERE row_key = $1 AND "before" = "after"`, id.ToUUID().String())
+			if err != nil {
+				t.Fatal(err)
+			}
+			return intOf(rows[0][0])
+		}
+		title := "Lease, renewed"
+		if _, err := db.GetContractRepository().UpdateOne(ctx, contractID, &orm.ContractUpdate{Title: &title}); err != nil {
+			t.Fatal(err)
+		}
+		if n := untouched(); n != 0 {
+			t.Errorf("a write of the contract's title wrote %d changes", n)
+		}
+		later, err := types.ParseTemporalDate(today.Add(150 * day).Format("2006-01-02"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.GetContractRepository().UpdateOne(ctx, contractID, &orm.ContractUpdate{EndsOn: &later}); err != nil {
+			t.Fatal(err)
+		}
+		if n := untouched(); n != 1 {
+			t.Errorf("a write of the contract's end wrote %d changes, want 1", n)
+		}
+		answers["target changes"] = untouched()
 	})
 	return answers
 }

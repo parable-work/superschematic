@@ -271,6 +271,9 @@ type DDLOutput struct {
 	// ChangeTriggers are the change triggers of the tables whose writes
 	// behaviors hear, by table (changes.go, D103).
 	ChangeTriggers []ChangeTrigger
+	// TargetChangeTriggers are the triggers a relative recurrence's target
+	// table keeps, by target and recurring table (relative_changes.go, #626).
+	TargetChangeTriggers []TargetChangeTrigger
 	// StateGuards are the guards of the tables' @stateMachine declarations,
 	// by table and column (state_guard.go, D118).
 	StateGuards []StateGuard
@@ -573,6 +576,10 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
+	targetChangeTriggers, err := buildTargetChangeTriggers(tableTypes, tables, changeTriggers, schema)
+	if err != nil {
+		return nil, err
+	}
 	stateGuards, err := buildStateGuards(tableTypes, tables, opts)
 	if err != nil {
 		return nil, err
@@ -677,6 +684,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 
 		MetadataKeyPrefix: metadataKeyPrefix,
 	}
+	output.TargetChangeTriggers = targetChangeTriggers
 
 	return output, nil
 }

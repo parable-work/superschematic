@@ -59,10 +59,11 @@
 //! (`setRecurrence`, `complete`, `skip`, `moveOne`, an update of the
 //! holiday calendar's field or the relation), at every fire, and on a
 //! write of those fields its change queue carries, a raw one among them.
-//! A write of the row a relative recurrence reads its date from is none
-//! of these: the row hears no write of another table's. `setRecurrence`
-//! with the rule the row already holds is what follows it: for a relative
-//! recurrence it plans again from the date as it is now, keeping the
+//! A write of the date a relative recurrence reads, on the row its
+//! relation names, comes as a change of the row that moves nothing, which
+//! a trigger of that table writes on this table's change queue (#626): it
+//! plans again as `setRecurrence` with the rule the row holds does. That
+//! call plans again from the date as it is now, keeping the
 //! recurrence as it was set, and answers `unchanged` only when the plan
 //! dates what the row already holds.
 //!
@@ -147,6 +148,9 @@ pub struct Holidays {
     pub calendar_field: String,
     pub date_field: String,
     pub field: String,
+    /// The holiday table's field that names a weekday a row with no date
+    /// closes every week (#729).
+    pub weekday_field: Option<String>,
 }
 
 /// Where the relative anchor's date is.
@@ -230,6 +234,7 @@ impl RecurrenceConfig {
             calendar_field: text(h.get("calendarField")).unwrap_or_default(),
             date_field: text(h.get("dateField")).unwrap_or_default(),
             field: text(h.get("field")).unwrap_or_default(),
+            weekday_field: text(h.get("weekdayField")),
         });
         if let Some(h) = &holidays {
             if !has_field(&h.field) {
@@ -908,8 +913,11 @@ fn expand_input(
     Ok(Some(input))
 }
 
-// holidays_of reads the dates of the holiday calendar the row's field
-// names, page by page.
+// holidays_of reads the holidays of the calendar the row's field names,
+// page by page: each row's date, or, for a row with no date, the weekday
+// its weekdayField names, which expand takes as the calendar's weekend
+// (#729). A weekday that names no day is passed over, as a fire never
+// refuses.
 fn holidays_of(view: &View<'_, RecurrenceConfig>, config: &RecurrenceConfig) -> Hook<Vec<String>> {
     let Some(h) = &config.holidays else {
         return Ok(Vec::new());
@@ -926,14 +934,26 @@ fn holidays_of(view: &View<'_, RecurrenceConfig>, config: &RecurrenceConfig) -> 
         for row in &page.rows {
             match row.row.own.get(&h.date_field) {
                 Some(Value::String(text)) if text.len() >= 10 => dates.push(text[..10].to_owned()),
-                Some(value) => {
+                Some(value) if !value.is_null() => {
                     if let Some(ms) = whole(value) {
                         if let Some(text) = crate::values::date_time_text(ms) {
                             dates.push(text[..10].to_owned());
                         }
                     }
                 }
-                None => {}
+                _ => {
+                    let weekday = h
+                        .weekday_field
+                        .as_ref()
+                        .and_then(|field| row.row.own.get(field))
+                        .and_then(Value::as_str)
+                        .map(str::to_ascii_lowercase);
+                    if let Some(day) =
+                        weekday.filter(|day| weekdays(std::slice::from_ref(day)).is_ok())
+                    {
+                        dates.push(day);
+                    }
+                }
             }
         }
         if !page.more {
@@ -981,6 +1001,44 @@ impl Behavior for Recurrence {
         params: &Value,
     ) -> Vec<SchemaIssue> {
         ajv::params_issues(file(), operation, params)
+    }
+
+    fn check_create_params(&self, _config: &RecurrenceConfig, params: &Value) -> Vec<SchemaIssue> {
+        match file().get("createParamsSchema") {
+            Some(schema) => ajv::issues(schema, params, ajv::Words::Params),
+            None => Vec::new(),
+        }
+    }
+
+    // A create's recurrence (#729): setRecurrence's checks, its permission
+    // and its plan, in the create's command, so the row is inserted with
+    // its occurrences and its deadlines armed in one version. An issue is
+    // the create's, at the use's entry (/recurrence/recurrence/rule).
+    fn initialize(&self, cx: &Cx<'_, RecurrenceConfig>, params: &Value) -> Hook<()> {
+        let Some(given) = params.get(RECURRENCE).filter(|given| !given.is_null()) else {
+            return Ok(());
+        };
+        let at = format!("/{}/{RECURRENCE}", cx.use_id());
+        spec_checked(cx, given, &|path: &str, message: String| {
+            Refusal::create_params(
+                cx.type_name(),
+                vec![SchemaIssue::new(format!("{at}{path}"), message)],
+            )
+            .into()
+        })?;
+        if let Some(permission) = manage(cx.config()) {
+            if !cx.can(permission)? {
+                let who = match cx.caller().subject.as_str() {
+                    "" => "a caller with no subject",
+                    subject => subject,
+                };
+                return Err(cx.forbidden(format!(
+                    "{who} may not create {} with a recurrence: it needs permission {permission}",
+                    cx.type_name()
+                )));
+            }
+        }
+        set_recurrence(cx, given).map(|_| ())
     }
 
     // settle: the parameters a recurrence needs, the permission, the
@@ -1138,6 +1196,31 @@ impl Behavior for Recurrence {
         let (Some(before), Some(after)) = (&change.before, &change.after) else {
             return Ok(());
         };
+        // A change that moves nothing of the row is the trigger on the
+        // relative anchor's table (#626): the row its relation names had its
+        // date written, so a relative recurrence plans again, as
+        // setRecurrence with the rule it holds does: only when the plan would
+        // now date its upcoming and open occurrences otherwise, so a write
+        // that leaves the date as it was writes nothing. Any other
+        // recurrence is as it was.
+        if before == after {
+            let mut plan = Plan::load(cx)?;
+            if !plan
+                .spec
+                .as_ref()
+                .is_some_and(|spec| spec.anchor == "relative")
+            {
+                return Ok(());
+            }
+            plan.catch_up(cx.now());
+            let mut again = plan.clone();
+            settle_plan(cx, &mut again)?;
+            return if again.pending() == plan.pending() {
+                Ok(())
+            } else {
+                replan(cx)
+            };
+        }
         if watched(cx.config())
             .iter()
             .any(|field| before.own.get(*field) != after.own.get(*field))
@@ -1200,11 +1283,20 @@ fn settle_plan(cx: &View<'_, RecurrenceConfig>, plan: &mut Plan) -> Hook<Option<
 // spec_of_params checks a setRecurrence's parameters: its anchor among the
 // config's, what that anchor needs, and a dry expansion of it.
 fn spec_of_params(view: &View<'_, RecurrenceConfig>, params: &Value) -> Hook<Spec> {
+    spec_checked(view, params, &|path: &str, message: String| {
+        bad_param(view, SET_RECURRENCE, vec![SchemaIssue::new(path, message)])
+    })
+}
+
+// spec_checked is spec_of_params with the refusal of an issue its caller's
+// (a create's names its entry of the create's parameters).
+fn spec_checked(
+    view: &View<'_, RecurrenceConfig>,
+    params: &Value,
+    issue: &dyn Fn(&str, String) -> Stop,
+) -> Hook<Spec> {
     let config = view.config();
     let spec = Spec::from_params(config, params);
-    let issue = |path: &str, message: String| {
-        bad_param(view, SET_RECURRENCE, vec![SchemaIssue::new(path, message)])
-    };
     if !config.anchors.contains(&spec.anchor) {
         return Err(issue(
             "/anchor",

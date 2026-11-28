@@ -380,6 +380,17 @@ func behaviorCaller(ctx context.Context) rules.Caller {
 	return rules.Caller{}
 }
 
+// CreateOptions is what a create of a row takes beside its fields, on a
+// table one of whose uses' behaviors takes create parameters (#729):
+// Behaviors, each such use's parameters by its member, as the repository's
+// <Type><Member>CreateParams types them, which the behaviors' core checks
+// and each use's initializer runs in the create's command, so the row is
+// inserted with what they set in one transaction. A member the table has
+// no use under is refused.
+type CreateOptions struct {
+	Behaviors map[string]any
+}
+
 // rulesHost is the host the core runs on in tx.
 func rulesHost(tx pgx.Tx) rules.Host {
 	return rules.Host{Layout: RulesLayout, Store: rulespostgres.NewStore(tx)}

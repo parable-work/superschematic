@@ -21,7 +21,7 @@ export abstract class Contract {
 // day of its holiday calendar. Each occurrence is on the calendar, for a
 // caller who may work filings (#601).
 @calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing", permission: "filings.work" })
-export abstract class Filing implements Recurrence<Filing, { adjust: "after"; anchors: ["calendar", "afterDone", "relative"]; holidays: { calendarField: "calendar"; dateField: "date"; field: "holidayCalendar"; table: "Holiday" }; horizonDays: 400; managePermission: "filings.manage"; opensBefore: "P14D"; overdueAfter: "P1D"; permission: "filings.work"; relative: { field: "endsOn"; type: "Contract"; via: "contract" }; remindBefore: "P3D"; timeZone: "Europe/London" }> {
+export abstract class Filing implements Recurrence<Filing, { adjust: "after"; anchors: ["calendar", "afterDone", "relative"]; holidays: { calendarField: "calendar"; dateField: "date"; field: "holidayCalendar"; table: "Holiday"; weekdayField: "weekday" }; horizonDays: 400; managePermission: "filings.manage"; opensBefore: "P14D"; overdueAfter: "P1D"; permission: "filings.work"; relative: { field: "endsOn"; type: "Contract"; via: "contract" }; remindBefore: "P3D"; timeZone: "Europe/London" }> {
   @key
   id: AutoGenerate<Identity.UUID>;
 
@@ -34,14 +34,18 @@ export abstract class Filing implements Recurrence<Filing, { adjust: "after"; an
 
 // A day a holiday calendar closes (D152). The app fills these rows; core
 // ships no holidays. A filing's due date moves off the days of the calendar
-// its holidayCalendar names.
+// its holidayCalendar names. A row with a weekday and no date closes that
+// day every week, and a calendar with such rows takes them as its weekend
+// in place of Saturday and Sunday (#729).
 export abstract class Holiday {
   @key
   id: AutoGenerate<Identity.UUID>;
 
   calendar: string;
 
-  date: Temporal.Date;
+  date: Nullable<Temporal.Date>;
+
+  weekday: Nullable<string>;
 
   name: string;
 }

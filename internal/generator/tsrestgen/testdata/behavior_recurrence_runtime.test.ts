@@ -376,3 +376,74 @@ test('a raw SQL write of a filing holiday calendar is heard by the worker, which
   await raw(`UPDATE filing SET holiday_calendar = 'west' WHERE id = $1`, [uuidToDb(id)]);
   await workUntil(async () => (await occurrences(id))[0]!.shifted === 'holiday');
 });
+
+/** The create's caller, as the behaviors' core sees it: who may set a recurrence, or only work one. */
+const creator = (who: Caller) => orm.withBehaviorCaller({ subject: callers[who].subject, permissions: [...callers[who].permissions] });
+
+test('a recurrence given at create is set in the create, its occurrences planned and its deadlines armed, and held to filings.manage', async () => {
+  // The create gives the Recurrence Filing implements its recurrence, by
+  // its member (#729): the row is inserted with it, in one command.
+  const start = londonDay(30);
+  const created = (await creator('manager').filing.createOne({ title: 'Given at create' } as never, { behaviors: { recurrence: { recurrence: { anchor: 'calendar', rule: 'FREQ=MONTHLY', start } } } })) as unknown as Record<string, any>;
+  const id = created.id as string;
+  const rows = await occurrences(id);
+  expect(rows[0]!.key).toBe(start);
+  expect(rows.every(row => row.state === 'upcoming' && Number(row.revision) === 1)).toBe(true);
+  const armed = await deadlines(id);
+  expect(armed.get('open')).toBe(Number(rows[0]!.opens_at));
+  expect(armed.get('remind')).toBe(Number(rows[0]!.remind_at));
+  // A setRecurrence of the same rule finds it set, and changes nothing.
+  const again = await call('manager', id, 'set-recurrence', { anchor: 'calendar', rule: 'FREQ=MONTHLY', start });
+  expect(again.body).toMatchObject({ unchanged: true, recurrence: { revision: 1 } });
+  // Without filings.manage the create is refused, and no row is kept.
+  const before = (await raw(`SELECT count(*) AS n FROM filing`)).rows[0]!.n;
+  await expect(creator('worker').filing.createOne({ title: 'Refused' } as never, { behaviors: { recurrence: { recurrence: { anchor: 'calendar', rule: 'FREQ=MONTHLY', start } } } })).rejects.toThrow(/filings\.manage/u);
+  // A rule that is no RRULE is the create's invalid argument, at its entry.
+  await expect(creator('manager').filing.createOne({ title: 'Refused' } as never, { behaviors: { recurrence: { recurrence: { anchor: 'calendar', rule: 'FREQ=SOMETIMES', start } } } })).rejects.toThrow(/recurrence\/rule/u);
+  expect((await raw(`SELECT count(*) AS n FROM filing`)).rows[0]!.n).toEqual(before);
+});
+
+/** The wall date-time at 09:00 of the first Saturday at least some days from now. */
+function londonSaturday(daysFromNow: number): string {
+  let at = new Date(Date.now() + daysFromNow * DAY);
+  while (at.getUTCDay() !== 6) at = new Date(at.getTime() + DAY);
+  return `${at.toISOString().slice(0, 10)}T09:00`;
+}
+
+test('a holiday calendar whose weekend is Friday and Saturday moves a due date off Saturday to the Sunday', async () => {
+  // The gulf calendar's rows name its weekend (#729): a weekday and no
+  // date. Its Saturday is closed and its Sunday open, so a due date on a
+  // Saturday moves after to the Sunday, where the default weekend would
+  // move it to the Monday.
+  for (const weekday of ['friday', 'saturday']) await orm.holiday.createOne({ calendar: 'gulf', weekday, name: 'Weekend' } as never);
+  const start = londonSaturday(40);
+  const sunday = new Date(Date.parse(`${start.slice(0, 10)}T00:00:00Z`) + DAY).toISOString().slice(0, 10);
+  const id = await newFiling({ holidayCalendar: 'gulf' });
+  expect((await call('manager', id, 'set-recurrence', { anchor: 'calendar', rule: 'FREQ=YEARLY', start })).status).toBe(200);
+  expect((await occurrences(id))[0]).toMatchObject({ key: start, due: `${sunday}T09:00`, shifted: 'weekend' });
+  const plain = await newFiling();
+  expect((await call('manager', plain, 'set-recurrence', { anchor: 'calendar', rule: 'FREQ=YEARLY', start })).status).toBe(200);
+  const monday = new Date(Date.parse(`${sunday}T00:00:00Z`) + DAY).toISOString().slice(0, 10);
+  expect((await occurrences(plain))[0]).toMatchObject({ key: start, due: `${monday}T09:00`, shifted: 'weekend' });
+});
+
+test('a write of a contract end date replans the relative recurrence of its filings with no call of the app', async () => {
+  // Sixty days before the contract ends. The contract's write is heard by
+  // a trigger of its table, which writes a change of each filing that
+  // names it on the filing's change queue (#626): the worker plans the
+  // filing again from the new date, and no setRecurrence is called.
+  const day = (offset: number) => new Date(Date.now() + offset * DAY).toISOString().slice(0, 10);
+  const sixtyBefore = (date: string) => `${new Date(Date.parse(`${date}T00:00:00Z`) - 60 * DAY).toISOString().slice(0, 10)}T00:00`;
+  const contract = (await orm.contract.createOne({ title: 'Lease', endsOn: day(120) } as never)) as unknown as Record<string, any>;
+  const id = await newFiling({ contractId: contract.id });
+  const set = await call('manager', id, 'set-recurrence', { anchor: 'relative', offset: '-P60D' });
+  expect(set.status).toBe(200);
+  expect((await occurrences(id))[0]!.key).toBe(sixtyBefore(day(120)));
+  await orm.contract.updateOne(contract.id, { endsOn: day(150) } as never);
+  await workUntil(async () => (await occurrences(id))[0]?.key === sixtyBefore(day(150)));
+  const rows = await occurrences(id);
+  expect(rows.length).toBe(1);
+  // The recurrence stays as it was set.
+  const listed = await call('manager', id, 'set-recurrence', { anchor: 'relative', offset: '-P60D' });
+  expect(listed.body).toMatchObject({ unchanged: true, recurrence: { revision: set.body.recurrence.revision } });
+});

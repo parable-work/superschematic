@@ -5342,7 +5342,7 @@ func (r *{{ .Name }}) operationOptions(ctx context.Context) *rules.ExecuteOption
 }
 
 {{ docComment "" (printf "createThroughCore is CreateOne on the repository's transaction: input's row stamped%s, created by the behaviors' core, whose uses initialize the fields they own, with the columns the insert writes, and read back." (or (and .EncryptedFields " and sealed") "")) }}
-func (r *{{ .Name }}) createThroughCore(ctx context.Context, input *{{ .TypeName }}Create) (*types.{{ .TypeName }}, error) {
+func (r *{{ .Name }}) createThroughCore(ctx context.Context, input *{{ .TypeName }}Create{{ if .CreateBehaviors }}, params map[string]any{{ end }}) (*types.{{ .TypeName }}, error) {
 	row := input.row()
 	{{- if .GenericJSONListFields }}
 	if err := refuseNull{{ .TypeName }}GenericJSONElements(row); err != nil {
@@ -5364,7 +5364,7 @@ func (r *{{ .Name }}) createThroughCore(ctx context.Context, input *{{ .TypeName
 	if err != nil {
 		return nil, err
 	}
-	opts := &rules.CreateOptions{ID: r.createKey(row), ExecuteOptions: rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}}
+	opts := &rules.CreateOptions{ID: r.createKey(row){{ if .CreateBehaviors }}, Params: params{{ end }}, ExecuteOptions: rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}}
 	{{- if or .PrimaryKeyIsUUID .PrimaryKey.IsStringLike }}
 	key, err := rules.RunCreate(ctx, rulesHost(r.tx), {{ printf "%q" .TypeName }}, r.coreOwn(row), behaviorCaller(ctx), opts)
 	if err != nil {
@@ -5558,11 +5558,42 @@ upserts, which insert what the core's create gives a row.
 {{- define "behaviorCreateOne" }}
 
 {{ docComment "" (printf "CreateOne inserts a new %s row through the behaviors' core (D103), in a transaction: each behavior's create initializes the fields it owns, and the row is read back. A refusal of the core's is returned as the *rules.Refusal it is." .TypeName) }}
-func (r *{{ .Name }}) CreateOne(ctx context.Context, input *{{ .TypeName }}Create) (*types.{{ .TypeName }}, error) {
+func (r *{{ .Name }}) CreateOne(ctx context.Context, input *{{ .TypeName }}Create{{ if .CreateBehaviors }}, opts ...CreateOptions{{ end }}) (*types.{{ .TypeName }}, error) {
+	{{- if .CreateBehaviors }}
+	params, err := {{ lowerFirst .TypeName }}CreateParams(opts)
+	if err != nil {
+		return nil, err
+	}
+	{{- end }}
 	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (*types.{{ .TypeName }}, error) {
-		return (&{{ .Name }}{tx: tx, txDB: r.database()}).createThroughCore(ctx, input)
+		return (&{{ .Name }}{tx: tx, txDB: r.database()}).createThroughCore(ctx, input{{ if .CreateBehaviors }}, params{{ end }})
 	})
 }
+{{- if .CreateBehaviors }}
+
+{{ docComment "" (printf "%sCreateParams are a create's Behaviors (#729), by use member, as the core's command takes them, by use id: a member no use of %s takes create parameters under is refused." (lowerFirst .TypeName) .TypeName) }}
+func {{ lowerFirst .TypeName }}CreateParams(opts []CreateOptions) (map[string]any, error) {
+	var params map[string]any
+	for _, opt := range opts {
+		for member, entry := range opt.Behaviors {
+			var id string
+			switch member {
+			{{- range .CreateBehaviors }}
+			case {{ printf "%q" .Member }}:
+				id = {{ printf "%q" .ID }}
+			{{- end }}
+			default:
+				return nil, fmt.Errorf("create {{ .TypeName }}: Behaviors names %q, and no behavior of {{ .TypeName }} takes create parameters under it (its members: {{ range $i, $b := .CreateBehaviors }}{{ if $i }}, {{ end }}{{ $b.Member }}{{ end }})", member)
+			}
+			if params == nil {
+				params = map[string]any{}
+			}
+			params[id] = entry
+		}
+	}
+	return params, nil
+}
+{{- end }}
 {{- end }}
 
 {{- define "behaviorCreateMany" }}
@@ -5576,7 +5607,7 @@ func (r *{{ .Name }}) CreateMany(ctx context.Context, inputs []*{{ .TypeName }}C
 		repo := &{{ .Name }}{tx: tx, txDB: r.database()}
 		rows := make([]*types.{{ .TypeName }}, 0, len(inputs))
 		for _, input := range inputs {
-			row, err := repo.createThroughCore(ctx, input)
+			row, err := repo.createThroughCore(ctx, input{{ if .CreateBehaviors }}, nil{{ end }})
 			if err != nil {
 				return nil, err
 			}

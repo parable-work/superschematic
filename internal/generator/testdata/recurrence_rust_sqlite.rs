@@ -22,7 +22,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use runtime::orm::calendar::{calendar_ics, CalendarDetail, CalendarOptions, CalendarRead};
 use runtime::orm::postgres::{deadpool_postgres, query_rows as pg_rows, tokio_postgres};
 use runtime::orm::sqlite::{query_rows as sqlite_rows, rusqlite, Database};
-use runtime::orm::{epoch_millis, Bound, Caller, Error, Marks, Values, WriteOptions};
+use runtime::orm::{epoch_millis, Bound, Caller, CreateOptions, Error, Marks, Values, WriteOptions};
 use runtime::Principal;
 use serde_json::{json, Value};
 
@@ -232,6 +232,16 @@ trait Db {
     fn deadlines(&self, filing: &str) -> BTreeMap<String, i64>;
     /// The calendar as `who` reads it.
     fn calendar(&self, who: u128, read: &CalendarRead) -> runtime::orm::calendar::Calendar;
+    /// Creates a filing as `who`, with the create's options (#729): the
+    /// row, or the refusal, which keeps no row.
+    fn create_as(&self, who: u128, row: Value, options: &CreateOptions) -> Result<Values, Error>;
+    /// Sets the members `patch` sets on the row of `table` whose key is
+    /// `key`, as no one.
+    fn update(&self, table: &str, key: &str, patch: Value);
+    /// How many messages of a filing's change queue move nothing of it,
+    /// its images before and after alike: a relative recurrence's target's
+    /// trigger's (#626).
+    fn untouched_changes(&self, filing: &str) -> i64;
 }
 
 fn occurrence_of(row: &[Value]) -> Occurrence {
@@ -328,6 +338,28 @@ impl Db for Sqlite {
                 types::orm::sqlite::calendar::read_calendar(repositories.untyped(), Some(&principal), read, &CalendarOptions::default())
             })
             .unwrap()
+    }
+
+    fn create_as(&self, who: u128, row: Value, options: &CreateOptions) -> Result<Values, Error> {
+        self.database.write(|connection| {
+            let repositories = types::orm::sqlite::Repositories::new(connection)?
+                .with_caller(Caller { subject: subject(who), permissions: permissions(who), ..Caller::default() });
+            repositories.untyped().table("Filing")?.create_one_with(&values(row), options)
+        })
+    }
+
+    fn update(&self, table: &str, key: &str, patch: Value) {
+        self.database
+            .write(|connection| types::orm::sqlite::Repositories::new(connection)?.untyped().table(table)?.update_one(&json!(key), &values(patch), &WriteOptions::default()))
+            .unwrap();
+    }
+
+    fn untouched_changes(&self, filing: &str) -> i64 {
+        let rows = self
+            .database
+            .read(|connection| sqlite_rows(connection, "SELECT count(*) FROM filing_change_queue WHERE row_key = ?1 AND \"before\" = \"after\"", &[arg(&hyphen(filing))]))
+            .unwrap();
+        millis(&rows[0][0])
     }
 }
 
@@ -441,6 +473,45 @@ impl Db for Postgres {
             let repositories = types::orm::postgres::Repositories::new(&client).unwrap();
             runtime::orm::calendar::read_calendar(repositories.untyped(), Some(&principal), read, &CalendarOptions::default()).await.unwrap()
         })
+    }
+
+    fn create_as(&self, who: u128, row: Value, options: &CreateOptions) -> Result<Values, Error> {
+        self.runtime.block_on(async {
+            let mut client = self.pool.get().await.unwrap();
+            let tx = client.transaction().await.unwrap();
+            let out = {
+                let repositories = types::orm::postgres::Repositories::new(&tx)?
+                    .with_caller(Caller { subject: subject(who), permissions: permissions(who), ..Caller::default() });
+                repositories.untyped().table("Filing")?.create_one_with(&values(row), options).await
+            };
+            match out {
+                Ok(out) => {
+                    tx.commit().await.unwrap();
+                    Ok(out)
+                }
+                Err(err) => {
+                    tx.rollback().await.unwrap();
+                    Err(err)
+                }
+            }
+        })
+    }
+
+    fn update(&self, table: &str, key: &str, patch: Value) {
+        self.runtime.block_on(async {
+            let mut client = self.pool.get().await.unwrap();
+            let tx = client.transaction().await.unwrap();
+            {
+                let repositories = types::orm::postgres::Repositories::new(&tx).unwrap();
+                repositories.untyped().table(table).unwrap().update_one(&json!(key), &values(patch), &WriteOptions::default()).await.unwrap();
+            }
+            tx.commit().await.unwrap();
+        });
+    }
+
+    fn untouched_changes(&self, filing: &str) -> i64 {
+        let rows = self.rows("SELECT count(*) FROM filing_change_queue WHERE row_key = $1::uuid AND \"before\" = \"after\"", &[arg(&hyphen(filing))]);
+        millis(&rows[0][0])
     }
 }
 
@@ -642,6 +713,73 @@ fn cases(db: &dyn Db) -> BTreeMap<&'static str, Value> {
         assert!(only.entries.iter().all(|e| e.source == "contract"));
         let stamp = 1_767_323_045_000; // 2026-01-02T03:04:05Z
         answers.insert("calendar read", json!({ "entries": read.entries, "more": read.more, "contracts": only.entries.len(), "ics": calendar_ics(&read.entries, CalendarDetail::Full, stamp, "Filings") }));
+    }
+
+    case("a recurrence given at create is set in the create, its occurrences planned and its deadlines armed, and held to filings.manage");
+    {
+        // The create gives the Recurrence Filing implements its recurrence,
+        // by its member (#729): the row is inserted with it, in one command.
+        let start = london_day(30);
+        let monthly = |id: &str, rule: &str| (json!({ "id": id, "title": "Given at create" }), CreateOptions { behaviors: values(json!({ "recurrence": { "recurrence": { "anchor": "calendar", "rule": rule, "start": start } } })) });
+        let id = key_of(1, 900);
+        let (row, options) = monthly(&id, "FREQ=MONTHLY");
+        db.create_as(MANAGER, row, &options).unwrap();
+        let rows = db.occurrences(&id);
+        assert_eq!(rows[0].key, start);
+        assert!(rows.iter().all(|row| row.state == "upcoming" && row.revision == 1), "{rows:?}");
+        let armed = db.deadlines(&id);
+        assert_eq!(armed.get("open"), Some(&rows[0].opens_at));
+        let again = db.call(MANAGER, &id, "setRecurrence", json!({ "anchor": "calendar", "rule": "FREQ=MONTHLY", "start": start })).unwrap();
+        assert_eq!(again["unchanged"], json!(true), "{again}");
+        let (row, options) = monthly(&key_of(1, 901), "FREQ=MONTHLY");
+        let forbidden = refusal(db.create_as(STAFF, row, &options).map(Value::Object));
+        let (row, options) = monthly(&key_of(1, 902), "FREQ=SOMETIMES");
+        let invalid = refusal(db.create_as(MANAGER, row, &options).map(Value::Object));
+        assert_eq!((forbidden.1, invalid.1), (403, 400), "{forbidden:?} {invalid:?}");
+        assert!(db.occurrences(&key_of(1, 901)).is_empty() && db.occurrences(&key_of(1, 902)).is_empty());
+        answers.insert("created", json!({ "rows": rows, "armed": armed, "refused": [forbidden.0, invalid.0] }));
+    }
+
+    case("a holiday calendar whose weekend is Friday and Saturday moves a due date off Saturday to the Sunday");
+    {
+        // The gulf calendar's rows name its weekend (#729): a weekday and no
+        // date, so a due date on a Saturday moves after to the Sunday, where
+        // the default weekend moves it to the Monday.
+        for (n, weekday) in [(901, "friday"), (902, "saturday")] {
+            db.create("Holiday", json!({ "id": key_of(2, n), "calendar": "gulf", "weekday": weekday, "name": "Weekend" }));
+        }
+        let mut day = today() + 40;
+        while weekday(day) != 6 {
+            day += 1;
+        }
+        let start = format!("{}T09:00", date(day));
+        let mut dues = Vec::new();
+        for (calendar, want) in [(Some("gulf"), day + 1), (None, day + 2)] {
+            let id = new_filing(None, calendar, None);
+            db.call(MANAGER, &id, "setRecurrence", json!({ "anchor": "calendar", "rule": "FREQ=YEARLY", "start": start })).unwrap();
+            let first = db.occurrences(&id)[0].clone();
+            assert_eq!((first.key.as_str(), &first.due[..10], first.shifted.as_str()), (start.as_str(), date(want).as_str(), "weekend"), "{calendar:?}");
+            dues.push(first);
+        }
+        answers.insert("weekend of a calendar", json!(dues));
+    }
+
+    case("a write of a contract end date writes a change of each filing that names it, which moves nothing of the filing");
+    {
+        // The trigger of the relative anchor's table (#626): a write of the
+        // contract's end writes a message of the filing's change queue, its
+        // images before and after the filing as it is; one that leaves the
+        // end as it was writes none.
+        let contract = key_of(3, 900);
+        db.create("Contract", json!({ "id": contract, "title": "Lease", "endsOn": date(today() + 120) }));
+        let id = new_filing(None, None, Some(&contract));
+        db.call(MANAGER, &id, "setRecurrence", json!({ "anchor": "relative", "offset": "-P60D" })).unwrap();
+        assert_eq!(db.untouched_changes(&id), 0);
+        db.update("Contract", &contract, json!({ "title": "Lease, renewed" }));
+        assert_eq!(db.untouched_changes(&id), 0);
+        db.update("Contract", &contract, json!({ "endsOn": date(today() + 150) }));
+        assert_eq!(db.untouched_changes(&id), 1);
+        answers.insert("target changes", json!(db.untouched_changes(&id)));
     }
     answers
 }

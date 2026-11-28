@@ -1090,6 +1090,12 @@ func fencesOf(host Host, reads []Answered) ([]Statement, error) {
 				fences = append(fences, Statement{Text: "NOT EXISTS (" + found + ")", Values: []any{key}, Check: true})
 				continue
 			}
+			if table.Version == "" {
+				// A table the layout holds read-only (D152) is read at version 0.
+				found := fmt.Sprintf("SELECT 1 FROM %s WHERE %s = %s%s", quote(table.Table), quote(table.Key.Column), placeholder(dialect, 1), live(table))
+				fences = append(fences, Statement{Text: "EXISTS (" + found + ")", Values: []any{key}, Check: true})
+				continue
+			}
 			found := fmt.Sprintf("SELECT 1 FROM %s WHERE %s = %s AND %s = %s%s", quote(table.Table), quote(table.Key.Column), placeholder(dialect, 1), quote(table.Version), placeholder(dialect, 2), live(table))
 			fences = append(fences, Statement{Text: "EXISTS (" + found + ")", Values: []any{key, read.Answer.Row.Version}, Check: true})
 		case read.Request.Kind == ReadKindHasRows && read.Answer.Kind == ReadKindHasRows:
@@ -1279,8 +1285,9 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 				}
 			}
 			// The version moves on with every write, the core's own: on
-			// Postgres @optimistic's trigger sets it to the same value.
-			sets = append(sets, quote(table.Version)+" = "+quote(table.Version)+" + 1")
+			// Postgres @optimistic's trigger sets it to the same value. A
+			// table the layout holds read-only (D152) has none to move.
+			sets = append(sets, versionBump(table)...)
 			where, err := fencedWhere(table, *write.Key, write.ExpectedVersion, bind)
 			if err != nil {
 				return nil, err
@@ -1300,7 +1307,7 @@ func statementsOf(ctx context.Context, host Host, typeName string, command Comma
 				for _, a := range soft {
 					sets = append(sets, quote(a.column)+" = "+bind(a.value))
 				}
-				sets = append(sets, quote(table.Version)+" = "+quote(table.Version)+" + 1")
+				sets = append(sets, versionBump(table)...)
 				where, err := fencedWhere(table, *write.Key, write.ExpectedVersion, bind)
 				if err != nil {
 					return nil, err
@@ -1446,7 +1453,21 @@ func fencedWhere(table *Table, key string, version int64, bind func(any) string)
 	if err != nil {
 		return "", err
 	}
+	if table.Version == "" {
+		return fmt.Sprintf("%s = %s%s", quote(table.Key.Column), bind(bound), live(table)), nil
+	}
 	return fmt.Sprintf("%s = %s AND %s = %s%s", quote(table.Key.Column), bind(bound), quote(table.Version), bind(version), live(table)), nil
+}
+
+// versionBump is the set that moves a row's version on with a write: none
+// for a table the layout holds read-only (D152), which composes no
+// behavior and has no version column; its repository's write runs through
+// the core all the same, which writes its own fields alone.
+func versionBump(table *Table) []string {
+	if table.Version == "" {
+		return nil
+	}
+	return []string{quote(table.Version) + " = " + quote(table.Version) + " + 1"}
 }
 
 // rawOrJSON is a row write as the core wrote it, for a message.

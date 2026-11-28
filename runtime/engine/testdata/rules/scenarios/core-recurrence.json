@@ -3351,6 +3351,540 @@
           "permissions": []
         }
       }
+    },
+    {
+      "name": "Recurrence > a holiday calendar's weekday rows are its weekend in place of weekendDays (#729): a due date on a Saturday moves after to the Sunday of a calendar closed on Friday and Saturday, and to the Monday of one with none; a create gives the row its recurrence, held to setRecurrence's checks and permission, planned and armed in the create's command",
+      "steps": [
+        {
+          "call": "open",
+          "as": "e1",
+          "args": [
+            {
+              "path": "{{dir:1}}/engine.db",
+              "policy": "allowAll",
+              "clock": "fixed",
+              "ids": "seeded",
+              "runner": {
+                "principal": {
+                  "subject": "runner",
+                  "permissions": [
+                    "filings.manage",
+                    "filings.work"
+                  ]
+                }
+              }
+            }
+          ],
+          "now": 1772323200000
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "manager",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Holiday",
+              "types": {
+                "Holiday": {
+                  "name": "Holiday",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "calendar",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "date",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "weekday",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    },
+                    {
+                      "name": "name",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Holiday",
+            "version": null,
+            "instanceType": "Holiday"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "manager",
+          "args": [
+            "Holiday"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Holiday",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.define",
+          "principal": "manager",
+          "args": [
+            {
+              "kind": "General",
+              "name": "Filing",
+              "types": {
+                "Filing": {
+                  "name": "Filing",
+                  "role": "EmbeddedStruct",
+                  "fields": [
+                    {
+                      "name": "title",
+                      "typeRef": {
+                        "name": "string"
+                      },
+                      "required": true
+                    },
+                    {
+                      "name": "holidayCalendar",
+                      "typeRef": {
+                        "name": "string"
+                      }
+                    }
+                  ],
+                  "behaviors": [
+                    {
+                      "name": "Recurrence",
+                      "config": {
+                        "anchors": [
+                          "calendar"
+                        ],
+                        "timeZone": "UTC",
+                        "horizonDays": 45,
+                        "adjust": "after",
+                        "holidays": {
+                          "table": "Holiday",
+                          "calendarField": "calendar",
+                          "dateField": "date",
+                          "field": "holidayCalendar",
+                          "weekdayField": "weekday"
+                        },
+                        "permission": "filings.work",
+                        "managePermission": "filings.manage"
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Filing",
+            "version": null,
+            "instanceType": "Filing"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "schemas.publish",
+          "principal": "manager",
+          "args": [
+            "Filing"
+          ],
+          "expect": {
+            "namespace": "default",
+            "name": "Filing",
+            "version": 1,
+            "published": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "manager",
+          "args": [
+            "Holiday",
+            {
+              "calendar": "gulf",
+              "weekday": "friday",
+              "name": "Weekend"
+            },
+            {
+              "id": "h1"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Holiday",
+            "id": "h1",
+            "data": {
+              "calendar": "gulf",
+              "weekday": "friday",
+              "name": "Weekend"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "manager",
+          "args": [
+            "Holiday",
+            {
+              "calendar": "gulf",
+              "weekday": "saturday",
+              "name": "Weekend"
+            },
+            {
+              "id": "h2"
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Holiday",
+            "id": "h2",
+            "data": {
+              "calendar": "gulf",
+              "weekday": "saturday",
+              "name": "Weekend"
+            },
+            "behaviors": {}
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "worker",
+          "args": [
+            "Filing",
+            {
+              "title": "Monthly return",
+              "holidayCalendar": "gulf"
+            },
+            {
+              "id": "f1",
+              "behaviors": {
+                "Recurrence": {
+                  "recurrence": {
+                    "anchor": "calendar",
+                    "rule": "FREQ=MONTHLY;BYMONTHDAY=14",
+                    "start": "2026-03-14T09:00"
+                  }
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "EngineError",
+            "code": "forbidden",
+            "message": "worker may not create Filing with a recurrence: it needs permission filings.manage"
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "manager",
+          "args": [
+            "Filing",
+            {
+              "title": "Monthly return",
+              "holidayCalendar": "gulf"
+            },
+            {
+              "id": "f1",
+              "behaviors": {
+                "Recurrence": {
+                  "recurrence": {
+                    "anchor": "calendar",
+                    "rule": "FREQ=SOMETIMES",
+                    "start": "2026-03-14T09:00"
+                  }
+                }
+              }
+            }
+          ],
+          "error": {
+            "class": "CreateParamsError",
+            "code": "invalid_argument",
+            "message": "create of Filing: /behaviors/Recurrence/recurrence/rule: rule \"FREQ=SOMETIMES\": FREQ \"SOMETIMES\" is no frequency",
+            "details": {
+              "issues": [
+                {
+                  "path": "/behaviors/Recurrence/recurrence/rule",
+                  "message": "rule \"FREQ=SOMETIMES\": FREQ \"SOMETIMES\" is no frequency"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "manager",
+          "args": [
+            "Filing",
+            {
+              "title": "Monthly return",
+              "holidayCalendar": "gulf"
+            },
+            {
+              "id": "f1",
+              "behaviors": {
+                "Recurrence": {
+                  "recurrence": {
+                    "anchor": "calendar",
+                    "rule": "FREQ=MONTHLY;BYMONTHDAY=14",
+                    "start": "2026-03-14T09:00"
+                  }
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Filing",
+            "id": "f1",
+            "data": {
+              "title": "Monthly return",
+              "holidayCalendar": "gulf"
+            },
+            "behaviors": {
+              "Recurrence": {
+                "recurrence": {
+                  "anchor": "calendar",
+                  "rule": "FREQ=MONTHLY;BYMONTHDAY=14",
+                  "start": "2026-03-14T09:00",
+                  "timeZone": "UTC",
+                  "adjust": "after",
+                  "setAt": 1772323200000,
+                  "revision": 1
+                },
+                "nextDueAt": 1773565200000
+              }
+            }
+          },
+          "events": [
+            {
+              "schema": "Filing",
+              "id": "f1",
+              "use": "Recurrence",
+              "kind": "opened",
+              "at": 1772323200000,
+              "payload": {
+                "key": "2026-03-14T09:00",
+                "due": "2026-03-15T09:00",
+                "dueAt": 1773565200000,
+                "overdueAt": 1773565200000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "worker",
+          "args": [
+            "Filing",
+            "f1",
+            "listOccurrences",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "key": "2026-03-14T09:00",
+                "due": "2026-03-15T09:00",
+                "dueAt": 1773565200000,
+                "opensAt": 1772323200000,
+                "overdueAt": 1773565200000,
+                "state": "open",
+                "revision": 1,
+                "shifted": "weekend",
+                "changedAt": 1772323200000
+              },
+              {
+                "key": "2026-04-14T09:00",
+                "due": "2026-04-14T09:00",
+                "dueAt": 1776157200000,
+                "opensAt": 1773565200000,
+                "overdueAt": 1776157200000,
+                "state": "upcoming",
+                "revision": 1,
+                "changedAt": 1772323200000
+              }
+            ]
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "manager",
+          "args": [
+            "Filing",
+            "f1",
+            "setRecurrence",
+            {
+              "anchor": "calendar",
+              "rule": "FREQ=MONTHLY;BYMONTHDAY=14",
+              "start": "2026-03-14T09:00"
+            }
+          ],
+          "now": 1772326800000,
+          "expect": {
+            "recurrence": {
+              "anchor": "calendar",
+              "rule": "FREQ=MONTHLY;BYMONTHDAY=14",
+              "start": "2026-03-14T09:00",
+              "timeZone": "UTC",
+              "adjust": "after",
+              "setAt": 1772323200000,
+              "revision": 1
+            },
+            "planned": [
+              "2026-03-14T09:00",
+              "2026-04-14T09:00"
+            ],
+            "kept": [
+              "2026-03-14T09:00"
+            ],
+            "nextDueAt": 1773565200000,
+            "unchanged": true
+          }
+        },
+        {
+          "engine": "e1",
+          "call": "instances.create",
+          "principal": "manager",
+          "args": [
+            "Filing",
+            {
+              "title": "Monthly return"
+            },
+            {
+              "id": "f2",
+              "behaviors": {
+                "Recurrence": {
+                  "recurrence": {
+                    "anchor": "calendar",
+                    "rule": "FREQ=MONTHLY;BYMONTHDAY=14",
+                    "start": "2026-03-14T09:00"
+                  }
+                }
+              }
+            }
+          ],
+          "expect": {
+            "namespace": "default",
+            "schema": "Filing",
+            "id": "f2",
+            "data": {
+              "title": "Monthly return"
+            },
+            "behaviors": {
+              "Recurrence": {
+                "recurrence": {
+                  "anchor": "calendar",
+                  "rule": "FREQ=MONTHLY;BYMONTHDAY=14",
+                  "start": "2026-03-14T09:00",
+                  "timeZone": "UTC",
+                  "adjust": "after",
+                  "setAt": 1772326800000,
+                  "revision": 1
+                },
+                "nextDueAt": 1773651600000
+              }
+            }
+          },
+          "events": [
+            {
+              "schema": "Filing",
+              "id": "f2",
+              "use": "Recurrence",
+              "kind": "opened",
+              "at": 1772326800000,
+              "payload": {
+                "key": "2026-03-14T09:00",
+                "due": "2026-03-16T09:00",
+                "dueAt": 1773651600000,
+                "overdueAt": 1773651600000
+              }
+            }
+          ]
+        },
+        {
+          "engine": "e1",
+          "call": "instances.invoke",
+          "principal": "worker",
+          "args": [
+            "Filing",
+            "f2",
+            "listOccurrences",
+            {}
+          ],
+          "expect": {
+            "items": [
+              {
+                "key": "2026-03-14T09:00",
+                "due": "2026-03-16T09:00",
+                "dueAt": 1773651600000,
+                "opensAt": 1772326800000,
+                "overdueAt": 1773651600000,
+                "state": "open",
+                "revision": 1,
+                "shifted": "weekend",
+                "changedAt": 1772326800000
+              },
+              {
+                "key": "2026-04-14T09:00",
+                "due": "2026-04-14T09:00",
+                "dueAt": 1776157200000,
+                "opensAt": 1773651600000,
+                "overdueAt": 1776157200000,
+                "state": "upcoming",
+                "revision": 1,
+                "changedAt": 1772326800000
+              }
+            ]
+          }
+        }
+      ],
+      "behaviors": [
+        "Recurrence"
+      ],
+      "principals": {
+        "manager": {
+          "subject": "manager",
+          "permissions": [
+            "filings.manage",
+            "filings.work"
+          ]
+        },
+        "worker": {
+          "subject": "worker",
+          "permissions": [
+            "filings.work"
+          ]
+        }
+      }
     }
   ]
 }

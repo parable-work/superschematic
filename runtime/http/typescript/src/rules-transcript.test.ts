@@ -141,7 +141,7 @@ const TRANSCRIPTS: readonly { readonly file: string; readonly floor: number }[] 
   { file: 'core-reconcile', floor: 58 },
   { file: 'core-schedules', floor: 161 },
   { file: 'core-pool', floor: 82 },
-  { file: 'core-recurrence', floor: 88 },
+  { file: 'core-recurrence', floor: 101 },
   { file: 'core-rollups', floor: 180 },
   { file: 'core-dependencies', floor: 266 },
   { file: 'core-numbering', floor: 104 },

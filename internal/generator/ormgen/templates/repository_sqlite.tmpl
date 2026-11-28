@@ -1255,7 +1255,7 @@ func (r *{{ $repo }}) ListAsOfBy{{ toGoName .FieldName }}ID(context.Context, {{ 
 {{- end }}
 {{- if not .Released }}
 
-func (r *{{ $repo }}) CreateOne(context.Context, *{{ .CreateInput }}) (*types.{{ .TypeName }}, error) {
+func (r *{{ $repo }}) CreateOne(context.Context, *{{ .CreateInput }}{{ if .CreateBehaviors }}, ...CreateOptions{{ end }}) (*types.{{ .TypeName }}, error) {
 	return nil, {{ $refused }}
 }
 
@@ -1397,9 +1397,15 @@ func (r *{{ $repo }}) inTx(ctx context.Context, fn func(tx *sql.Tx) error) error
 
 // CreateOne creates a {{ .TypeName }} row through the behaviors' core (D103), in a
 // transaction, whose uses initialize the fields they own, and reads it back.
-func (r *{{ $repo }}) CreateOne(ctx context.Context, input *{{ .CreateInput }}) (*types.{{ .TypeName }}, error) {
+func (r *{{ $repo }}) CreateOne(ctx context.Context, input *{{ .CreateInput }}{{ if .CreateBehaviors }}, opts ...CreateOptions{{ end }}) (*types.{{ .TypeName }}, error) {
+	{{- if .CreateBehaviors }}
+	params, err := {{ lowerFirst .TypeName }}CreateParams(opts)
+	if err != nil {
+		return nil, err
+	}
+	{{- end }}
 	var out *types.{{ .TypeName }}
-	err := r.inTx(ctx, func(tx *sql.Tx) error {
+	err {{ if .CreateBehaviors }}={{ else }}:={{ end }} r.inTx(ctx, func(tx *sql.Tx) error {
 		pg := r.pg()
 		row := input.row()
 		if err := r.stampCreate(ctx, row); err != nil {
@@ -1412,7 +1418,7 @@ func (r *{{ $repo }}) CreateOne(ctx context.Context, input *{{ .CreateInput }}) 
 		if columns, err = {{ $v }}.coreColumns(columns); err != nil {
 			return err
 		}
-		opts := &rules.CreateOptions{ID: pg.createKey(row), ExecuteOptions: rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}}
+		opts := &rules.CreateOptions{ID: pg.createKey(row){{ if .CreateBehaviors }}, Params: params{{ end }}, ExecuteOptions: rules.ExecuteOptions{OwnColumns: columns{{ if .Preconditions }}, Preconditions: behaviorPreconditions(ctx){{ end }}}}
 		{{- if or .PrimaryKeyIsUUID .PrimaryKey.IsStringLike }}
 		key, err := rules.RunCreate(ctx, sqliteRulesHost(tx), {{ printf "%q" .TypeName }}, pg.coreOwn(row), behaviorCaller(ctx), opts)
 		if err != nil {

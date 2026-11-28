@@ -623,6 +623,10 @@ pub struct Behaviors {
     /// caller (D156): the core reads every row.
     #[serde(default)]
     pub answers: Vec<AnsweredRow>,
+    /// The uses whose behavior takes create parameters (#729), by the
+    /// member a create's behaviors name them by: their use ids.
+    #[serde(default)]
+    pub creates: BTreeMap<String, String>,
 }
 
 /// An operation of a table as a whole whose answer names one of the
@@ -1057,6 +1061,17 @@ pub struct WriteOptions {
     pub preconditions: Option<Values>,
 }
 
+/// What a create of one row takes beside its fields (#729): `behaviors`,
+/// each use's create parameters by the use's member (`recurrence`), which
+/// the behaviors' core checks and each use's initializer runs in the
+/// create's command, so the row is inserted with what they set in one
+/// transaction. A member the table has no use under that takes them is
+/// [`Error::Invalid`], and a table that composes no behaviors refuses any.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CreateOptions {
+    pub behaviors: Values,
+}
+
 /// The options of `upsert_one`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct UpsertOptions {
@@ -1431,6 +1446,9 @@ pub struct CoreCreate<'a> {
     pub columns: CoreColumns,
     /// Who the command runs as.
     pub caller: Caller,
+    /// Each use's create parameters, by use id (#729); none when the create
+    /// gives none.
+    pub params: Values,
 }
 
 /// An update of a row through the core (D103).

@@ -311,6 +311,12 @@ type ORMTable struct {
 	// and updateOne, deleteOne and each operation take in their options;
 	// none for a table whose uses take none.
 	Preconditions []ORMPrecondition
+
+	// CreateBehaviors are the create parameters the table's uses take
+	// (#729), in the uses' order, which orm.ts types as
+	// <Type>CreateBehaviors, each by its use's member, and createOne takes in
+	// its options ({ behaviors }); none for a table whose uses take none.
+	CreateBehaviors []ORMCreateBehavior
 }
 
 // ORMRelation is a to-one relation as orm.ts writes it: Field, the
@@ -655,6 +661,7 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 		if rules != nil {
 			table.Uses = rules.uses[t.Type]
 			table.Preconditions = rules.preconditions[t.Type]
+			table.CreateBehaviors = rules.createBehaviors[t.Type]
 			if layout := rules.layout.Types[t.Type]; layout != nil {
 				table.Deadlines = layout.Deadlines != nil
 				table.Changes = layout.Changes != nil
@@ -769,7 +776,7 @@ func ormViews(schema *ir.Schema, opts Options, out *ORMInfo, projections []TypeI
 	}
 	taken := map[string]string{}
 	for _, t := range out.Tables {
-		for _, suffix := range []string{"Row", "Create", "Update", "Filter", "OrderField", "SortField", "UniqueKey", "PageKey", "Relations", "Repository", "VectorField", "Uses", "Preconditions"} {
+		for _, suffix := range []string{"Row", "Create", "Update", "Filter", "OrderField", "SortField", "UniqueKey", "PageKey", "Relations", "Repository", "VectorField", "Uses", "Preconditions", "CreateBehaviors"} {
 			taken[t.Type+suffix] = t.Type
 		}
 		taken[t.Member] = t.Type

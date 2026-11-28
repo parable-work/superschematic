@@ -125,6 +125,17 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 		}
 		m.Triggers = append(m.Triggers, trigger)
 	}
+	// A relative recurrence's target trigger (#626), which writes the
+	// recurring table's change queue: placed, replaced and dropped as the
+	// change trigger is; no backfill.
+	for _, c := range out.TargetChangeTriggers {
+		m.Functions = append(m.Functions, &Function{Name: c.FunctionName, Definition: c.FunctionSQL(), Origin: c.Origin})
+		trigger, err := modelTrigger(c.Trigger(), c.Origin)
+		if err != nil {
+			return nil, err
+		}
+		m.Triggers = append(m.Triggers, trigger)
+	}
 
 	// A @stateMachine's guard (D118): its function, and the trigger that
 	// refuses a move the machine does not list, which the planner places by

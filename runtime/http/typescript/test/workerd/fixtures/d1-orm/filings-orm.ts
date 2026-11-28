@@ -170,16 +170,17 @@ export const holidayTable: TableDefinition = {
   columns: [
     { name: "id", column: "id", field: "id", qualified: "holiday.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
     { name: "calendar", column: "calendar", field: "calendar", qualified: "holiday.calendar", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
-    { name: "date", column: "\"date\"", field: "date", qualified: "holiday.\"date\"", date: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "date", column: "\"date\"", field: "date", qualified: "holiday.\"date\"", date: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "weekday", column: "weekday", field: "weekday", qualified: "holiday.weekday", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
     { name: "name", column: "\"name\"", field: "name", qualified: "holiday.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
   ],
   statements: {
-    columns: "\"id\", \"calendar\", \"date\", \"name\"",
-    qualifiedColumns: "\"holiday\".\"id\", \"holiday\".\"calendar\", \"holiday\".\"date\", \"holiday\".\"name\"",
+    columns: "\"id\", \"calendar\", \"date\", \"weekday\", \"name\"",
+    qualifiedColumns: "\"holiday\".\"id\", \"holiday\".\"calendar\", \"holiday\".\"date\", \"holiday\".\"weekday\", \"holiday\".\"name\"",
     selectColumn: "\"holiday\".\"%s\"",
-    getOne: "SELECT \"id\", \"calendar\", \"date\", \"name\" FROM holiday WHERE id = ?1",
+    getOne: "SELECT \"id\", \"calendar\", \"date\", \"weekday\", \"name\" FROM holiday WHERE id = ?1",
     getOneFields: "SELECT %s FROM holiday WHERE id = ?1",
-    getMany: "SELECT \"id\", \"calendar\", \"date\", \"name\" FROM holiday WHERE id IN (%s)",
+    getMany: "SELECT \"id\", \"calendar\", \"date\", \"weekday\", \"name\" FROM holiday WHERE id IN (%s)",
     live: "",
     liveWhere: "",
     liveCondition: "",
@@ -197,18 +198,18 @@ export const holidayTable: TableDefinition = {
     insert: "INSERT INTO holiday (%s) VALUES (%s) RETURNING %s",
     insertMany: "INSERT INTO holiday (%s) VALUES %s RETURNING %s",
     update: "UPDATE holiday SET %s WHERE id = ?%d",
-    returning: " RETURNING \"id\", \"calendar\", \"date\", \"name\"",
+    returning: " RETURNING \"id\", \"calendar\", \"date\", \"weekday\", \"name\"",
     updateMany: "UPDATE holiday SET %s%s",
     updatedAt: "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
     updatedBy: "updated_by = ?%d",
-    upsert: "INSERT INTO holiday (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"calendar\", \"date\", \"name\"",
+    upsert: "INSERT INTO holiday (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"calendar\", \"date\", \"weekday\", \"name\"",
     softDelete: "",
     softDeleteMany: "",
     delete: "DELETE FROM holiday WHERE id = ?1",
     deleteMany: "DELETE FROM holiday%s",
   },
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = holiday.id", rows: "SELECT \"id\", \"calendar\", \"date\", \"name\" FROM holiday WHERE (id) IN (VALUES %s)" },
+    "id": { conflict: "(id)", keep: "id = holiday.id", rows: "SELECT \"id\", \"calendar\", \"date\", \"weekday\", \"name\" FROM holiday WHERE (id) IN (VALUES %s)" },
   },
 };
 
@@ -497,7 +498,8 @@ export const fixtureRecurrenceDbRules: RulesLayout = {
                 "calendarField": "calendar",
                 "dateField": "date",
                 "field": "holidayCalendar",
-                "table": "Holiday"
+                "table": "Holiday",
+                "weekdayField": "weekday"
               },
               "horizonDays": 400,
               "managePermission": "filings.manage",
@@ -556,6 +558,11 @@ export const fixtureRecurrenceDbRules: RulesLayout = {
           "type": "Temporal.Date"
         },
         {
+          "field": "weekday",
+          "column": "weekday",
+          "type": "string"
+        },
+        {
           "field": "name",
           "column": "name",
           "type": "string"
@@ -573,6 +580,10 @@ export const fixtureRecurrenceDbRules: RulesLayout = {
           {
             "name": "date",
             "type": "Temporal.Date"
+          },
+          {
+            "name": "weekday",
+            "type": "string"
           },
           {
             "name": "name",

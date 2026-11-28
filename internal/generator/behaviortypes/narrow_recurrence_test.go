@@ -57,6 +57,17 @@ func TestNarrowRecurrence(t *testing.T) {
 		if anchor[RefKey] != "FilingRecurrenceAnchor" || anchor["description"] == nil {
 			t.Errorf("%s: anchor %v", test.config, anchor)
 		}
+		// A create's recurrence takes what setRecurrence takes (#729).
+		created, err := at(n.CreateParams, "properties", "recurrence", "properties")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := SortedKeys(created); !slices.Equal(got, test.members) {
+			t.Errorf("%s: a create's recurrence takes %v, want %v", test.config, got, test.members)
+		}
+		if anchor, _ := created["anchor"].(map[string]any); anchor[RefKey] != "FilingRecurrenceAnchor" {
+			t.Errorf("%s: a create's anchor %v", test.config, anchor)
+		}
 		// The result's recurrence is the declaration's object.
 		if node, err := at(n.Results["setRecurrence"], "properties", "recurrence"); err != nil || node[RefKey] != nil {
 			t.Errorf("%s: the result's recurrence %v (%v)", test.config, node, err)

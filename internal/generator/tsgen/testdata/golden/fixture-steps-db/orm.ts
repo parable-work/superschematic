@@ -267,6 +267,12 @@ export interface StepRelations {
   readonly batch: Related<BatchRow, BatchRelations, 'one'>;
 }
 
+/** What a create of Step gives its behaviors (#729): each use's create parameters by its member, which the behaviors' core checks and each use's initializer runs in the create's command. createOne takes it in its options ({ behaviors }). */
+export interface StepCreateBehaviors {
+  /** The create parameters of the Dependencies Step implements. */
+  readonly dependencies?: { blockers?: Array<{ id: string; schema?: 'Step' }> };
+}
+
 /** The behaviors of Step (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
 export interface StepUses {
   /** The operations of Dependencies, which Step implements. */
@@ -318,7 +324,9 @@ export type StepRepository = WithoutUpserts<Repository<
   StepUniqueKey,
   T.IdentityUUID,
   StepPageKey,
-  StepRelations
+  StepRelations,
+  Readonly<Record<string, unknown>>,
+  StepCreateBehaviors
 >> & StepUses;
 
 /** The step table, as the runtime reads and writes it. */

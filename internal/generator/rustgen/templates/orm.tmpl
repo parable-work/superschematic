@@ -460,11 +460,11 @@ pub mod postgres {
                 let own_columns = orm::postgres::core_columns(client, table, &create.columns).await?;
                 let options = adapter::CreateOptions {
                     id: create.key,
+                    params: create.params,
                     execute: adapter::ExecuteOptions {
                         own_columns: Some(own_columns),
                         ..Default::default()
                     },
-                    ..Default::default()
                 };
                 let own = rules::own(table, &create.fields)?;
                 let host = rules::host()?;
@@ -892,11 +892,11 @@ pub mod sqlite {
             let table = create.table;
             let options = adapter::CreateOptions {
                 id: create.key,
+                params: create.params,
                 execute: adapter::ExecuteOptions {
                     own_columns: Some(orm::sqlite::core_columns(table, &create.columns)?),
                     ..Default::default()
                 },
-                ..Default::default()
             };
             let own = rules::own(table, &create.fields)?;
             let caller = rules::caller(create.caller);

@@ -43,6 +43,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
 	"github.com/parable-work/superschematic/runtime/http/go/worker"
+	rules "github.com/parable-work/superschematic/runtime/rules/go"
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
 	"github.com/parable-work/superschematic/runtime/schema/go/crosstable"
 	"go.uber.org/zap"
@@ -257,7 +258,7 @@ func TestRecurrence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := db.GetHolidayRepository().CreateOne(ctx, &orm.HolidayCreate{Calendar: calendar, Date: on, Name: "Closed"}); err != nil {
+		if _, err := db.GetHolidayRepository().CreateOne(ctx, &orm.HolidayCreate{Calendar: calendar, Date: &on, Name: "Closed"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -592,5 +593,134 @@ func TestRecurrence(t *testing.T) {
 		}
 		workUntil(t, func() bool { return text(occurrences(t, column)[0].Shifted) == "holiday" })
 		_ = id
+	})
+
+	// as is ctx with the behaviors' caller who, holding who's permissions.
+	as := func(who string) context.Context {
+		return orm.WithBehaviorCaller(ctx, rules.Caller{Subject: who, Permissions: permissions[who]})
+	}
+	monthly := func(start string) orm.CreateOptions {
+		rule, anchor := "FREQ=MONTHLY", orm.FilingRecurrenceAnchor("calendar")
+		return orm.CreateOptions{Behaviors: map[string]any{"recurrence": orm.FilingRecurrenceCreateParams{Recurrence: &orm.FilingRecurrenceCreateParamsRecurrence{Anchor: anchor, Rule: &rule, Start: &start}}}}
+	}
+
+	t.Run("a recurrence given at create is set in the create, its occurrences planned and its deadlines armed, and held to filings.manage", func(t *testing.T) {
+		// The create gives the Recurrence Filing implements its recurrence,
+		// by its member (#729): the row is inserted with it, in one command.
+		start := londonDay(30)
+		row, err := db.GetFilingRepository().CreateOne(as(manager), &orm.FilingCreate{Title: "Given at create"}, monthly(start))
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, column := row.Id.String(), row.Id.ToUUID().String()
+		rows := occurrences(t, column)
+		if len(rows) == 0 || rows[0].Key != start {
+			t.Fatalf("the occurrences: %+v", rows)
+		}
+		for _, o := range rows {
+			if text(o.State) != "upcoming" || o.Revision == nil || *o.Revision != 1 {
+				t.Errorf("occurrence %s is %s of revision %v", o.Key, text(o.State), o.Revision)
+			}
+		}
+		if armed := deadlines(t, column); armed["open"] != millis(rows[0].OpensAt) || armed["remind"] != millis(rows[0].RemindAt) {
+			t.Errorf("armed %v", armed)
+		}
+		if _, again := call(t, manager, id, "set-recurrence", map[string]any{"anchor": "calendar", "rule": "FREQ=MONTHLY", "start": start}); again["unchanged"] != true {
+			t.Errorf("the same rule again: %v", again)
+		}
+		var before int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM filing`).Scan(&before); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.GetFilingRepository().CreateOne(as(staff), &orm.FilingCreate{Title: "Refused"}, monthly(start)); err == nil || !strings.Contains(err.Error(), "filings.manage") {
+			t.Errorf("a create without filings.manage: %v", err)
+		}
+		bad := monthly(start)
+		rule := "FREQ=SOMETIMES"
+		bad.Behaviors["recurrence"].(orm.FilingRecurrenceCreateParams).Recurrence.Rule = &rule
+		if _, err := db.GetFilingRepository().CreateOne(as(manager), &orm.FilingCreate{Title: "Refused"}, bad); err == nil || !strings.Contains(err.Error(), "recurrence/rule") {
+			t.Errorf("a create of a rule that is no RRULE: %v", err)
+		}
+		if _, err := db.GetFilingRepository().CreateOne(as(manager), &orm.FilingCreate{Title: "Refused"}, orm.CreateOptions{Behaviors: map[string]any{"timers": map[string]any{}}}); err == nil || !strings.Contains(err.Error(), "recurrence") {
+			t.Errorf("a create of a member no use has: %v", err)
+		}
+		var after int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM filing`).Scan(&after); err != nil || after != before {
+			t.Errorf("%d filings after the refused creates, %d before: %v", after, before, err)
+		}
+	})
+
+	t.Run("a holiday calendar whose weekend is Friday and Saturday moves a due date off Saturday to the Sunday", func(t *testing.T) {
+		// The gulf calendar's rows name its weekend (#729): a weekday and no
+		// date. Its Saturday closes and its Sunday is open, so a due date on
+		// a Saturday moves after to the Sunday, where the default weekend
+		// would move it to the Monday.
+		for _, weekday := range []string{"friday", "saturday"} {
+			day := weekday
+			if _, err := db.GetHolidayRepository().CreateOne(ctx, &orm.HolidayCreate{Calendar: "gulf", Weekday: day, Name: "Weekend"}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		at := time.Now().Add(40 * day)
+		for at.Weekday() != time.Saturday {
+			at = at.Add(day)
+		}
+		start := at.UTC().Format("2006-01-02") + "T09:00"
+		sunday, monday := at.Add(day).UTC().Format("2006-01-02")+"T09:00", at.Add(2*day).UTC().Format("2006-01-02")+"T09:00"
+		for calendar, want := range map[string]string{"gulf": sunday, "": monday} {
+			id, column := newFiling(t, "", calendar)
+			if status, body := call(t, manager, id, "set-recurrence", map[string]any{"anchor": "calendar", "rule": "FREQ=YEARLY", "start": start}); status != http.StatusOK {
+				t.Fatalf("set-recurrence: %d %v", status, body)
+			}
+			if first := occurrences(t, column)[0]; first.Key != start || text(first.Due) != want || text(first.Shifted) != "weekend" {
+				t.Errorf("calendar %q: the first occurrence: key %s, due %s, shifted %s; want due %s", calendar, first.Key, text(first.Due), text(first.Shifted), want)
+			}
+		}
+	})
+
+	t.Run("a write of a contract end date replans the relative recurrence of its filings with no call of the app", func(t *testing.T) {
+		// Sixty days before the contract ends. The contract's write is heard
+		// by a trigger of its table, which writes a change of each filing
+		// that names it on the filing's change queue (#626): the worker
+		// plans the filing again from the new date, with no setRecurrence.
+		date := func(days int) string { return time.Now().Add(time.Duration(days) * day).UTC().Format("2006-01-02") }
+		sixtyBefore := func(d string) string {
+			on, _ := time.Parse("2006-01-02", d)
+			return on.Add(-60*day).Format("2006-01-02") + "T00:00"
+		}
+		ends, err := dbtypes.ParseTemporalDate(date(120))
+		if err != nil {
+			t.Fatal(err)
+		}
+		contract, err := db.GetContractRepository().CreateOne(ctx, &orm.ContractCreate{Title: "Lease", EndsOn: ends})
+		if err != nil {
+			t.Fatal(err)
+		}
+		row, err := db.GetFilingRepository().CreateOne(ctx, &orm.FilingCreate{Title: "Renewal notice", Contract: contract})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, column := row.Id.String(), row.Id.ToUUID().String()
+		status, set := call(t, manager, id, "set-recurrence", map[string]any{"anchor": "relative", "offset": "-P60D"})
+		if status != http.StatusOK {
+			t.Fatalf("set-recurrence: %d %v", status, set)
+		}
+		if first := occurrences(t, column)[0]; first.Key != sixtyBefore(date(120)) {
+			t.Fatalf("the first occurrence: %s, want %s", first.Key, sixtyBefore(date(120)))
+		}
+		later, err := dbtypes.ParseTemporalDate(date(150))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.GetContractRepository().UpdateOne(ctx, *contract.Id, &orm.ContractUpdate{EndsOn: &later}); err != nil {
+			t.Fatal(err)
+		}
+		workUntil(t, func() bool {
+			rows := occurrences(t, column)
+			return len(rows) == 1 && rows[0].Key == sixtyBefore(date(150))
+		})
+		if _, again := call(t, manager, id, "set-recurrence", map[string]any{"anchor": "relative", "offset": "-P60D"}); again["unchanged"] != true || !reflect.DeepEqual(again["recurrence"], set["recurrence"]) {
+			t.Errorf("the recurrence after the replan: %v, set %v", again, set["recurrence"])
+		}
 	})
 }

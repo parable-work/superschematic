@@ -675,7 +675,7 @@ pub fn parse_filing_recurrence_occurrences(value: Value, unknown_fields: rt::Unk
 }
 
 /// The fields `Holiday` declares, by their wire names.
-pub const HOLIDAY_FIELDS: &[&str] = &["id", "calendar", "date", "name"];
+pub const HOLIDAY_FIELDS: &[&str] = &["id", "calendar", "date", "weekday", "name"];
 
 /// Validates a JSON value as `Holiday`. A null value passes; the errors
 /// are empty when the value is valid.
@@ -699,7 +699,13 @@ pub fn validate_holiday(value: &Value) -> ValidationErrors {
     }
     {
         let field = value.get("date");
-        errors.set_result("date", scalars::validate_temporal_date_required(field));
+        if !rt::is_absent(field) {
+            errors.set_result("date", scalars::validate_temporal_date(field));
+        }
+    }
+    {
+        let field = value.get("weekday");
+        rt::expect_string(&mut errors, "weekday", field);
     }
     {
         let field = value.get("name");

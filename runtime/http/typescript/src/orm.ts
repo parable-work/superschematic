@@ -1108,6 +1108,20 @@ export interface WriteOptions<Preconditions = Readonly<Record<string, unknown>>>
   readonly preconditions?: Preconditions;
 }
 
+/**
+ * What a create of one row through createOne takes beside its fields: each
+ * use's create parameters, by the use's member ({ recurrence: { recurrence:
+ * { anchor, rule, start } } }), which the behaviors' core checks and each
+ * use's initializer runs in the create's command, so the row is inserted
+ * with what they set, in one transaction and one version (#729). The
+ * generated orm.ts types them per table (<Type>CreateBehaviors), a member
+ * for each use whose behavior declares create parameters; a table that
+ * composes no behaviors refuses them.
+ */
+export interface CreateOptions<Behaviors = Readonly<Record<string, unknown>>> {
+  readonly behaviors?: Behaviors;
+}
+
 /** The repository of a table. */
 export interface Repository<
   Row,
@@ -1121,9 +1135,10 @@ export interface Repository<
   PageKey,
   Relations = unknown,
   Preconditions = Readonly<Record<string, unknown>>,
+  CreateBehaviors = Readonly<Record<string, unknown>>,
 > extends ReadRepository<Row, Filter, OrderField, SortField, Key, PageKey, Relations> {
-  /** Inserts a row; an optional member left unset takes its column's default. */
-  createOne(input: Create): Promise<Row>;
+  /** Inserts a row; an optional member left unset takes its column's default. options.behaviors are a behavior table's create parameters, by use member (#729). */
+  createOne(input: Create, options?: CreateOptions<CreateBehaviors>): Promise<Row>;
   /** Inserts the rows in one statement, DEFAULT for each column a row leaves unset that another sets. */
   createMany(inputs: readonly Create[]): Promise<Row[]>;
   /** Sets the members update sets, null setting a column NULL, on the live row whose key is id; NotFoundError when there is none. options.preconditions are a behavior table's (D104). */
@@ -1253,7 +1268,8 @@ export interface SoftDeleteRepository<
   PageKey,
   Relations = unknown,
   Preconditions = Readonly<Record<string, unknown>>,
-> extends Repository<Row, Create, Update, Filter, OrderField, SortField, UniqueKey, Key, PageKey, Relations, Preconditions> {
+  CreateBehaviors = Readonly<Record<string, unknown>>,
+> extends Repository<Row, Create, Update, Filter, OrderField, SortField, UniqueKey, Key, PageKey, Relations, Preconditions, CreateBehaviors> {
   /** Removes the row whose key is id, deleted or not; NotFoundError when there is none. */
   hardDeleteOne(id: Key): Promise<void>;
 }
@@ -1272,7 +1288,7 @@ export interface PlainRepository<Row = Record<string, unknown>> {
   findOne(filter: Readonly<Record<string, unknown>> | null | undefined, options?: Readonly<Record<string, unknown>>): Promise<Row | null>;
   findMany(filter: Readonly<Record<string, unknown>> | null | undefined, options?: Readonly<Record<string, unknown>>): Promise<{ rows: Row[]; total?: number }>;
   findPage(filter: Readonly<Record<string, unknown>> | null | undefined, options?: Readonly<Record<string, unknown>>): Promise<RowPage<Row, unknown>>;
-  createOne(input: Readonly<Record<string, unknown>>): Promise<Row>;
+  createOne(input: Readonly<Record<string, unknown>>, options?: CreateOptions): Promise<Row>;
   createMany(inputs: readonly Readonly<Record<string, unknown>>[]): Promise<Row[]>;
   updateOne(id: unknown, update: Readonly<Record<string, unknown>>, options?: WriteOptions): Promise<Row>;
   updateMany(filter: Readonly<Record<string, unknown>> | null, update: Readonly<Record<string, unknown>>): Promise<number>;
@@ -2466,12 +2482,15 @@ class TableRepository implements PlainRepository<Values> {
     return { columns, placeholders };
   }
 
-  async createOne(input: Values): Promise<Values> {
+  async createOne(input: Values, options?: CreateOptions): Promise<Values> {
     if (this.behaviors) {
-      const created = await this.atomically(repo => repo.createThroughCore(input));
+      const params = this.createParams(options?.behaviors);
+      const created = await this.atomically(repo => repo.createThroughCore(input, params));
       await this.requireCreatedReach(created);
       return created;
     }
+    const given = Object.keys(options?.behaviors ?? {});
+    if (given.length > 0) throw new Error(`orm: createOne of ${this.def.name} gives behaviors ${given.join(', ')}, and ${this.def.name} composes none (#729)`);
     const args: unknown[] = [];
     const { columns, placeholders } = this.insertOne(this.sealed(this.stamped(input), 'create'), args);
     const s = this.def.statements;
@@ -3493,13 +3512,31 @@ class TableRepository implements PlainRepository<Values> {
     return this.keyColumn().uuid ? uuidFromDb(id) : String(id);
   }
 
-  /** createOne through the core, in a transaction (this repository's). */
-  private async createThroughCore(input: Values): Promise<Values> {
+  /** createOne through the core, in a transaction (this repository's), with each use's create parameters by use id. */
+  private async createThroughCore(input: Values, params?: Readonly<Record<string, unknown>>): Promise<Values> {
     const stamped = this.sealed(this.stamped(input), 'create');
     const keyed = stamped[this.def.key];
     const id = keyed === undefined || keyed === null || keyed === '' ? undefined : this.wireKey(keyed);
-    const key = await runCreate(this.rulesHost(), this.def.name, this.coreOwn(stamped), this.caller(), { id, ownColumns: this.createColumns(stamped) });
+    const key = await runCreate(this.rulesHost(), this.def.name, this.coreOwn(stamped), this.caller(), { id, ownColumns: this.createColumns(stamped), params });
     return this.getOne(key);
+  }
+
+  /**
+   * A create's behaviors (#729), by use member, as the core's command takes
+   * them, by use id: a member no use of the table has throws, and the core
+   * refuses an entry of a use whose behavior takes no create parameters.
+   */
+  private createParams(behaviors: Readonly<Record<string, unknown>> | undefined): Readonly<Record<string, unknown>> | undefined {
+    if (behaviors === undefined) return undefined;
+    const uses = this.behaviors?.uses ?? [];
+    const params: Record<string, unknown> = {};
+    for (const [member, entry] of Object.entries(behaviors)) {
+      if (entry === undefined) continue;
+      const use = uses.find(each => (each.member ?? each.id) === member);
+      if (!use) throw new Error(`orm: createOne of ${this.def.name} gives behaviors.${member}, and no behavior of ${this.def.name} sits under ${member} (its members: ${uses.map(each => each.member ?? each.id).join(', ')})`);
+      params[use.id] = entry;
+    }
+    return params;
   }
 
   /** updateOne through the core, in a transaction (this repository's), presenting the caller's preconditions. */

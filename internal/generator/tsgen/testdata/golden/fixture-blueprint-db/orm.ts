@@ -281,6 +281,12 @@ export interface JobRelations {
   readonly batch: Related<BatchRow, BatchRelations, 'one'>;
 }
 
+/** What a create of Job gives its behaviors (#729): each use's create parameters by its member, which the behaviors' core checks and each use's initializer runs in the create's command. createOne takes it in its options ({ behaviors }). */
+export interface JobCreateBehaviors {
+  /** The create parameters of the Dependencies Job implements. */
+  readonly dependencies?: { blockers?: Array<{ id: string; schema?: 'Job' }> };
+}
+
 /** The behaviors of Job (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes. */
 export interface JobUses {
   /** The operations of Dependencies, which Job implements. */
@@ -332,7 +338,9 @@ export type JobRepository = WithoutUpserts<Repository<
   JobUniqueKey,
   T.IdentityUUID,
   JobPageKey,
-  JobRelations
+  JobRelations,
+  Readonly<Record<string, unknown>>,
+  JobCreateBehaviors
 >> & JobUses;
 
 /** The job table, as the runtime reads and writes it. */

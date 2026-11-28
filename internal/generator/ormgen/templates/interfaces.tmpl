@@ -78,7 +78,7 @@ type {{ .TypeName }}RepositoryInterface interface {
 	FindMany(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}FindOptions) ([]*types.{{ .TypeName }}, int, error)
 	FindPage(ctx context.Context, filter *{{ .TypeName }}Filter, opts *{{ .TypeName }}PageOptions) (*{{ .TypeName }}Page, error)
 	{{- if not .Released }}
-	CreateOne(ctx context.Context, input *{{ .CreateInput }}) (*types.{{ .TypeName }}, error)
+	CreateOne(ctx context.Context, input *{{ .CreateInput }}{{ if .CreateBehaviors }}, opts ...CreateOptions{{ end }}) (*types.{{ .TypeName }}, error)
 	CreateMany(ctx context.Context, inputs []*{{ .CreateInput }}) ([]*types.{{ .TypeName }}, error)
 	{{- if not .NoUpsert }}
 	UpsertOne(ctx context.Context, input *{{ .CreateInput }}, on {{ .TypeName }}UniqueKey, update *{{ .TypeName }}Update) (*types.{{ .TypeName }}, error)
@@ -413,7 +413,7 @@ func (r *NoOp{{ .Name }}) FindPage(_ context.Context, _ *{{ .TypeName }}Filter, 
 {{- if not .Released }}
 {{- if .HasBehaviors }}
 
-func (r *NoOp{{ .Name }}) CreateOne(_ context.Context, input *{{ .TypeName }}Create) (*types.{{ .TypeName }}, error) {
+func (r *NoOp{{ .Name }}) CreateOne(_ context.Context, input *{{ .TypeName }}Create{{ if .CreateBehaviors }}, _ ...CreateOptions{{ end }}) (*types.{{ .TypeName }}, error) {
 	return input.row(), nil
 }
 

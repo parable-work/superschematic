@@ -29,7 +29,7 @@ use api::behaviors::{
 use api::database_types::orm::postgres::Repositories;
 use api::runtime::orm::calendar::{read_calendar, CalendarOptions, CalendarRead};
 use api::runtime::orm::postgres::{deadpool_postgres, tokio_postgres};
-use api::runtime::orm::{Error, Values};
+use api::runtime::orm::{Caller, CreateOptions, Error, Values};
 use api::runtime::postgres::Pool;
 use api::runtime::worker::{run_worker, Options};
 use api::runtime::{bearer_token, ApiError, Authenticator, Principal, Shutdown};
@@ -588,5 +588,107 @@ async fn recurrence_on_postgres() {
         app.work_until(async || app.occurrences(&id).await[0].shifted.as_deref() == Some("holiday")).await;
     }
 
+    case("a recurrence given at create is set in the create, its occurrences planned and its deadlines armed, and held to filings.manage");
+    {
+        // The create gives the Recurrence Filing implements its recurrence,
+        // by its member (#729): the row is inserted with it, in one command.
+        let start = london_day(30);
+        let monthly = |rule: &str| CreateOptions { behaviors: values(json!({ "recurrence": { "recurrence": { "anchor": "calendar", "rule": rule, "start": start } } })) };
+        let created = app.create_as(&manager_id, &["filings.manage", "filings.work"], json!({ "title": "Given at create" }), &monthly("FREQ=MONTHLY")).await.unwrap();
+        let id = created["id"].as_str().unwrap().to_owned();
+        let rows = app.occurrences(&id).await;
+        assert_eq!(rows[0].key, start);
+        assert!(rows.iter().all(|row| row.state == "upcoming" && row.revision == 1), "{rows:?}");
+        let armed = app.deadlines(&id).await;
+        assert_eq!((armed.get("open"), armed.get("remind")), (rows[0].opens_at.as_ref(), rows[0].remind_at.as_ref()));
+        let (_, again) = app.call(&manager, &id, "set-recurrence", json!({ "anchor": "calendar", "rule": "FREQ=MONTHLY", "start": start })).await;
+        assert_eq!(again["unchanged"], json!(true), "{again}");
+        let count = || async { app.pool.get().await.unwrap().query_one("SELECT count(*) FROM filing", &[]).await.unwrap().get::<_, i64>(0) };
+        let before = count().await;
+        let refused = app.create_as(&worker_id, &["filings.work"], json!({ "title": "Refused" }), &monthly("FREQ=MONTHLY")).await;
+        assert!(format!("{refused:?}").contains("filings.manage"), "{refused:?}");
+        let refused = app.create_as(&manager_id, &["filings.manage", "filings.work"], json!({ "title": "Refused" }), &monthly("FREQ=SOMETIMES")).await;
+        assert!(format!("{refused:?}").contains("recurrence/rule"), "{refused:?}");
+        let refused = app.create_as(&manager_id, &["filings.manage"], json!({ "title": "Refused" }), &CreateOptions { behaviors: values(json!({ "timers": {} })) }).await;
+        assert!(matches!(refused, Err(Error::Invalid(_))), "{refused:?}");
+        assert_eq!(count().await, before);
+    }
+
+    case("a holiday calendar whose weekend is Friday and Saturday moves a due date off Saturday to the Sunday");
+    {
+        // The gulf calendar's rows name its weekend (#729): a weekday and no
+        // date. Its Saturday closes and its Sunday is open, so a due date on
+        // a Saturday moves after to the Sunday, where the default weekend
+        // would move it to the Monday.
+        for weekday in ["friday", "saturday"] {
+            app.create("Holiday", json!({ "calendar": "gulf", "weekday": weekday, "name": "Weekend" })).await;
+        }
+        // 1970-01-01 was a Thursday: day n is a Saturday when (n + 4) % 7 == 6.
+        let mut day = now_millis() / DAY + 40;
+        while (day + 4) % 7 != 6 {
+            day += 1;
+        }
+        let start = format!("{}T09:00", date(day * DAY));
+        let (sunday, monday) = (format!("{}T09:00", date((day + 1) * DAY)), format!("{}T09:00", date((day + 2) * DAY)));
+        for (calendar, want) in [("gulf", sunday), ("", monday)] {
+            let id = app.new_filing(json!({ "holidayCalendar": calendar })).await;
+            let (status, _) = app.call(&manager, &id, "set-recurrence", json!({ "anchor": "calendar", "rule": "FREQ=YEARLY", "start": start })).await;
+            assert_eq!(status, 200);
+            let first = &app.occurrences(&id).await[0];
+            assert_eq!((first.key.as_str(), first.due.as_deref(), first.shifted.as_deref()), (start.as_str(), Some(want.as_str()), Some("weekend")), "calendar {calendar:?}");
+        }
+    }
+
+    case("a write of a contract end date replans the relative recurrence of its filings with no call of the app");
+    {
+        // Sixty days before the contract ends. The contract's write is heard
+        // by a trigger of its table, which writes a change of each filing
+        // that names it on the filing's change queue (#626): the worker
+        // plans the filing again from the new date, with no setRecurrence.
+        let today = now_millis() / DAY;
+        let sixty_before = |days: i64| format!("{}T00:00", date((today + days - 60) * DAY));
+        let contract = app.create("Contract", json!({ "title": "Lease", "endsOn": date((today + 120) * DAY) })).await;
+        let id = app.new_filing(json!({ "contractId": contract })).await;
+        let (status, set) = app.call(&manager, &id, "set-recurrence", json!({ "anchor": "relative", "offset": "-P60D" })).await;
+        assert_eq!(status, 200, "{set}");
+        assert_eq!(app.occurrences(&id).await[0].key, sixty_before(120));
+        {
+            let mut client = app.pool.get().await.unwrap();
+            let tx = client.transaction().await.unwrap();
+            {
+                let repos = Repositories::new(&tx).unwrap();
+                let key = Value::String(contract.clone());
+                repos.untyped().table("Contract").unwrap().update_one(&key, &values(json!({ "endsOn": date((today + 150) * DAY) })), &Default::default()).await.unwrap();
+            }
+            tx.commit().await.unwrap();
+        }
+        app.work_until(async || {
+            let rows = app.occurrences(&id).await;
+            rows.len() == 1 && rows[0].key == sixty_before(150)
+        })
+        .await;
+        let (_, again) = app.call(&manager, &id, "set-recurrence", json!({ "anchor": "relative", "offset": "-P60D" })).await;
+        assert_eq!((&again["unchanged"], &again["recurrence"]), (&json!(true), &set["recurrence"]), "{again}");
+    }
+
     app.drop_schema().await;
+}
+
+impl App {
+    /// Creates a filing through the repositories as a caller of the
+    /// behaviors' core who holds permissions, in a transaction of its own,
+    /// with the create's options: the row, or the refusal.
+    async fn create_as(&self, subject: &str, permissions: &[&str], row: Value, options: &CreateOptions) -> Result<Values, Error> {
+        let mut client = self.pool.get().await.unwrap();
+        let tx = client.transaction().await.unwrap();
+        let caller = Caller { subject: subject.to_owned(), permissions: permissions.iter().map(|p| (*p).to_owned()).collect(), ..Caller::default() };
+        let created = {
+            let repos = Repositories::new(&tx).unwrap().with_caller(caller);
+            repos.untyped().table("Filing").unwrap().create_one_with(&values(row), options).await
+        };
+        if created.is_ok() {
+            tx.commit().await.unwrap();
+        }
+        created
+    }
 }

@@ -1402,6 +1402,21 @@ function rowList(table: RulesTable): string {
   return [...selected.map((column, i) => `${quote(column.column)} AS c${i}`), `${version} AS v`].join(', ');
 }
 
+/**
+ * The sets that move a row's version on with a write, the core's own: none
+ * for a table the layout holds read-only (D152), which composes no behavior
+ * and has no version column, whose repository's write runs through the core
+ * all the same and writes its own fields alone.
+ */
+function versionMoves(table: RulesTable): string[] {
+  return table.version === '' ? [] : [`${quote(table.version)} = ${quote(table.version)} + 1`];
+}
+
+/** The condition a write holds a row's version to, bound by bind; none for a table the layout holds read-only (D152). */
+function versionHeld(table: RulesTable, bind: () => string): string {
+  return table.version === '' ? '' : ` AND ${quote(table.version)} = ${bind()}`;
+}
+
 /** The columns a row read holds among a row's own fields: the own columns, then the audit columns (D104). */
 function ownRead(table: RulesTable): readonly RulesColumn[] {
   return table.audit === undefined || table.audit.length === 0 ? table.own : [...table.own, ...table.audit];
@@ -2060,9 +2075,11 @@ function fencesOf(host: RulesHost, reads: readonly CoreAnswered[]): RulesStateme
     if (table === undefined) continue;
     if (request.kind === 'row' && 'row' in answer) {
       const row = answer.row;
-      const at = row === null ? '' : ` AND ${quote(table.version)} = ${placeholder(dialect, 2)}`;
+      // A table the layout holds read-only (D152) has no version column: its row is held by its key.
+      const versioned = row !== null && table.version !== '';
+      const at = versioned ? ` AND ${quote(table.version)} = ${placeholder(dialect, 2)}` : '';
       const found = `SELECT 1 FROM ${quote(table.table)} WHERE ${quote(table.key.column)} = ${placeholder(dialect, 1)}${at}${live(table)}`;
-      fences.push({ text: `${row === null ? 'NOT ' : ''}EXISTS (${found})`, values: row === null ? [keyValue(table, request.key)] : [keyValue(table, request.key), row.version], check: true });
+      fences.push({ text: `${row === null ? 'NOT ' : ''}EXISTS (${found})`, values: versioned ? [keyValue(table, request.key), row.version] : [keyValue(table, request.key)], check: true });
     } else if (request.kind === 'hasRows' && 'hasRows' in answer) {
       const any = `SELECT 1 FROM ${quote(table.table)}${table.live ? ` WHERE ${quote(table.live.column)} IS NULL` : ''}`;
       fences.push({ text: `${answer.hasRows ? '' : 'NOT '}EXISTS (${any})`, values: [], check: true });
@@ -2178,8 +2195,8 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
         if (mine) for (const column of options.nowColumns ?? []) sets.push(`${quote(column)} = ${stampNow(dialect)}`);
         // The version moves on with every write, the core's own: on
         // Postgres @optimistic's trigger sets it to the same value.
-        sets.push(`${quote(table.version)} = ${quote(table.version)} + 1`);
-        const where = `${quote(table.key.column)} = ${bind(keyValue(table, write.key))} AND ${quote(table.version)} = ${bind(write.expectedVersion)}${live(table)}`;
+        sets.push(...versionMoves(table));
+        const where = `${quote(table.key.column)} = ${bind(keyValue(table, write.key))}${versionHeld(table, () => bind(write.expectedVersion))}${live(table)}`;
         statements.push({ text: `UPDATE ${quote(table.table)} SET ${sets.join(', ')} WHERE ${where}`, values, expect: 1 });
         break;
       }
@@ -2188,12 +2205,12 @@ async function statementsOf(host: RulesHost, type: string, command: CoreCommand,
         deleted.set(rowId(write.type, write.key), { table, key: write.key, soft: soft !== undefined });
         if (soft !== undefined) {
           const sets = Object.entries(soft).map(([column, value]) => `${quote(column)} = ${bind(value)}`);
-          sets.push(`${quote(table.version)} = ${quote(table.version)} + 1`);
-          const where = `${quote(table.key.column)} = ${bind(keyValue(table, write.key))} AND ${quote(table.version)} = ${bind(write.expectedVersion)}${live(table)}`;
+          sets.push(...versionMoves(table));
+          const where = `${quote(table.key.column)} = ${bind(keyValue(table, write.key))}${versionHeld(table, () => bind(write.expectedVersion))}${live(table)}`;
           statements.push({ text: `UPDATE ${quote(table.table)} SET ${sets.join(', ')} WHERE ${where}`, values, expect: 1 });
           break;
         }
-        const where = `${quote(table.key.column)} = ${bind(keyValue(table, write.key))} AND ${quote(table.version)} = ${bind(write.expectedVersion)}${live(table)}`;
+        const where = `${quote(table.key.column)} = ${bind(keyValue(table, write.key))}${versionHeld(table, () => bind(write.expectedVersion))}${live(table)}`;
         statements.push({ text: `DELETE FROM ${quote(table.table)} WHERE ${where}`, values, expect: 1 });
         break;
       }

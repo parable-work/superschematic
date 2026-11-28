@@ -374,6 +374,9 @@ type ormBehaviors struct {
 	// answer names one of its rows (the layout's answersRow), which the
 	// runtime keeps to the caller (D156).
 	Answers []ormAnsweredRow `json:"answers,omitempty"`
+	// Creates are the uses whose behavior takes create parameters (#729),
+	// by the member a create's behaviors name them by: their use ids.
+	Creates map[string]string `json:"creates,omitempty"`
 }
 
 // ormAnsweredRow is an operation of the table as a whole whose answer
@@ -622,6 +625,16 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 				// insert.
 				if len(use.Tables) > 0 || len(use.Shared) > 0 || registry.TableCreatesRows(use.Behavior) {
 					behaviors.NoUpsert = true
+				}
+				if declaration, ok := registryBehavior(opts.Registry, use.Behavior); ok && len(declaration.CreateParamsSchema) > 0 {
+					member := use.Member
+					if member == "" {
+						member = use.ID
+					}
+					if behaviors.Creates == nil {
+						behaviors.Creates = map[string]string{}
+					}
+					behaviors.Creates[member] = use.ID
 				}
 				for _, op := range use.Operations {
 					if op.AnswersRow != "" {
@@ -1176,4 +1189,13 @@ func checkOperationNames(output *ModuleOutput) error {
 		}
 	}
 	return nil
+}
+
+// registryBehavior is the declaration reg registers as name; false with no
+// registry or no such behavior.
+func registryBehavior(reg *registry.Registry, name string) (registry.Behavior, bool) {
+	if reg == nil {
+		return registry.Behavior{}, false
+	}
+	return reg.Behavior(name)
 }
