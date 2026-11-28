@@ -98,6 +98,7 @@ var accessCases = []string{
 	"a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused",
 	"a private row never appears to another user in a list, a read or a search",
 	"a named row is visible to its owner and to the principals it names",
+	"a member of a nested team sees a row named for the outer team, and stops seeing it once removed",
 	"a document inherits its folder's audience, and follows it when the folder's changes",
 	"an agent run sees what whom it acts for sees, and writes no read-only row",
 	"a row rule follows a path through the table's relations",

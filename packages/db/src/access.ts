@@ -101,6 +101,39 @@ export function accessLog(): ClassDecorator {
   return () => {};
 }
 
+/**
+ * Marks the table whose rows are teams (#735): principals an @audience row's
+ * audienceNamed may name by their ids, as it names users, so a row named for
+ * a team is visible to each of its members. The membership is the class
+ * marked @teamMembers.
+ *
+ * ```ts
+ * @team()
+ * export abstract class Team { ... }
+ * ```
+ */
+export function team(): ClassDecorator {
+  return () => {};
+}
+
+/**
+ * Marks the class that is the membership of the @team table's teams (#735).
+ * The build fills its fields: the team, the member (a user's id, or another
+ * team's, which nests that team in this one) and when the member joined.
+ * Teams nest: a caller's ids are its own and those of every team it belongs
+ * to, directly or through another team, which the authenticator reads on
+ * every call, so a member removed from a team sees its rows no more at the
+ * next call. A cycle in the membership ends the read.
+ *
+ * ```ts
+ * @teamMembers()
+ * export abstract class TeamMember {}
+ * ```
+ */
+export function teamMembers(): ClassDecorator {
+  return () => {};
+}
+
 /** The options of @calendarSource (D152). */
 export interface CalendarSourceOptions<T> {
   /** The source's name, which a calendar read's sources and a feed's scope name; the table's name, with its first letter lowered, unless set (and the field's, or occurrences, after a dot when the table has more than one source). */

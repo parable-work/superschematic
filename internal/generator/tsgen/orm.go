@@ -217,8 +217,12 @@ type ORMTable struct {
 	// them (D156); nil for a table or view no audience holds.
 	Audience *sqlutil.AudienceModel
 	// Access is what the table is to the runtime's per-record access
-	// (sqlutil.TableModel.Access, D156): grants, log or roles.
+	// (sqlutil.TableModel.Access, D156): grants, log, roles or teamMembers.
 	Access string
+	// Teams is the @teamMembers table's statement that reads the teams
+	// ids are members of, through every nesting (#735, sqlutil.TeamsSQL);
+	// empty for every other table.
+	Teams string
 
 	// Calendar are the table's @calendarSource declarations (D152), which
 	// the runtime's calendar read and feed merge; nil for a table with none.
@@ -634,6 +638,11 @@ func typeScriptORM(schema *ir.Schema, opts Options, output *ModuleOutput, projec
 			}
 			if td.Conversations != nil {
 				table.Conversations = td.Conversations.Part
+			}
+			if td.TeamMembers != nil {
+				if table.Teams, err = sqlutil.TeamsSQL(*t); err != nil {
+					return nil, err
+				}
 			}
 		}
 		if t.Search {

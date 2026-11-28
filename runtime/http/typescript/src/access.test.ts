@@ -34,6 +34,17 @@ describe('the audience predicate (D156)', () => {
     expect(audienceConditions(definition, caller, [], 0, true)[0]).toEndWith(`"doc"."effective_agents" = 'followRole'`);
   });
 
+  test('admits a caller through the teams it belongs to (#735)', () => {
+    const TEAM = '00000000-0000-4000-8000-0000000000c1';
+    const OUTER = '00000000-0000-4000-8000-0000000000c2';
+    const caller = accessCallerOf({ subject: OWNER, teams: [TEAM, OUTER] });
+    const args: unknown[] = [];
+    expect(audienceConditions(definition, caller, args, 0)).toEqual([
+      '("doc"."effective_audience" IS NULL OR "doc"."effective_audience" && ARRAY[$1, $2, $3]::uuid[])',
+    ]);
+    expect(args).toEqual([OWNER, TEAM, OUTER]);
+  });
+
   test("holds a projection to its source's rows", () => {
     const probe = { ...definition, probe: '"doc_view"."id" IN (SELECT "doc"."id" FROM "doc"%s)' };
     expect(audienceConditions(probe, accessCallerOf(null), [], 0)).toEqual(['"doc_view"."id" IN (SELECT "doc"."id" FROM "doc" WHERE "doc"."effective_audience" IS NULL)']);

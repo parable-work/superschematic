@@ -43,6 +43,7 @@ func checkAccess(schema *ir.Schema, in Input, r *Result) {
 	}
 	checkAccessTable(schema, in, "@accessGrants", func(td *ir.TypeDef) bool { return td.AccessGrants != nil }, r)
 	checkAccessTable(schema, in, "@accessLog", func(td *ir.TypeDef) bool { return td.AccessLog != nil }, r)
+	checkTeams(schema, in, r)
 	for _, name := range sortedTypeNames(schema.Types) {
 		td := schema.Types[name]
 		if td == nil || td.Projection == nil {

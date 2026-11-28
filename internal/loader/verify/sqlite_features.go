@@ -29,6 +29,10 @@ var sqliteReaders = map[string][]string{
 	"@attachments":  {registry.LangTypeScript, registry.LangGo, registry.LangRust},
 	"@accessGrants": {registry.LangTypeScript, registry.LangGo, registry.LangRust},
 	"@accessLog":    {registry.LangTypeScript, registry.LangGo, registry.LangRust},
+	// A caller's teams on SQLite (#735): each ORM's read of them, and its
+	// audience's condition over the caller's ids.
+	"@team":        {registry.LangTypeScript, registry.LangGo, registry.LangRust},
+	"@teamMembers": {registry.LangTypeScript, registry.LangGo, registry.LangRust},
 	// The search index on SQLite (D186): its triggers keep a row's index
 	// row whichever ORM writes it, and the TypeScript runtime, the Go
 	// schema runtime's crosstable and the Rust runtime's

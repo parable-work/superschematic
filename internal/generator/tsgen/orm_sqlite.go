@@ -87,6 +87,13 @@ func sqliteORMTable(t *sqlutil.TableModel, table ORMTable) (ORMTable, string) {
 		audience.Probe = ""
 		out.Audience = &audience
 	}
+	if table.Teams != "" {
+		teams, err := sqlutil.SQLiteTeamsSQL(*t)
+		if err != nil {
+			return ORMTable{}, err.Error()
+		}
+		out.Teams = teams
+	}
 	if table.Searchable != "" {
 		searchable, err := sqliteSearchable(table.Searchable)
 		if err != nil {

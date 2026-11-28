@@ -292,6 +292,12 @@ type TypeDef struct {
 	AccessGrants *AccessGrantsDef `json:"accessGrants,omitempty" yaml:"accessGrants,omitempty"`
 	AccessLog    *AccessLogDef    `json:"accessLog,omitempty" yaml:"accessLog,omitempty"`
 
+	// Team marks the DB table whose rows are teams an audience may name
+	// (#735), and TeamMembers the class that is their membership, whose
+	// fields the loader fills. Nil for every other type.
+	Team        *TeamDef        `json:"team,omitempty" yaml:"team,omitempty"`
+	TeamMembers *TeamMembersDef `json:"teamMembers,omitempty" yaml:"teamMembers,omitempty"`
+
 	// RowReferences is the @references declaration of a DB table (D154):
 	// the rows each row points at, in a sub-table the loader adds. Nil for
 	// every other type. See [RowReferencesDef].

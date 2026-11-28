@@ -47,6 +47,13 @@ export interface Principal {
    */
   readonly grants?: readonly GrantReach[];
   /**
+   * The teams the principal belongs to (#735), directly or through another
+   * team, by their ids, which teamAuthenticator reads on every call: an
+   * audience that names one of them admits the principal. Absent for a
+   * principal in no team, and where the database has no @teamMembers table.
+   */
+  readonly teams?: readonly string[];
+  /**
    * The credential the call came with, for the access log (D114, D156): an
    * API key's, a grant's or an OAuth grant's id (#695); absent for a
    * session.

@@ -100,7 +100,7 @@ func mayBeJSONShape(td *ir.TypeDef) bool {
 	}
 	if td.Source != nil || td.VersionedConfig != nil || td.VersionGraph != nil || td.GraphMember != nil ||
 		td.User != nil || td.UserRole != nil || td.IdempotencyKeys != nil || td.BehaviorTable != nil || td.BehaviorQueue != nil ||
-		td.Projection != nil || td.Queue != nil || td.Audience != nil || td.AccessGrants != nil || td.AccessLog != nil ||
+		td.Projection != nil || td.Queue != nil || td.Audience != nil || td.AccessGrants != nil || td.AccessLog != nil || td.Team != nil || td.TeamMembers != nil ||
 		td.RowReferences != nil || td.Attachments != nil || td.RowTable != nil || td.Notifier != nil ||
 		td.ChannelIdentities != nil || td.Agents != nil || td.Party != nil || td.Conversations != nil ||
 		td.RunRequests != nil || td.Searchable != nil || td.Query != nil {

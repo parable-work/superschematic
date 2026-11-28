@@ -146,6 +146,11 @@ type DepsRoutes struct {
 	// the router records each call the log records there (accessLogOf).
 	AccessLog bool
 
+	// Teams is set for a database with a @teamMembers table (#735): the
+	// router's authenticator puts a caller's teams on its principal on
+	// every call, through teamAuthenticator around the others.
+	Teams bool
+
 	// Files is set for a database with an @attachments table (D154): with
 	// a files slot among the API's providers, runtime.ts exports
 	// processPendingFiles, the file processor's pass over what the
@@ -335,6 +340,8 @@ func (o *APIOutput) checkRuntimeDeps(deps DepsInfo) error {
 		piece = "search across tables (D155)"
 	case deps.Routes.Grants || deps.Routes.AccessLog:
 		piece = "the grants and the access log (D156)"
+	case deps.Routes.Teams:
+		piece = "the teams (#735)"
 	case deps.Routes.Files && deps.Providers != nil:
 		piece = "the file processor (D159)"
 	default:

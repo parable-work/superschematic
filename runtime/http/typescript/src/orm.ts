@@ -468,9 +468,16 @@ export interface TableDefinition {
   readonly audience?: AudienceDefinition;
   /**
    * What the table is to per-record access (D156): the table of grants,
-   * the access log, or the UserRole table whose rows a grant's role names.
+   * the access log, or the UserRole table whose rows a grant's role names;
+   * or the membership of the @team table's teams (#735).
    */
-  readonly access?: 'grants' | 'log' | 'roles';
+  readonly access?: 'grants' | 'log' | 'roles' | 'teamMembers';
+  /**
+   * On the @teamMembers table (#735), the statement that reads the teams
+   * the ids of its one parameter are members of, through every nesting
+   * (sqlutil's TeamsSQL), which teamAuthenticator runs.
+   */
+  readonly teams?: string;
   /** The table's @calendarSource declarations (D152), which the calendar read and feed merge; absent for a table with none. */
   readonly calendar?: readonly CalendarSourceDefinition[];
   /** A @searchable table's index (D155), which the search across tables ranks and indexSearch builds; absent for a table that is not @searchable. */
@@ -552,7 +559,9 @@ export class AccessRefusedError extends Error {
 export function audienceConditions(definition: AudienceDefinition, caller: AccessCaller, args: unknown[], offset: number, write = false): string[] {
   let n = offset;
   const ids: string[] = [];
-  for (const subject of [caller.subject, caller.kind === 'agent' ? caller.actingFor?.subject : undefined]) {
+  // The caller's ids: its own, whom an agent run acts for, and the teams it
+  // belongs to, directly or through another team (#735).
+  for (const subject of [caller.subject, caller.kind === 'agent' ? caller.actingFor?.subject : undefined, ...(caller.teams ?? [])]) {
     const value = subject === undefined ? undefined : uuidValue(subject);
     if (value !== undefined) ids.push(uuidToDb(subject!));
   }
