@@ -97,18 +97,30 @@ one provider.
 
 ## Use providers in an API
 
-The API's config lists the packages it may use, each a directory
-relative to the service's directory:
+The API's config lists the packages it may use, each by its directory
+relative to the service's directory or by its npm name:
 
 ```ts
 export default defineConfig({
   name: "notes-api",
   kind: SchemaKind.API,
   dependencies: [NotesDb],
-  providers: ["../../../providers/sms-relay-a", "../../../providers/sms-relay-b"],
+  providers: ["../../../providers/sms-relay-a", "@example-providers/sms-relay-b"],
   outputs: { /* ... */ },
 });
 ```
+
+An entry that starts with `.` or `/` is a directory, and it starts with
+`./` or `../`. Any other entry is a package's npm name, which resolves as
+Node.js resolves it: from the first `node_modules` in the service's
+directory or one above it that holds the package. The build refuses a
+package no `node_modules` holds, naming each place it looked, and one
+whose `package.json` gives another name.
+
+A change to a listed package's manifest (its `package.json`, `Cargo.toml`,
+`superschematic.json` or `go.mod`) rebuilds the APIs that list it and the
+stacks that deploy them, and `.deps.json` lists each provider package
+with an edge from the API package that links it.
 
 Its `@envVars` class names a slot per provider it uses with `@providers`.
 A slot is a string field whose value, in each environment, names the
@@ -134,7 +146,12 @@ implements.
 ## Choose a provider per environment
 
 A stack binds a slot as it binds any field, in the deployable's `env`.
-`stack secrets set` enters the secret settings:
+`stack secrets set` enters the secret settings of the provider each slot
+names. A secret setting that no named provider reads, of a slot the
+environment leaves unset or of a provider it does not name, is no secret
+of that environment: `stack secrets set` does not ask for it, and a
+deploy does not wait on it. A required `Secret<T>` field stays a secret
+of every environment, since the config needs it at start.
 
 ```ts
 @environment({ target: "local", settings: [{ of: NotesApi, env: { SMS: "sms-relay-a", SMS_URL: "http://127.0.0.1:4310" } }] })
