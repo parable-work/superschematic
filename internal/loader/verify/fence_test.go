@@ -289,13 +289,6 @@ func TestFenceRefusesAQueueClass(t *testing.T) {
 	wantFenceErrors(t, schema, in, "@fenced on Job: Job is a @queue class, whose rows are messages the queue's clients write with statements of their own, which advance no fence; declare the fence on a table")
 }
 
-// A DB service's engine type has no table for a trigger to watch.
-func TestFenceRefusesAnEngineType(t *testing.T) {
-	schema, in := fenceSchema()
-	jobOf(schema).Behaviors = []ir.BehaviorRef{{Name: "Workflow"}}
-	wantFenceErrors(t, schema, in, "@fenced on Job: Job composes a behavior with @behavior, so the engine keeps its instances in tables of its own, which no fence's trigger watches and no repository writes; declare the fence on a table")
-}
-
 // A version graph's engines write a member's rows.
 func TestFenceRefusesAVersionGraphMember(t *testing.T) {
 	schema, in := fenceSchema()

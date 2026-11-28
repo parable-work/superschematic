@@ -197,12 +197,13 @@ dependencies, then:
   them every minute, as `Dev`'s settings say, and `shop-stock`'s Rust job
   `OrderRestocks`, which `Dev` runs only when `superschematic stack run`
   asks ([Jobs](/superschematic/guides/stacks/#jobs));
-- builds and starts `shop-db`'s engine runner, which runs the reactions
-  and deadlines of its engine types, the shop's checkouts among them
-  ([Engine behaviors](/superschematic/guides/engine-behaviors/));
+- builds `shop-api`'s behavior worker `CheckoutTimers` and starts it as a
+  process: it runs the deadlines and the change queue of `shop-db`'s
+  `Checkout` table, and expires a checkout held too long
+  ([The worker](/superschematic/guides/api-routes/#the-worker));
 - builds `shop-stock`'s app `Backoffice` and starts it after
-  `shop-stock`'s server: the stock pages and the engine console under
-  `/stock` ([Apps](/superschematic/guides/stacks/#apps)).
+  `shop-stock`'s server: the stock pages under `/stock`
+  ([Apps](/superschematic/guides/stacks/#apps)).
 
 The checkouts pay through acmepay, a fake payment provider in
 `go/acmepay`, which `stack dev` reaches at the address `shop-orders`'

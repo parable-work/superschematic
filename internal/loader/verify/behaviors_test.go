@@ -88,11 +88,7 @@ func TestBehaviorsVerify(t *testing.T) {
 		// the type, so two behaviors' namespace operations of one name
 		// share none.
 		{"namespace operations share a name", []ir.BehaviorRef{{Name: "Tally"}, {Name: "Census"}}, nil},
-		// Timers' status names a table's Workflow field (D103); an engine
-		// type's Timers reads its one Workflow, and would ignore it.
-		{"an engine type's Timers names status", []ir.BehaviorRef{{Name: "Timers", Config: json.RawMessage(`{"deadlines":{"remind":{"afterMs":1000,"start":{"create":true}}},"status":"payment"}`)}},
-			[]string{"src/item.schema.json: type Item: @behavior Timers names status, the Workflow field a table's Timers reads (implements Timers<Item, C>, D103); an engine type's Timers reads its one Workflow, so leave status out"}},
-		{"an engine type's Timers", []ir.BehaviorRef{{Name: "Timers", Config: json.RawMessage(`{"deadlines":{"remind":{"afterMs":1000,"start":{"create":true}}}}`)}}, nil},
+		{"Timers", []ir.BehaviorRef{{Name: "Timers", Config: json.RawMessage(`{"deadlines":{"remind":{"afterMs":1000,"start":{"create":true}}}}`)}}, nil},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			r := Run(behaviorSchema(test.refs...), Input{Registry: reg})
@@ -146,15 +142,6 @@ func TestBehaviorsVerifyWithTheCore(t *testing.T) {
 	r = Run(behaviorSchema(ir.BehaviorRef{Name: "Pallet"}), Input{Registry: core})
 	if want := `type Item: behavior "Pallet" is not a registered behavior (registered: Aliased, Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Pool, Presence, Provenance, Queue, Reactions, Reconcile, Recurrence, Retries, Revisions, Rollups, Schedules, Search, Seats, StateRules, Stock, Timers, Variants, Workflow)`; !hasError(r, want) {
 		t.Fatalf("errors = %v, want %q", errorStrings(r), want)
-	}
-
-	// Branches and Lease compose on one type: Branches points the release
-	// pointer with releaseCommit and Lease ends a lease with release, so no
-	// operation name is added twice.
-	branches := ir.BehaviorRef{Name: "Branches", Config: json.RawMessage(`{"kinds":{"step":{"type":"Step"}}}`)}
-	r = Run(behaviorSchema(branches, ir.BehaviorRef{Name: "Lease"}), Input{Registry: core})
-	if got := errorStrings(r); len(got) != 0 {
-		t.Fatalf("Branches and Lease: errors = %v, want none", got)
 	}
 
 	schema := behaviorSchema(workflow)
@@ -253,8 +240,8 @@ func TestBehaviorsVerifyFieldAnchors(t *testing.T) {
 	}{
 		{"one field", orderTable(onField("status", "Workflow", orderStates)), nil},
 		{"two fields", orderTable(onField("status", "Workflow", orderStates), onField("paymentStatus", "Workflow", orderStates)), nil},
-		{"both forms", orderTable(ir.BehaviorRef{Name: "Comments"}, onField("status", "Workflow", orderStates)),
-			[]string{"src/order.schema.json: type Order composes behavior Comments on the type (@behavior) and behavior Workflow on its field status: a type composes its behaviors on the type or on fields, never both (D103)"}},
+		{"@behavior on a DB type", orderTable(ir.BehaviorRef{Name: "Comments"}, onField("status", "Workflow", orderStates)),
+			[]string{"src/order.schema.json: type Order composes behavior Comments with @behavior, which a DB type does not take: a DB type is a table, which composes it as implements Comments<Order, { ... }> (D103)"}},
 		{"one field twice", orderTable(onField("status", "Workflow", orderStates), onField("status", "Workflow", orderStates)),
 			[]string{"type Order anchors two behaviors on its field status"}},
 		{"not a table", general,

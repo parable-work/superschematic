@@ -2245,6 +2245,7 @@ dependencies = [
  "superschematic-rules",
  "superschematic-rules-behaviors",
  "superschematic-rules-handler",
+ "superschematic-rules-runtime",
  "superschematic-rules-testkit",
  "tokio",
  "tower",

@@ -18,12 +18,8 @@ name = "desk-app-api-backoffice"
 path = "src/main.rs"
 
 [dependencies]
-serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
 schemas-desk-app-api-api = { path = "../../../api/desk-app-api" }
 schemas-desk-app-api-backoffice-app = { path = "../../../impl/desk-app-api.backoffice" }
 schemas-desk-app-api-implementation = { path = "../../../impl/desk-app-api" }
-schemas-desk-db-types = { path = "../../../types/rust/desk-db" }
-superschematic-engine = { path = "../../../../../runtime/engine/rust/engine", default-features = false, features = ["background", "postgres"] }
-superschematic-engine-behaviors = { path = "../../../../../runtime/engine/rust/behaviors", default-features = false, features = ["postgres"] }
 superschematic-http-runtime = { path = "../../../../../runtime/http/rust", features = ["identity", "identity-postgres", "logging", "otel", "postgres"] }

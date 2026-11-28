@@ -217,7 +217,7 @@ var approvalsMemberTypes = map[string][]string{
 // each requirement member it holds is of a type the core reads.
 func approvalsRowsProblem(schema *ir.Schema, td *ir.TypeDef, table, link, in string) string {
 	rows := schema.Types[table]
-	if rows == nil || rows.Role != ir.RoleDBTable || rows.JsonField || rows.IsEngineType() {
+	if rows == nil || rows.Role != ir.RoleDBTable || rows.JsonField {
 		return fmt.Sprintf("requirementsFrom names %s, which is not a table of %s", table, schema.Name)
 	}
 	if len(rows.TableBehaviors()) == 0 {
@@ -271,44 +271,4 @@ func approvalsMemberFits(schema *ir.Schema, fd *ir.FieldDef, kinds []string) boo
 		}
 	}
 	return false
-}
-
-// approvalsTableMembers are the gate members D200 adds, each a table's
-// Approvals' alone, in the order the engine refuses them.
-var approvalsTableMembers = []string{
-	"requirementsFrom", "pinOn", "callers", "proof", "proofWithinMs",
-	"excludeCreatorPerson", "excludeSubjectsIn", "recheckPermission", "when",
-}
-
-// checkEngineApprovalsConfig refuses, on an engine type, each member of
-// Approvals' config that a table's Approvals alone takes (D104, D200):
-// each gate's resetOn, pinned, then D200's members, gates in the canonical
-// config's order, then status. The declaration is shared, so the configSchema accepts them; the
-// engine's Approvals refuses them too, and the build says so first, naming
-// the table form. A config the configSchema refuses is reported by
-// checkTypeBehaviors and left alone here.
-func checkEngineApprovalsConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
-	var config struct {
-		Gates  map[string]map[string]json.RawMessage `json:"gates"`
-		Status json.RawMessage                       `json:"status"`
-	}
-	if len(ref.Config) == 0 || json.Unmarshal(ref.Config, &config) != nil {
-		return
-	}
-	for _, state := range slices.Sorted(maps.Keys(config.Gates)) {
-		if _, ok := config.Gates[state]["resetOn"]; ok {
-			r.errorf(td.Owner, "type %s: @behavior Approvals names resetOn on the gate of %q, which a table's Approvals takes (implements Approvals<%s, C>, D104); an engine type's gates follow resetOnChange, so leave it out", td.Name, state, td.Name)
-		}
-		if _, ok := config.Gates[state]["pinned"]; ok {
-			r.errorf(td.Owner, "type %s: @behavior Approvals names pinned on the gate of %q, which a table's Approvals takes (implements Approvals<%s, C>, D104); an engine type's sign-off names no version, so leave it out", td.Name, state, td.Name)
-		}
-		for _, member := range approvalsTableMembers {
-			if _, ok := config.Gates[state][member]; ok {
-				r.errorf(td.Owner, "type %s: @behavior Approvals names %s on the gate of %q, which a table's Approvals takes (implements Approvals<%s, C>, D200); an engine type's gate is a count and a permission, so leave it out", td.Name, member, state, td.Name)
-			}
-		}
-	}
-	if len(config.Status) > 0 {
-		r.errorf(td.Owner, "type %s: @behavior Approvals names status, the Workflow field a table's Approvals reads (implements Approvals<%s, C>, D104); an engine type's Approvals reads its one Workflow, so leave status out", td.Name, td.Name)
-	}
 }

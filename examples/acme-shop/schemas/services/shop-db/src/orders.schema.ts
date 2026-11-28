@@ -65,7 +65,7 @@ export abstract class Order extends Auditable {
 
   // Why the order was cancelled, when it was.
   cancelReason: Nullable<Validate<string, { maxLength: 500 }>>;
-  // The engine's Checkout the order was placed from, once paid (D70);
+  // The Checkout row the order was placed from, once paid (D70, D103);
   // none for an order placeOrder took. Unique, so a checkout writes one
   // order however often shop-orders looks at it. The column is nullable,
   // so a migration adds it to a database that holds orders already.

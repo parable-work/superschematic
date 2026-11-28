@@ -2,7 +2,7 @@
   "name": "engine-notes",
   "version": "0.0.0",
   "private": true,
-  "description": "A notes server on @superschematic/engine: one SQLite file, a schema that composes Workflow, Comments and Revisions, and the HTTP API, event stream and MCP endpoint on one Hono app. scripts/link.sh puts the engine and the packages it needs into node_modules from this checkout; see README.md.",
+  "description": "A notes server on development mode, served by @superschematic/rules-handler: one SQLite file, a schema that composes Workflow, Comments and Revisions, and the routes, event stream and MCP endpoint behind one Fetch handler, with bearer-token callers. scripts/link.sh puts the handler and the HTTP runtime into node_modules from this checkout; see README.md.",
   "type": "module",
   "engines": {
     "node": ">=24"

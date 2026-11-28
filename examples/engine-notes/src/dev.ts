@@ -1,123 +1,141 @@
-// The notes schema on development mode (D117): the same schema file served
-// by superschematic-dev, the development server of the behaviors' core,
-// in place of the engine. A row is kept as JSON in the server's own tables,
-// a publish takes effect at once, and the behaviors run on the core
-// (runtime/engine/rust/rules-behaviors).
+// The notes server on development mode (D117): the notes schema served by
+// @superschematic/rules-handler, the handler of the behaviors' core, in a
+// server written by hand. A note is kept as JSON in the handler's own
+// tables over one SQLite connection, a publish takes effect at once, and
+// Workflow, Comments and Revisions run on the core
+// (runtime/engine/rust/rules-behaviors). One Fetch handler serves the
+// routes, the event stream and the MCP endpoint, which
+// @hono/node-server listens with on Node.js and on Bun.
 //
-// What the engine's server has that this one differs in:
+// How it is built (README.md, "How it works"):
 //
-// - The type is Note, as the schema file's type names it; the engine
-//   names the schema notes. Routes are under /namespaces/default/schemas/Note.
-// - A row is its own fields beside its behaviors' fields, each named after
-//   its behavior (workflowStatus, commentsMessages), and a read's fields
-//   are its version's (_version); the engine answers data and behaviors
-//   apart, with seq and an ETag on an operation too.
-// - The caller is whoever the x-superschematic-subject and
-//   x-superschematic-permissions headers say, and the policy is data
-//   (devPolicy); the engine authenticates a bearer token and asks a
-//   function.
-// - The event log holds what the behaviors emit about their rows, which
-//   Workflow, Comments and Revisions do not; the engine logs every write.
-//   The stream sends signals beside them with signals=1 as the engine's
-//   does, a streamed reply's draft among them.
+// - The type is Note, as the schema file names it, and the routes are
+//   under /namespaces/default/schemas/Note.
+// - A row is its own fields beside its behaviors' fields: Workflow's is
+//   the field status, as a table's status: Workflow<> is (D117), and the
+//   rest are each named after their behavior (commentsMessages). Its
+//   version is _version, which the ETag carries.
+// - A caller is the one its bearer token names (authenticate), and the
+//   access policy is data (devPolicy), asked before every request.
+// - The event stream carries what the behaviors emit about their rows, and
+//   with signals=1 the signals beside them, a streamed reply's draft among
+//   them.
 // - A publish has no compatibility rule: a version may add a required
 //   field, and its publish is refused while a stored note lacks it (409
-//   conflict, StoredRowsError), unless it discards those notes. The engine
-//   refuses such a draft at define (incompatible_change).
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+//   conflict) unless it discards those notes.
+import { readFileSync } from 'node:fs';
+import type { Server } from 'node:http';
 
-/** The repository's root, two directories above this example. */
-const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
+import { serve } from '@hono/node-server';
+import { McpUnknownToolError, serveMcp, type McpToolSet } from '@superschematic/http-runtime/mcp';
+import { Dev, SqliteStore, type Authenticate, type Caller, type DevMcp, type Policy, type SqliteConnection } from '@superschematic/rules-handler';
+
+/** The notes schema, in the JSON data form of a schema file. */
+export const notesSchema: Record<string, unknown> = JSON.parse(readFileSync(new URL('../schemas/notes.schema.json', import.meta.url), 'utf8'));
+
+/** The callers this example knows, by bearer token. */
+export const callers: ReadonlyMap<string, Caller> = new Map<string, Caller>([
+  // An author: reads and writes notes.
+  ['alice-token', { subject: 'alice', permissions: ['notes.read', 'notes.write'] }],
+  // An editor: everything under notes, publishing and reviewing included.
+  ['bob-token', { subject: 'bob', permissions: ['notes'] }],
+  // A reader: reads notes, comments on them and proposes changes.
+  ['carol-token', { subject: 'carol', permissions: ['notes.read'] }],
+  // A schema owner: defines and publishes schemas, reads no notes.
+  ['dana-token', { subject: 'dana', permissions: ['schemas'] }],
+]);
 
 /**
- * The superschematic-dev binary: SUPERSCHEMATIC_DEV when set, else the debug
- * build in the engine's Cargo workspace (scripts/check.sh builds it).
+ * authenticate is the host's Authenticate: it turns a request's bearer
+ * token into the caller it names, or undefined (401). This example looks
+ * the token up in a fixed table; a deployment verifies a signed token or a
+ * session instead.
  */
-export function devBinary(): string {
-  const given = process.env.SUPERSCHEMATIC_DEV;
-  if (given !== undefined && given !== '') {
-    return given;
-  }
-  const target = process.env.CARGO_TARGET_DIR ?? join(repoRoot, 'runtime', 'engine', 'rust', 'target');
-  return join(target, 'debug', 'superschematic-dev');
-}
+export const authenticate: Authenticate = (request) => {
+  const match = /^Bearer\s+(\S+)$/i.exec((request.headers.get('authorization') ?? '').trim());
+  return match === null ? undefined : callers.get(match[1]!);
+};
 
 /**
- * The access policy of src/auth.ts as development mode's data: defining and
- * publishing to a holder of schemas.<action>; posting, reacting, a streamed
- * reply and a proposal to a reader; and the rest to a holder of
+ * The access policy, as development mode's data, asked before every
+ * request. Permissions are dotted names, and a permission covers every one
+ * nested under it, so bob's notes covers notes.read, notes.write, and the
+ * notes.publish and notes.review the schema's behaviors name. Defining and
+ * publishing take schemas.<action>; a reader may post, react, stream a
+ * reply and propose a change, which need notes.read; the rest takes
  * notes.<action>. Signals and read state are asked as reads.
  */
-export const devPolicy = {
+export const devPolicy: Policy = {
   rules: [
-    { action: ['define', 'publish'], require: ['schemas.{action}'] },
+    { action: ['define', 'publish'], require: 'schemas.{action}' },
     {
       action: 'write',
       operation: ['post', 'react', 'unreact', 'propose', 'begin', 'appendDraft', 'finish', 'interrupt'],
-      require: ['notes.read'],
+      require: 'notes.read',
     },
-    { action: ['read', 'write'], require: ['notes.{action}'] },
+    { action: ['read', 'write'], require: 'notes.{action}' },
   ],
 };
 
-/** The callers of src/auth.ts, as the headers that name them to development mode. */
-export const devCallers: Readonly<Record<string, Readonly<Record<string, string>>>> = {
-  alice: { 'x-superschematic-subject': 'alice', 'x-superschematic-permissions': 'notes.read,notes.write' },
-  bob: { 'x-superschematic-subject': 'bob', 'x-superschematic-permissions': 'notes' },
-  carol: { 'x-superschematic-subject': 'carol', 'x-superschematic-permissions': 'notes.read' },
-  dana: { 'x-superschematic-subject': 'dana', 'x-superschematic-permissions': 'schemas' },
+/**
+ * The caller the server publishes its schema as: it defines and publishes
+ * schemas, and reads notes, so the list of live types shows it Note.
+ */
+const deployer: Caller = { subject: 'engine-notes', permissions: ['schemas', 'notes.read'] };
+
+/**
+ * The MCP endpoint: the HTTP runtime's transport over each caller's tools.
+ * A refused call's problem is the document the handler writes, which the
+ * runtime's ProblemBody types.
+ */
+const mcp: DevMcp = {
+  serve: (request, tools, { caller, requestId }) =>
+    serveMcp(request, tools as McpToolSet, { serverInfo: { name: 'engine-notes', version: '0.0.0' }, caller: caller.subject, requestId }),
+  unknownTool: (message) => new McpUnknownToolError(message),
 };
 
-export interface DevServer {
-  /** The server's origin, such as http://127.0.0.1:4500. */
+/**
+ * openNotesDev serves the notes schema on development mode over a SQLite
+ * connection (bun:sqlite's Database or node:sqlite's DatabaseSync, over a
+ * file or in memory), and publishes the schema when Note is not live yet,
+ * so a restart over the same file keeps the notes and the version they
+ * are at. The change queue and the deadlines run after each request.
+ */
+export async function openNotesDev(connection: SqliteConnection): Promise<Dev> {
+  const dev = await Dev.open((layout, codec) => new SqliteStore(connection, layout, codec), { policy: devPolicy, authenticate, mcp });
+  const live = await dev.request(deployer, { kind: 'types' });
+  if (!live.some((type) => type.name === 'Note')) {
+    await dev.request(deployer, { kind: 'define', document: notesSchema });
+    await dev.request(deployer, { kind: 'publish', type: 'Note' });
+  }
+  return dev;
+}
+
+export interface Listening {
+  /** The server's origin, such as http://127.0.0.1:8787. */
   url: string;
   close(): Promise<void>;
 }
 
 /**
- * startDev runs superschematic-dev over a SQLite file, with devPolicy and no
- * default caller, on a free port, and resolves once it serves.
+ * listen serves dev's routes, under /namespaces/default, with
+ * @hono/node-server, on Node.js and on Bun. Port 0 picks a free one.
  */
-export function startDev(db: string, policyFile: string): Promise<DevServer> {
-  const binary = devBinary();
-  if (!existsSync(binary)) {
-    return Promise.reject(
-      new Error(`${binary} is missing: build it with cargo build -p superschematic-rules-dev --features server --bin superschematic-dev, or set SUPERSCHEMATIC_DEV`)
-    );
-  }
-  writeFileSync(policyFile, JSON.stringify(devPolicy));
-  const child: ChildProcess = spawn(binary, ['--db', db, '--listen', '127.0.0.1:0', '--policy', `@${policyFile}`, '--as', ''], {
-    stdio: ['ignore', 'ignore', 'pipe'],
-  });
+export function listen(dev: Dev, port = 0, hostname = '127.0.0.1'): Promise<Listening> {
   return new Promise((resolve, reject) => {
-    let output = '';
-    const failed = (error: Error) => reject(error);
-    child.once('error', failed);
-    child.once('exit', (code) => reject(new Error(`superschematic-dev exited with ${code}: ${output}`)));
-    child.stderr?.setEncoding('utf8');
-    child.stderr?.on('data', (chunk: string) => {
-      output += chunk;
-      const served = /serving (http:\/\/[^/\s]+)/.exec(output);
-      if (served === null) {
-        return;
-      }
-      child.removeAllListeners('exit');
-      child.removeListener('error', failed);
+    const server = serve({ fetch: (request: Request) => dev.http(request), port, hostname }, (info) => {
+      server.off('error', reject);
       resolve({
-        url: served[1],
+        url: `http://${hostname}:${info.port}`,
         close: () =>
-          new Promise<void>((done) => {
-            if (child.exitCode !== null) {
-              done();
-              return;
-            }
-            child.once('exit', () => done());
-            child.kill('SIGTERM');
+          new Promise<void>((done, fail) => {
+            server.close((error) => (error ? fail(error) : done()));
+            // An open event stream holds its connection until it ends.
+            server.closeAllConnections();
           }),
       });
-    });
+    }) as Server;
+    // A port in use fails the start instead of leaving it waiting.
+    server.once('error', reject);
   });
 }

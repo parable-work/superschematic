@@ -16,7 +16,6 @@ declare module "../src/index" {
       // A list of objects, as `stack init` writes a bucket's cors (D148).
       bucket: { versioning?: boolean; cors?: { origins: string[]; methods: ("GET" | "HEAD" | "PUT" | "POST" | "DELETE")[]; headers?: string[]; maxAge?: string }[] };
       worker: { memory?: string };
-      runner: { memory?: string };
       memoryStore: { nodeType?: string };
     };
   }
@@ -544,63 +543,15 @@ export abstract class WorkerOfDatabase {}
 })
 export abstract class LocalWorkerMemory {}
 
-// An engine's runner's element names its database's handle and
-// `runner: true`; it turns the runner on or off and takes the target's
-// runner settings (D58).
+// A database has no runner: the engine's runner (D58) is gone with engine
+// types (D103), so runner beside a DB's handle is a key its settings refuse.
 @environment({
   target: "fake",
   fake: { project: "acme-staging", region: "us-east1" },
-  settings: [{ of: ShopDb, runner: true, enabled: false, memory: "1Gi" }],
+  // @ts-expect-error a database's settings take no runner
+  settings: [{ of: ShopDb, runner: true }],
 })
-export abstract class RunnerSettings {}
-
-@environment({
-  target: "local",
-  settings: [{ of: ShopDb, runner: true, enabled: true }],
-})
-export abstract class LocalRunner {}
-
-@environment({
-  target: "fake",
-  // A platform outside the target takes its own settings.
-  settings: [{ of: ShopDb, runner: true, platform: "other.runner", cpu: "2" }],
-})
-export abstract class RunnerElsewhere {}
-
-@environment({
-  target: "fake",
-  // @ts-expect-error an API's handle has no engine's runner
-  settings: [{ of: ShopApi, runner: true }],
-})
-export abstract class RunnerOfApi {}
-
-@environment({
-  target: "fake",
-  // @ts-expect-error runner names the runner with true
-  settings: [{ of: ShopDb, runner: false }],
-})
-export abstract class RunnerFalse {}
-
-@environment({
-  target: "fake",
-  // @ts-expect-error instances are a worker's setting
-  settings: [{ of: ShopDb, runner: true, instances: 2 }],
-})
-export abstract class InstancesOnRunner {}
-
-@environment({
-  target: "fake",
-  // @ts-expect-error a runner reads no env
-  settings: [{ of: ShopDb, runner: true, env: { LOG_LEVEL: "warn" } }],
-})
-export abstract class EnvOnRunner {}
-
-@environment({
-  target: "local",
-  // @ts-expect-error a local runner takes no settings
-  settings: [{ of: ShopDb, runner: true, memory: "1Gi" }],
-})
-export abstract class LocalRunnerMemory {}
+export abstract class RunnerOfDb {}
 
 // An app is exposed beside its API's handle, which types its name (D78).
 @stack({ deploy: [ShopStock], expose: [ShopApi, { of: ShopStock, app: "Backoffice" }] })
@@ -644,9 +595,9 @@ export abstract class InstancesOnApp {}
 export abstract class AppOfDb {}
 
 // What the stack adds to its deployables' images (D144): a server by its
-// API's handle or its declared class, and a job, a worker, a deriver, an
-// app or an engine's runner beside a handle, as a settings element names
-// one, with packages, a Dockerfile to extend with, or both.
+// API's handle or its declared class, and a job, a worker, a deriver or an
+// app beside a handle, as a settings element names one, with packages, a
+// Dockerfile to extend with, or both.
 @stack({
   deploy: [ShopApi, ShopOrders, ShopCart, ShopFulfilment, ShopSupport, ShopStock],
   images: [
@@ -656,7 +607,6 @@ export abstract class AppOfDb {}
     { of: ShopFulfilment, worker: "FulfilOrders", packages: ["tini"] },
     { of: ShopSupport, deriver: "TriageTickets", packages: ["tini"] },
     { of: ShopStock, app: "Backoffice", packages: ["tini"] },
-    { of: ShopDb, runner: true, packages: ["tini"] },
   ],
 })
 export abstract class ImageShop {}
@@ -684,7 +634,7 @@ export abstract class ImageOfABucket {}
 
 @stack({
   deploy: [ShopApi],
-  // @ts-expect-error a database runs no image; its engine's runner does, named with runner: true
+  // @ts-expect-error a database runs no image
   images: [{ of: ShopDb, packages: ["tini"] }],
 })
 export abstract class ImageOfADatabase {}

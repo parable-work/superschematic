@@ -69,8 +69,8 @@ Check it:
 bin/superschematic --help
 ```
 
-It lists the core's fifteen commands: `init`, `check`, `build`, `build-all`,
-`json-schema`, `format`, `behaviors`, `engine-client`, `env`, `catalog` and the
+It lists the core's fourteen commands: `init`, `check`, `build`, `build-all`,
+`json-schema`, `format`, `behaviors`, `env`, `catalog` and the
 `new`, `migrate`, `queries`, `stack` and `identity` groups.
 
 ## Compile generated Go code

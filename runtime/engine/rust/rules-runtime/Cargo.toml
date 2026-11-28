@@ -43,8 +43,9 @@ uuid = { version = "1.28.0", features = ["v4"] }
 
 [dev-dependencies]
 # Development mode, which answers a list from every row: the parity test
-# holds runtime mode's queries to its answers.
-superschematic-rules-dev = { path = "../rules-dev" }
+# holds runtime mode's queries to its answers, and a development store, on
+# SQLite or in a Postgres schema, moves to runtime mode with its rows.
+superschematic-rules-dev = { path = "../rules-dev", features = ["postgres"] }
 
 [lints]
 workspace = true

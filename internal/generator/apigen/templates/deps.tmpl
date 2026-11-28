@@ -64,9 +64,6 @@ import (
 {{- if .Deps.MemoryStores }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/memorystore"
 {{- end }}
-{{- if .Engine }}
-	engine "{{ $.Naming.EngineGoModule }}"
-{{- end }}
 {{- if .Deps.Providers }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/providers"
 {{- end }}
@@ -127,14 +124,6 @@ type Deps struct {
 	// path it had without it; a Subscribe while it is unreachable is held
 	// until it reconnects.
 	{{ .Field }} memorystore.Store
-{{ end }}
-{{- if .Engine }}
-	// Engine is the engine of {{ .Engine.Database }}, the API's engine database
-	// (D58), which the entrypoint opens in the background, so it starts while
-	// the database is not up yet: Engine.Wait(ctx) returns it once it opens,
-	// and Engine.Engine() at once, or why it is not open. Its types'
-	// instances are the engine's, in namespace {{ .Engine.Namespace }}.
-	Engine *engine.Background
 {{ end }}
 {{- if .Deps.Providers }}
 	// Providers are the runtime providers the environment's config names

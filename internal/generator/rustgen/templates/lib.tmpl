@@ -22,9 +22,6 @@ pub mod validators;
 {{if .IdentityDescriptor -}}
 pub mod identity;
 {{end -}}
-{{if .EngineDocument -}}
-pub mod engine;
-{{end -}}
 {{if .Behaviors -}}
 pub mod behaviors;
 {{end -}}
@@ -55,9 +52,6 @@ pub use unions::*;
 {{end -}}
 {{if .IdentityDescriptor -}}
 pub use identity::*;
-{{end -}}
-{{if .EngineDocument -}}
-pub use engine::*;
 {{end -}}
 {{if .Behaviors -}}
 pub use behaviors::*;

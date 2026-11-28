@@ -107,7 +107,7 @@ func TestRegisterPlatformRejects(t *testing.T) {
 	t.Run("database with an artifact", func(t *testing.T) {
 		spec := sqlPlatform("fake.sql")
 		spec.Artifact = ir.ArtifactBundle
-		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job, worker, runner, deriver or app platform builds one") {
+		if err := New(naming.Default()).RegisterPlatform(spec); err == nil || !strings.Contains(err.Error(), "only a server, job, worker, deriver or app platform builds one") {
 			t.Fatalf("RegisterPlatform = %v", err)
 		}
 	})
@@ -599,7 +599,7 @@ func TestStackSpecsFailAfterFinalize(t *testing.T) {
 	if err := reg.RegisterTarget(TargetSpec{Name: "fake", Platforms: map[ir.DeployableKind]string{ir.DeployableServer: "fake.run"}}); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore", "tasks"} {
+	for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack", "site", "memorystore", "tasks"} {
 		if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 			t.Fatal(err)
 		}
@@ -620,7 +620,7 @@ func TestStackSpecsFailAfterFinalize(t *testing.T) {
 		if err := reg.RegisterPlatform(spec); err != nil {
 			t.Fatal(err)
 		}
-		for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "enginedoc", "stack", "site", "memorystore", "tasks"} {
+		for _, name := range []string{"types", "sql", "orm", "api", "sdks", "envConfig", "stack", "site", "memorystore", "tasks"} {
 			if err := reg.RegisterGenerator(GeneratorSpec{Name: name, Generate: noopGenerate}); err != nil {
 				t.Fatal(err)
 			}

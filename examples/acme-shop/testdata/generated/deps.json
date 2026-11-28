@@ -31,7 +31,9 @@
       "name": "example.com/acme/types/go/shop-api",
       "path": "types/go/shop-api",
       "service": "shop-api",
-      "deps": null
+      "deps": [
+        "shop-db-types"
+      ]
     },
     {
       "id": "shop-cache-types",
@@ -280,7 +282,9 @@
       "name": "@acme/shop-api-types",
       "path": "types/typescript/shop-api",
       "service": "shop-api",
-      "deps": null
+      "deps": [
+        "shop-db-types"
+      ]
     },
     {
       "id": "shop-cart-api",
@@ -312,7 +316,9 @@
       "name": "@acme/shop-cart-types",
       "path": "types/typescript/shop-cart",
       "service": "shop-cart",
-      "deps": null
+      "deps": [
+        "shop-db-types"
+      ]
     },
     {
       "id": "shop-common-types",
@@ -395,6 +401,7 @@
       "path": "api/shop-wishlist",
       "service": "shop-wishlist",
       "deps": [
+        "shop-wishlist-db-types",
         "shop-wishlist-types"
       ]
     },

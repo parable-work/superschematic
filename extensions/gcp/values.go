@@ -136,8 +136,7 @@ const siteSettings = `{
 // or more, so a fraction of one is refused here rather than by the deploy.
 // How many instances run, and how many messages each handles, are the
 // core's settings (ir.ResolvedWorker). telemetry turns the trace export on
-// or off over its environment's (D67, amended). An engine's runner and a
-// deriver take these.
+// or off over its environment's (D67, amended). A deriver takes these.
 const cloudRunPoolSettings = `{
   "type": "object",
   "properties": {

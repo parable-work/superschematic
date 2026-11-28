@@ -732,8 +732,8 @@ func (c *crate) ViewsUse(fn string) bool {
 }
 
 // HasViews reports whether the crate writes views.rs: it has display
-// components, or something calls views::money_text (WritesMoney), an
-// engine panel's amount or a form's (D44, amended). Without components
+// components, or something calls views::money_text (WritesMoney), a
+// form's amount (D44, amended). Without components
 // views.rs holds money_text alone.
 func (c *crate) HasViews() bool { return len(c.Views) > 0 || c.WritesMoney() }
 

@@ -6,7 +6,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -92,20 +91,4 @@ func (f flow) reachable(from string) []string {
 		}
 	}
 	return seen
-}
-
-// engineRefusal is the build's refusal of a behavior no engine implements
-// on an engine type (D104), naming the table form the behaviors' core runs
-// it in: implements <B><T, { ... }> for a behavior that names no value
-// field, <value>: <B><{ ... }> for one anchored on a field, beside a
-// Workflow field when it requires Workflow.
-func engineRefusal(td *ir.TypeDef, behavior registry.Behavior) string {
-	if behavior.Value == "" {
-		return fmt.Sprintf("type %s: behavior %s is implemented by the behaviors' core alone, which runs it on a table, and no engine implements it: write implements %s<%s, { ... }> on a DB table (D104)", td.Name, behavior.Name, behavior.Name, td.Name)
-	}
-	beside := ""
-	if slices.Contains(behavior.Requires, workflowBehavior) {
-		beside = " beside a Workflow field"
-	}
-	return fmt.Sprintf("type %s: behavior %s is implemented by the behaviors' core alone, which runs it on a field of a table, and no engine implements it: write %s: %s<{ ... }>%s on a DB table (D104)", td.Name, behavior.Name, behavior.Value, behavior.Name, beside)
 }

@@ -85,12 +85,6 @@ const (
 	// starts, beside the servers (D53).
 	WorkerPlatform = "local.worker"
 
-	// RunnerPlatform runs an engine's runner as a process with no port,
-	// ready once it starts, as a worker is (D58): its own process, which
-	// takes the runner's lock on the environment's Postgres, as it does on
-	// gcp.
-	RunnerPlatform = "local.runner"
-
 	// DeriverPlatform runs a deriver as a process with no port, ready once
 	// it starts, as a worker is (D74).
 	DeriverPlatform = "local.deriver"
@@ -138,10 +132,6 @@ const (
 	JobMemoryStoreConnector     = "local.job-valkey"
 	WorkerMemoryStoreConnector  = "local.worker-valkey"
 	DeriverMemoryStoreConnector = "local.deriver-valkey"
-
-	// RunnerSQLConnector connects an engine's runner to its engine
-	// database, its one edge (D58).
-	RunnerSQLConnector = "local.runner-postgres"
 
 	// DeriverSQLConnector, DeriverSQLiteConnector, DeriverHTTPConnector and
 	// DeriverBucketConnector connect a deriver, whose edges are its API's,
@@ -201,9 +191,9 @@ const (
 
 	// TypeProcess is a process run from its entrypoint: built from its
 	// module or its crate, or run by Bun. A server's listens on its port
-	// and is ready once its readiness path answers; a worker's, an
-	// engine's runner's and a deriver's have no port and are ready once
-	// they start (ReadinessStarted, D53, D58, D74); an app's listens on
+	// and is ready once its readiness path answers; a worker's and a
+	// deriver's have no port and are ready once they start
+	// (ReadinessStarted, D53, D74); an app's listens on
 	// its port and is ready once it accepts a connection there
 	// (ReadinessListening, D78).
 	TypeProcess = "local:process/process:Process"
@@ -294,15 +284,6 @@ func Register(r *registry.Registry) error {
 			Lower:     lowerWorker,
 		},
 		{
-			Name: RunnerPlatform,
-			Kind: ir.DeployableRunner,
-			// In its API's language, as a worker is (D58).
-			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
-			NameOf:    processName,
-			AddressOf: func(registry.PlatformContext) any { return nil },
-			Lower:     lowerRunner,
-		},
-		{
 			Name: DeriverPlatform,
 			Kind: ir.DeployableDeriver,
 			// In its API's language, TypeScript or Rust (D74), or Go for a
@@ -380,7 +361,6 @@ func Register(r *registry.Registry) error {
 		{Name: WorkerSQLiteConnector, Edge: ir.EdgeSQL, From: WorkerPlatform, To: SQLitePlatform, Connect: connectSQLite},
 		{Name: WorkerHTTPConnector, Edge: ir.EdgeHTTP, From: WorkerPlatform, To: ServerPlatform, Connect: connectHTTP},
 		{Name: WorkerBucketConnector, Edge: ir.EdgeBucket, From: WorkerPlatform, To: BucketPlatform, Connect: connectBucket},
-		{Name: RunnerSQLConnector, Edge: ir.EdgeSQL, From: RunnerPlatform, To: DatabasePlatform, Connect: connectSQL},
 		{Name: DeriverSQLConnector, Edge: ir.EdgeSQL, From: DeriverPlatform, To: DatabasePlatform, Connect: connectSQL},
 		{Name: DeriverSQLiteConnector, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLitePlatform, Connect: connectSQLite},
 		{Name: DeriverHTTPConnector, Edge: ir.EdgeHTTP, From: DeriverPlatform, To: ServerPlatform, Connect: connectHTTP},
@@ -415,7 +395,6 @@ func Register(r *registry.Registry) error {
 			ir.DeployableBucket:      BucketPlatform,
 			ir.DeployableMemoryStore: MemoryStorePlatform,
 			ir.DeployableWorker:      WorkerPlatform,
-			ir.DeployableRunner:      RunnerPlatform,
 			ir.DeployableDeriver:     DeriverPlatform,
 			ir.DeployableApp:         AppPlatform,
 		},
@@ -538,7 +517,7 @@ var resourceTypes = map[string]string{
 	    "name": {"type": "string", "minLength": 1},
 	    "module": {"type": "string", "minLength": 1},
 	    "language": {"enum": ["go", "typescript", "rust"]},
-	    "kind": {"enum": ["worker", "runner", "deriver", "app"]},
+	    "kind": {"enum": ["worker", "deriver", "app"]},
 	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
 	    "readiness": {"type": "string", "pattern": "^(/|started$|listening$)"},
 	    "env": {"type": "array", "items": {

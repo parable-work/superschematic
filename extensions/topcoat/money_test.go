@@ -24,7 +24,7 @@ func formsWithoutViewsOutputs() map[string]any {
 // formats money (D44, amended), so views.rs is written holding it alone,
 // lib.rs declares the module, and the crate passes cargo clippy with
 // warnings denied and formats an amount through crate::views::money_text,
-// as an engine panel calls it in a crate whose console has no component.
+// as a form calls it in a crate whose console has no component.
 func TestMoneyTextWithoutViews(t *testing.T) {
 	root := testpaths.TempDir(t)
 	if _, err := buildService(t, formsService, root, formsWithoutViewsOutputs()); err != nil {

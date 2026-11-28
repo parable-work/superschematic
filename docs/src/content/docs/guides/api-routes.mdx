@@ -3052,8 +3052,8 @@ the route's 400 before the core runs (the TypeScript and Go SDKs check it
 before they send it); and one for a use whose behavior takes none, or a use the table
 lacks, is 400 `invalid_argument` from the core, class
 `PreconditionsError` (`preconditions of Job: /Retries: behavior Retries
-takes no precondition`). An engine type's routes read the token from the
-`Preconditions` header instead
+takes no precondition`). Development mode's routes read the token from
+the `Preconditions` header instead
 ([Work queues](/superschematic/guides/work-queues/#lease)).
 
 ### Their worker
@@ -3347,7 +3347,8 @@ with a path parameter in a segment's place (`account/{id}/pick` matching
 serve the table's operations from code of your own. An operation a
 behavior declares on a namespace as a whole (Comments') is not served,
 and the build warns of it, and neither is one a table leaves out
-(Dependencies' `listDependents`, D104's step 4, an engine type's alone).
+(Dependencies' `listDependents`, D104's step 4, which the engine alone
+runs).
 
 ## A version graph's operations
 

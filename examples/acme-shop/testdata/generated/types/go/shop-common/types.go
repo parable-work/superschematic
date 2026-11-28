@@ -748,7 +748,7 @@ func FeedItemFromYAMLNonStrict(data []byte) (*FeedItem, error) {
 type Price struct {
 	AmountCents GenericInt64 `json:"amountCents"`
 
-	Currency Currency `json:"currency"`
+	Currency Currency `json:"currency,omitzero"`
 }
 
 // MaskSecrets returns a copy of Price with secret fields cleared.

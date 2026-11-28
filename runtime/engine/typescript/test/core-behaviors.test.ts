@@ -13,7 +13,9 @@
 // wait for sign-offs, fixture-numbering-json, whose invoices are
 // numbered per project and per year, and fixture-timers-json, whose
 // support requests are escalated or resolved when nobody moves them in
-// time.
+// time. The documents that compose Links, Search or Branches, which the
+// loader refuses since D103 folded them into schema features, are the
+// engine's copies of those fixtures (runtime/engine/testdata/documents).
 // They register when the engine opens, under names no deployment can take.
 import assert from 'node:assert/strict';
 import { afterEach, describe, test } from 'node:test';

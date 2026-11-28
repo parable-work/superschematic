@@ -12,28 +12,32 @@ import (
 )
 
 // The extension's fixtures of a stack app (D78): fixture-app-api, whose
-// users are the core user model's in its authDb, fixture-app-db, which is
-// an engine database too, as acme's shop-db is, and which declares the app
-// Backoffice.
+// users are the core user model's in its authDb, fixture-app-db, and which
+// declares the app Backoffice.
 const (
 	appService  = "fixture-app-api"
 	appDatabase = "fixture-app-db"
 )
+
+// appDatabaseOutputs are fixture-app-db's outputs: its Go types, which the
+// ORM a DB always gets imports, and the Rust types the API's crates read.
+func appDatabaseOutputs() map[string]any {
+	return map[string]any{"types": map[string]any{"go": map[string]any{"enabled": true}, "rust": map[string]any{"enabled": true}}}
+}
 
 // TestTheCrateServesAStackApp builds fixture-app-api's crates with the
 // pages on: the API crate declares apps::BackofficeParts, and the Topcoat
 // crate's fixture_app_api_with_parts and fixture_app_api_with_parts_and_api
 // take them, converted into AppParts. Then cargo clippy and cargo test run
 // appPartsTest: the program's serve binds parts.addr and serves the router
-// fixture_app_api_with_parts builds there, its pages and no JSON API or
-// engine routes; a user who signs in through the sign-in page is the
-// caller of the pages, through the identity page authenticator over the
-// parts' implementations; with the API too, a user the mounted JSON API
-// signs in is, and the engine pages read the engine the parts hold, which
-// a note created through the engine's routes is in.
+// fixture_app_api_with_parts builds there, its pages and no JSON API; a
+// user who signs in through the sign-in page is the caller of the pages,
+// through the identity page authenticator over the parts'
+// implementations; with the API too, a user the mounted JSON API signs in
+// is.
 func TestTheCrateServesAStackApp(t *testing.T) {
 	root := testpaths.TempDir(t)
-	if _, err := buildService(t, appDatabase, root, engineDatabaseOutputs()); err != nil {
+	if _, err := buildService(t, appDatabase, root, appDatabaseOutputs()); err != nil {
 		t.Fatalf("build %s: %v", appDatabase, err)
 	}
 	if _, err := buildService(t, appService, root, pagesOutputs()); err != nil {
@@ -49,7 +53,7 @@ func TestTheCrateServesAStackApp(t *testing.T) {
 		"set_up_parts(self, parts.into(), false)",
 		"set_up_parts(self, parts.into(), true)",
 		"let page_authenticator: Arc<dyn PageAuthenticator> = Arc::new(IdentityPageAuthenticator::of(&parts.implementations));",
-		"set_up(router, parts.implementations, page_authenticator, parts.engine, api)",
+		"set_up(router, parts.implementations, page_authenticator, api)",
 		"impl From<api::apps::BackofficeParts> for AppParts {",
 	} {
 		if !strings.Contains(string(lib), want) {
@@ -57,18 +61,19 @@ func TestTheCrateServesAStackApp(t *testing.T) {
 		}
 	}
 	// An API that declares no app gets no method of it.
-	if _, err := buildService(t, engineDatabase, root, engineDatabaseOutputs()); err != nil {
-		t.Fatalf("build %s: %v", engineDatabase, err)
+	noApp := appCopyWithoutApps(t)
+	if _, err := buildDir(t, registry.DefaultNaming(), noApp, root, pagesOutputs(), nil); err != nil {
+		t.Fatalf("build %s with no app: %v", appService, err)
 	}
-	if _, err := buildService(t, engineService, root, pagesOutputs()); err != nil {
-		t.Fatalf("build %s: %v", engineService, err)
-	}
-	other, err := os.ReadFile(filepath.Join(topcoat.Dir(root, engineService), "src", "lib.rs"))
+	other, err := os.ReadFile(filepath.Join(topcoat.Dir(root, appService), "src", "lib.rs"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(string(other), "_with_parts") || strings.Contains(string(other), "AppParts") {
-		t.Errorf("the crate of %s, which declares no app, has a method of one:\n%s", engineService, other)
+		t.Errorf("the crate of %s, which declares no app, has a method of one:\n%s", appService, other)
+	}
+	if _, err := buildService(t, appService, root, pagesOutputs()); err != nil {
+		t.Fatalf("build %s: %v", appService, err)
 	}
 
 	ddl, err := os.ReadFile("../../runtime/http/testdata/identity/sqlite/create.sql")
@@ -82,7 +87,7 @@ func TestTheCrateServesAStackApp(t *testing.T) {
 tracing = "0.1.41"
 `,
 		files:  map[string]string{"identity.sql": string(ddl)},
-		before: map[string]map[string]any{appDatabase: engineDatabaseOutputs()},
+		before: map[string]map[string]any{appDatabase: appDatabaseOutputs()},
 	})
 }
 
@@ -104,10 +109,8 @@ use schemas_fixture_app_api_topcoat::api::runtime::identity::{
 use schemas_fixture_app_api_topcoat::api::runtime::stackconfig::{Cors, Database};
 use schemas_fixture_app_api_topcoat::api::runtime::{postgres, ApiError, RequestContext};
 use schemas_fixture_app_api_topcoat::api::{identity, types, Deps, Handlers, Implementations, NotesImplementation};
-use schemas_fixture_app_api_topcoat::{engine, RouterBuilderFixtureAppApiExt};
+use schemas_fixture_app_api_topcoat::RouterBuilderFixtureAppApiExt;
 use serde_json::json;
-use superschematic_engine::background::{Background, BackgroundOptions};
-use superschematic_engine::EngineOptions;
 use topcoat::router::{to_bytes, Body, Router, RouterBuilderDiscoverExt, StatusCode};
 
 #[path = "support/enter.rs"]
@@ -138,16 +141,10 @@ async fn serve(parts: BackofficeParts) -> std::io::Result<()> {
     topcoat::serve(listener, router).await
 }
 
-fn temp(name: &str) -> std::path::PathBuf {
-    let path = std::env::temp_dir().join(format!("topcoat-app-{}-{:?}-{name}", std::process::id(), std::thread::current().id()));
-    let _ = std::fs::remove_file(&path);
-    path
-}
-
 // The parts of Backoffice on addr, as its entrypoint builds them: the
 // API's Deps, its implementations with the identity runtime's
 // authenticator, over users Ada, who holds Note, and Grace, who holds
-// nothing, and the engine of fixture-app-db, open, its document deployed.
+// nothing.
 async fn parts(addr: SocketAddr) -> BackofficeParts {
     let connection = rusqlite::Connection::open_in_memory().unwrap();
     connection.execute_batch(include_str!("identity.sql")).unwrap();
@@ -173,18 +170,10 @@ async fn parts(addr: SocketAddr) -> BackofficeParts {
         fixture_app_api_identity: config,
     };
     let db = postgres::connect(&env.fixture_app_db_database).unwrap();
-    // The Deps' engine opens in the background, on a file of its own: the
-    // pages call the one the parts hold.
-    let background_path = temp("background.db").to_string_lossy().into_owned();
-    let background = Background::open(
-        move || EngineOptions::from_json(&json!({ "path": background_path })),
-        BackgroundOptions::default(),
-    );
-    let deps = Deps { config: env, db, engine: background, span: tracing::Span::none() };
+    let deps = Deps { config: env, db, span: tracing::Span::none() };
     let handlers = Handlers { notes: Arc::new(Notes) };
     let implementations = Implementations::new(handlers, Arc::new(IdentityAuthenticator::new(service)));
-    let opened = tokio::task::spawn_blocking(|| engine::open(temp("engine.db")).expect("open the engine")).await.unwrap();
-    BackofficeParts { deps, implementations, engine: opened, addr }
+    BackofficeParts { deps, implementations, addr }
 }
 
 struct Reply {
@@ -236,10 +225,8 @@ async fn sign_in_page(router: &Router, login: &str) -> String {
     cookie.split(';').next().unwrap().to_string()
 }
 
-const NOTES: &str = "/engine/namespaces/fixture-app-db/schemas/Note/instances";
-
-// The app serves its pages from the parts and mounts no JSON API or engine
-// routes: a stack may expose the app and keep its API internal.
+// The app serves its pages from the parts and mounts no JSON API: a stack
+// may expose the app and keep its API internal.
 #[tokio::test(flavor = "multi_thread")]
 async fn the_parts_set_up_the_pages_alone() {
     let parts = parts(SocketAddr::from(([127, 0, 0, 1], 0))).await;
@@ -250,63 +237,31 @@ async fn the_parts_set_up_the_pages_alone() {
     assert_eq!(reply.status, StatusCode::NOT_FOUND, "{}", reply.body);
     let reply = send(&router, "GET", "/api/notes/count", &[], None).await;
     assert_eq!(reply.status, StatusCode::NOT_FOUND, "{}", reply.body);
-    let reply = send(&router, "GET", NOTES, &[], None).await;
-    assert_eq!(reply.status, StatusCode::NOT_FOUND, "{}", reply.body);
 
-    // The pages call the API and the engine in-process, as the caller the
-    // sign-in page's session gives them.
-    let reply = send(&router, "GET", "/console/engine", &[], None).await;
+    // The pages call the API in-process, as the caller the sign-in page's
+    // session gives them.
+    let reply = send(&router, "GET", "/console/account", &[], None).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.body);
     let ada = sign_in_page(&router, "ada@example.com").await;
-    let reply = send(&router, "GET", "/console/engine", &[("cookie", &ada)], None).await;
+    let reply = send(&router, "GET", "/console/account", &[("cookie", &ada)], None).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
-    assert!(reply.body.contains("<a href=\"/console/engine/Note\">Notes</a>"), "{}", reply.body);
-    let reply = send(&router, "GET", "/console/engine/Note", &[("cookie", &ada)], None).await;
-    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    assert!(reply.body.contains("ada@example.com"), "{}", reply.body);
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn the_parts_set_up_the_pages_the_api_and_the_engine() {
+async fn the_parts_set_up_the_pages_and_the_api() {
     let parts = parts(SocketAddr::from(([127, 0, 0, 1], 0))).await;
-    let engine = Arc::clone(&parts.engine);
     let router = Router::builder().discover().fixture_app_api_with_parts_and_api(parts).build();
 
     // The pages ask for a caller, whom the API's session gives them.
-    let reply = send(&router, "GET", "/console/engine", &[], None).await;
+    let reply = send(&router, "GET", "/console/account", &[], None).await;
     assert_eq!(reply.status, StatusCode::UNAUTHORIZED, "{}", reply.body);
     let ada = sign_in(&router, "ada@example.com").await;
-    let reply = send(&router, "GET", "/console/engine", &[("cookie", &ada)], None).await;
+    let reply = send(&router, "GET", "/console/account", &[("cookie", &ada)], None).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
-    assert!(reply.body.contains("<a href=\"/console/engine/Note\">Notes</a>"), "{}", reply.body);
-
-    // A note created through the engine's routes, as Ada, is in the engine
-    // the parts hold, and its page shows it.
-    let reply = send(
-        &router,
-        "POST",
-        NOTES,
-        &[("cookie", &ada), ("sec-fetch-site", "same-origin"), ("content-type", "application/json")],
-        Some(json!({"id": "n1", "data": {"title": "Hello"}})),
-    )
-    .await;
-    assert_eq!(reply.status, StatusCode::CREATED, "{}", reply.body);
-    let held = tokio::task::spawn_blocking(move || {
-        let principal = superschematic_engine::Principal::new("ada", ["Note"]);
-        let target = superschematic_engine::SchemaTarget { namespace: Some("fixture-app-db") };
-        engine.schemas().live(&principal, "Note", target).map(|live| live.is_some())
-    })
-    .await
-    .unwrap()
-    .unwrap();
-    assert!(held, "the parts' engine has no live Note");
-    let reply = send(&router, "GET", "/console/engine/Note/n1", &[("cookie", &ada)], None).await;
+    assert!(reply.body.contains("ada@example.com"), "{}", reply.body);
+    let reply = send(&router, "GET", "/api/notes/count", &[("cookie", &ada)], None).await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
-    assert!(reply.body.contains("<div data-field=\"title\"><dt>Title</dt><dd>Hello</dd></div>"), "{}", reply.body);
-
-    // Grace, who holds no Note, is refused it by the engine's policy.
-    let grace = sign_in(&router, "grace@example.com").await;
-    let reply = send(&router, "GET", "/console/engine/Note/n1", &[("cookie", &grace)], None).await;
-    assert_eq!(reply.status, StatusCode::FORBIDDEN, "{}", reply.body);
 }
 
 // A GET of path on addr over a socket of its own, which answers the status
@@ -326,7 +281,7 @@ async fn serve_listens_on_the_parts_address() {
     let status = tokio::task::spawn_blocking(move || {
         for _ in 0..100 {
             if TcpStream::connect(addr).is_ok() {
-                return get(addr, "/console/engine");
+                return get(addr, "/console/account");
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
@@ -341,8 +296,33 @@ async fn serve_listens_on_the_parts_address() {
 }
 `
 
+// appCopyWithoutApps copies fixture-app-api into a directory of the test's
+// own with its apps left out.
+func appCopyWithoutApps(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join(testpaths.TempDir(t), appService)
+	for _, file := range []string{"schema.config.yaml", filepath.Join("src", "app.schema.yaml")} {
+		data, err := os.ReadFile(filepath.Join(serviceDir(appService), file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		if i := strings.Index(text, "\napps:\n"); i >= 0 {
+			text = text[:i+1]
+		}
+		path := filepath.Join(dir, file)
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
 // appCopy copies fixture-app-api into a directory of the test's own, with
-// no authDb, so its crate has no identity runtime and no engine, and its
+// no authDb, so its crate has no identity runtime, and its
 // schema without the user sessions that need one; with auth off, its
 // operations need no caller either.
 func appCopy(t *testing.T, auth bool) string {
@@ -371,14 +351,14 @@ func appCopy(t *testing.T, auth bool) string {
 	return dir
 }
 
-// TestAppPartsOfAnAPIWithoutIdentityOrEngineBuild builds the Topcoat crate
-// of fixture-app-api's app with no identity runtime and no engine (D78):
+// TestAppPartsOfAnAPIWithoutIdentityBuild builds the Topcoat crate of
+// fixture-app-api's app with no identity runtime (D78):
 // an API with auth of its own takes the app's page authenticator in
 // fixture_app_api_with_parts and fixture_app_api_with_parts_and_api, as
 // their doc's serve does, and one without auth takes the parts alone.
 // AppParts then holds the implementations alone. cargo clippy and cargo
 // test compile a program that calls each.
-func TestAppPartsOfAnAPIWithoutIdentityOrEngineBuild(t *testing.T) {
+func TestAppPartsOfAnAPIWithoutIdentityBuild(t *testing.T) {
 	for _, c := range []struct {
 		name string
 		auth bool
@@ -410,8 +390,8 @@ func TestAppPartsOfAnAPIWithoutIdentityOrEngineBuild(t *testing.T) {
 					t.Errorf("lib.rs lacks %s:\n%s", want, lib)
 				}
 			}
-			if strings.Contains(string(lib), "IdentityPageAuthenticator") || strings.Contains(string(lib), "parts.engine") {
-				t.Errorf("lib.rs of an API with no identity runtime or engine has one:\n%s", lib)
+			if strings.Contains(string(lib), "IdentityPageAuthenticator") {
+				t.Errorf("lib.rs of an API with no identity runtime has one:\n%s", lib)
 			}
 			cargoTestCrateWith(t, appService, c.test, crateOptions{outputs: pagesOutputs(), dir: dir})
 		})

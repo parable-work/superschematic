@@ -795,11 +795,13 @@ own table, not in the core's naming keys. See
 ## A behavior
 
 A behavior is code that adds fields, operations, checks and storage to a
-type when an engine runs the schema. The compiler declares, carries and
-checks behaviors; the engine, the Rust library every server links (D58),
-runs them. An extension ships both halves: the declaration, registered
-with the compiler, and a Rust crate that implements it, which the
-project's engine compiles in (below).
+table (D103), or to a General schema's type (D16). The compiler declares,
+carries and checks behaviors; the behaviors' core runs them, on a table
+and in development mode (D117). An extension ships the declaration,
+registered with the compiler, and the behavior's rules: stated in the
+declarative vocabulary, or a Rust crate that implements its hooks over
+the core's API, which the project's rules crate adds to the core
+([The project's rules core](#the-projects-rules-core)).
 
 An extension declares a behavior in a JSON file beside its Go package,
 embeds it and registers it:
@@ -860,7 +862,7 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   `behaviors["acme.Rating"].ratingCount`, apart from the type's own
   fields and every other behavior's, so none collides, and a filter or a
   display names one by its qualified name, `acme.Rating.ratingCount`.
-  A config never renames a field. A field the engine computes at a read
+  A config never renames a field. A field the core computes at a read
   from other instances, the clock or the config says `"volatile": true`,
   since no event of its instance records its moves. One whose value is
   the caller's, not the instance's (an unread count), also says
@@ -870,35 +872,32 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   `update` or `delete`, which every schema has. `paramsSchema` is an
   object schema that sets `"additionalProperties": false`, so an
   operation's parameters are exactly the ones it declares; the registry
-  and the engine both refuse one that does not.
+  refuses one that does not.
   `invocationPolicy` is a value of the registry's tool invocation policy;
   left out, the policy's default applies. `scope` is `instance`, the
   default, `schema`, an operation on the schema as a whole, or
   `namespace`, one on the behavior's own tables across every schema of a
   namespace that composes it, called by the behavior's name
-  ([namespace operations](/superschematic/guides/engine-behaviors/#namespace-operations));
-  `engine-client` types a behavior's namespace operations once per
-  module, with a client of their own, `acmeRatingNamespaceClient`, apart
-  from every schema's. An instance operation that writes only its
+  ([namespace operations](/superschematic/guides/engine-behaviors/#namespace-operations)).
+  An instance operation that writes only its
   caller's own state may say `"beside": true, "log": false, "asks":
   "read"`, and the policy is asked `read` for it.
-- `signals` are the messages about an instance the engine hands to the
+- `signals` are the messages about an instance the core hands to the
   event streams open on it and keeps nowhere (D77): a typing indicator,
   a draft's next chunk. Each is `{ name, description, paramsSchema,
   access }`, its name camelCase and unique among the behavior's signals,
   its `paramsSchema` the JSON Schema of its data, and its `access` who
   may send it: `read` or `write`, a caller the policy lets read or write
   the schema, or `operation`, the behavior's own operations alone,
-  through their context's `signal(name, data)`. `engine-client` types
-  each one's data and writes a send method for each a caller may send.
+  through their context's `signal(name, data)`.
 - `vetoes` lists the codes the behavior's refusals carry, each
   `{ code, description }` in lowercase snake case, so a client can
-  branch on `details.code` of a 409 `vetoed`. The engine refuses a veto
+  branch on `details.code` of a 409 `vetoed`. The core refuses a veto
   with a code the declaration does not list.
 - `preconditionSchema`, a closed object schema, declares what a caller
   may assert to the behavior with a write: the entry it sends under the
   behavior's name in the preconditions of an update, a delete or an
-  operation, which the engine checks and hands to the behavior's guard.
+  operation, which the core checks and hands to the behavior's guard.
   Lease's is `{ token }`.
 - `rules`, optional, states the behavior's rules in the declarative
   vocabulary the behaviors' core interprets (D103's step 5), so a table
@@ -906,16 +905,15 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   an operation's effects, reactions and fields derived from a sub-table
   ([declarative behaviors](/superschematic/reference/declarative-behaviors/)).
   acme's file states them beside `tables` (a `ratings` sub-table keyed by
-  the shopper) and fields with a `type`, which a table's layout reads;
-  the engine reads neither, and runs the crate below.
+  the shopper) and fields with a `type`, which a table's layout reads.
 
 Assembly fails on a malformed declaration, and `Finalize` on a
 `requires` or `conflicts` name nobody registered or an invocation policy
 value the registry's policy does not have.
 
-A type composes behaviors with `@behavior` from `@superschematic/schema`,
-which any kind may import. Several on one class apply in source order,
-and a type lists a behavior once:
+A General schema's type composes behaviors with `@behavior` from
+`@superschematic/schema` (D16). Several on one class apply in source
+order, and a type lists a behavior once:
 
 ```ts
 import { behavior } from "@superschematic/schema";
@@ -932,6 +930,10 @@ The data forms write the same list:
 ```json
 "behaviors": [{ "name": "acme.Rating", "config": { "maxStars": 5 } }]
 ```
+
+A DB type is a table, which implements a behavior or carries it on a
+field instead (D103): the load refuses `@behavior` on it and names that
+form.
 
 The config type comes from `BehaviorConfigs`, which your authoring package
 augments, as it augments `MCPToolOptions` for an invocation policy key:
@@ -958,251 +960,18 @@ registered behaviors and holds each config to its schema. The core's
 `types` generator renders behaviors: its `<Type>Behaviors` holds your
 behavior's fields under its exact name, typed as any JSON, since a
 declaration names a field without a schema, and in Go, Rust and Python
-under the name in PascalCase (`acme.Rating` is `AcmeRating`). The DB and
-General pipelines build such a schema: on a DB type a behavior makes an
-engine type, which `sql` and `orm` leave out and the `enginedoc`
-generator writes into the engine document, with your behavior and the
-crate its `BehaviorSpec`'s `Rust` names
-([Engine types](/superschematic/guides/engine-behaviors/#engine-types)).
-An API's own type cannot compose one, and the API generators refuse an
-API that uses an engine type, naming themselves. A generator of yours
-whose output covers what behaviors add, or holds nothing a type's
-behaviors add, as acme's manifest lists type names, sets
-`GeneratorSpec.RendersBehaviors`; without it, a build of such a schema
-that runs it fails and names it. acme's `shop-ratings` and
-`shop-ratings-ts` services (`ext/testdata/services`) compose
-`acme.Rating`.
-
-### The implementation
-
-The engine runs a Rust type that implements its `Behavior` trait over the
-same declaration. The crate lives in your project, as a Cargo workspace of
-its own with its own lock file, and depends on `superschematic-engine`
-without its database features, which the project's engine picks. Copy
-the declaration into the crate with your binary's `behaviors` command, and
-run it with `--check` in CI so the copy cannot fall behind:
-
-```sh
-acme-schematic behaviors --extension acme --out crates/behaviors/declarations
-acme-schematic behaviors --extension acme --out crates/behaviors/declarations --check
-```
-
-The implementation embeds that copy, parses a type's config into the
-value its hooks get, and gives the engine a hook for each point of an
-instance's life, with a handler and a reader for exactly the operations
-and fields the declaration names. acme's `Rating`, in the `acme-behaviors`
-crate (`crates/behaviors/src/lib.rs`), whose `RatingConfig`, `Totals`,
-`totals`, `summary` and `average` are its own:
-
-```rust
-use serde_json::Value;
-use superschematic_engine::behaviors::{BehaviorMigration, ColumnSpec};
-use superschematic_engine::json::number_value;
-use superschematic_engine::storage::SqlValue;
-use superschematic_engine::{Behavior, ConfigTarget, EngineError, Error, Hooks, Result};
-
-pub struct Rating;
-
-impl Behavior for Rating {
-    type Config = RatingConfig;
-
-    fn declaration(&self) -> &str {
-        include_str!("../declarations/acme.Rating.behavior.json")
-    }
-
-    fn parse_config(&self, raw: &Value, _target: &ConfigTarget<'_>) -> Result<RatingConfig> {
-        match raw.get("maxStars") {
-            Some(Value::Number(max)) => Ok(RatingConfig { max_stars: number_value(max) as i64 }),
-            _ => Err(Error::config("maxStars, the highest rating a shopper can give, is required")),
-        }
-    }
-
-    fn hooks(&self) -> Hooks<Self> {
-        Hooks {
-            config_change: Some(|_, before, after, _| { /* maxStars may rise, not fall */ }),
-            migrations: vec![BehaviorMigration::new(1, "rating totals")
-                .column("count", ColumnSpec::integer().not_null().default(0))
-                .column("stars", ColumnSpec::integer().not_null().default(0))],
-            operations: vec![
-                ("rate", |_, cx, params| {
-                    let stars = match params.get("stars") {
-                        Some(Value::Number(stars)) => number_value(stars),
-                        _ => 0.0,
-                    };
-                    if stars > cx.config().max_stars as f64 {
-                        return Err(EngineError::invalid_argument(/* ... */).into());
-                    }
-                    let before = totals(&cx.columns().get()?)?;
-                    let after = Totals { count: before.count + 1, stars: before.stars + stars as i64 };
-                    cx.columns().set(&[
-                        ("count", SqlValue::Integer(after.count)),
-                        ("stars", SqlValue::Integer(after.stars)),
-                    ])?;
-                    Ok(summary(&after))
-                }),
-                ("ratingSummary", |_, cx, _| Ok(summary(&totals(&cx.columns().get()?)?))),
-            ],
-            fields: vec![
-                ("ratingCount", |_, view| Ok(Some(Value::from(totals(&view.columns().get()?)?.count)))),
-                ("ratingAverage", |_, view| Ok(Some(average(&totals(&view.columns().get()?)?)))),
-            ],
-            ..Hooks::default()
-        }
-    }
-}
-```
-
-Every hook is optional and a plain function, runs inside the call's
-transaction, and writes only the behavior's own storage: columns the
-engine adds to its instances table and names for the behavior
-(`cx.columns()`), and tables of its own through `cx.sql().table(name)`.
-Its SQL also reads its own columns across every instance of the schema,
-with their own fields, through a read-only relation the engine names
-(`cx.sql().instances()`), asking the access policy for read as the
-caller. A refusal is an `EngineError`, such as `invalid_argument`, or a
-veto. A guard may veto an update, a delete or any behavior's operation on
-the type with a `Veto`, a reason or `{ reason, code, details }` whose code
-the declaration lists, and reads the caller's precondition for its
-behavior in `request.precondition()`; another behavior changes this one's
-state only by calling its operations, so those guards always run. Where a
-config names a permission, the behavior asks `cx.can(permission)`, which
-the permission matcher the deployment gives the engine answers. An
-operation can change the instance's own fields with `cx.update(patch)`,
-which runs the checks and guards of an update. A `validate` hook judges
-the fields a create or an update would store and returns issues at their
-paths, which refuse the write as `invalid_instance`, as the live
-version's own do, before any guard is asked; it never sees a
-precondition, which is the guard's to judge. `checked_types` names the
-document's types it checks values against, which the compatibility rule
-then holds, and `instance_schema` shows clients what it holds the fields
-to, under `allOf` in the describe document and the create and update
-tools. A behavior that keeps values of the schema's other types in its
-own tables reads those types in `parse_config`
-(`target.types().get(name)`), which holds them to the schema's checks and
-its compatibility rule as a type a field reaches is held, and checks a
-value against one with `validate(type, value)` in its contexts.
-`guidance` tells an MCP client what the config means: a summary, and for
-each operation of the type, the behavior's own and the ones its guard
-holds, when to call it and the codes of the vetoes it can meet, which the
-engine merges into each tool's guidance, as an SDK tool carries its
-`@docs`. `create_params_schema` shows the create parameters the config
-takes, narrower than the declaration's. The engine's README ("Behaviors",
-and "Guidance" under "Tools") has the whole interface: `parse_config`,
-and the hooks `config_change`, `after_config_change`, `migrations`,
-`initialize`, `validate`, `checked_types`, `instance_schema`, `guidance`,
-`create_params_schema`, `guard`, `operations`, `schema_operations`,
-`fields`, `filters`, `after_change`, `guard_reference`,
-`after_reference_change`, `reactions` and `schedules`. `config_change`'s
-last argument says whether the schema has instances (`instances()`), so a
-change only stored ones could break is refused only while there are some.
-
-A behavior written in TypeScript, with `defineBehavior` from
-`@superschematic/engine/testing`, runs only on the engine's test addon
-(`scripts/engine-napi.sh --js-behaviors`), through its bridge; the
-shipped addon and a project's refuse it. It is for an engine's tests and
-fixtures, not an extension's implementation.
-
-### The project's engine
-
-Name the crate in the behavior's registration: its Cargo package name,
-its directory relative to your project (the parent of the schemas root,
-which `[paths]` is relative to as well), and the Rust expression that
-registers it:
-
-```go
-r.RegisterBehavior(registry.BehaviorSpec{
-	Extension: Name,
-	Rust: registry.BehaviorRust{
-		Crate:    "acme-behaviors",
-		Path:     "crates/behaviors",
-		Register: "acme_behaviors::Rating",
-	},
-	Declaration: ratingDeclaration,
-})
-```
-
-For a DB or General schema whose types compose the behavior, the build's
-`projectengine` generator writes the project's engine crate,
-`engine/rust/<service>`, named `<rust_crate_prefix><service>-engine`: it
-depends on the engine's crates at the `[paths]` keys `engine_rust`,
-`engine_behaviors_rust`, `engine_workqueue_rust` and
-`engine_commerce_rust`, and on yours at its path, and its `behaviors()`
-registers the core's behaviors, the work queue's and the commerce ones
-when the schema uses one, then yours; `tools()` carries your
-binary's invocation policy and vendor keys, under which an operation that
-names your policy's value registers. Each server language takes the
-engine from that crate its own way
-([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)):
-
-- A Rust server links the library and opens the engine with its
-  `behaviors()` and `tools()`.
-- A Go server links the workspace's `ffi/` member, the engine's C ABI
-  over the same `behaviors()`, as a static archive in place of the
-  core's (`scripts/engine-archive.sh --crate <crate>/ffi --out <dir>`).
-- A TypeScript server loads the workspace's `napi/` member, the engine's
-  Node-API addon over them, in place of the core's addon: build it with
-  `scripts/engine-napi.sh --crate <crate>/napi --out <dir>`, which prints
-  the file it wrote, and name that file with the engine option `addon`
-  or, for every engine the process opens, `SUPERSCHEMATIC_ENGINE_ADDON`.
-
-A generated server does this itself: a stack's Dockerfile builds the
-member its language takes in its engine stage, and `stack dev` builds it
-before it builds or starts the server, so the commands above are for a
-host you write by hand.
-
-The host runs your behavior beside the core's: a Rust host passes the
-set of both, as the engine crate's `behaviors()` is, and a TypeScript
-host names yours in `behaviors`, which the addon registers after the
-core's. It passes the meta-schema its binary writes,
-which declares the behavior, and the tool invocation policy and vendor
-keys its binary registers, which the engine writes its MCP tools with (an
-operation's `invocationPolicy` must be one of the policy's values). In
-TypeScript, with `addon` the file `scripts/engine-napi.sh` printed and
-`tools` the engine document's:
-
-```ts
-import { openEngine } from "@superschematic/engine";
-
-const engine = openEngine({ path: "shop.db", policy, addon, metaSchema: acmeJSONSchema, behaviors: ["acme.Rating"], tools });
-engine.schemas.define(me, productSchema);   // composes acme.Rating
-engine.schemas.publish(me, "Product");       // creates the rating columns
-engine.instances.invoke(me, "Product", id, "rate", { stars: 4 });
-```
-
-and in Rust, over the core's set and the crate's:
-
-```rust
-use superschematic_engine::{Engine, EngineOptions, MetaSchema, Policy};
-
-let mut options = EngineOptions::sqlite("shop.db");
-options.policy = Some(Policy::allow_all());
-options.meta_schema = Some(MetaSchema::Text(std::fs::read_to_string("acme-schema-file.json")?));
-options.behaviors = superschematic_engine_behaviors::core().extend(acme_behaviors::behaviors());
-options.tools = acme_behaviors::tools();
-let engine = Engine::open(options)?;
-```
-
-An engine without the behavior refuses a schema that composes it. The
-engine registers the core's own behaviors, `Workflow`, `Comments`,
-`Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`,
-`Constants`, `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering`,
-`Approvals`, `Derived` and `Provenance`, when it opens, and the core's
-addon also carries the
-[work-queue behaviors](/superschematic/guides/work-queues/), which run
-once a host names them (`workQueueBehaviors` from
-`@superschematic/engine-workqueue`). No core operation names an
-invocation policy, so their tools take the default of the policy you
-pass. A behavior whose registration names no crate, or a crate the
-project does not hold, gets no project engine: the build's log says no
-engine can run the schema's behaviors, and an engine refuses the schema.
-
-acme's `crates/behaviors` is the whole example: its tests
-(`tests/rating.rs`) run the engine scenario on SQLite and Postgres, and
-the smoke builds and tests the engine crate the acme binary writes for
-`shop-ratings`, its archive with it, and loads its addon in Node.js,
-where an engine on it publishes `shop-ratings`' `Product`, creates one
-and rates it. The [engine guide](/superschematic/guides/engine/) serves
-three of the core's behaviors in `examples/engine-notes`.
+under the name in PascalCase (`acme.Rating` is `AcmeRating`). A General
+schema with such a type builds. A table that implements the behavior, or
+carries it on a field, stays a table: `sql` writes the fields it owns as
+columns, and the behaviors' core runs it
+([The project's rules core](#the-projects-rules-core)). An API's own type
+cannot compose one. A generator of yours whose output covers what a
+behavior adds to a table, or holds nothing of the table at all, as acme's
+manifest lists type names, sets `GeneratorSpec.RendersFieldBehaviors`;
+without it, a build that runs it on a schema one of whose tables
+composes a behavior, or that imports such a table, fails and names it.
+acme's `shop-ratings` and `shop-ratings-ts` services
+(`ext/testdata/services`) compose `acme.Rating`.
 
 ## A behavior declared by a class
 
@@ -1401,9 +1170,34 @@ schema names a project's behavior as it names one of the core's:
 
 A behavior whose rules need code names the Rust crate that implements its
 hooks over the core's API (`crate`, `registry.BehaviorSpec.Rules` in Go):
-a value that implements `superschematic_rules::Behavior`. A table may then
-implement the behavior, and the build of its DB schema writes the
-project's rules crate into `rules/rust/<schema>`. The crate is the core's
+a value that implements `superschematic_rules::Behavior`. The
+registration gives its Cargo package name, its directory relative to your
+project (the parent of the schemas root, which `[paths]` is relative to
+as well), and the Rust expression the project's rules crate adds to the
+core:
+
+```go
+r.RegisterBehavior(registry.BehaviorSpec{
+	Extension: Name,
+	Rules: registry.BehaviorRust{
+		Crate:    "acme-rules",
+		Path:     "crates/rules",
+		Register: "acme_rules::Flagged",
+	},
+	Declaration: flaggedDeclaration,
+})
+```
+
+Copy the declaration into the crate with your binary's `behaviors`
+command, and run it with `--check` in CI so the copy cannot fall behind:
+
+```sh
+acme-schematic behaviors --extension acme --out crates/rules/declarations
+acme-schematic behaviors --extension acme --out crates/rules/declarations --check
+```
+
+A table may then implement the behavior, and the build of its DB schema
+writes the project's rules crate into `rules/rust/<schema>`. The crate is the core's
 behaviors with each composed behavior's crate added, and it exports the
 core's ABI over them (`superschematic_rules_wasm::export_rules_abi`). Its
 tests find every composed behavior registered and declared.
@@ -1442,7 +1236,7 @@ make up the surface, each spec carrying the extension's `Name()`:
 
 | Registration | Adds |
 | --- | --- |
-| `RegisterPlatform(registry.PlatformSpec)` | one deployable kind (`server`, `database`, `job`, `worker`, `site`, `bucket`, `memoryStore`, `runner`, `deriver` or `app`) on one runtime, such as Cloud Run or Cloud SQL: the server languages or SQL dialects it runs, the JSON Schema of a deployable's settings there, its name and address in an environment, and a pure `Lower` to its resources |
+| `RegisterPlatform(registry.PlatformSpec)` | one deployable kind (`server`, `database`, `job`, `worker`, `site`, `bucket`, `memoryStore`, `deriver` or `app`) on one runtime, such as Cloud Run or Cloud SQL: the server languages or SQL dialects it runs, the JSON Schema of a deployable's settings there, its name and address in an environment, and a pure `Lower` to its resources |
 | `RegisterConnector(registry.ConnectorSpec)` | one edge kind (`sql`, `http`, `site`, `bucket` or `memoryStore`) between two platforms: a pure `Connect` that returns the edge's resources, such as an IAM grant, and the value of the config field the edge derives |
 | `RegisterTarget(registry.TargetSpec)` | a platform per deployable kind, the JSON Schema of an environment's values, the default DNS platform, the provisioner, the properties schema of each resource type its platforms emit, and policy rules over the resolved resource graph |
 | `RegisterDNSPlatform(registry.DNSPlatformSpec)` | a DNS provider for an environment's domain records, which need not be the target's provider: its values schema, a pure `Lower` from records to resources, the schemas of the resource types it brings, and the credentials its provider reads |
@@ -1477,9 +1271,8 @@ environment that runs such an API with no provider of that interface.
 ## A command
 
 `cli.New` returns the core's commands: `check`, `build`, `build-all`,
-`migrate`, `queries`, `json-schema`, `format`, `behaviors`,
-`engine-client`, `stack`, `identity`, `env`, `catalog`, `init`, `new` and
-`tasks`
+`migrate`, `queries`, `json-schema`, `format`, `behaviors`, `stack`,
+`identity`, `env`, `catalog`, `init`, `new` and `tasks`
 ([CLI](/superschematic/reference/cli/)). An extension that implements
 `cli.CommandProvider` contributes more:
 
