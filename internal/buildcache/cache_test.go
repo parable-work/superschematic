@@ -52,7 +52,7 @@ func TestStoreRestoreRoundTrip(t *testing.T) {
 	require.NoError(t, os.Symlink(filepath.Join(repoA, "vendor", "scalars"), filepath.Join(out, "node_modules", "linked-pkg")))
 	require.NoError(t, os.Symlink("../dep/index.js", filepath.Join(out, "node_modules", "rel-link")))
 
-	require.NoError(t, StoreEntry(cacheRoot, "schemas", "demo", stringsOf("f", 64), repoA, []string{rel}))
+	require.NoError(t, StoreEntry(cacheRoot, "schemas", "demo", stringsOf("f", 64), repoA, []string{rel}, ""))
 	entry := FindEntry(cacheRoot, "schemas", "demo", stringsOf("f", 64))
 	require.NotEmpty(t, entry)
 	assert.NoDirExists(t, filepath.Join(entry, "outputs", "0", "target"))
@@ -74,7 +74,7 @@ func TestRestoreRejectsDamagedEntry(t *testing.T) {
 	rel := filepath.ToSlash(filepath.Join("schemas", "dist", "types", "go", "demo"))
 	writeFile(t, filepath.Join(repo, filepath.FromSlash(rel), "types.go"), "package demo")
 
-	require.NoError(t, StoreEntry(cacheRoot, "schemas", "demo", stringsOf("a", 64), repo, []string{rel}))
+	require.NoError(t, StoreEntry(cacheRoot, "schemas", "demo", stringsOf("a", 64), repo, []string{rel}, ""))
 	entry := FindEntry(cacheRoot, "schemas", "demo", stringsOf("a", 64))
 	require.NotEmpty(t, entry)
 	require.NoError(t, os.Remove(filepath.Join(entry, "outputs", "0", "types.go")))
