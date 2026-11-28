@@ -2,6 +2,7 @@ package apigen
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/goutil"
@@ -61,6 +62,73 @@ type DerivedField struct {
 	From        []*ir.FieldDef
 	Instruction string
 	Model       string
+}
+
+// SchemaNames are the names of the tables the deriver fills, in order.
+func (d DeriverInfo) SchemaNames() []string {
+	var out []string
+	for _, schema := range d.Schemas {
+		out = append(out, schema.Name)
+	}
+	return out
+}
+
+// DeriverPlan is a deriver of an API laid out in one language (D146): the
+// deriver, and its methods, one per derived field of its tables, in the
+// tables' order and then by field, each rendered by the language's
+// DeriverRenderer.
+type DeriverPlan[M any] struct {
+	DeriverInfo
+	Methods []M
+}
+
+// DeriverRenderer is how one language's generator renders the methods of
+// an API's derivers, for PlanDerivers. Schema, when set, readies the
+// derived fields of a table of a deriver (its fields' types, say) before
+// Method renders any; Method renders the method of a derived field of the
+// table and gives the name the method takes.
+type DeriverRenderer[M any] struct {
+	Schema func(d DeriverInfo, schema DerivedSchema) error
+	Method func(d DeriverInfo, schema DerivedSchema, f DerivedField) (method M, name string, err error)
+}
+
+// PlanDerivers lays out an API's derivers in one language, gen naming the
+// generator and api the API in errors: the derivers, sorted by name when
+// byName and in the API's order otherwise, and each one's methods,
+// rendered by r. It refuses two methods of one deriver that one name would
+// take. An error of r.Schema is wrapped with the deriver and the API; one
+// of r.Method is returned as it is.
+func PlanDerivers[M any](gen, api string, derivers []DeriverInfo, byName bool, r DeriverRenderer[M]) ([]DeriverPlan[M], error) {
+	if byName {
+		derivers = slices.Clone(derivers)
+		slices.SortStableFunc(derivers, func(a, b DeriverInfo) int { return strings.Compare(a.Name, b.Name) })
+	}
+	var out []DeriverPlan[M]
+	for _, d := range derivers {
+		plan := DeriverPlan[M]{DeriverInfo: d}
+		taken := map[string]string{}
+		for _, schema := range d.Schemas {
+			if r.Schema != nil {
+				if err := r.Schema(d, schema); err != nil {
+					return nil, fmt.Errorf("%s: deriver %s of %s: %w", gen, d.Name, api, err)
+				}
+			}
+			for _, f := range schema.Fields {
+				key := schema.Name + "." + f.Name
+				m, name, err := r.Method(d, schema, f)
+				if err != nil {
+					return nil, err
+				}
+				if other, clash := taken[name]; clash {
+					return nil, fmt.Errorf("%s: deriver %s of %s fills %s and %s, which would both be its method %s", gen, d.Name, api, other, key, name)
+				}
+				taken[name] = key
+				plan.Methods = append(plan.Methods, m)
+			}
+		}
+		out = append(out, plan)
+	}
+	return out, nil
 }
 
 // DeriversFunc is the function an implementation of an API with derivers
@@ -150,13 +218,50 @@ func (m GoDeriverMethod) FromList() string {
 // imports them as, by field: typegen's FieldTypes.
 type GoFieldTypes func(schema string) (map[string]string, error)
 
-// SetDerivers sets the API's derivers, its derivers of tables, their
-// fields typed by types, refusing two methods of one deriver that one name
-// would take.
+// SetDerivers sets the API's derivers, its derivers of tables in the API's
+// order, their fields typed by types, refusing two methods of one deriver
+// that one name would take.
 func (o *APIOutput) SetDerivers(tables []DeriverInfo, types GoFieldTypes) error {
 	o.GoDerivers = nil
-	for _, d := range tables {
-		info := GoDeriver{
+	var fieldTypes map[string]string
+	plans, err := PlanDerivers("apigen", o.SchemaName, tables, false, DeriverRenderer[GoDeriverMethod]{
+		Schema: func(_ DeriverInfo, schema DerivedSchema) (err error) {
+			fieldTypes, err = types(schema.Name)
+			return err
+		},
+		Method: func(d DeriverInfo, schema DerivedSchema, f DerivedField) (GoDeriverMethod, string, error) {
+			m := GoDeriverMethod{
+				Schema:      schema.Name,
+				Field:       f.Name,
+				Method:      goutil.GoPublicIdentifier(schema.Name) + goutil.GoPublicIdentifier(f.Name),
+				Inputs:      goutil.GoPublicIdentifier(schema.Name) + goutil.GoPublicIdentifier(f.Name) + "Inputs",
+				Value:       strings.TrimPrefix(fieldTypes[f.Name], "*"),
+				Instruction: f.Instruction,
+				Model:       f.Model,
+			}
+			if m.Value == "" {
+				return m, "", fmt.Errorf("apigen: deriver %s of %s fills %s, whose Go type the database's types do not declare", d.Name, o.SchemaName, m.Key())
+			}
+			for _, from := range f.From {
+				t := fieldTypes[from.Name]
+				if t == "" {
+					return m, "", fmt.Errorf("apigen: deriver %s of %s fills %s from %s, whose Go type the database's types do not declare", d.Name, o.SchemaName, m.Key(), from.Name)
+				}
+				// An input that holds no value is left out: a pointer,
+				// unless its type is nil already.
+				if !strings.HasPrefix(t, "*") && !strings.HasPrefix(t, "[]") && !strings.HasPrefix(t, "map[") {
+					t = "*" + t
+				}
+				m.From = append(m.From, GoDerivedInput{Name: from.Name, GoName: goutil.GoPublicIdentifier(from.Name), Type: t})
+			}
+			return m, m.Method, nil
+		},
+	})
+	if err != nil {
+		return err
+	}
+	for _, d := range plans {
+		o.GoDerivers = append(o.GoDerivers, GoDeriver{
 			Name:        d.Name,
 			Field:       goutil.GoPublicIdentifier(d.Name),
 			Interface:   goutil.GoPublicIdentifier(d.Name) + "Deriver",
@@ -164,48 +269,9 @@ func (o *APIOutput) SetDerivers(tables []DeriverInfo, types GoFieldTypes) error 
 			Permissions: d.Permissions,
 			Concurrency: d.Concurrency,
 			BatchSize:   d.BatchSize,
-		}
-		methods := map[string]string{}
-		for _, schema := range d.Schemas {
-			info.Schemas = append(info.Schemas, schema.Name)
-			fieldTypes, err := types(schema.Name)
-			if err != nil {
-				return fmt.Errorf("apigen: deriver %s of %s: %w", d.Name, o.SchemaName, err)
-			}
-			for _, f := range schema.Fields {
-				key := schema.Name + "." + f.Name
-				m := GoDeriverMethod{
-					Schema:      schema.Name,
-					Field:       f.Name,
-					Method:      goutil.GoPublicIdentifier(schema.Name) + goutil.GoPublicIdentifier(f.Name),
-					Inputs:      goutil.GoPublicIdentifier(schema.Name) + goutil.GoPublicIdentifier(f.Name) + "Inputs",
-					Value:       strings.TrimPrefix(fieldTypes[f.Name], "*"),
-					Instruction: f.Instruction,
-					Model:       f.Model,
-				}
-				if m.Value == "" {
-					return fmt.Errorf("apigen: deriver %s of %s fills %s, whose Go type the database's types do not declare", d.Name, o.SchemaName, key)
-				}
-				for _, from := range f.From {
-					t := fieldTypes[from.Name]
-					if t == "" {
-						return fmt.Errorf("apigen: deriver %s of %s fills %s from %s, whose Go type the database's types do not declare", d.Name, o.SchemaName, key, from.Name)
-					}
-					// An input that holds no value is left out: a pointer,
-					// unless its type is nil already.
-					if !strings.HasPrefix(t, "*") && !strings.HasPrefix(t, "[]") && !strings.HasPrefix(t, "map[") {
-						t = "*" + t
-					}
-					m.From = append(m.From, GoDerivedInput{Name: from.Name, GoName: goutil.GoPublicIdentifier(from.Name), Type: t})
-				}
-				if other, clash := methods[m.Method]; clash {
-					return fmt.Errorf("apigen: deriver %s of %s fills %s and %s, which would both be its method %s", d.Name, o.SchemaName, other, key, m.Method)
-				}
-				methods[m.Method] = key
-				info.Methods = append(info.Methods, m)
-			}
-		}
-		o.GoDerivers = append(o.GoDerivers, info)
+			Schemas:     d.SchemaNames(),
+			Methods:     d.Methods,
+		})
 	}
 	return nil
 }

@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -116,13 +117,13 @@ func From(options Options) (*Providers, error) {
 		}
 		byName[d.Name] = d
 	}
-	for _, name := range sortedKeys(options.Manifests) {
+	for _, name := range slices.Sorted(maps.Keys(options.Manifests)) {
 		if _, ok := byName[name]; !ok {
 			problems = append(problems, fmt.Sprintf("the API's config lists provider %s, which the server does not link", name))
 		}
 	}
 	entries := map[string]*entry{}
-	for _, slot := range sortedKeys(options.Slots) {
+	for _, slot := range slices.Sorted(maps.Keys(options.Slots)) {
 		iface := options.Slots[slot]
 		contract, ok := ContractOf(iface)
 		if !ok {
@@ -140,7 +141,7 @@ func From(options Options) (*Providers, error) {
 		name := named.text
 		d, ok := byName[name]
 		if !ok {
-			links := strings.Join(sortedKeys(byName), ", ")
+			links := strings.Join(slices.Sorted(maps.Keys(byName)), ", ")
 			if links == "" {
 				links = "none"
 			}
@@ -152,7 +153,7 @@ func From(options Options) (*Providers, error) {
 			continue
 		}
 		values := map[string]ConfigValue{}
-		for _, key := range sortedKeys(d.Config) {
+		for _, key := range slices.Sorted(maps.Keys(d.Config)) {
 			spec := d.Config[key]
 			field := ConfigField(slot, key)
 			value := options.Config[field]
@@ -208,7 +209,7 @@ func From(options Options) (*Providers, error) {
 // every interface, sorted by slot.
 func (p *Providers) Configured(iface Interface) []ConfiguredProvider {
 	var out []ConfiguredProvider
-	for _, slot := range sortedKeys(p.entries) {
+	for _, slot := range slices.Sorted(maps.Keys(p.entries)) {
 		e := p.entries[slot]
 		if iface == "" || e.iface == iface {
 			out = append(out, ConfiguredProvider{Slot: slot, Interface: e.iface, Provider: e.definition.Name})
@@ -339,15 +340,6 @@ func (p *Providers) Files(ctx context.Context, slot string) (FileProcessor, erro
 func IsNotConfigured(err error) bool {
 	var target *NotConfiguredError
 	return errors.As(err, &target)
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
 }
 
 // bound is made, a provider of iface, with every operation made within

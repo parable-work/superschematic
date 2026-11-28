@@ -20,8 +20,8 @@ func TestGeneratedGenericJSONAcceptsAnyJSONValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, scalar := range output.Scalars {
-		if scalar.Name == "Generic.JSON" && scalar.TSType != "JSONValue" {
-			t.Fatalf("Generic.JSON TypeScript type = %q, want JSONValue", scalar.TSType)
+		if scalar.Name == "Generic.JSON" && scalar.TSType() != "JSONValue" {
+			t.Fatalf("Generic.JSON TypeScript type = %q, want JSONValue", scalar.TSType())
 		}
 	}
 	if len(schema.Types) == 0 {

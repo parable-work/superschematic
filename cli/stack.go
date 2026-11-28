@@ -101,10 +101,7 @@ func openStackProject(cmd *cobra.Command, a *app, dir, out, namingPath string) (
 		return nil, fmt.Errorf("stack service directory not found: %s", dir)
 	}
 	p := &stackProject{dir: abs, servicesRoot: filepath.Dir(abs), schemasRoot: filepath.Dir(filepath.Dir(abs))}
-	if p.names, err = resolveNaming(namingPath, p.schemasRoot); err != nil {
-		return nil, err
-	}
-	if p.reg, err = a.resolveRegistry(p.names); err != nil {
+	if p.names, p.reg, err = a.openNaming(namingPath, p.schemasRoot); err != nil {
 		return nil, err
 	}
 	p.outputRoot = out
@@ -145,11 +142,8 @@ func findStackService(a *app, namingPath string) (string, error) {
 		return "", err
 	}
 	open := func(schemasRoot string) (*registry.Registry, error) {
-		names, err := resolveNaming(namingPath, schemasRoot)
-		if err != nil {
-			return nil, err
-		}
-		return a.resolveRegistry(names)
+		_, reg, err := a.openNaming(namingPath, schemasRoot)
+		return reg, err
 	}
 	if reg, err := open(filepath.Dir(filepath.Dir(cwd))); err == nil {
 		if cfg, err := buildplan.ReadConfig(cwd, reg); err == nil && cfg.Kind == ir.SchemaKindStack {
@@ -351,7 +345,7 @@ Examples:
 	}
 	cmd.Flags().StringVarP(&flags.environment, "environment", "e", "", "the environment to run (default the stack's one environment on the local target)")
 	cmd.Flags().StringVar(&flags.out, "out", "", "output root for generated artifacts (default <schemas-root>/dist)")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <stack-service-dir>/../../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <stack-service-dir>/../../superschematic.toml)")
 	cmd.Flags().BoolVar(&flags.removeData, "remove-data", false, "on exit, remove this checkout's containers of the environment and their data, the Postgres databases and the buckets' objects, and the SQLite files, instead of stopping them (a memory store keeps no data either way)")
 	cmd.Flags().BoolVar(&flags.buildSites, "build-sites", false, "build each site once and serve its files, a site with a dev server (site.dev) too, as a deploy does, in place of running its dev server")
 	// The flag's name before the storage emulator's container joined

@@ -32,24 +32,23 @@
 //! advisory lock first, so one request at a time writes the store, as on
 //! SQLite.
 
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::{params, Connection, OptionalExtension, ToSql};
-use serde_json::{Map, Value};
-use superschematic_rules::{
-    Caller, Code, Core, Refusal, RowChange, SharedRow, SharedRowChange, SubRow, SubRowChange,
-};
-use superschematic_rules_handler::document::storage_key;
+use rusqlite::types::{ToSqlOutput, ValueRef};
+use rusqlite::{params_from_iter, Connection, ToSql};
+use serde_json::Value;
+use superschematic_rules::{Caller, Code, Core, Refusal, SharedRow, SubRow};
 use superschematic_rules_handler::{
-    run_due, Armed, Declarations, Draft, DueDeadline, Handler, HeldSubRow, Policy, QueuedChange,
-    QueuedEvent, RanDue, Request, Store, StoreAnswer, StoreRead, StoreWrite, StoredRow, Unit,
-    Version,
+    run_due, Declarations, DueDeadline, Handler, Policy, QueuedChange, QueuedEvent, RanDue,
+    Request, Store, StoreAnswer, StoreRead, Unit,
 };
+
+use layout::{Arg, Cell, Cells, Db, Layout};
 
 mod http;
 pub mod hub;
+mod layout;
 #[cfg(feature = "postgres")]
 mod pg;
 #[cfg(feature = "server")]
@@ -65,9 +64,7 @@ pub const LAYOUT_VERSION: &str = "1";
 /// The development layout in a SQLite database.
 pub struct SqliteStore {
     conn: Connection,
-    /// The behaviors whose shared sub-tables the store holds, by name: each
-    /// one's table.
-    sub_tables: BTreeMap<String, String>,
+    layout: Layout,
 }
 
 fn failed(error: rusqlite::Error) -> Refusal {
@@ -82,31 +79,69 @@ fn failed(error: rusqlite::Error) -> Refusal {
     Refusal::internal(format!("the development store failed: {error}"))
 }
 
-fn text(value: &impl serde::Serialize) -> Result<String, Refusal> {
-    serde_json::to_string(value)
-        .map_err(|error| Refusal::internal(format!("a value is no JSON: {error}")))
+/// A statement of the layout in SQLite's words: its `$n` placeholders as
+/// `?n`, which SQLite numbers alike. No statement of the layout holds a `$`
+/// but in a placeholder; every value is bound.
+fn sqlite_sql(sql: &str) -> String {
+    sql.replace('$', "?")
 }
 
-fn parse<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, Refusal> {
-    serde_json::from_str(text)
-        .map_err(|error| Refusal::internal(format!("the development store holds no JSON: {error}")))
-}
-
-/// Why a unit stopped: a fence that did not hold, or a refusal.
-enum Stop {
-    Moved,
-    Refused(Refusal),
-}
-
-impl From<rusqlite::Error> for Stop {
-    fn from(error: rusqlite::Error) -> Self {
-        Stop::Refused(failed(error))
+impl ToSql for Arg<'_> {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(match self {
+            Arg::Text(text) => ToSqlOutput::Borrowed(ValueRef::Text(text.as_bytes())),
+            Arg::Owned(text) => ToSqlOutput::Borrowed(ValueRef::Text(text.as_bytes())),
+            Arg::Int(n) => ToSqlOutput::Owned(rusqlite::types::Value::Integer(*n)),
+        })
     }
 }
 
-impl From<Refusal> for Stop {
-    fn from(refusal: Refusal) -> Self {
-        Stop::Refused(refusal)
+/// The connection a store's statements run over.
+struct SqliteDb<'a>(&'a Connection);
+
+impl Db for SqliteDb<'_> {
+    fn execute(&mut self, sql: &str, args: &[Arg<'_>]) -> Result<u64, Refusal> {
+        let changed = self
+            .0
+            .execute(&sqlite_sql(sql), params_from_iter(args))
+            .map_err(failed)?;
+        Ok(u64::try_from(changed).unwrap_or(u64::MAX))
+    }
+
+    fn query(&mut self, sql: &str, args: &[Arg<'_>]) -> Result<Vec<Cells>, Refusal> {
+        let mut statement = self.0.prepare_cached(&sqlite_sql(sql)).map_err(failed)?;
+        let width = statement.column_count();
+        let mut rows = statement.query(params_from_iter(args)).map_err(failed)?;
+        let mut out = Vec::new();
+        while let Some(row) = rows.next().map_err(failed)? {
+            let mut cells = Vec::with_capacity(width);
+            for at in 0..width {
+                cells.push(match row.get_ref(at).map_err(failed)? {
+                    ValueRef::Null => Cell::Null,
+                    ValueRef::Integer(n) => Cell::Int(n),
+                    ValueRef::Text(bytes) => Cell::Text(
+                        std::str::from_utf8(bytes)
+                            .map_err(|error| {
+                                Refusal::internal(format!(
+                                    "the development store holds text that is no UTF-8: {error}"
+                                ))
+                            })?
+                            .to_owned(),
+                    ),
+                    ValueRef::Real(_) | ValueRef::Blob(_) => {
+                        return Err(Refusal::internal(format!(
+                            "the development store holds neither text nor a whole number in column {at}"
+                        )))
+                    }
+                });
+            }
+            out.push(Cells(cells));
+        }
+        Ok(out)
+    }
+
+    fn batch(&mut self, sql: &str) -> Result<(), Refusal> {
+        self.0.execute_batch(sql).map_err(failed)
     }
 }
 
@@ -126,124 +161,18 @@ impl SqliteStore {
     /// there.
     pub fn over(conn: Connection, declarations: &Declarations) -> rusqlite::Result<Self> {
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS dev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS dev_schema_versions (
-               schema TEXT NOT NULL, version INTEGER NOT NULL, document TEXT NOT NULL,
-               PRIMARY KEY (schema, version));
-             CREATE TABLE IF NOT EXISTS dev_schema_drafts (
-               schema TEXT PRIMARY KEY, document TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS dev_instances (
-               schema TEXT NOT NULL, id TEXT NOT NULL, version INTEGER NOT NULL,
-               data TEXT NOT NULL, owned TEXT NOT NULL,
-               PRIMARY KEY (schema, id));
-             CREATE TABLE IF NOT EXISTS dev_deadlines (
-               schema TEXT NOT NULL, id TEXT NOT NULL, use_id TEXT NOT NULL, name TEXT NOT NULL,
-               at INTEGER NOT NULL, due INTEGER NOT NULL, payload TEXT NOT NULL,
-               PRIMARY KEY (schema, id, use_id, name));
-             CREATE INDEX IF NOT EXISTS dev_deadlines_due ON dev_deadlines (due);
-             CREATE TABLE IF NOT EXISTS dev_events (
-               seq INTEGER PRIMARY KEY AUTOINCREMENT, schema TEXT NOT NULL, id TEXT NOT NULL,
-               use_id TEXT NOT NULL, kind TEXT NOT NULL, at INTEGER NOT NULL, payload TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS dev_changes (
-               seq INTEGER PRIMARY KEY AUTOINCREMENT, schema TEXT NOT NULL, id TEXT NOT NULL,
-               change TEXT NOT NULL);
-             CREATE TABLE IF NOT EXISTS dev_shared (
-               schema TEXT NOT NULL, use_id TEXT NOT NULL, tbl TEXT NOT NULL, key TEXT NOT NULL,
-               data TEXT NOT NULL, version INTEGER NOT NULL,
-               PRIMARY KEY (schema, use_id, tbl, key));",
-        )?;
-        conn.execute(
-            "INSERT INTO dev_meta (key, value) VALUES ('layout', ?1) ON CONFLICT (key) DO NOTHING",
-            [LAYOUT_VERSION],
-        )?;
-        let mut sub_tables = BTreeMap::new();
-        for declared in declarations
-            .iter()
-            .filter(|declared| declared.has_row_tables())
-        {
-            let table = format!("dev_sub_{}", storage_key(&declared.name));
-            conn.execute_batch(&format!(
-                "CREATE TABLE IF NOT EXISTS \"{table}\" (
-                   schema TEXT NOT NULL, id TEXT NOT NULL, use_id TEXT NOT NULL, tbl TEXT NOT NULL,
-                   key TEXT NOT NULL, data TEXT NOT NULL,
-                   PRIMARY KEY (schema, id, use_id, tbl, key));"
-            ))?;
-            sub_tables.insert(declared.name.clone(), table);
+        let layout = Layout::sqlite(declarations);
+        conn.execute_batch(&layout.create_tables())?;
+        conn.execute(&sqlite_sql(&layout.record_version()), [LAYOUT_VERSION])?;
+        for table in layout.create_sub_tables() {
+            conn.execute_batch(&table)?;
         }
-        Ok(SqliteStore { conn, sub_tables })
+        Ok(SqliteStore { conn, layout })
     }
 
     /// The connection, for a test's or an operator's own SQL.
     pub fn connection(&self) -> &Connection {
         &self.conn
-    }
-
-    fn sub_table(&self, behavior: &str) -> Result<&str, Refusal> {
-        self.sub_tables
-            .get(behavior)
-            .map(String::as_str)
-            .ok_or_else(|| {
-                Refusal::internal(format!(
-                    "the development store keeps no sub-table of {behavior}, which declares none"
-                ))
-            })
-    }
-
-    fn row(&self, type_name: &str, id: &str) -> Result<Option<StoredRow>, Refusal> {
-        self.conn
-            .query_row(
-                "SELECT version, data, owned FROM dev_instances WHERE schema = ?1 AND id = ?2",
-                params![type_name, id],
-                |row| {
-                    Ok((
-                        row.get::<_, i64>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
-            )
-            .optional()
-            .map_err(failed)?
-            .map(|(version, data, owned)| {
-                Ok(StoredRow {
-                    id: id.to_owned(),
-                    version,
-                    data: parse(&data)?,
-                    owned: parse(&owned)?,
-                })
-            })
-            .transpose()
-    }
-
-    fn rows(&self, type_name: &str) -> Result<Vec<StoredRow>, Refusal> {
-        let mut statement = self
-            .conn
-            .prepare_cached(
-                "SELECT id, version, data, owned FROM dev_instances WHERE schema = ?1 ORDER BY id",
-            )
-            .map_err(failed)?;
-        let rows = statement
-            .query_map([type_name], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, i64>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })
-            .map_err(failed)?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (id, version, data, owned) = row.map_err(failed)?;
-            out.push(StoredRow {
-                id,
-                version,
-                data: parse(&data)?,
-                owned: parse(&owned)?,
-            });
-        }
-        Ok(out)
     }
 
     /// A row's rows of one use's sub-table, in key order.
@@ -254,61 +183,8 @@ impl SqliteStore {
         use_id: &str,
         table: &str,
     ) -> Result<Vec<SubRow>, Refusal> {
-        let mut out = Vec::new();
-        for sub_table in self.sub_tables.values() {
-            let mut statement = self
-                .conn
-                .prepare_cached(&format!(
-                    "SELECT key, data FROM \"{sub_table}\" WHERE schema = ?1 AND id = ?2 AND use_id = ?3 AND tbl = ?4 ORDER BY key"
-                ))
-                .map_err(failed)?;
-            let rows = statement
-                .query_map(params![type_name, id, use_id, table], |row| {
-                    Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-                })
-                .map_err(failed)?;
-            for row in rows {
-                let (key, data) = row.map_err(failed)?;
-                out.push(SubRow::new(key, parse(&data)?));
-            }
-        }
-        out.sort_by(|a, b| a.key.cmp(&b.key));
-        Ok(out)
-    }
-
-    fn table_sub_rows(
-        &self,
-        type_name: &str,
-        use_id: &str,
-        table: &str,
-    ) -> Result<Vec<HeldSubRow>, Refusal> {
-        let mut out = Vec::new();
-        for sub_table in self.sub_tables.values() {
-            let mut statement = self
-                .conn
-                .prepare_cached(&format!(
-                    "SELECT id, key, data FROM \"{sub_table}\" WHERE schema = ?1 AND use_id = ?2 AND tbl = ?3 ORDER BY id, key"
-                ))
-                .map_err(failed)?;
-            let rows = statement
-                .query_map(params![type_name, use_id, table], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                })
-                .map_err(failed)?;
-            for row in rows {
-                let (id, key, data) = row.map_err(failed)?;
-                out.push(HeldSubRow {
-                    id,
-                    row: SubRow::new(key, parse(&data)?),
-                });
-            }
-        }
-        out.sort_by(|a, b| (&a.id, &a.row.key).cmp(&(&b.id, &b.row.key)));
-        Ok(out)
+        self.layout
+            .sub_rows(&mut SqliteDb(&self.conn), type_name, id, use_id, table)
     }
 
     /// The row of a key of a use's shared table, with its version.
@@ -319,483 +195,32 @@ impl SqliteStore {
         table: &str,
         key: &str,
     ) -> Result<Option<SharedRow>, Refusal> {
-        self.conn
-            .query_row(
-                "SELECT data, version FROM dev_shared WHERE schema = ?1 AND use_id = ?2 AND tbl = ?3 AND key = ?4",
-                params![type_name, use_id, table, key],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()
-            .map_err(failed)?
-            .map(|(data, version)| Ok(SharedRow::new(key, parse(&data)?, version)))
-            .transpose()
+        self.layout
+            .shared_row(&mut SqliteDb(&self.conn), type_name, use_id, table, key)
     }
 
-    /// A row's armed deadlines: each its use, name and time, by use and
-    /// name.
+    /// A row's armed deadlines: each its use, name, time and payload, by
+    /// use and name.
     pub fn armed(
         &self,
         type_name: &str,
         id: &str,
     ) -> Result<Vec<(String, String, i64, Value)>, Refusal> {
-        let mut statement = self
-            .conn
-            .prepare_cached(
-                "SELECT use_id, name, at, payload FROM dev_deadlines WHERE schema = ?1 AND id = ?2 ORDER BY use_id, name",
-            )
-            .map_err(failed)?;
-        let rows = statement
-            .query_map(params![type_name, id], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })
-            .map_err(failed)?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (use_id, name, at, payload) = row.map_err(failed)?;
-            out.push((use_id, name, at, parse(&payload)?));
-        }
-        Ok(out)
-    }
-
-    // changed runs a write and holds it to change one row.
-    fn one(&self, sql: &str, values: &[&dyn ToSql]) -> Result<(), Stop> {
-        if self.conn.execute(sql, values)? == 1 {
-            Ok(())
-        } else {
-            Err(Stop::Moved)
-        }
-    }
-
-    fn drop_row(&self, type_name: &str, id: &str) -> Result<(), Stop> {
-        for sub_table in self.sub_tables.values() {
-            self.conn.execute(
-                &format!("DELETE FROM \"{sub_table}\" WHERE schema = ?1 AND id = ?2"),
-                params![type_name, id],
-            )?;
-        }
-        self.conn.execute(
-            "DELETE FROM dev_deadlines WHERE schema = ?1 AND id = ?2",
-            params![type_name, id],
-        )?;
-        Ok(())
-    }
-
-    fn apply_one(&self, write: &StoreWrite) -> Result<(), Stop> {
-        match write {
-            StoreWrite::PutDraft {
-                type_name,
-                document,
-            } => {
-                self.conn.execute(
-                    "INSERT INTO dev_schema_drafts (schema, document) VALUES (?1, ?2)
-                     ON CONFLICT (schema) DO UPDATE SET document = excluded.document",
-                    params![type_name, text(document)?],
-                )?;
-            }
-            StoreWrite::PutVersion {
-                type_name,
-                version,
-                document,
-            } => {
-                let live: i64 = self.conn.query_row(
-                    "SELECT COALESCE(MAX(version), 0) FROM dev_schema_versions WHERE schema = ?1",
-                    [type_name],
-                    |row| row.get(0),
-                )?;
-                if live != version - 1 {
-                    return Err(Stop::Moved);
-                }
-                self.conn.execute(
-                    "INSERT INTO dev_schema_versions (schema, version, document) VALUES (?1, ?2, ?3)",
-                    params![type_name, version, text(document)?],
-                )?;
-                self.conn.execute(
-                    "DELETE FROM dev_schema_drafts WHERE schema = ?1",
-                    [type_name],
-                )?;
-            }
-            StoreWrite::Insert {
-                type_name,
-                id,
-                data,
-                owned,
-            } => {
-                let held: Option<i64> = self
-                    .conn
-                    .query_row(
-                        "SELECT 1 FROM dev_instances WHERE schema = ?1 AND id = ?2",
-                        params![type_name, id],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                if held.is_some() {
-                    return Err(Stop::Refused(Refusal::new(
-                        Code::Conflict,
-                        format!("{type_name} {id} already exists"),
-                    )));
-                }
-                self.conn.execute(
-                    "INSERT INTO dev_instances (schema, id, version, data, owned) VALUES (?1, ?2, 1, ?3, ?4)",
-                    params![type_name, id, text(data)?, text(owned)?],
-                )?;
-            }
-            StoreWrite::Update {
-                type_name,
-                id,
-                expected,
-                data,
-                owned,
-            } => self.one(
-                "UPDATE dev_instances SET data = ?1, owned = ?2, version = version + 1
-                 WHERE schema = ?3 AND id = ?4 AND version = ?5",
-                params![text(data)?, text(owned)?, type_name, id, expected],
-            )?,
-            StoreWrite::Rewrite {
-                type_name,
-                id,
-                data,
-                owned,
-            } => self.one(
-                "UPDATE dev_instances SET data = ?1, owned = ?2 WHERE schema = ?3 AND id = ?4",
-                params![text(data)?, text(owned)?, type_name, id],
-            )?,
-            StoreWrite::Delete {
-                type_name,
-                id,
-                expected,
-            } => {
-                match expected {
-                    Some(expected) => self.one(
-                        "DELETE FROM dev_instances WHERE schema = ?1 AND id = ?2 AND version = ?3",
-                        params![type_name, id, expected],
-                    )?,
-                    None => self.one(
-                        "DELETE FROM dev_instances WHERE schema = ?1 AND id = ?2",
-                        params![type_name, id],
-                    )?,
-                }
-                self.drop_row(type_name, id)?;
-            }
-            StoreWrite::Gone { type_name, id } => {
-                if self.row(type_name, id)?.is_none() {
-                    self.drop_row(type_name, id)?;
-                }
-            }
-            StoreWrite::SubRow {
-                type_name,
-                id,
-                behavior,
-                use_id,
-                table,
-                key,
-                change,
-            } => {
-                let sub_table = self.sub_table(behavior)?;
-                match change {
-                    SubRowChange::Insert { values } => {
-                        let values: Map<String, Value> = values
-                            .iter()
-                            .filter(|(_, value)| !value.is_null())
-                            .map(|(name, value)| (name.clone(), value.clone()))
-                            .collect();
-                        self.one(
-                            &format!(
-                                "INSERT INTO \"{sub_table}\" (schema, id, use_id, tbl, key, data)
-                                 VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT DO NOTHING"
-                            ),
-                            params![type_name, id, use_id, table, key, text(&values)?],
-                        )?;
-                    }
-                    SubRowChange::Update { values } => {
-                        let held: Option<String> = self
-                            .conn
-                            .query_row(
-                                &format!(
-                                    "SELECT data FROM \"{sub_table}\" WHERE schema = ?1 AND id = ?2 AND use_id = ?3 AND tbl = ?4 AND key = ?5"
-                                ),
-                                params![type_name, id, use_id, table, key],
-                                |row| row.get(0),
-                            )
-                            .optional()?;
-                        let Some(held) = held else {
-                            return Err(Stop::Moved);
-                        };
-                        let mut data: Map<String, Value> = parse(&held)?;
-                        for (name, value) in values {
-                            if value.is_null() {
-                                data.shift_remove(name);
-                            } else {
-                                data.insert(name.clone(), value.clone());
-                            }
-                        }
-                        self.one(
-                            &format!(
-                                "UPDATE \"{sub_table}\" SET data = ?1 WHERE schema = ?2 AND id = ?3 AND use_id = ?4 AND tbl = ?5 AND key = ?6"
-                            ),
-                            params![text(&data)?, type_name, id, use_id, table, key],
-                        )?;
-                    }
-                    SubRowChange::Delete => self.one(
-                        &format!(
-                            "DELETE FROM \"{sub_table}\" WHERE schema = ?1 AND id = ?2 AND use_id = ?3 AND tbl = ?4 AND key = ?5"
-                        ),
-                        params![type_name, id, use_id, table, key],
-                    )?,
-                    other => {
-                        return Err(Stop::Refused(Refusal::internal(format!(
-                            "the development store takes no sub-table change of this kind: {other:?}"
-                        ))))
-                    }
-                }
-            }
-            StoreWrite::SharedRow {
-                type_name,
-                use_id,
-                table,
-                key,
-                change,
-            } => match change {
-                SharedRowChange::Insert { values } => self.one(
-                    "INSERT INTO dev_shared (schema, use_id, tbl, key, data, version)
-                     VALUES (?1, ?2, ?3, ?4, ?5, 1) ON CONFLICT DO NOTHING",
-                    params![type_name, use_id, table, key, text(values)?],
-                )?,
-                SharedRowChange::Update {
-                    expected_version,
-                    values,
-                } => {
-                    let Some(held) = self.shared_row(type_name, use_id, table, key)? else {
-                        return Err(Stop::Moved);
-                    };
-                    let mut data = held.values;
-                    for (name, value) in values {
-                        if value.is_null() {
-                            data.shift_remove(name);
-                        } else {
-                            data.insert(name.clone(), value.clone());
-                        }
-                    }
-                    self.one(
-                        "UPDATE dev_shared SET data = ?1, version = version + 1
-                         WHERE schema = ?2 AND use_id = ?3 AND tbl = ?4 AND key = ?5 AND version = ?6",
-                        params![text(&data)?, type_name, use_id, table, key, expected_version],
-                    )?;
-                }
-                // A delete held to its version (D147): one a writer moved or
-                // deleted first deletes nothing, and the command runs again.
-                SharedRowChange::Delete { expected_version } => self.one(
-                    "DELETE FROM dev_shared
-                     WHERE schema = ?1 AND use_id = ?2 AND tbl = ?3 AND key = ?4 AND version = ?5",
-                    params![type_name, use_id, table, key, expected_version],
-                )?,
-                other => {
-                    return Err(Stop::Refused(Refusal::internal(format!(
-                        "the development store takes no shared-table change of this kind: {other:?}"
-                    ))))
-                }
-            },
-            StoreWrite::DropUse {
-                type_name,
-                behavior,
-                use_id,
-            } => {
-                if let Ok(sub_table) = self.sub_table(behavior) {
-                    self.conn.execute(
-                        &format!("DELETE FROM \"{sub_table}\" WHERE schema = ?1 AND use_id = ?2"),
-                        params![type_name, use_id],
-                    )?;
-                }
-                self.conn.execute(
-                    "DELETE FROM dev_shared WHERE schema = ?1 AND use_id = ?2",
-                    params![type_name, use_id],
-                )?;
-            }
-            StoreWrite::Arm {
-                type_name,
-                id,
-                use_id,
-                name,
-                at,
-                payload,
-            } => {
-                self.conn.execute(
-                    "INSERT INTO dev_deadlines (schema, id, use_id, name, at, due, payload)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6)
-                     ON CONFLICT (schema, id, use_id, name)
-                     DO UPDATE SET at = excluded.at, due = excluded.due, payload = excluded.payload",
-                    params![type_name, id, use_id, name, at, text(payload)?],
-                )?;
-            }
-            StoreWrite::Clear {
-                type_name,
-                id,
-                use_id,
-                name,
-            } => {
-                self.conn.execute(
-                    "DELETE FROM dev_deadlines WHERE schema = ?1 AND id = ?2 AND use_id = ?3 AND name = ?4",
-                    params![type_name, id, use_id, name],
-                )?;
-            }
-            StoreWrite::ClearUse { type_name, use_id } => {
-                self.conn.execute(
-                    "DELETE FROM dev_deadlines WHERE schema = ?1 AND use_id = ?2",
-                    params![type_name, use_id],
-                )?;
-            }
-            StoreWrite::Spend {
-                type_name,
-                id,
-                use_id,
-                name,
-                at,
-            } => self.one(
-                "DELETE FROM dev_deadlines WHERE schema = ?1 AND id = ?2 AND use_id = ?3 AND name = ?4 AND at = ?5",
-                params![type_name, id, use_id, name, at],
-            )?,
-            StoreWrite::Release {
-                type_name,
-                id,
-                use_id,
-                name,
-                due,
-            } => self.one(
-                "UPDATE dev_deadlines SET due = ?1 WHERE schema = ?2 AND id = ?3 AND use_id = ?4 AND name = ?5",
-                params![due, type_name, id, use_id, name],
-            )?,
-            StoreWrite::Event {
-                type_name,
-                id,
-                use_id,
-                kind,
-                at,
-                payload,
-            } => {
-                self.conn.execute(
-                    "INSERT INTO dev_events (schema, id, use_id, kind, at, payload) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![type_name, id, use_id, kind, at, text(payload)?],
-                )?;
-            }
-            StoreWrite::Change {
-                type_name,
-                id,
-                change,
-            } => {
-                self.conn.execute(
-                    "INSERT INTO dev_changes (schema, id, change) VALUES (?1, ?2, ?3)",
-                    params![type_name, id, text(change)?],
-                )?;
-            }
-            StoreWrite::Dequeue { seq } => {
-                self.one("DELETE FROM dev_changes WHERE seq = ?1", params![seq])?;
-            }
-        }
-        Ok(())
+        self.layout.armed(&mut SqliteDb(&self.conn), type_name, id)
     }
 }
 
 impl Store for SqliteStore {
     fn due(&mut self, now: i64) -> Result<Vec<DueDeadline>, Refusal> {
-        let mut statement = self
-            .conn
-            .prepare_cached(
-                "SELECT schema, id, use_id, name, at, payload FROM dev_deadlines WHERE due <= ?1 ORDER BY due, schema, id, use_id, name",
-            )
-            .map_err(failed)?;
-        let rows = statement
-            .query_map([now], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, i64>(4)?,
-                    row.get::<_, String>(5)?,
-                ))
-            })
-            .map_err(failed)?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (type_name, id, use_id, name, at, payload) = row.map_err(failed)?;
-            out.push(DueDeadline {
-                type_name,
-                id,
-                use_id,
-                name,
-                at,
-                payload: parse(&payload)?,
-            });
-        }
-        Ok(out)
+        self.layout.due(&mut SqliteDb(&self.conn), now)
     }
 
     fn queued(&mut self) -> Result<Vec<QueuedChange>, Refusal> {
-        let mut statement = self
-            .conn
-            .prepare_cached("SELECT seq, schema, id, change FROM dev_changes ORDER BY seq")
-            .map_err(failed)?;
-        let rows = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                ))
-            })
-            .map_err(failed)?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (seq, type_name, id, change) = row.map_err(failed)?;
-            out.push(QueuedChange {
-                seq,
-                type_name,
-                id,
-                change: parse::<RowChange>(&change)?,
-            });
-        }
-        Ok(out)
+        self.layout.queued(&mut SqliteDb(&self.conn))
     }
 
     fn events(&mut self, after: i64) -> Result<Vec<QueuedEvent>, Refusal> {
-        let mut statement = self
-            .conn
-            .prepare_cached(
-                "SELECT seq, schema, id, use_id, kind, at, payload FROM dev_events WHERE seq > ?1 ORDER BY seq",
-            )
-            .map_err(failed)?;
-        let rows = statement
-            .query_map([after], |row| {
-                Ok((
-                    row.get::<_, i64>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, i64>(5)?,
-                    row.get::<_, String>(6)?,
-                ))
-            })
-            .map_err(failed)?;
-        let mut out = Vec::new();
-        for row in rows {
-            let (seq, type_name, id, use_id, kind, at, payload) = row.map_err(failed)?;
-            out.push(QueuedEvent {
-                seq,
-                type_name,
-                id,
-                use_id,
-                kind,
-                at,
-                payload: parse(&payload)?,
-            });
-        }
-        Ok(out)
+        self.layout.events(&mut SqliteDb(&self.conn), after)
     }
 
     fn begin(&mut self) -> Result<(), Refusal> {
@@ -814,130 +239,11 @@ impl Store for SqliteStore {
     }
 
     fn read(&mut self, read: &StoreRead) -> Result<StoreAnswer, Refusal> {
-        Ok(match read {
-            StoreRead::Live => {
-                let mut statement = self
-                    .conn
-                    .prepare_cached(
-                        "SELECT schema, version, document FROM dev_schema_versions AS v
-                         WHERE version = (SELECT MAX(version) FROM dev_schema_versions WHERE schema = v.schema)
-                         ORDER BY schema",
-                    )
-                    .map_err(failed)?;
-                let rows = statement
-                    .query_map([], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, i64>(1)?,
-                            row.get::<_, String>(2)?,
-                        ))
-                    })
-                    .map_err(failed)?;
-                let mut versions = Vec::new();
-                for row in rows {
-                    let (type_name, version, document) = row.map_err(failed)?;
-                    versions.push(Version {
-                        type_name,
-                        version,
-                        document: parse(&document)?,
-                    });
-                }
-                StoreAnswer::Live(versions)
-            }
-            StoreRead::Draft { type_name } => {
-                let document: Option<String> = self
-                    .conn
-                    .query_row(
-                        "SELECT document FROM dev_schema_drafts WHERE schema = ?1",
-                        [type_name],
-                        |row| row.get(0),
-                    )
-                    .optional()
-                    .map_err(failed)?;
-                StoreAnswer::Draft(
-                    document
-                        .map(|document| {
-                            Ok::<_, Refusal>(Draft {
-                                type_name: type_name.clone(),
-                                document: parse(&document)?,
-                            })
-                        })
-                        .transpose()?,
-                )
-            }
-            StoreRead::Row { type_name, id } => StoreAnswer::Row(self.row(type_name, id)?),
-            StoreRead::Rows { type_name } => StoreAnswer::Rows(self.rows(type_name)?),
-            StoreRead::SubRows {
-                type_name,
-                id,
-                use_id,
-                table,
-            } => StoreAnswer::SubRows(self.sub_rows(type_name, id, use_id, table)?),
-            StoreRead::TableSubRows {
-                type_name,
-                use_id,
-                table,
-            } => StoreAnswer::TableSubRows(self.table_sub_rows(type_name, use_id, table)?),
-            StoreRead::SharedRow {
-                type_name,
-                use_id,
-                table,
-                key,
-            } => StoreAnswer::SharedRow(self.shared_row(type_name, use_id, table, key)?),
-            StoreRead::Armed {
-                type_name,
-                id,
-                use_id,
-                name,
-            } => {
-                let armed: Option<(i64, String)> = self
-                    .conn
-                    .query_row(
-                        "SELECT at, payload FROM dev_deadlines WHERE schema = ?1 AND id = ?2 AND use_id = ?3 AND name = ?4",
-                        params![type_name, id, use_id, name],
-                        |row| Ok((row.get(0)?, row.get(1)?)),
-                    )
-                    .optional()
-                    .map_err(failed)?;
-                StoreAnswer::Armed(
-                    armed
-                        .map(|(at, payload)| {
-                            Ok::<_, Refusal>(Armed {
-                                at,
-                                payload: parse(&payload)?,
-                            })
-                        })
-                        .transpose()?,
-                )
-            }
-            StoreRead::Page { .. } | StoreRead::Holders { .. } | StoreRead::Reached { .. } => {
-                return Err(superschematic_rules_handler::store::unqueried(read))
-            }
-        })
+        self.layout.read(&mut SqliteDb(&self.conn), read)
     }
 
     fn apply(&mut self, unit: &Unit) -> Result<bool, Refusal> {
-        self.conn
-            .execute_batch("SAVEPOINT dev_unit")
-            .map_err(failed)?;
-        for write in &unit.writes {
-            match self.apply_one(write) {
-                Ok(()) => {}
-                Err(stop) => {
-                    self.conn
-                        .execute_batch("ROLLBACK TO dev_unit; RELEASE dev_unit")
-                        .map_err(failed)?;
-                    return match stop {
-                        Stop::Moved => Ok(false),
-                        Stop::Refused(refusal) => Err(refusal),
-                    };
-                }
-            }
-        }
-        self.conn
-            .execute_batch("RELEASE dev_unit")
-            .map_err(failed)?;
-        Ok(true)
+        self.layout.apply(&mut SqliteDb(&self.conn), unit)
     }
 }
 

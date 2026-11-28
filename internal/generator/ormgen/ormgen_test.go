@@ -533,9 +533,8 @@ func TestGenerateFixtureDBShape(t *testing.T) {
 		t.Fatalf("expected one hasMany relationship on Tenant, got %+v", tenant.Relationships)
 	}
 	users := tenant.Relationships[0]
-	if users.HasManyParentRelationField != "Tenant" || users.HasManyParentFilterField != "TenantID" {
-		t.Errorf("hasMany parent mapping = (%q, %q), want (Tenant, TenantID)",
-			users.HasManyParentRelationField, users.HasManyParentFilterField)
+	if back := users.Back; back == nil || *back != (HasManyBack{GoField: "Tenant", FilterField: "TenantID"}) {
+		t.Errorf("hasMany back relation = %+v, want Tenant, by TenantID, required", back)
 	}
 
 	// hasMany relationships must not participate in column scan order.

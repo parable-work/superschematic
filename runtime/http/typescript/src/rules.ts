@@ -197,6 +197,8 @@ export type CoreAction =
   | { readonly kind: 'tableOperation'; readonly useId: string; readonly operation: string; readonly params?: unknown }
   | { readonly kind: 'deadline'; readonly key: string; readonly useId: string; readonly name: string; readonly at: number; readonly payload?: unknown }
   | { readonly kind: 'change'; readonly key: string; readonly change: CoreRowChange }
+  /** A read of a row (D104's step 4): the fields each use computes through reads, by use id, as the change set's result. The adapter sends none: a row's own and owned fields it reads itself. */
+  | { readonly kind: 'read'; readonly key: string }
   /** A caller's signal about a row (D77's primitive 2): the use whose behavior declares it, its name and its data. The core holds it to the declaration and writes nothing; the change set's signals hold the one sent. */
   | { readonly kind: 'signal'; readonly key: string; readonly useId: string; readonly name: string; readonly data?: unknown }
   /** An operation of the namespace as a whole (D77's primitive 3), by its behavior and name: it runs on no type and no row, over the types that compose the behavior (CoreReadRequest composing). */
@@ -2044,7 +2046,8 @@ export async function readQueuedEvents(host: RulesHost, type: string): Promise<Q
  * still absent, and a table read to have rows still has them, or still
  * none, each of a soft-deletable table's live rows. A read of a type the
  * layout lacks, of a spec, or of the types that compose a behavior, answers
- * from the layout and needs none. Answers made before the latest lock are asked for again, so a command
+ * from the layout and needs none, as a read of permissions, of no table,
+ * would. Answers made before the latest lock are asked for again, so a command
  * that takes a lock decides on reads made under it alone.
  */
 function fencesOf(host: RulesHost, reads: readonly CoreAnswered[]): RulesStatement[] {

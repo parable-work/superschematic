@@ -39,28 +39,20 @@ var templatesFS embed.FS
 // localObjectRoles are the type roles emitted as plain (non-input) structs.
 var localObjectRoles = []ir.Role{ir.RoleDBTable, ir.RoleAPIView, ir.RoleEmbeddedStruct}
 
-// ScalarInfo holds information about a scalar type (Go-specific wrapper).
+// ScalarInfo holds information about a scalar type (Go-specific wrapper):
+// the scalar as codegen extracts it, and what the Go generator reads off
+// it.
 type ScalarInfo struct {
-	Name                         string
-	GoType                       string
-	Primitive                    ir.LanguagePrimitive
-	Doc                          string
-	MaxLength                    int
-	MinLength                    int
-	Pattern                      string
-	Format                       string
-	CaseInsensitive              bool
-	ReservedWords                []string
-	ReservedWordsCaseInsensitive bool
-	ReservedWordsMatchPartial    bool
-	Minimum                      *int64
-	Maximum                      *int64
-	Example                      string
-	HasCustomNormalize           bool
-	HasCustomValidate            bool
-	HasCustomParse               bool
-	Tokens                       codegen.ScalarTokens
-	Traits                       codegen.ScalarTraits
+	codegen.ScalarInfo
+
+	// GoType is the scalar's Go type: its TargetType, except that a
+	// UUID-like scalar of uuid.UUID whose symbol is not UUID is this
+	// module's UUID.
+	GoType string
+
+	// Doc is the scalar's description and its comment, as a doc comment
+	// gives them (codegen.DocText).
+	Doc string
 
 	// ParseTarget is the superscalar function the generated Parse alias binds
 	// to (e.g. "ParseIdentityUUID", "ParseUUID"). Empty means no Parse alias
@@ -768,26 +760,9 @@ func convertScalars(codegenScalars []codegen.ScalarInfo) []ScalarInfo {
 		}
 
 		scalar := ScalarInfo{
-			Name:                         cs.Name,
-			GoType:                       goType,
-			Primitive:                    cs.Primitive,
-			Doc:                          codegen.DocText(cs.Description, cs.Comment),
-			MaxLength:                    cs.MaxLength,
-			MinLength:                    cs.MinLength,
-			Pattern:                      cs.Pattern,
-			Format:                       cs.Format,
-			CaseInsensitive:              cs.CaseInsensitive,
-			ReservedWords:                cs.ReservedWords,
-			ReservedWordsCaseInsensitive: cs.ReservedWordsCaseInsensitive,
-			ReservedWordsMatchPartial:    cs.ReservedWordsMatchPartial,
-			Minimum:                      cs.Minimum,
-			Maximum:                      cs.Maximum,
-			Example:                      cs.Example,
-			HasCustomNormalize:           cs.HasCustomNormalize,
-			HasCustomValidate:            cs.HasCustomValidate,
-			HasCustomParse:               cs.HasCustomParse,
-			Tokens:                       cs.Tokens,
-			Traits:                       cs.Traits,
+			ScalarInfo: cs,
+			GoType:     goType,
+			Doc:        codegen.DocText(cs.Description, cs.Comment),
 		}
 		scalar.ParseTarget = scalarLibParseTarget(scalar)
 		scalar.ParseAsInt64 = scalar.ParseTarget != "" && scalar.Traits.IsIntegerLike

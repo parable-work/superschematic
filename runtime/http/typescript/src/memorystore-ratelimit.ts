@@ -1,6 +1,6 @@
 import { MemoryStoreUnavailableError, memoryStoreName, type MemoryStore, type Ref } from './memorystore.js';
 import { MemoryRateLimitStore, type RateLimitDecision, type RateLimitStore } from './ratelimit.js';
-import { sha256 } from './sha256.js';
+import { sha256Hex } from './sha256.js';
 
 /*
 The shared rate limit (D75): an API whose config names a rateLimitStore
@@ -65,13 +65,6 @@ export function rateLimitWindow(limit: number, windowMs: number, nowMs: number, 
   };
 }
 
-/** The lowercase hex SHA-256 of s's UTF-8. */
-function hexSha256(s: string): string {
-  let out = '';
-  for (const b of sha256(new TextEncoder().encode(s))) out += b.toString(16).padStart(2, '0');
-  return out;
-}
-
 /**
  * The name, without the store's prefix, of the rate-limit counter of
  * service's operation, for the window starting at windowStart (Unix
@@ -79,7 +72,7 @@ function hexSha256(s: string): string {
  * MemoryStoreNameError for a service or an operation that is no segment.
  */
 export function rateLimitKeyName(service: string, operation: string, windowStart: number, clientKey: string): string {
-  return memoryStoreName(RATE_LIMIT_DECLARATION, service, operation, String(windowStart), hexSha256(clientKey));
+  return memoryStoreName(RATE_LIMIT_DECLARATION, service, operation, String(windowStart), sha256Hex(clientKey));
 }
 
 /** What a MemoryStoreRateLimitStore is built with. */

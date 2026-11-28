@@ -22,13 +22,14 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/archive.sh
+. "$ROOT/scripts/lib/archive.sh"
 CRATE="$ROOT/runtime/versiongraph/rust"
 GO_DIR="$ROOT/runtime/versiongraph/go"
 ARCHIVE_NAME="libsuperschematic_versiongraph.a"
 
-goos="$(go env GOOS)"
-goarch="$(go env GOARCH)"
-DEST="$GO_DIR/lib/${goos}_${goarch}"
+archive_target
+DEST="$(archive_lib_dir "$GO_DIR")"
 
 prebuilt=0
 case "${1:-}" in
@@ -57,45 +58,13 @@ if [ "$prebuilt" = "1" ]; then
 fi
 
 # Go binaries link this archive beside superscalar's, so both are built
-# with tools.env's RUST_VERSION (scripts/superscalar-dep.sh says why).
-RUSTUP_TOOLCHAIN="$(grep -E '^RUST_VERSION=' "$ROOT/tools.env" | cut -d= -f2)"
-export RUSTUP_TOOLCHAIN
+# with tools.env's RUST_VERSION (scripts/lib/archive.sh says why).
+archive_toolchain
 
-BUILD_LOG="$(mktemp)"
-trap 'rm -f "$BUILD_LOG"' EXIT
+archive_build "$CRATE"
+archive_stage "$ARCHIVE" "$DEST" "$ARCHIVE_NAME"
 
-# cargo names the archive it built in its artifact records, wherever
-# CARGO_TARGET_DIR or a config puts the target directory.
-cargo build --release --manifest-path "$CRATE/Cargo.toml" --message-format=json-render-diagnostics >"$BUILD_LOG"
-ARCHIVE="$(python3 - "$BUILD_LOG" "$ARCHIVE_NAME" <<'PY'
-import json, sys
-
-for line in open(sys.argv[1], encoding="utf-8"):
-    try:
-        message = json.loads(line)
-    except ValueError:
-        continue
-    if message.get("reason") != "compiler-artifact":
-        continue
-    for path in message.get("filenames") or []:
-        if path.endswith("/" + sys.argv[2]):
-            print(path)
-            sys.exit(0)
-PY
-)"
-if [ -z "$ARCHIVE" ] || [ ! -f "$ARCHIVE" ]; then
-  echo "cargo reported no $ARCHIVE_NAME" >&2
-  exit 1
-fi
-
-mkdir -p "$DEST"
-cp "$ARCHIVE" "$DEST/$ARCHIVE_NAME"
-
-DIGEST="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$DEST/$ARCHIVE_NAME")"
-STAMP="$GO_DIR/archive_stamp_${goos}_${goarch}.go"
-NEW_STAMP="$(mktemp)"
-trap 'rm -f "$BUILD_LOG" "$NEW_STAMP"' EXIT
-cat >"$NEW_STAMP" <<EOF
+archive_stamp "$GO_DIR/archive_stamp_${goos}_${goarch}.go" <<EOF
 //go:build ${goos} && ${goarch}
 
 package versiongraph
@@ -107,10 +76,6 @@ package versiongraph
 // one.
 const archiveSHA256 = "${DIGEST}"
 EOF
-# Rewrite only on a change, so an unchanged archive keeps the cache warm.
-if ! cmp -s "$NEW_STAMP" "$STAMP"; then
-  cp "$NEW_STAMP" "$STAMP"
-fi
 
 echo "versiongraph archive ${DIGEST:0:12} staged under $DEST" >&2
 echo "-L$DEST"

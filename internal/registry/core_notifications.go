@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -75,7 +76,7 @@ func eventOf(typeName string, args []any) (*ir.EventDef, error) {
 		return nil, ArgErrorf(0, "@event on %s takes an options object: %s", typeName, shape)
 	}
 	event := &ir.EventDef{}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		value := obj[key]
 		if key == "payload" {
 			list, ok := value.([]any)

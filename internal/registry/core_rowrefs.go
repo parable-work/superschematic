@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -71,7 +73,7 @@ func rowReferencesOf(typeName string, args []any) (*ir.RowReferencesDef, error) 
 	if !ok {
 		return nil, ArgErrorf(0, "@references on %s takes an options object: %s", typeName, shape)
 	}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		value := obj[key]
 		switch key {
 		case "tables":
@@ -124,7 +126,7 @@ func attachmentsOf(typeName string, args []any) (*ir.AttachmentsDef, error) {
 		}
 		return int64(n), nil
 	}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		value := obj[key]
 		var err error
 		switch key {

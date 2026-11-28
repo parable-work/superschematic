@@ -2,6 +2,7 @@ package ir
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -274,7 +275,7 @@ func (s *Schema) ProviderSlotsOf() (map[string]string, error) {
 	}
 	var slots map[string]string
 	from := map[string]string{}
-	for _, name := range sortedStringMapKeys(s.Types) {
+	for _, name := range slices.Sorted(maps.Keys(s.Types)) {
 		td := s.Types[name]
 		if td == nil || td.ProviderSlots == nil {
 			continue
@@ -282,7 +283,7 @@ func (s *Schema) ProviderSlotsOf() (map[string]string, error) {
 		if !td.EnvVars {
 			return nil, fmt.Errorf("%s: @providers is on %s, which is no @envVars class; a provider slot is a config field (D159)", s.Name, name)
 		}
-		for _, slot := range sortedStringMapKeys(td.ProviderSlots) {
+		for _, slot := range slices.Sorted(maps.Keys(td.ProviderSlots)) {
 			iface := td.ProviderSlots[slot]
 			if prev, ok := slots[slot]; ok && prev != iface {
 				return nil, fmt.Errorf("%s: slot %s takes %s on %s and %s on %s; a slot takes one interface (D159)", s.Name, slot, prev, from[slot], iface, name)

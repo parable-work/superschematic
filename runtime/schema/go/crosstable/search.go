@@ -3,6 +3,7 @@ package crosstable
 import (
 	"context"
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strings"
@@ -329,7 +330,7 @@ func SearchTables(ctx context.Context, h Host, caller Caller, request SearchRequ
 		}
 	}
 	var sources []string
-	for _, table := range sortedKeys(all) {
+	for _, table := range slices.Sorted(maps.Keys(all)) {
 		if request.Tables != nil && !slices.Contains(request.Tables, table) {
 			continue
 		}

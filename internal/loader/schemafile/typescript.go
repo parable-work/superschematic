@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -104,7 +105,7 @@ func renderDeclarations(root map[string]any, kinds []string, policyKey string, b
 	if err := d.writeRoot(root); err != nil {
 		return nil, err
 	}
-	for _, name := range sortedKeys(defs) {
+	for _, name := range slices.Sorted(maps.Keys(defs)) {
 		if err := d.writeDef(name, defs[name]); err != nil {
 			return nil, err
 		}
@@ -211,7 +212,7 @@ func (d *declarations) writeDef(name string, schema any) error {
 	}
 	fmt.Fprintf(&d.out, "export interface %s {\n", name)
 	policy := false
-	for _, key := range sortedKeys(props) {
+	for _, key := range slices.Sorted(maps.Keys(props)) {
 		propAt := at + "/properties/" + key
 		var typ string
 		switch {
@@ -598,7 +599,7 @@ var valueConstraints = []string{"pattern", "minLength", "maxLength", "minimum", 
 
 // onlyKeys fails on any keyword of node outside allowed.
 func onlyKeys(node map[string]any, at string, allowed ...string) error {
-	for _, key := range sortedKeys(node) {
+	for _, key := range slices.Sorted(maps.Keys(node)) {
 		if !slices.Contains(allowed, key) {
 			return fmt.Errorf("%s: unsupported JSON Schema keyword %q", at, key)
 		}

@@ -2,7 +2,8 @@ package verify
 
 import (
 	"encoding/json"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
@@ -78,7 +79,7 @@ func checkSeedRows(schema *ir.Schema, in Input, r *Result) {
 		scalarTypes := sqlutil.ScalarSQLTypes(schema)
 		seen := map[string]int{}
 		for i, row := range td.SeedRows.Rows {
-			for _, field := range sortedKeys(row) {
+			for _, field := range slices.Sorted(maps.Keys(row)) {
 				check(field)
 			}
 			for _, fd := range td.Fields {
@@ -118,14 +119,4 @@ func checkSeedRows(schema *ir.Schema, in Input, r *Result) {
 			seen[string(data)] = i
 		}
 	}
-}
-
-// sortedKeys is a row's field names in order, so the errors are stable.
-func sortedKeys(row map[string]any) []string {
-	names := make([]string, 0, len(row))
-	for name := range row {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
 }

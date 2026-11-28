@@ -12,6 +12,8 @@ use serde::ser::{Serialize, SerializeMap, Serializer};
 
 use superschematic_schema_runtime::{ValidationError, ValidationErrors};
 
+use crate::jsjson::array_index;
+
 /// What a path of [`FieldErrors`] holds: the errors of the value there, or
 /// the errors of the object there, keyed by its own fields.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -184,18 +186,6 @@ impl FieldErrors {
             }
         }
     }
-}
-
-/// The index a key names when it is an array index to JavaScript: the
-/// canonical decimal text of an integer below 2^32 - 1.
-fn array_index(key: &str) -> Option<u32> {
-    if key.is_empty() || !key.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    if key.len() > 1 && key.starts_with('0') {
-        return None;
-    }
-    key.parse::<u32>().ok().filter(|index| *index != u32::MAX)
 }
 
 /// An object whose keys are in [`FieldErrors::iter`] order, each holding a

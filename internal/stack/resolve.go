@@ -3,9 +3,9 @@ package stack
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/registry"
@@ -60,7 +60,7 @@ func Servers(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.resolveBuckets()
 	r.resolveMemoryStores()
 	var servers []*ir.ResolvedDeployable
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		res := r.deployables[name].res
 		if res.Kind != ir.DeployableServer {
 			continue
@@ -96,7 +96,7 @@ func Jobs(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.resolveBuckets()
 	r.resolveMemoryStores()
 	var jobs []*ir.ResolvedDeployable
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		res := r.deployables[name].res
 		if res.Kind != ir.DeployableJob {
 			continue
@@ -613,7 +613,7 @@ func (r *resolver) declareDeployables() {
 // member API service is a job of its own, named after its API and its
 // class (ir.JobDeployableName, D52).
 func (r *resolver) defaultDeployables() {
-	for _, name := range sortedKeys(r.members) {
+	for _, name := range slices.Sorted(maps.Keys(r.members)) {
 		if _, claimed := r.byService[name]; claimed {
 			continue
 		}
@@ -654,7 +654,7 @@ func (r *resolver) defaultDeployables() {
 		r.deployables[name] = &deployable{res: res}
 		r.byService[name] = name
 	}
-	for _, name := range sortedKeys(r.members) {
+	for _, name := range slices.Sorted(maps.Keys(r.members)) {
 		svc := r.services[name]
 		if svc.Kind != ir.SchemaKindAPI {
 			continue
@@ -832,7 +832,7 @@ func (r *resolver) applySettings() {
 // bound, not refused. A worker takes its API's server's env as a job does
 // (D53), and so do a deriver (D74) and an app (D78).
 func (r *resolver) inheritServerEnv() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		var api string
 		switch {
@@ -879,7 +879,7 @@ func (r *resolver) inheritServerEnv() {
 // amended).
 func (r *resolver) scheduleJobs() {
 	parameterized := len(r.env.parameters) > 0
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind != ir.DeployableJob || d.job == nil {
 			continue
@@ -922,7 +922,7 @@ func (r *resolver) scheduleJobs() {
 // place puts each deployable on its platform and checks the platform can
 // realize it.
 func (r *resolver) place() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		res := d.res
 		slices.SortFunc(res.Services, func(a, b ir.ServiceRef) int { return strings.Compare(a.Name, b.Name) })
@@ -1056,7 +1056,7 @@ func (r *resolver) serverLanguage(res *ir.ResolvedDeployable) (string, bool) {
 	}
 	if len(languages) > 1 {
 		var parts []string
-		for _, lang := range sortedKeys(languages) {
+		for _, lang := range slices.Sorted(maps.Keys(languages)) {
 			parts = append(parts, fmt.Sprintf("%s in %s", strings.Join(languages[lang], ", "), lang))
 		}
 		r.fail(CodeUnrealizable, "server %s serves %s; one process runs one language", res.Name, strings.Join(parts, " and "))
@@ -1136,7 +1136,7 @@ func (r *resolver) expose() {
 		}
 		d.res.Exposed = true
 	}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		if d := r.deployables[name]; d.res.Kind == ir.DeployableSite {
 			d.res.Exposed = true
 		}
@@ -1163,7 +1163,7 @@ func (r *resolver) dropUnplaced() {
 // stays a call, to the server's own address. A job calls what its API
 // calls (D52), and a site what its Site service calls (D55).
 func (r *resolver) resolveCalls() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if !d.res.Kind.RollsOut() {
 			continue
@@ -1187,7 +1187,7 @@ func (r *resolver) resolveCalls() {
 // the `buckets` of the APIs it serves, so two APIs of one server that list
 // one bucket share it. A job reaches what its API lists (D54).
 func (r *resolver) resolveBuckets() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if !d.res.Kind.RunsCode() {
 			continue
@@ -1226,7 +1226,7 @@ func (r *resolver) stackEnvironment() registry.StackEnvironment {
 // nameDeployables asks each platform for its deployable's name and
 // address, and for an exposed deployable's public address.
 func (r *resolver) nameDeployables() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		ctx := registry.PlatformContext{Environment: r.stackEnvironment(), Deployable: cloneDeployable(d.res)}
 		where := fmt.Sprintf("platform %s names %s with", d.platform.Name, name)
@@ -1300,13 +1300,13 @@ func (r *resolver) output() *ir.ResolvedEnvironment {
 	if len(r.env.values) > 0 {
 		out.Values = deepCopy(r.env.values).(map[string]any)
 	}
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		out.Deployables = append(out.Deployables, r.deployables[name].res)
 	}
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		out.Edges = append(out.Edges, r.edges[id].res)
 	}
-	for _, name := range sortedKeys(r.disabled) {
+	for _, name := range slices.Sorted(maps.Keys(r.disabled)) {
 		out.Disabled = append(out.Disabled, r.disabled[name])
 	}
 	out.Secrets = r.secrets()
@@ -1320,15 +1320,6 @@ func article(kind ir.DeployableKind) string {
 		return "an"
 	}
 	return "a"
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // cloneDeployable copies a deployable for a platform, deep enough that the

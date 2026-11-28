@@ -3,6 +3,7 @@ package crosstable
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -127,7 +128,7 @@ func ReadCalendar(ctx context.Context, h Host, caller Caller, read CalendarRead,
 	as := h.As(ctx, caller.Principal)
 	out := Calendar{Entries: []CalendarEntry{}}
 	defs := h.Definitions().Calendar
-	for _, typeName := range sortedKeys(defs) {
+	for _, typeName := range slices.Sorted(maps.Keys(defs)) {
 		table := defs[typeName]
 		for _, source := range table.Sources {
 			if read.Sources != nil && !slices.Contains(read.Sources, source.Name) {

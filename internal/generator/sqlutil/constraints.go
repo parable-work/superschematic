@@ -116,6 +116,24 @@ func QuoteLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
+// Unquote is one quoted SQL string literal or identifier as what it holds:
+// its quotes stripped and each quote inside, which quoting doubles, made
+// one again, so the literal QuoteLiteral writes for it's unquotes to it's
+// and the identifier "a""b" to a"b. s not wrapped in a pair of either
+// quote is returned as it is, so an identifier QuoteIdentifier left bare
+// unquotes to itself.
+func Unquote(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+	q := s[0]
+	if (q != '\'' && q != '"') || s[len(s)-1] != q {
+		return s
+	}
+	quote := string(q)
+	return strings.ReplaceAll(s[1:len(s)-1], quote+quote, quote)
+}
+
 // Check is the CHECK constraint a field gives its column (D83): the values
 // its enum allows, or the bounds of its Validate rules. A field has at most
 // one; its rules are ANDed. NULL passes every check, so a nullable column

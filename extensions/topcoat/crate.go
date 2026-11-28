@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -123,7 +124,7 @@ func (c *crate) UsedHosted() []*hostedCrate {
 	if c.hosting == nil {
 		return out
 	}
-	for _, service := range sortedKeys(c.hosting.crates) {
+	for _, service := range slices.Sorted(maps.Keys(c.hosting.crates)) {
 		if h := c.hosting.crates[service]; h != nil && h.used {
 			out = append(out, h)
 		}
@@ -1073,14 +1074,4 @@ func doc4(text string) string {
 // rustString renders a Rust string literal.
 func rustString(s string) string {
 	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`, "\r", `\r`, "\t", `\t`).Replace(s) + `"`
-}
-
-// sortedKeys returns m's keys in order.
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }

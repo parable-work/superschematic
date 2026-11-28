@@ -22,7 +22,8 @@ const financesFixture = "fixture-finances-db"
 // list as one FindPage, a date range, a business, a person, an amount
 // range and a search, ordered by date, two pages, each row with its
 // account and provider, its category and parent, its business and its
-// person loaded; a @hasMany include of an account's line items; and the
+// person loaded; a @hasMany include of an account's line items, and by
+// GetOne, FindOne and FindMany, with each line's category; and the
 // TransactionListRow projection's FindPage, filtered on joined columns, its
 // next page, GetOne, and FindMany with its count and without (D89). Then
 // AllOf (D99): two OR groups ANDed, the category or its parent and the name
@@ -238,6 +239,33 @@ func TestFinancesOnPostgres(t *testing.T) {` + strings.Replace(pageTestSetup, "P
 	if len(account.LineItems) != 6 {
 		t.Errorf("checking's line items = %d, want 6", len(account.LineItems))
 	}
+	// FindOne and FindMany load a @hasMany field, and the relations
+	// selected under it, as GetOne does.
+	withCategories := AccountFields{Id: true, LineItemsNested: &LineItemFields{Id: true, Name: true, CategoryNested: CategoryFields{Id: true, Name: true}}}
+	categorized := func(read string, a *types.Account) {
+		t.Helper()
+		if len(a.LineItems) != 6 {
+			t.Errorf("%s: checking's line items = %d, want 6", read, len(a.LineItems))
+		}
+		for _, item := range a.LineItems {
+			if item.Name == "Dinner and coffee" && (item.Category == nil || item.Category.Name != "Dining") {
+				t.Errorf("%s: the dinner's category = %+v, want Dining", read, item.Category)
+			}
+		}
+	}
+	slug := &StringFilter{Eq: strPtr("checking")}
+	found, err := db.Account.FindOne(ctx, &AccountFilter{Slug: slug}, &AccountFindOptions{Fields: withCategories})
+	must(err)
+	categorized("FindOne", found)
+	many, _, err := db.Account.FindMany(ctx, &AccountFilter{Slug: slug}, &AccountFindOptions{Fields: withCategories, Limit: 10})
+	must(err)
+	if len(many) != 1 {
+		t.Fatalf("FindMany of checking = %d rows, want 1", len(many))
+	}
+	categorized("FindMany", many[0])
+	got2, err := db.Account.GetOne(ctx, *checking.Id, &AccountGetOptions{Fields: withCategories})
+	must(err)
+	categorized("GetOne", got2)
 
 	// The flat list: the projection's page, filtered on joined columns.
 	listed, err := db.TransactionListRow().FindPage(ctx, &TransactionListRowFilter{

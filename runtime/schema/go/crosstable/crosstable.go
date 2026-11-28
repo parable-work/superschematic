@@ -254,16 +254,6 @@ func MustParse(calendar, searchable string) *Definitions {
 	return out
 }
 
-// sortedKeys are a map's keys, sorted.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
-}
-
 // ---- row values ----
 
 func text(row Row, column string) string {

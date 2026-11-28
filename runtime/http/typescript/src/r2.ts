@@ -13,6 +13,7 @@ import {
   type PutResult,
   type SignedUrlOptions,
 } from './bucket.js';
+import { hex, subtleSha256Hex } from './sha256.js';
 import type { BucketConnection, R2Credential } from './stackconfig.js';
 
 /*
@@ -210,14 +211,6 @@ function objectOf(object: R2ObjectLike, contentType?: string): BucketObject {
 
 const encoder = new TextEncoder();
 
-function hex(bytes: ArrayBuffer): string {
-  return Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('');
-}
-
-async function sha256Hex(text: string): Promise<string> {
-  return hex(await crypto.subtle.digest('SHA-256', encoder.encode(text)));
-}
-
 async function hmac(key: BufferSource, data: string): Promise<ArrayBuffer> {
   const imported = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   return crypto.subtle.sign('HMAC', imported, encoder.encode(data));
@@ -225,7 +218,7 @@ async function hmac(key: BufferSource, data: string): Promise<ArrayBuffer> {
 
 /** R2's S3 secret access key for an account token: the hex SHA-256 of its value. */
 export function r2SecretAccessKey(token: string): Promise<string> {
-  return sha256Hex(token);
+  return subtleSha256Hex(token);
 }
 
 /** S3's URI encoding: every byte but A-Z, a-z, 0-9, -, ., _ and ~ as %XX, and / too unless keepSlash. */
@@ -289,7 +282,7 @@ export async function presignV4(request: PresignV4Request): Promise<string> {
     signedHeaders,
     'UNSIGNED-PAYLOAD',
   ].join('\n');
-  const stringToSign = ['AWS4-HMAC-SHA256', stamp, scope, await sha256Hex(canonicalRequest)].join('\n');
+  const stringToSign = ['AWS4-HMAC-SHA256', stamp, scope, await subtleSha256Hex(canonicalRequest)].join('\n');
   let key: BufferSource = encoder.encode(`AWS4${request.secretAccessKey}`);
   for (const part of [day, request.region, 's3', 'aws4_request']) key = await hmac(key, part);
   const signature = hex(await hmac(key, stringToSign));

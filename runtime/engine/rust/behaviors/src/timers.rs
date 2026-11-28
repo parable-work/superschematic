@@ -1211,7 +1211,7 @@ pub fn parse_date_time(text: &str) -> Option<i64> {
     if !(1..=12).contains(&month) || !(1..=31).contains(&day) {
         return None;
     }
-    let days = days_from_civil(year, month) + day - 1;
+    let days = superschematic_engine::civil::to_days(year, month, day);
     if at == bytes.len() {
         return clip(days * 86_400_000);
     }
@@ -1281,18 +1281,6 @@ pub fn parse_date_time(text: &str) -> Option<i64> {
 // NaN.
 fn clip(ms: i64) -> Option<i64> {
     (ms.abs() <= 8_640_000_000_000_000).then_some(ms)
-}
-
-// days_from_civil is the days from the epoch to the first of a month of
-// the proleptic Gregorian calendar (Howard Hinnant's algorithm).
-fn days_from_civil(year: i64, month: i64) -> i64 {
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let of_era = year - era * 400;
-    let shifted = if month > 2 { month - 3 } else { month + 9 };
-    let of_year = (153 * shifted + 2) / 5;
-    let of_era_days = of_era * 365 + of_era / 4 - of_era / 100 + of_year;
-    era * 146_097 + of_era_days - 719_468
 }
 
 #[cfg(test)]

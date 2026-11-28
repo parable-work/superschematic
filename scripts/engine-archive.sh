@@ -30,12 +30,13 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib/archive.sh
+. "$ROOT/scripts/lib/archive.sh"
 GO_DIR="$ROOT/runtime/engine/go"
 WORKSPACE="$ROOT/runtime/engine/rust"
 ARCHIVE_NAME="libsuperschematic_engine.a"
 
-goos="$(go env GOOS)"
-goarch="$(go env GOARCH)"
+archive_target
 
 crate="$WORKSPACE/ffi"
 out=""
@@ -63,7 +64,7 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
-DEST="${out:-$GO_DIR/lib/${goos}_${goarch}}"
+DEST="${out:-$(archive_lib_dir "$GO_DIR")}"
 
 if [ "$print" = "1" ]; then
   echo "-L$DEST"
@@ -77,9 +78,8 @@ fi
 
 # Go binaries link this archive beside superscalar's and the version
 # graph's, so all three are built with tools.env's RUST_VERSION
-# (scripts/superscalar-dep.sh says why).
-RUSTUP_TOOLCHAIN="$(grep -E '^RUST_VERSION=' "$ROOT/tools.env" | cut -d= -f2)"
-export RUSTUP_TOOLCHAIN
+# (scripts/lib/archive.sh says why).
+archive_toolchain
 
 # rusqlite compiles the SQLite it bundles with the host's C compiler, which
 # targets the SDK's macOS unless told otherwise, newer than the one Go's
@@ -90,9 +90,7 @@ fi
 
 # The engine reads schemas through runtime/schema/rust-ir, which depends on
 # superscalar's core by path: the checkout alone, nothing of it built.
-if [ ! -f "$ROOT/third_party/superscalar/crates/core/Cargo.toml" ]; then
-  "$ROOT/scripts/superscalar-dep.sh" --checkout
-fi
+archive_superscalar_sources
 
 # A crate of the engine's workspace builds against its committed lock file.
 locked=()
@@ -100,50 +98,12 @@ case "$crate/" in
   "$WORKSPACE"/*) locked=(--locked) ;;
 esac
 
-BUILD_LOG="$(mktemp)"
-NEW_STAMP="$(mktemp)"
-trap 'rm -f "$BUILD_LOG" "$NEW_STAMP"' EXIT
+# ${locked[@]+...} expands an empty list to nothing under set -u on
+# macOS's bash 3.2 too.
+archive_build "$crate" ${locked[@]+"${locked[@]}"}
+archive_stage "$ARCHIVE" "$DEST" "$ARCHIVE_NAME"
 
-# cargo names the archive it built in its artifact records, wherever
-# CARGO_TARGET_DIR or a config puts the target directory: the staticlib of
-# the package whose manifest is the crate's. ${locked[@]+...} expands an
-# empty list to nothing under set -u on macOS's bash 3.2 too.
-cargo build --release ${locked[@]+"${locked[@]}"} --manifest-path "$crate/Cargo.toml" \
-  --message-format=json-render-diagnostics >"$BUILD_LOG"
-read -r ARCHIVE PACKAGE < <(python3 - "$BUILD_LOG" "$crate/Cargo.toml" <<'PY'
-import json, os, sys
-
-manifest = os.path.realpath(sys.argv[2])
-found = None
-for line in open(sys.argv[1], encoding="utf-8"):
-    try:
-        message = json.loads(line)
-    except ValueError:
-        continue
-    if message.get("reason") != "compiler-artifact":
-        continue
-    if os.path.realpath(message.get("manifest_path") or "") != manifest:
-        continue
-    if "staticlib" not in (message.get("target") or {}).get("kind", []):
-        continue
-    for path in message.get("filenames") or []:
-        if path.endswith(".a"):
-            found = (path, message["target"]["name"])
-if found:
-    print(found[0], found[1])
-PY
-)
-if [ -z "${ARCHIVE:-}" ] || [ ! -f "$ARCHIVE" ]; then
-  echo "cargo reported no static library for $crate" >&2
-  exit 1
-fi
-
-mkdir -p "$DEST"
-cp "$ARCHIVE" "$DEST/$ARCHIVE_NAME"
-
-DIGEST="$(python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$DEST/$ARCHIVE_NAME")"
-STAMP="$GO_DIR/archive_stamp_${goos}_${goarch}.go"
-cat >"$NEW_STAMP" <<EOF
+archive_stamp "$GO_DIR/archive_stamp_${goos}_${goarch}.go" <<EOF
 //go:build ${goos} && ${goarch}
 
 package engine
@@ -158,10 +118,6 @@ const (
 	archiveCrate  = "${PACKAGE}"
 )
 EOF
-# Rewrite only on a change, so an unchanged archive keeps the cache warm.
-if ! cmp -s "$NEW_STAMP" "$STAMP"; then
-  cp "$NEW_STAMP" "$STAMP"
-fi
 
 echo "engine archive ${DIGEST:0:12} (${PACKAGE}) staged under $DEST" >&2
 echo "-L$DEST"

@@ -1,6 +1,7 @@
 package stack
 
 import (
+	"maps"
 	"slices"
 	"strings"
 
@@ -40,7 +41,7 @@ func Derivers(in Input) ([]*ir.ResolvedDeployable, error) {
 	r.resolveCalls()
 	r.runDerivers()
 	var derivers []*ir.ResolvedDeployable
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		res := r.deployables[name].res
 		if res.Kind != ir.DeployableDeriver {
 			continue
@@ -60,7 +61,7 @@ func (r *resolver) defaultDerivers() {
 	if r.byDeriver == nil {
 		r.byDeriver = map[string]string{}
 	}
-	for _, name := range sortedKeys(r.members) {
+	for _, name := range slices.Sorted(maps.Keys(r.members)) {
 		svc := r.services[name]
 		if svc.Kind != ir.SchemaKindAPI {
 			continue
@@ -181,7 +182,7 @@ func (r *resolver) applyDeriverSettings(where, env string, d *deployable, entry 
 // It fills them through their repositories, on a TypeScript, Rust or Go
 // API (D146).
 func (r *resolver) runDerivers() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name]
 		if d.res.Kind != ir.DeployableDeriver || d.deriver == nil {
 			continue

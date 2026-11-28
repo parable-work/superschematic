@@ -21,6 +21,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -897,7 +898,7 @@ func (o *APIOutput) TableHandlers() []string {
 	for _, route := range o.TableRoutes() {
 		handlers[route.Handler()] = struct{}{}
 	}
-	return sortedKeys(handlers)
+	return slices.Sorted(maps.Keys(handlers))
 }
 
 // RouterNeedsORM reports whether the router runs operations through
@@ -1025,7 +1026,7 @@ func (o *APIOutput) FilterTypeNames() []string {
 	for _, endpoint := range o.FilteredEndpoints() {
 		names[endpoint.Filter.TypeName] = struct{}{}
 	}
-	return sortedKeys(names)
+	return slices.Sorted(maps.Keys(names))
 }
 
 // InterfaceRuntimeTypes are the types interfaces.ts imports from the
@@ -1046,7 +1047,7 @@ func (o *APIOutput) InterfaceRuntimeTypes() []string {
 			types[field.Shape+"Filter"] = struct{}{}
 		}
 	}
-	return sortedKeys(types)
+	return slices.Sorted(maps.Keys(types))
 }
 
 // OperationTableType is the type router.ts holds its operation table to:
@@ -1347,10 +1348,10 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		}
 		ns.Endpoints = append(ns.Endpoints, endpoint)
 	}
-	for _, name := range sortedKeys(byNamespace) {
+	for _, name := range slices.Sorted(maps.Keys(byNamespace)) {
 		output.Namespaces = append(output.Namespaces, *byNamespace[name])
 	}
-	output.WebhookProviders = sortedKeys(webhookProviders)
+	output.WebhookProviders = slices.Sorted(maps.Keys(webhookProviders))
 
 	output.TypeImports = b.packageImports(b.typeImports)
 	output.RouterTypeImports = b.packageImports(b.routerTypeImports)
@@ -1362,8 +1363,8 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 	for symbol := range b.filterScalarImports {
 		b.scalarImports[symbol] = struct{}{}
 	}
-	output.ScalarImports = sortedKeys(b.scalarImports)
-	output.RouterScalarImports = sortedKeys(b.routerScalarImports)
+	output.ScalarImports = slices.Sorted(maps.Keys(b.scalarImports))
+	output.RouterScalarImports = slices.Sorted(maps.Keys(b.routerScalarImports))
 	peers := map[string]struct{}{}
 	for pkg := range b.typeImports {
 		peers[pkg] = struct{}{}
@@ -1372,7 +1373,7 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		peers[pkg] = struct{}{}
 	}
 	peers[output.TypesPackage] = struct{}{}
-	output.PeerPackages = sortedKeys(peers)
+	output.PeerPackages = slices.Sorted(maps.Keys(peers))
 
 	if opts.MCP {
 		mcp, err := mcpInfo(output, apiOutput, opts.Clock)
@@ -2322,19 +2323,10 @@ func (b *builder) addImport(set map[string]map[string]struct{}, pkg, symbol stri
 
 func (b *builder) packageImports(set map[string]map[string]struct{}) []PackageImport {
 	imports := make([]PackageImport, 0, len(set))
-	for _, pkg := range sortedKeys(set) {
-		imports = append(imports, PackageImport{Package: pkg, Symbols: sortedKeys(set[pkg])})
+	for _, pkg := range slices.Sorted(maps.Keys(set)) {
+		imports = append(imports, PackageImport{Package: pkg, Symbols: slices.Sorted(maps.Keys(set[pkg]))})
 	}
 	return imports
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for key := range m {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // docLines assembles the JSDoc body of an implementation method.
@@ -2412,8 +2404,7 @@ func docLines(ep EndpointInfo) []string {
 
 // tsString renders a single-quoted TypeScript string literal.
 func tsString(s string) string {
-	replacer := strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`, "\r", `\r`)
-	return "'" + replacer.Replace(s) + "'"
+	return tsutil.Quote(s)
 }
 
 // PageSpecLiteral is the operation table's page, its PageSpec: { defaultLimit:

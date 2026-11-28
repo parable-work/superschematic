@@ -158,7 +158,7 @@ const changeCreatedAt = "created_at"
 
 // unquoteKey is the table's key column without its quotes.
 func (t ChangeTrigger) unquoteKey() string {
-	return strings.ReplaceAll(strings.Trim(t.Key, `"`), `""`, `"`)
+	return sqlutil.Unquote(t.Key)
 }
 
 // guarded are the columns an update's guard compares: the image's, then
@@ -195,7 +195,7 @@ func (t ChangeTrigger) image(row string, value func(row, column string) string, 
 		end := min(start+chunk, len(t.Image))
 		members := make([]string, 0, end-start)
 		for _, c := range t.Image[start:end] {
-			members = append(members, stringLiteral(c)+", "+value(row, c))
+			members = append(members, sqlutil.QuoteLiteral(c)+", "+value(row, c))
 		}
 		chunks = append(chunks, call+"("+strings.Join(members, ", ")+")")
 	}

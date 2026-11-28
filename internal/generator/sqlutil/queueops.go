@@ -227,7 +227,7 @@ func SQLiteQueueOperatorStatements(table string, message []QueueMessageColumn, k
 	keys = slices.DeleteFunc(slices.Clone(keys), func(k string) bool { return k == "" })
 	object := make([]string, 0, 2*len(message))
 	for _, c := range message {
-		object = append(object, "'"+strings.ReplaceAll(c.Name, "'", "''")+"'", sqliteMessageValue(c))
+		object = append(object, QuoteLiteral(c.Name), sqliteMessageValue(c))
 	}
 	named := "id IN (SELECT value FROM json_each(?1))"
 	dead := fmt.Sprintf("state = '%s'", ir.QueueStateDead)

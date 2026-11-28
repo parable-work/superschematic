@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -136,7 +137,7 @@ func ValidateTypeDisplay(d *TypeDisplay) error {
 			errs = append(errs, fmt.Errorf("display summaryFields lists %s twice", name))
 		}
 	}
-	for _, name := range sortedStringMapKeys(d.States) {
+	for _, name := range slices.Sorted(maps.Keys(d.States)) {
 		state := d.States[name]
 		if !DisplayStateName.MatchString(name) {
 			errs = append(errs, fmt.Errorf("display states key %q is not a state name (a letter, then letters, digits, _ and -)", name))
@@ -150,14 +151,14 @@ func ValidateTypeDisplay(d *TypeDisplay) error {
 			errs = append(errs, fmt.Errorf("display state %s tone %q is not one of muted, active, success, warning, danger", name, state.Tone))
 		}
 	}
-	for _, from := range sortedStringMapKeys(d.Transitions) {
+	for _, from := range slices.Sorted(maps.Keys(d.Transitions)) {
 		if !DisplayStateName.MatchString(from) {
 			errs = append(errs, fmt.Errorf("display transitions key %q is not a state name (a letter, then letters, digits, _ and -)", from))
 		}
 		if len(d.Transitions[from]) == 0 {
 			errs = append(errs, fmt.Errorf("display transitions from %s label none", from))
 		}
-		for _, to := range sortedStringMapKeys(d.Transitions[from]) {
+		for _, to := range slices.Sorted(maps.Keys(d.Transitions[from])) {
 			if !DisplayStateName.MatchString(to) {
 				errs = append(errs, fmt.Errorf("display transitions from %s key %q is not a state name (a letter, then letters, digits, _ and -)", from, to))
 			}

@@ -33,6 +33,7 @@ import (
 
 	versiongraph "github.com/parable-work/superschematic/runtime/versiongraph/go"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/canonical"
+	graph "github.com/parable-work/superschematic/runtime/versiongraph/go/descriptor"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/storage"
 )
 
@@ -68,17 +69,10 @@ type Engine struct {
 	snapshotEvery int
 }
 
-// kindRoles are the columns of a kind's rows the engine reads.
-type kindRoles struct {
-	Name      string `json:"kind"`
-	Key       string `json:"key"`
-	ID        string `json:"id"`
-	Tombstone string `json:"tombstone"`
-	Version   string `json:"version"`
-	// ReleasedTable is set for a kind that keeps the released tree's rows
-	// in a table of its own (D139), which Release rewrites.
-	ReleasedTable string `json:"releasedTable"`
-}
+// kindRoles are a kind of the descriptor: the engine reads the columns of
+// its rows that hold its key, id, tombstone and version, and its
+// ReleasedTable, which Release rewrites.
+type kindRoles = graph.Kind
 
 // New returns the engine of the graph descriptor describes (version 3),
 // over s. The core checks the descriptor.
@@ -86,9 +80,7 @@ func New(descriptor json.RawMessage, s storage.Storage, opts Options) (*Engine, 
 	if _, err := versiongraph.Validate(versiongraph.TreeRequest{Descriptor: descriptor, Tree: json.RawMessage(`{}`)}); err != nil {
 		return nil, err
 	}
-	var d struct {
-		Kinds []kindRoles `json:"kinds"`
-	}
+	var d graph.Descriptor
 	if err := json.Unmarshal(descriptor, &d); err != nil {
 		return nil, fmt.Errorf("engine: read the descriptor: %w", err)
 	}
@@ -102,7 +94,7 @@ func New(descriptor json.RawMessage, s storage.Storage, opts Options) (*Engine, 
 		snapshotEvery: opts.SnapshotEvery,
 	}
 	for i := range e.kinds {
-		e.byName[e.kinds[i].Name] = &e.kinds[i]
+		e.byName[e.kinds[i].Kind] = &e.kinds[i]
 	}
 	if e.walkCeiling <= 0 {
 		e.walkCeiling = DefaultWalkCeiling
@@ -330,14 +322,14 @@ func (e *Engine) Save(ctx context.Context, actor, ref string, version int64, edi
 		}
 		deletes := false
 		for _, k := range e.kinds {
-			for _, row := range edits[k.Name].Upsert {
-				stored, err := e.writeRow(ctx, tx, k.Name, r, row, false, actor)
+			for _, row := range edits[k.Kind].Upsert {
+				stored, err := e.writeRow(ctx, tx, k.Kind, r, row, false, actor)
 				if err != nil {
 					return err
 				}
-				result.Saved.add(k.Name, stored)
+				result.Saved.add(k.Kind, stored)
 			}
-			deletes = deletes || len(edits[k.Name].Delete) > 0
+			deletes = deletes || len(edits[k.Kind].Delete) > 0
 		}
 		if err := e.checkSaved(result.Saved); err != nil {
 			return err
@@ -352,27 +344,27 @@ func (e *Engine) Save(ctx context.Context, actor, ref string, version int64, edi
 				return err
 			}
 			for _, k := range e.kinds {
-				for _, key := range edits[k.Name].Delete {
+				for _, key := range edits[k.Kind].Delete {
 					if err := ids(&key); err != nil {
 						return err
 					}
-					if err := e.deleteEntity(ctx, tx, r, byKey, k.Name, key, actor); err != nil {
+					if err := e.deleteEntity(ctx, tx, r, byKey, k.Kind, key, actor); err != nil {
 						return err
 					}
 				}
 			}
 		}
 		for _, k := range e.kinds {
-			for _, key := range edits[k.Name].Unset {
+			for _, key := range edits[k.Kind].Unset {
 				if err := ids(&key); err != nil {
 					return err
 				}
-				removed, err := tx.RemoveRow(ctx, k.Name, r.ID, key, actor)
+				removed, err := tx.RemoveRow(ctx, k.Kind, r.ID, key, actor)
 				if err != nil {
 					return err
 				}
 				if !removed {
-					return fmt.Errorf("%w: no %s override of %s", ErrEntityNotFound, k.Name, key)
+					return fmt.Errorf("%w: no %s override of %s", ErrEntityNotFound, k.Kind, key)
 				}
 			}
 		}
@@ -779,7 +771,7 @@ func (e *Engine) writeReleased(ctx context.Context, tx storage.Tx, before string
 		write := storage.ReleasedWrite{Root: commit.Root, Commit: commit.ID, Sequence: *commit.Sequence, Replace: replace}
 		for _, change := range changes {
 			switch {
-			case change.Kind != k.Name:
+			case change.Kind != k.Kind:
 			case change.Operation == "DELETE":
 				write.Delete = append(write.Delete, change.EntityKey)
 			default:
@@ -789,7 +781,7 @@ func (e *Engine) writeReleased(ctx context.Context, tx storage.Tx, before string
 		if !replace && len(write.Delete) == 0 && len(write.Upsert) == 0 {
 			continue
 		}
-		if err := tx.WriteReleased(ctx, k.Name, write); err != nil {
+		if err := tx.WriteReleased(ctx, k.Kind, write); err != nil {
 			return err
 		}
 	}
@@ -1035,21 +1027,21 @@ type row struct {
 func (e *Engine) readRow(kind *kindRoles, raw json.RawMessage) (row, error) {
 	var columns map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &columns); err != nil {
-		return row{}, fmt.Errorf("engine: decode %s row: %w", kind.Name, err)
+		return row{}, fmt.Errorf("engine: decode %s row: %w", kind.Kind, err)
 	}
 	var r row
 	if err := json.Unmarshal(columns[kind.Key], &r.key); err != nil {
-		return row{}, fmt.Errorf("engine: %s row %s: %w", kind.Name, kind.Key, err)
+		return row{}, fmt.Errorf("engine: %s row %s: %w", kind.Kind, kind.Key, err)
 	}
 	if err := json.Unmarshal(columns[kind.ID], &r.id); err != nil {
-		return row{}, fmt.Errorf("engine: %s row %s: %w", kind.Name, kind.ID, err)
+		return row{}, fmt.Errorf("engine: %s row %s: %w", kind.Kind, kind.ID, err)
 	}
 	if err := json.Unmarshal(columns[kind.Version], &r.version); err != nil {
-		return row{}, fmt.Errorf("engine: %s row %s: %w", kind.Name, kind.Version, err)
+		return row{}, fmt.Errorf("engine: %s row %s: %w", kind.Kind, kind.Version, err)
 	}
 	if raw := columns[kind.Tombstone]; len(raw) > 0 && string(raw) != "null" {
 		if err := json.Unmarshal(raw, &r.tombstone); err != nil {
-			return row{}, fmt.Errorf("engine: %s row %s: %w", kind.Name, kind.Tombstone, err)
+			return row{}, fmt.Errorf("engine: %s row %s: %w", kind.Kind, kind.Tombstone, err)
 		}
 	}
 	return r, nil
@@ -1079,12 +1071,12 @@ func (e *Engine) index(tree Tree) (map[string]map[string]json.RawMessage, error)
 func (e *Engine) ownRows(ctx context.Context, tx storage.Tx, ref string) (Tree, error) {
 	tree := Tree{}
 	for _, k := range e.kinds {
-		rows, err := tx.Rows(ctx, k.Name, ref)
+		rows, err := tx.Rows(ctx, k.Kind, ref)
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
-			tree.add(k.Name, r)
+			tree.add(k.Kind, r)
 		}
 	}
 	return tree, nil
@@ -1198,19 +1190,19 @@ func (e *Engine) images(ctx context.Context, tx storage.Tx, pins pinSet) (Tree, 
 	}
 	tree := Tree{}
 	for _, k := range e.kinds {
-		want := byKind[k.Name]
+		want := byKind[k.Kind]
 		if len(want) == 0 {
 			continue
 		}
-		images, err := tx.Images(ctx, k.Name, want)
+		images, err := tx.Images(ctx, k.Kind, want)
 		if err != nil {
 			return nil, err
 		}
 		if len(images) != len(want) {
-			return nil, fmt.Errorf("%w: %d of %d %s rows", ErrHistoryMissing, len(want)-len(images), len(want), k.Name)
+			return nil, fmt.Errorf("%w: %d of %d %s rows", ErrHistoryMissing, len(want)-len(images), len(want), k.Kind)
 		}
 		for _, image := range images {
-			tree.add(k.Name, image)
+			tree.add(k.Kind, image)
 		}
 	}
 	return tree, nil
@@ -1664,11 +1656,11 @@ func (e *Engine) overlay(ctx context.Context, tx storage.Tx, ref storage.Ref, ba
 		}
 	}
 	for _, k := range e.kinds {
-		for key := range ownByKey[k.Name] {
-			if kept[entity{k.Name, key}] {
+		for key := range ownByKey[k.Kind] {
+			if kept[entity{k.Kind, key}] {
 				continue
 			}
-			if _, err := tx.RemoveRow(ctx, k.Name, ref.ID, key, actor); err != nil {
+			if _, err := tx.RemoveRow(ctx, k.Kind, ref.ID, key, actor); err != nil {
 				return err
 			}
 		}

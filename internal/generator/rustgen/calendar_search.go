@@ -2,6 +2,7 @@ package rustgen
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -77,7 +78,7 @@ func calendarOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel) 
 // occurrencesOf is the occurrences sub-table of td's Recurrence.
 func occurrencesOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel) (*rustCalendarOccurrences, error) {
 	var sub *ir.TypeDef
-	for _, name := range sortedNames(schema) {
+	for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 		if m := schema.Types[name].BehaviorTable; m != nil && m.Row == td.Name && m.Use == "Recurrence" && m.Table == "occurrences" {
 			sub = schema.Types[name]
 		}
@@ -256,7 +257,7 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel
 		out.Audience = a
 	}
 	if s.IndexesComments() {
-		for _, name := range sortedNames(schema) {
+		for _, name := range slices.Sorted(maps.Keys(schema.Types)) {
 			m := schema.Types[name].BehaviorTable
 			if m == nil || m.Row != td.Name || m.Behavior != "Comments" || m.Table != "messages" || byType[name] == nil {
 				continue
@@ -283,16 +284,6 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel
 		}
 	}
 	return out, nil
-}
-
-// sortedNames are the schema's type names in order.
-func sortedNames(schema *ir.Schema) []string {
-	names := make([]string, 0, len(schema.Types))
-	for name := range schema.Types {
-		names = append(names, name)
-	}
-	slices.Sort(names)
-	return names
 }
 
 // searchConfigOf is the schema's search index's text search configuration

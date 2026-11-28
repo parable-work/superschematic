@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -367,7 +368,7 @@ func ReindexSearch(ctx context.Context, h Host, options ReindexOptions) (int, er
 	}
 	count := 0
 	defs := h.Definitions().Searchable
-	for _, table := range sortedKeys(defs) {
+	for _, table := range slices.Sorted(maps.Keys(defs)) {
 		if options.Tables != nil && !slices.Contains(options.Tables, table) {
 			continue
 		}

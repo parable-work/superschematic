@@ -10,7 +10,7 @@
 package notifications
 
 import (
-	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/loader/fielddef"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -130,21 +130,21 @@ func identityFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	user := ir.PrincipalUser
 	zero := "0"
 	return []*ir.FieldDef{
-		keyField(),
-		required(ir.ChannelIdentityKindField, "string", "The kind of address: email, phone or handle."),
-		required(ir.ChannelIdentityAddressField, "string", "The address, normalised: an email address in lower case, a phone number as + and its digits, a handle as its adapter writes it."),
-		withDefault(required(ir.ChannelIdentityPrincipalKindField, "string", "The kind of principal the address resolves to: user, or party."), &user),
-		optional(ir.ChannelIdentityPrincipalTableField, "string", "The table of the party the address resolves to, by its type's name; null for a user."),
-		required(ir.ChannelIdentityPrincipalField, uuidScalar, "The principal's id: the user's, or the party row's key."),
-		withDefault(required(ir.ChannelIdentityTrustField, "string", "How the address was confirmed: unverified, verified (it replied with the code sent to it) or entered (by hand, at a lower trust)."), &unverified),
-		optional(ir.ChannelIdentityVerifiedAtField, dateTimeScalar, "When it was verified or entered."),
-		optional(ir.ChannelIdentityCodeHashField, "string", "The SHA-256 of a code sent to the address and not yet answered."),
-		optional(ir.ChannelIdentityCodePurposeField, "string", "What the code is for: verify, or reset (a password reset, D81)."),
-		optional(ir.ChannelIdentityCodeExpiresAtField, dateTimeScalar, "When the code expires."),
-		withDefault(required(ir.ChannelIdentityCodeAttemptsField, int64Scalar, "How many wrong answers the code has had."), &zero),
-		withDefault(required(ir.ChannelIdentityCreatedAtField, dateTimeScalar, "When the identity was added."), now()),
-		optional(ir.ChannelIdentityRevokedAtField, dateTimeScalar, "When it stopped resolving to its principal."),
-		optional(ir.ChannelIdentityOptedOutAtField, dateTimeScalar, "When the address opted out, by a keyword its adapter read (D157): nothing is sent to it after, until it opts in again."),
+		fielddef.Key(),
+		fielddef.Required(ir.ChannelIdentityKindField, "string", "The kind of address: email, phone or handle."),
+		fielddef.Required(ir.ChannelIdentityAddressField, "string", "The address, normalised: an email address in lower case, a phone number as + and its digits, a handle as its adapter writes it."),
+		fielddef.WithDefault(fielddef.Required(ir.ChannelIdentityPrincipalKindField, "string", "The kind of principal the address resolves to: user, or party."), &user),
+		fielddef.Optional(ir.ChannelIdentityPrincipalTableField, "string", "The table of the party the address resolves to, by its type's name; null for a user."),
+		fielddef.Required(ir.ChannelIdentityPrincipalField, uuidScalar, "The principal's id: the user's, or the party row's key."),
+		fielddef.WithDefault(fielddef.Required(ir.ChannelIdentityTrustField, "string", "How the address was confirmed: unverified, verified (it replied with the code sent to it) or entered (by hand, at a lower trust)."), &unverified),
+		fielddef.Optional(ir.ChannelIdentityVerifiedAtField, dateTimeScalar, "When it was verified or entered."),
+		fielddef.Optional(ir.ChannelIdentityCodeHashField, "string", "The SHA-256 of a code sent to the address and not yet answered."),
+		fielddef.Optional(ir.ChannelIdentityCodePurposeField, "string", "What the code is for: verify, or reset (a password reset, D81)."),
+		fielddef.Optional(ir.ChannelIdentityCodeExpiresAtField, dateTimeScalar, "When the code expires."),
+		fielddef.WithDefault(fielddef.Required(ir.ChannelIdentityCodeAttemptsField, int64Scalar, "How many wrong answers the code has had."), &zero),
+		fielddef.WithDefault(fielddef.Required(ir.ChannelIdentityCreatedAtField, dateTimeScalar, "When the identity was added."), fielddef.Now()),
+		fielddef.Optional(ir.ChannelIdentityRevokedAtField, dateTimeScalar, "When it stopped resolving to its principal."),
+		fielddef.Optional(ir.ChannelIdentityOptedOutAtField, dateTimeScalar, "When the address opted out, by a keyword its adapter read (D157): nothing is sent to it after, until it opts in again."),
 	}, []ir.IndexDef{
 		{Keys: []string{ir.ChannelIdentityKindField, ir.ChannelIdentityAddressField}, Name: "address"},
 		{Keys: []string{ir.ChannelIdentityPrincipalField}, Name: "principal"},
@@ -158,26 +158,26 @@ func inboxFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	user := ir.PrincipalUser
 	zero := "0"
 	return []*ir.FieldDef{
-		keyField(),
-		required("recipient", uuidScalar, "The principal the notice is for."),
-		withDefault(required("recipientKind", "string", "Its kind: user, or party."), &user),
-		required("reference", int64Scalar, "The notice's number among its recipient's, which a reply names: done 142."),
-		required("eventId", uuidScalar, "The event the notice is of; a recipient has one notice of an event."),
-		required("eventKind", "string", "The event's kind."),
-		required("urgency", "string", "urgent, normal, digest or record."),
-		optional("subjectTable", "string", "The table of the record the event is about, by its type's name; null for an event of no record."),
-		optional("subjectKey", "string", "The record's key as text."),
-		required("title", "string", "What the notice says in a line."),
-		optional("body", "string", "What it says beyond its title."),
-		optional("payload", jsonScalar, "The event's payload."),
-		optional("route", uuidScalar, "The route that named the recipient; null for a notice sent directly."),
-		withDefault(required("state", "string", "unread, read, acknowledged or done."), &unread),
-		withDefault(required("escalation", int64Scalar, "How many steps of its route's escalation have run."), &zero),
-		withDefault(required("createdAt", dateTimeScalar, ""), now()),
-		optional("readAt", dateTimeScalar, "When its recipient read it."),
-		optional("acknowledgedAt", dateTimeScalar, "When its recipient acknowledged it."),
-		optional("acknowledgedVia", "string", "The channel kind it was acknowledged on: inapp, sms, email."),
-		optional("digestedAt", dateTimeScalar, "When a digest carried it; null for one not batched or not yet sent."),
+		fielddef.Key(),
+		fielddef.Required("recipient", uuidScalar, "The principal the notice is for."),
+		fielddef.WithDefault(fielddef.Required("recipientKind", "string", "Its kind: user, or party."), &user),
+		fielddef.Required("reference", int64Scalar, "The notice's number among its recipient's, which a reply names: done 142."),
+		fielddef.Required("eventId", uuidScalar, "The event the notice is of; a recipient has one notice of an event."),
+		fielddef.Required("eventKind", "string", "The event's kind."),
+		fielddef.Required("urgency", "string", "urgent, normal, digest or record."),
+		fielddef.Optional("subjectTable", "string", "The table of the record the event is about, by its type's name; null for an event of no record."),
+		fielddef.Optional("subjectKey", "string", "The record's key as text."),
+		fielddef.Required("title", "string", "What the notice says in a line."),
+		fielddef.Optional("body", "string", "What it says beyond its title."),
+		fielddef.Optional("payload", jsonScalar, "The event's payload."),
+		fielddef.Optional("route", uuidScalar, "The route that named the recipient; null for a notice sent directly."),
+		fielddef.WithDefault(fielddef.Required("state", "string", "unread, read, acknowledged or done."), &unread),
+		fielddef.WithDefault(fielddef.Required("escalation", int64Scalar, "How many steps of its route's escalation have run."), &zero),
+		fielddef.WithDefault(fielddef.Required("createdAt", dateTimeScalar, ""), fielddef.Now()),
+		fielddef.Optional("readAt", dateTimeScalar, "When its recipient read it."),
+		fielddef.Optional("acknowledgedAt", dateTimeScalar, "When its recipient acknowledged it."),
+		fielddef.Optional("acknowledgedVia", "string", "The channel kind it was acknowledged on: inapp, sms, email."),
+		fielddef.Optional("digestedAt", dateTimeScalar, "When a digest carried it; null for one not batched or not yet sent."),
 	}, []ir.IndexDef{
 		{Keys: []string{"recipient", "reference"}, Unique: true, Name: "reference"},
 		{Keys: []string{"eventId", "recipient"}, Unique: true, Name: "event"},
@@ -192,25 +192,25 @@ func deliveryFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	notice := "notice"
 	one := "1"
 	return []*ir.FieldDef{
-		keyField(),
-		optional("notice", uuidScalar, "The notice it delivers; null for a message of no notice: a reply's echo, a code."),
-		withDefault(required("purpose", "string", "notice, echo, alert, code or digest."), &notice),
-		optional("recipient", uuidScalar, "The principal it is for; null for an address no principal holds yet."),
-		required("channelKind", "string", "The kind of channel: inapp, sms, email, chat."),
-		optional("slot", "string", "The provider slot it was sent through (D159); null for the in-app inbox."),
-		optional("address", "string", "The address it was sent to."),
-		withDefault(required("attempt", int64Scalar, "Which attempt of its notice it is, from 1."), &one),
-		withDefault(required("state", "string", "queued, sent, delivered, read, failed or acknowledged."), &queued),
-		optional("providerMessageId", "string", "The adapter's service's id of the message, which its statuses and replies name."),
-		optional("detail", "string", "Why it failed, or what the service said."),
-		withDefault(required("queuedAt", dateTimeScalar, ""), now()),
-		optional("dueAt", dateTimeScalar, "When it is to be sent: later than queuedAt in quiet hours."),
-		optional("sentAt", dateTimeScalar, ""),
-		optional("deliveredAt", dateTimeScalar, ""),
-		optional("readAt", dateTimeScalar, ""),
-		optional("failedAt", dateTimeScalar, ""),
-		optional("acknowledgedAt", dateTimeScalar, ""),
-		optional("endedAt", dateTimeScalar, "When it reached a state it leaves no more, which its retention counts from."),
+		fielddef.Key(),
+		fielddef.Optional("notice", uuidScalar, "The notice it delivers; null for a message of no notice: a reply's echo, a code."),
+		fielddef.WithDefault(fielddef.Required("purpose", "string", "notice, echo, alert, code or digest."), &notice),
+		fielddef.Optional("recipient", uuidScalar, "The principal it is for; null for an address no principal holds yet."),
+		fielddef.Required("channelKind", "string", "The kind of channel: inapp, sms, email, chat."),
+		fielddef.Optional("slot", "string", "The provider slot it was sent through (D159); null for the in-app inbox."),
+		fielddef.Optional("address", "string", "The address it was sent to."),
+		fielddef.WithDefault(fielddef.Required("attempt", int64Scalar, "Which attempt of its notice it is, from 1."), &one),
+		fielddef.WithDefault(fielddef.Required("state", "string", "queued, sent, delivered, read, failed or acknowledged."), &queued),
+		fielddef.Optional("providerMessageId", "string", "The adapter's service's id of the message, which its statuses and replies name."),
+		fielddef.Optional("detail", "string", "Why it failed, or what the service said."),
+		fielddef.WithDefault(fielddef.Required("queuedAt", dateTimeScalar, ""), fielddef.Now()),
+		fielddef.Optional("dueAt", dateTimeScalar, "When it is to be sent: later than queuedAt in quiet hours."),
+		fielddef.Optional("sentAt", dateTimeScalar, ""),
+		fielddef.Optional("deliveredAt", dateTimeScalar, ""),
+		fielddef.Optional("readAt", dateTimeScalar, ""),
+		fielddef.Optional("failedAt", dateTimeScalar, ""),
+		fielddef.Optional("acknowledgedAt", dateTimeScalar, ""),
+		fielddef.Optional("endedAt", dateTimeScalar, "When it reached a state it leaves no more, which its retention counts from."),
 	}, []ir.IndexDef{
 		{Keys: []string{"notice"}, Name: "notice"},
 		{Keys: []string{"providerMessageId"}, Name: "provider_message"},
@@ -223,17 +223,17 @@ func deliveryFields() ([]*ir.FieldDef, []ir.IndexDef) {
 func routeFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	on := "true"
 	return []*ir.FieldDef{
-		keyField(),
-		required("name", "string", "What the route is, for whoever edits it."),
-		required("eventKind", "string", "The event kind it matches, or * for every kind."),
-		optional("subjectTable", "string", "The table whose events it matches, by its type's name; null for any."),
-		optional("filter", jsonScalar, "A filter on the record, in the repositories' filter syntax: { status: { eq: \"open\" } }; null for every record."),
-		required("recipients", jsonScalar, "Who it reaches: a list of { path }, a relation path of the record to principals (assignees, project.owner); { principal }, a user's id; { role }, the users holding a role; or { party: { table, key } } (D157)."),
-		optional("urgency", "string", "The urgency it sends at in place of the event's; null for the event's."),
-		optional("escalation", jsonScalar, "What an urgent notice not acknowledged in time does: a list of steps { afterSeconds, channels?, recipients? }, each after the one before."),
-		withDefault(required("enabled", "boolean", "Whether it routes."), &on),
-		withDefault(required("createdAt", dateTimeScalar, ""), now()),
-		optional("createdBy", uuidScalar, "Who made it."),
+		fielddef.Key(),
+		fielddef.Required("name", "string", "What the route is, for whoever edits it."),
+		fielddef.Required("eventKind", "string", "The event kind it matches, or * for every kind."),
+		fielddef.Optional("subjectTable", "string", "The table whose events it matches, by its type's name; null for any."),
+		fielddef.Optional("filter", jsonScalar, "A filter on the record, in the repositories' filter syntax: { status: { eq: \"open\" } }; null for every record."),
+		fielddef.Required("recipients", jsonScalar, "Who it reaches: a list of { path }, a relation path of the record to principals (assignees, project.owner); { principal }, a user's id; { role }, the users holding a role; or { party: { table, key } } (D157)."),
+		fielddef.Optional("urgency", "string", "The urgency it sends at in place of the event's; null for the event's."),
+		fielddef.Optional("escalation", jsonScalar, "What an urgent notice not acknowledged in time does: a list of steps { afterSeconds, channels?, recipients? }, each after the one before."),
+		fielddef.WithDefault(fielddef.Required("enabled", "boolean", "Whether it routes."), &on),
+		fielddef.WithDefault(fielddef.Required("createdAt", dateTimeScalar, ""), fielddef.Now()),
+		fielddef.Optional("createdBy", uuidScalar, "Who made it."),
 	}, []ir.IndexDef{
 		{Keys: []string{"eventKind"}, Name: "event_kind"},
 	}
@@ -246,15 +246,15 @@ func routeFields() ([]*ir.FieldDef, []ir.IndexDef) {
 func preferenceFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	any := "*"
 	return []*ir.FieldDef{
-		keyField(),
-		optional("principal", uuidScalar, "Whose preference it is; null for the default every principal without one of their own takes."),
-		withDefault(required("eventKind", "string", "The event kind it is for, or * for every kind."), &any),
-		withDefault(required("urgency", "string", "The urgency it is for, or * for every one."), &any),
+		fielddef.Key(),
+		fielddef.Optional("principal", uuidScalar, "Whose preference it is; null for the default every principal without one of their own takes."),
+		fielddef.WithDefault(fielddef.Required("eventKind", "string", "The event kind it is for, or * for every kind."), &any),
+		fielddef.WithDefault(fielddef.Required("urgency", "string", "The urgency it is for, or * for every one."), &any),
 		{Name: "channels", Comment: "The channel kinds a notice goes out on, in the order a failure falls through: sms, email, chat; inapp is the inbox, which every notice reaches.", TypeRef: ir.TypeRef{Name: "string", IsArray: true}, Required: true},
-		optional("quietStart", timeScalar, "When quiet hours start, a time of day in the time zone; null for none."),
-		optional("quietEnd", timeScalar, "When they end."),
-		optional("timeZone", timeZoneScalar, "The IANA time zone quiet hours and digests are read in; UTC when null."),
-		optional("digest", ruleScalar, "The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once."),
+		fielddef.Optional("quietStart", timeScalar, "When quiet hours start, a time of day in the time zone; null for none."),
+		fielddef.Optional("quietEnd", timeScalar, "When they end."),
+		fielddef.Optional("timeZone", timeZoneScalar, "The IANA time zone quiet hours and digests are read in; UTC when null."),
+		fielddef.Optional("digest", ruleScalar, "The RRULE a digest goes out on (FREQ=DAILY;BYHOUR=8;BYMINUTE=0); null sends digest notices at once."),
 	}, []ir.IndexDef{
 		{Keys: []string{"principal"}, Name: "principal"},
 	}
@@ -265,20 +265,20 @@ func preferenceFields() ([]*ir.FieldDef, []ir.IndexDef) {
 func subscriptionFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	on := "true"
 	return []*ir.FieldDef{
-		keyField(),
-		required("name", "string", "What the brief is called."),
-		required("principal", uuidScalar, "Whom it goes to; the query runs as them."),
-		required("subjectTable", "string", "The table it reads, by its type's name."),
-		optional("filter", jsonScalar, "The saved query: a filter in the repositories' syntax; null for every row the principal reads."),
-		optional("titleField", "string", "The field each row is listed by; the key when null."),
-		required("rule", ruleScalar, "The RRULE it goes out on (D152)."),
-		required("start", "string", "The wall date-time the rule starts from: 2026-01-05T08:00."),
-		required("timeZone", timeZoneScalar, "The IANA time zone the rule is read in."),
+		fielddef.Key(),
+		fielddef.Required("name", "string", "What the brief is called."),
+		fielddef.Required("principal", uuidScalar, "Whom it goes to; the query runs as them."),
+		fielddef.Required("subjectTable", "string", "The table it reads, by its type's name."),
+		fielddef.Optional("filter", jsonScalar, "The saved query: a filter in the repositories' syntax; null for every row the principal reads."),
+		fielddef.Optional("titleField", "string", "The field each row is listed by; the key when null."),
+		fielddef.Required("rule", ruleScalar, "The RRULE it goes out on (D152)."),
+		fielddef.Required("start", "string", "The wall date-time the rule starts from: 2026-01-05T08:00."),
+		fielddef.Required("timeZone", timeZoneScalar, "The IANA time zone the rule is read in."),
 		{Name: "channels", Comment: "The channel kinds it goes out on.", TypeRef: ir.TypeRef{Name: "string", IsArray: true}, Required: true},
-		withDefault(required("enabled", "boolean", "Whether it goes out."), &on),
-		optional("nextAt", dateTimeScalar, "When it next goes out."),
-		optional("lastSentAt", dateTimeScalar, "When it last went out."),
-		withDefault(required("createdAt", dateTimeScalar, ""), now()),
+		fielddef.WithDefault(fielddef.Required("enabled", "boolean", "Whether it goes out."), &on),
+		fielddef.Optional("nextAt", dateTimeScalar, "When it next goes out."),
+		fielddef.Optional("lastSentAt", dateTimeScalar, "When it last went out."),
+		fielddef.WithDefault(fielddef.Required("createdAt", dateTimeScalar, ""), fielddef.Now()),
 	}, nil
 }
 
@@ -286,9 +286,9 @@ func subscriptionFields() ([]*ir.FieldDef, []ir.IndexDef) {
 // reply on it may use, of those its principal holds.
 func trustFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	return []*ir.FieldDef{
-		keyField(),
+		fielddef.Key(),
 		{Name: "channelKind", Comment: "The kind of channel: sms, email, chat.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Unique: true},
-		required("level", "string", "low, standard or high."),
+		fielddef.Required("level", "string", "low, standard or high."),
 		{Name: "permissions", Comment: "The permissions a reply on the channel may use, of those its principal holds; null for all of them. Acknowledging a notice needs none.", TypeRef: ir.TypeRef{Name: "string", IsArray: true}},
 	}, nil
 }
@@ -297,23 +297,23 @@ func trustFields() ([]*ir.FieldDef, []ir.IndexDef) {
 // whom, what interpreted it, what it ran, and how to undo it.
 func replyFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	return []*ir.FieldDef{
-		keyField(),
-		withDefault(required("receivedAt", dateTimeScalar, ""), now()),
-		required("channelKind", "string", "The kind of channel it came on."),
-		optional("slot", "string", "The provider slot that received it."),
-		required("address", "string", "The sender's address, normalised."),
-		optional("providerMessageId", "string", "The service's id of the message."),
-		optional("identity", uuidScalar, "The channel identity it resolved through; null for an unknown sender."),
-		optional("principal", uuidScalar, "The principal it ran as."),
-		required("body", "string", "The text as it came."),
-		required("interpreter", "string", "What read the text: keyword, the core's own reader, or the name of what the app plugged in."),
-		optional("verb", "string", "What the text asked: ack, done, undo, a code."),
-		optional("notice", uuidScalar, "The notice it answered."),
-		optional("reference", int64Scalar, "The reference it named."),
-		required("outcome", "string", "done, refused, unknown, ambiguous or failed."),
-		optional("detail", "string", "Why, for an outcome that is not done."),
-		optional("undo", jsonScalar, "What undoing it needs; null for what cannot be undone."),
-		optional("undoneAt", dateTimeScalar, "When it was undone."),
+		fielddef.Key(),
+		fielddef.WithDefault(fielddef.Required("receivedAt", dateTimeScalar, ""), fielddef.Now()),
+		fielddef.Required("channelKind", "string", "The kind of channel it came on."),
+		fielddef.Optional("slot", "string", "The provider slot that received it."),
+		fielddef.Required("address", "string", "The sender's address, normalised."),
+		fielddef.Optional("providerMessageId", "string", "The service's id of the message."),
+		fielddef.Optional("identity", uuidScalar, "The channel identity it resolved through; null for an unknown sender."),
+		fielddef.Optional("principal", uuidScalar, "The principal it ran as."),
+		fielddef.Required("body", "string", "The text as it came."),
+		fielddef.Required("interpreter", "string", "What read the text: keyword, the core's own reader, or the name of what the app plugged in."),
+		fielddef.Optional("verb", "string", "What the text asked: ack, done, undo, a code."),
+		fielddef.Optional("notice", uuidScalar, "The notice it answered."),
+		fielddef.Optional("reference", int64Scalar, "The reference it named."),
+		fielddef.Required("outcome", "string", "done, refused, unknown, ambiguous or failed."),
+		fielddef.Optional("detail", "string", "Why, for an outcome that is not done."),
+		fielddef.Optional("undo", jsonScalar, "What undoing it needs; null for what cannot be undone."),
+		fielddef.Optional("undoneAt", dateTimeScalar, "When it was undone."),
 	}, []ir.IndexDef{
 		{Keys: []string{"principal", "receivedAt"}, Name: "principal"},
 	}
@@ -323,35 +323,13 @@ func replyFields() ([]*ir.FieldDef, []ir.IndexDef) {
 // is of, each due when its message is (D80).
 func dispatchFields() []*ir.FieldDef {
 	return []*ir.FieldDef{
-		required("step", "string", "route, deliver, timeout, escalate, digest or brief."),
-		optional("event", jsonScalar, "The event a route step routes."),
-		optional("notice", uuidScalar, "The notice an escalate step is of."),
-		optional("delivery", uuidScalar, "The delivery a deliver or timeout step is of."),
-		optional("recipient", uuidScalar, "The principal a digest step is for."),
-		optional("subscription", uuidScalar, "The subscription a brief step sends."),
+		fielddef.Required("step", "string", "route, deliver, timeout, escalate, digest or brief."),
+		fielddef.Optional("event", jsonScalar, "The event a route step routes."),
+		fielddef.Optional("notice", uuidScalar, "The notice an escalate step is of."),
+		fielddef.Optional("delivery", uuidScalar, "The delivery a deliver or timeout step is of."),
+		fielddef.Optional("recipient", uuidScalar, "The principal a digest step is for."),
+		fielddef.Optional("subscription", uuidScalar, "The subscription a brief step sends."),
 	}
-}
-
-func keyField() *ir.FieldDef {
-	return &ir.FieldDef{Name: "id", TypeRef: ir.TypeRef{Name: uuidScalar}, Required: true, Key: true, AutoGenerated: true}
-}
-
-func required(name, typeName, comment string) *ir.FieldDef {
-	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: typeName}, Required: true}
-}
-
-func optional(name, typeName, comment string) *ir.FieldDef {
-	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: typeName}}
-}
-
-func withDefault(fd *ir.FieldDef, value *string) *ir.FieldDef {
-	fd.Default = value
-	return fd
-}
-
-func now() *string {
-	s := codegen.DefaultNow
-	return &s
 }
 
 func sortedTypes(schema *ir.Schema) []string {

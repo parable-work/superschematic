@@ -263,14 +263,8 @@ type QueryParam struct {
 	// ItemIsText marks a list whose items are not numbers or booleans, so
 	// one may be empty or hold a comma or surrounding space, which the
 	// comma-separated value cannot carry.
-	ItemIsText        bool
-	ValidateMin       *float64
-	ValidateMax       *float64
-	ValidateMinLength *int
-	ValidateMaxLength *int
-	ValidateListMin   *int
-	ValidateListMax   *int
-	ValidatePattern   string
+	ItemIsText bool
+	ir.ValueRules
 	// EmptyIsAbsent marks a parameter whose empty value is left out, as
 	// the route reads it: a paged operation's cursor (D60), which an empty
 	// one would otherwise send for the first page.
@@ -281,12 +275,7 @@ type QueryParam struct {
 // before the request: that the comma-separated value carries a text item
 // as it is, and the argument's rules, which the route checks per item.
 func (p QueryParam) ChecksItems() bool {
-	return p.IsArray && (p.ItemIsText ||
-		p.ValidateMin != nil ||
-		p.ValidateMax != nil ||
-		p.ValidateMinLength != nil ||
-		p.ValidateMaxLength != nil ||
-		p.ValidatePattern != "")
+	return p.IsArray && (p.ItemIsText || p.HasValue())
 }
 
 // ChecksListMin reports whether listMin bounds a value the SDK sends. A
@@ -301,18 +290,12 @@ func (p QueryParam) ChecksListMin() bool {
 
 // ScalarArg represents a scalar input argument for an endpoint.
 type ScalarArg struct {
-	Name              string
-	RustName          string
-	RustType          string
-	Required          bool
-	IsArray           bool
-	ValidateMin       *float64
-	ValidateMax       *float64
-	ValidateMinLength *int
-	ValidateMaxLength *int
-	ValidateListMin   *int
-	ValidateListMax   *int
-	ValidatePattern   string
+	Name     string
+	RustName string
+	RustType string
+	Required bool
+	IsArray  bool
+	ir.ValueRules
 	// IsMap marks a map argument (Record<string, T>; with IsArray,
 	// Record<string, T[]>), a HashMap of its values as the route takes it,
 	// sent as a JSON object. ValueSchema names the schema each value is
@@ -388,15 +371,9 @@ func (arg ScalarArg) NeedsGeneratedValidation() bool {
 		return false
 	}
 	if arg.IsArray {
-		return arg.ValidateListMin != nil || arg.ValidateListMax != nil
+		return arg.HasList()
 	}
-	return arg.ValidateMin != nil ||
-		arg.ValidateMax != nil ||
-		arg.ValidateMinLength != nil ||
-		arg.ValidateMaxLength != nil ||
-		arg.ValidatePattern != "" ||
-		arg.ValidateListMin != nil ||
-		arg.ValidateListMax != nil
+	return arg.Any()
 }
 
 // FileUploadField represents file upload field metadata.
@@ -795,19 +772,13 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			rustType = "Vec<" + rustType + ">"
 		}
 		queryParams = append(queryParams, QueryParam{
-			Name:              param.Name,
-			RustName:          toRustFieldName(param.Name),
-			RustType:          rustType,
-			Required:          param.Required,
-			IsArray:           param.IsArray,
-			ItemIsText:        param.IsArray && sendsText(param),
-			ValidateMin:       param.ValidateMin,
-			ValidateMax:       param.ValidateMax,
-			ValidateMinLength: param.ValidateMinLength,
-			ValidateMaxLength: param.ValidateMaxLength,
-			ValidateListMin:   runtimeListMinimum(param.ValidateListMin),
-			ValidateListMax:   param.ValidateListMax,
-			ValidatePattern:   param.ValidatePattern,
+			Name:       param.Name,
+			RustName:   toRustFieldName(param.Name),
+			RustType:   rustType,
+			Required:   param.Required,
+			IsArray:    param.IsArray,
+			ItemIsText: param.IsArray && sendsText(param),
+			ValueRules: runtimeRules(param.ValueRules),
 		})
 		if param.Required {
 			hasRequiredQueryParams = true
@@ -852,22 +823,16 @@ func convertEndpoint(ep apigen.EndpointInfo, isScopedNS bool, scopeParamName str
 			rustType = rustutil.WrapOptionalType(rustType)
 		}
 		scalarArgs = append(scalarArgs, ScalarArg{
-			Name:              arg.Name,
-			RustName:          toRustFieldName(arg.Name),
-			RustType:          rustType,
-			Required:          arg.Required,
-			IsArray:           isArray,
-			ValidateMin:       arg.ValidateMin,
-			ValidateMax:       arg.ValidateMax,
-			ValidateMinLength: arg.ValidateMinLength,
-			ValidateMaxLength: arg.ValidateMaxLength,
-			ValidateListMin:   runtimeListMinimum(arg.ValidateListMin),
-			ValidateListMax:   arg.ValidateListMax,
-			ValidatePattern:   arg.ValidatePattern,
-			IsMap:             arg.IsMap,
-			ValueSchema:       valueSchema,
-			ArrayDepth:        arg.ArrayDepth(),
-			typeName:          arg.Type,
+			Name:        arg.Name,
+			RustName:    toRustFieldName(arg.Name),
+			RustType:    rustType,
+			Required:    arg.Required,
+			IsArray:     isArray,
+			ValueRules:  runtimeRules(arg.ValueRules),
+			IsMap:       arg.IsMap,
+			ValueSchema: valueSchema,
+			ArrayDepth:  arg.ArrayDepth(),
+			typeName:    arg.Type,
 		})
 	}
 
@@ -1175,38 +1140,17 @@ func WriteSDKWithTools(output *SDKOutput, apiOutput *apigen.APIOutput, outputDir
 			return fmt.Errorf("failed to generate tools metadata: %w", err)
 		}
 		if toolsOutput != nil && len(toolsOutput.Tools) > 0 {
-			toolsFuncs := toolsTemplateFuncs()
-			if err := generateFile(
-				"tools-openai.tmpl",
-				filepath.Join(outputDir, "tools", "openai.json"),
+			if err := toolsutil.WriteDocuments(
+				filepath.Join(outputDir, "tools"),
 				toolsOutput,
-				toolsFuncs,
+				[]toolsutil.Document{
+					toolsutil.OpenAIDocument,
+					toolsutil.AnthropicDocument,
+					toolsutil.SchemaDocument,
+					toolsutil.MCPAuditDocument,
+				},
 			); err != nil {
-				return fmt.Errorf("failed to generate tools/openai.json: %w", err)
-			}
-			if err := generateFile(
-				"tools-anthropic.tmpl",
-				filepath.Join(outputDir, "tools", "anthropic.json"),
-				toolsOutput,
-				toolsFuncs,
-			); err != nil {
-				return fmt.Errorf("failed to generate tools/anthropic.json: %w", err)
-			}
-			if err := generateFile(
-				"tools-schema.tmpl",
-				filepath.Join(outputDir, "tools", "schema.json"),
-				toolsOutput,
-				toolsFuncs,
-			); err != nil {
-				return fmt.Errorf("failed to generate tools/schema.json: %w", err)
-			}
-			if err := generateFile(
-				"tools-mcp-audit.tmpl",
-				filepath.Join(outputDir, "tools", "mcp-audit.json"),
-				toolsOutput,
-				toolsFuncs,
-			); err != nil {
-				return fmt.Errorf("failed to generate tools/mcp-audit.json: %w", err)
+				return err
 			}
 		}
 	}
@@ -1233,14 +1177,14 @@ func sendsText(param apigen.Param) bool {
 		param.Type != codegen.PrimitiveNumber && param.Type != codegen.PrimitiveBoolean
 }
 
-// runtimeListMinimum drops a zero list minimum: a Rust collection length is
+// runtimeRules drops a zero list minimum: a Rust collection length is
 // unsigned, so the check is always true and `len() < 0` draws a compiler
 // warning. A positive minimum is kept.
-func runtimeListMinimum(value *int) *int {
-	if value == nil || *value == 0 {
-		return nil
+func runtimeRules(rules ir.ValueRules) ir.ValueRules {
+	if rules.ValidateListMin != nil && *rules.ValidateListMin == 0 {
+		rules.ValidateListMin = nil
 	}
-	return value
+	return rules
 }
 
 func templateFuncs() template.FuncMap {

@@ -1277,19 +1277,15 @@ func (s *TypeScriptServer) planLoopback(taken names) {
 	if s.Background() {
 		return
 	}
-	serves := make([]string, len(s.APIs))
-	guarded := map[string]bool{}
-	for i, a := range s.APIs {
-		serves[i] = a.Service
-		guarded[a.Service] = a.Callers != ""
+	var sends []bool
+	s.Loopback, sends = planLoopback(s.APIs, func(a *TypeScriptAPI) (string, bool) { return a.Service, a.Callers != "" },
+		s.Clients, func(c *TypeScriptClient) string { return c.Service }, taken.take)
+	for i, c := range s.Clients {
+		c.Loopback = sends[i]
 	}
-	for _, c := range s.Clients {
-		c.Loopback = guarded[c.Service]
-	}
-	if !slices.ContainsFunc(s.Clients, func(c *TypeScriptClient) bool { return c.Loopback }) {
+	if s.Loopback == nil {
 		return
 	}
-	s.Loopback = &Loopback{Var: taken.take("loopback"), Serves: serves}
 	for _, a := range s.APIs {
 		if a.Callers != "" {
 			a.Loopback = s.Loopback.Var

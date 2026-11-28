@@ -29,7 +29,7 @@ func customTemplateFuncs() template.FuncMap {
 		"tsDoc":                    tsDoc,
 		"secretMaskValue":          secretMaskValue,
 		"hasStringValidator": func(s ScalarInfo) bool {
-			return s.TSType == "string" && s.Primitive == ir.LanguageString
+			return s.TSType() == "string" && s.Primitive == ir.LanguageString
 		},
 		"containsString": func(values []string, target string) bool {
 			for _, value := range values {
@@ -252,13 +252,13 @@ func tsDoc(doc, linePrefix string) string {
 func scalarLibTypeName(s ScalarInfo) string {
 	// JSONValue (Generic.JSON) is declared by superscalar whatever the
 	// scalar's primitive.
-	if s.Primitive != ir.LanguageObject && s.TSType != "JSONValue" {
+	if s.Primitive != ir.LanguageObject && s.TSType() != "JSONValue" {
 		return ""
 	}
-	if s.TSType == "" || !isImportableType(s.TSType) {
+	if s.TSType() == "" || !isImportableType(s.TSType()) {
 		return ""
 	}
-	return s.TSType
+	return s.TSType()
 }
 
 // uniqueScalarLibTypeNames returns unique structured superscalar type names
@@ -390,7 +390,7 @@ func typeScalarDefaultCasts(t *TypeInfo) []string {
 func secretMaskValue(f FieldInfo) string {
 	base := f.TSType
 	if f.ScalarInfo != nil && !f.IsArray && !f.IsMap {
-		base = f.ScalarInfo.TSType
+		base = f.ScalarInfo.TSType()
 	}
 	var zero string
 	switch base {
@@ -597,7 +597,7 @@ func unionImports(names []string, modules map[string]string) []ModuleImport {
 func typeNeedsJSONParse(t *TypeInfo, generatedTypeNames map[string]bool) bool {
 	for _, f := range t.Fields {
 		if f.IsScalar && f.ScalarInfo != nil &&
-			f.ScalarInfo.TSType == "JSDate" && f.ScalarInfo.HasParseFromJSON {
+			f.ScalarInfo.TSType() == "JSDate" && f.ScalarInfo.HasParseFromJSON {
 			return true
 		}
 		if !f.IsScalar && f.Type != "" && f.Type != t.Name && generatedTypeNames[f.Type] {
@@ -617,7 +617,7 @@ func typeParserScalarsUsed(t *TypeInfo) []ScalarInfo {
 	var scalars []ScalarInfo
 	for _, f := range t.Fields {
 		if f.IsScalar && f.ScalarInfo != nil &&
-			f.ScalarInfo.TSType == "JSDate" && f.ScalarInfo.HasParseFromJSON &&
+			f.ScalarInfo.TSType() == "JSDate" && f.ScalarInfo.HasParseFromJSON &&
 			!seen[f.ScalarInfo.Name] {
 			seen[f.ScalarInfo.Name] = true
 			scalars = append(scalars, *f.ScalarInfo)
