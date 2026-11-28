@@ -21,7 +21,9 @@ use std::sync::Arc;
 use crate::database_types;
 use crate::deps::Deps;
 use crate::runtime::bucket::Bucket;
-use crate::runtime::orm::file_processing::{process_files, FileProcessingOptions, FileProcessingRun};
+use crate::runtime::orm::file_processing::{
+    process_files, FileProcessingOptions, FileProcessingRun,
+};
 use crate::runtime::orm::Error;
 
 /// One pass of the file processor over the attachments of fixture-references-db, on a
