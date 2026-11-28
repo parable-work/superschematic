@@ -803,9 +803,13 @@ impl Inbound {
         if files.is_empty() {
             return None;
         }
-        let (Some(bucket), Some(_)) = (
+        let (Some(bucket), true) = (
             self.inner.bucket.as_ref(),
-            self.inner.definition.attachments.as_ref(),
+            self.inner
+                .definition
+                .attachments
+                .as_ref()
+                .is_some_and(|attachments| attachments.holders.contains_key(&self.inner.messages)),
         ) else {
             return Some(format!(
                 "{} file(s) dropped: the inbound path has no bucket or the messages table no @attachments",
@@ -1843,25 +1847,48 @@ impl Inbound {
         }
         let role = role.unwrap_or("about");
         self.refer(message, to, role).await;
-        if self.inner.definition.attachments.is_none() {
+        // Only a messages table with @attachments has files to file, and
+        // only a row of a table with them takes one: any other row gets the
+        // reference alone.
+        let holds = |table: &str| {
+            self.inner
+                .definition
+                .attachments
+                .as_ref()
+                .is_some_and(|attachments| attachments.holders.contains_key(table))
+        };
+        if !holds(&self.inner.messages) || !holds(&to.table) {
             return Ok(());
         }
-        let files = {
+        // Filing is idempotent, as the reference is: a run request whose
+        // handler failed after filing is run again, and the row takes no
+        // file twice.
+        let (filed, files) = {
             let client = self.store().client().await?;
-            match self.sys(client.db())?.attachments() {
-                Ok(attachments) => {
-                    attachments
-                        .list(&RowRef::new(self.inner.messages.clone(), message))
-                        .await?
-                }
-                Err(_) => return Ok(()),
-            }
+            let sys = self.sys(client.db())?;
+            let attachments = sys.attachments()?;
+            let filed: Vec<String> = attachments
+                .list(to)
+                .await?
+                .into_iter()
+                .filter_map(|file| file.filed_from)
+                .collect();
+            let files = attachments
+                .list(&RowRef::new(self.inner.messages.clone(), message))
+                .await?;
+            (filed, files)
         };
         for attachment in files {
+            let from = format!(
+                "{}:{}:{}",
+                self.inner.messages, attachment.key, attachment.id
+            );
+            if filed.contains(&from) {
+                continue;
+            }
             let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
-            let filed = self
-                .sys(tx.db())?
+            self.sys(tx.db())?
                 .attachments()?
                 .file(&FileOnto {
                     file: FileRef::new(self.inner.messages.clone(), attachment.id.clone()),
@@ -1869,14 +1896,8 @@ impl Inbound {
                     r#move: false,
                     role: Some(role.to_owned()),
                 })
-                .await;
-            match filed {
-                Ok(_) => tx.commit().await?,
-                // A row of a table that holds no files gets the reference
-                // alone.
-                Err(Error::Refused(refusal)) if refusal.code == "not_a_holder" => return Ok(()),
-                Err(err) => return Err(err.into()),
-            }
+                .await?;
+            tx.commit().await?;
         }
         Ok(())
     }

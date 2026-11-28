@@ -23,6 +23,7 @@ import { createLogger } from '@superschematic/http-runtime';
 import { currentAccess } from '@superschematic/http-runtime/hono';
 import {
   checkProviderPackage,
+  extensionAuthenticator,
   providersFrom,
   SecretValue,
   useCredential,
@@ -31,6 +32,7 @@ import {
 } from '@superschematic/http-runtime/providers';
 
 import { notesProviders, receiveReplies, sendNotice } from '../src/app.ts';
+import { chatBridge, pollNetwork, runBridge, type RelayedMessage } from '../providers/chat-bridge/src/index.ts';
 import { localSandbox, settled } from '../providers/local-sandbox/src/index.ts';
 import { mailRelay } from '../providers/mail-relay/src/index.ts';
 import { smsRelayA } from '../providers/sms-relay-a/src/index.ts';
@@ -135,6 +137,15 @@ test('each provider package declares in its package.json what its definition and
     log: capturedLog().log,
   });
   checkProviderPackage(mailPkg, mailRelay(), await mail.channel('MAIL'));
+  // The messaging bridge's adapter.
+  const bridgePkg = JSON.parse(readFileSync(here('../providers/chat-bridge/package.json'), 'utf8')) as unknown;
+  const bridge = providersFrom({
+    slots: { CHAT: 'channel' },
+    config: { CHAT: 'chat-bridge', CHAT_URL: 'http://chat.test', CHAT_TOKEN: new SecretValue('t'), CHAT_RELAY_KEY: new SecretValue('k') },
+    definitions: [chatBridge()],
+    log: capturedLog().log,
+  });
+  checkProviderPackage(bridgePkg, chatBridge(), await bridge.channel('CHAT'));
 });
 
 test('one notice goes out through either SMS relay, and only the config differs', async () => {
@@ -280,4 +291,75 @@ test('a provider runs its operations as its own principal', async () => {
     { subject: 'extension:sms-relay-a', kind: 'extension' },
     { subject: 'extension:sms-relay-a', kind: 'extension' },
   ]);
+});
+
+test('a messaging bridge connects outward and relays with a key that relays messages and nothing else', async () => {
+  const RELAY_KEY = 'chat-relay-key-5e1b';
+  const CHAT_TOKEN = 'chat-network-token-a07c';
+  const { log, lines } = capturedLog();
+  const sent: { to: string; text: string }[] = [];
+  // The network: its API sends, and its events endpoint holds what it received for the bridge to read.
+  const received: RelayedMessage[] = [
+    { id: 'chat-in-1', from: '@dee', text: 'Gate fixed', at: '2026-11-25T12:00:00Z' },
+    { id: 'chat-in-2', from: '@eve', text: 'done 142', at: '2026-11-25T12:01:00Z', replyTo: 'chat-out-1' },
+  ];
+  const network = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(String(input));
+    const auth = new Headers(init.headers).get('authorization');
+    if (auth !== `Bearer ${CHAT_TOKEN}`) return new Response('who are you', { status: 401 });
+    if (url.pathname === '/v1/health') return new Response('{}', { status: 200 });
+    if (url.pathname === '/v1/messages') {
+      const body = JSON.parse(String(init.body)) as { to: string; text: string };
+      sent.push(body);
+      return Response.json({ id: `chat-out-${sent.length}` });
+    }
+    if (url.pathname === '/v1/events') {
+      const after = url.searchParams.get('after');
+      const start = after ? received.findIndex(m => m.id === after) + 1 : 0;
+      const page = received.slice(start, start + 1);
+      return Response.json({ events: page, cursor: page.length > 0 ? page[0]!.id : null });
+    }
+    return new Response('no such route', { status: 404 });
+  }) as typeof fetch;
+  const providers = providersFrom({
+    slots: { CHAT: 'channel' },
+    config: { CHAT: 'chat-bridge', CHAT_URL: 'http://chat.test', CHAT_TOKEN: new SecretValue(CHAT_TOKEN), CHAT_RELAY_KEY: new SecretValue(RELAY_KEY) },
+    definitions: [chatBridge({ fetch: network })],
+    log,
+  });
+  const adapter = await providers.channel('CHAT');
+  assert.deepEqual(await adapter.send({ to: '@dee', body: 'Can you look at the gate?' }), { providerMessageId: 'chat-out-1', state: 'sent' });
+  assert.deepEqual(sent, [{ to: '@dee', text: 'Can you look at the gate?' }]);
+
+  // The app's inbound route, as a generated server mounts it: the request
+  // goes to the adapter, which takes it only with the relay key.
+  const inbound: unknown[] = [];
+  const app = (async (input: string | URL | Request, init: RequestInit = {}) => {
+    const url = new URL(String(input));
+    if (url.pathname !== '/webhooks/chat/inbound') return new Response('not found', { status: 404 });
+    const headers: Record<string, string> = {};
+    new Headers(init.headers).forEach((value, name) => (headers[name] = value));
+    try {
+      inbound.push(...(await adapter.inbound!({ headers, body: String(init.body) })));
+      return Response.json({ ok: true });
+    } catch {
+      return new Response('refused', { status: 401 });
+    }
+  }) as typeof fetch;
+
+  // The bridge reads the network outward and relays outward.
+  const relayed = await runBridge({ messages: pollNetwork({ url: 'http://chat.test', token: CHAT_TOKEN, fetch: network }), inbound: 'http://app.test/webhooks/chat/inbound', key: RELAY_KEY, fetch: app });
+  assert.equal(relayed, 2);
+  assert.deepEqual(inbound, [
+    { providerMessageId: 'chat-in-1', from: '@dee', body: 'Gate fixed', receivedAt: new Date('2026-11-25T12:00:00Z') },
+    { providerMessageId: 'chat-in-2', from: '@eve', body: 'done 142', receivedAt: new Date('2026-11-25T12:01:00Z'), inReplyTo: 'chat-out-1' },
+  ]);
+  // Another key is refused, and the bridge stops.
+  await assert.rejects(runBridge({ messages: pollNetwork({ url: 'http://chat.test', token: CHAT_TOKEN, fetch: network }), inbound: 'http://app.test/webhooks/chat/inbound', key: 'not-the-key', fetch: app }), /answered 401/u);
+  // The key is the provider's principal to the API, which may relay messages and nothing else.
+  const authenticate = extensionAuthenticator([{ key: new SecretValue(RELAY_KEY), provider: chatBridge() }]);
+  assert.deepEqual(await authenticate({ bearerToken: RELAY_KEY } as never), { subject: 'extension:chat-bridge', kind: 'extension', permissions: ['messages.relay'] });
+  assert.equal(await authenticate({ bearerToken: 'not-the-key' } as never), null);
+  const printed = lines.join('\n');
+  assert.ok(!printed.includes(RELAY_KEY) && !printed.includes(CHAT_TOKEN), 'the log holds no key');
 });

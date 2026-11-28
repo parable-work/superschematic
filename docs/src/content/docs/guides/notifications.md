@@ -20,9 +20,10 @@ person who sent it.
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties; a generated TypeScript server that builds the notifier into its `Deps`, mounts the relays' callbacks and the inbox, and drains the dispatch queue ([the generated server](#what-the-generated-server-wires)) | the same in a generated Go or Rust server |
 | the recipient's audience held at routing and at send time; every adapter's health asked on a schedule by the dispatch queue's worker | |
-| urgent, normal, digest and record; quiet hours; digests and briefs | an inbox page in Topcoat |
-| deliveries that fall through, time out and escalate | an event at an occurrence's due time itself; a reply interpreter other than keywords |
+| urgent, normal, digest and record; quiet hours, held to the instants they start and end on a night the clocks change (TypeScript and Go); digests and briefs | an inbox page in Topcoat; Rust's quiet hours, which count wall minutes |
+| deliveries that fall through, time out and escalate | an event at an occurrence's due time itself |
 | replies by reference, trust per channel kind, echo and undo, and the audit | |
+| a reply no keyword reads, interpreted by an agent run that acts for its sender (TypeScript, [below](#a-reply-an-agent-reads)) | the same in Go and Rust |
 | verifying an address by a code, and password reset by email; the dispatch queue drained on Workers over D1 | |
 
 [D153](https://github.com/parable-work/superschematic/issues/602)
@@ -177,6 +178,13 @@ await orm.asSystem().noticePreference.createOne({
 });
 ```
 
+Quiet hours start and end at instants in the recipient's zone (#602).
+Each wall time is the first instant the clock shows it: on the night the
+clocks go forward past it, the instant they jump; on the night they go
+back over it, the first time it shows. So a window holds a notice for the
+hours that pass: 22:00 to 07:00 in New York holds one 8 hours on the
+night the clocks go forward and 10 on the night they go back.
+
 A delivery is queued, then sent, delivered and read, or it ends failed or
 acknowledged. A send that fails, or no delivery report in five minutes
 from an adapter that reports them, falls through to the next channel. An
@@ -241,6 +249,31 @@ export abstract class ChannelTrust {}
 Every reply is a row of the replies table: its
 channel, its sender, what read the text (`keyword`), what it ran, and its
 undo. Every action is echoed back with `UNDO 142`.
+
+### A reply an agent reads
+
+Keywords are the default. A notifier given an interpreter hands a reply
+no keyword reads to an [agent run](/superschematic/guides/agent-runs/)
+(#602, D158): one from a user's verified identity whose first word is not
+`ack`, `undo` or a verb a reply action takes, about a notice of a record.
+It may name the notice anywhere as `#142`, or by the one waiting.
+
+```ts
+const notifier = createNotifier({ orm, dispatch, providers, replies, agents: { request: (tx, input) => agents.notifierAgents.request(tx, input) }, interpret: { agent: "reader" } });
+const agents = createAgents({ orm, requests, endpoint, providers, notifier, tools: { reply: notifier.replyTool } });
+await agents.define(admin, { name: "reader", role: "reader-agent", tools: ["reply"] });
+```
+
+| Step | What happens |
+| --- | --- |
+| the reply | a row of the replies table at once, `interpreting`, its interpreter `agent:reader`; a run request in the same transaction, trigger `reply`, about the notice's record, acting for the sender, its task the text |
+| the run | the agent's role narrowed to the sender's permissions; its token reaches the notice's record and what the role reaches from it, nothing more |
+| the reply tool | runs one verb the notice takes, `ack` or a reply action, on that notice alone, held to the action's permission within the channel's trust as a keyword reply is; it names no notice, and a reply is acted on once |
+| the echo | the action repeated back with `UNDO 142`, which undoes it as a keyword reply's undo does |
+| a run that does not act | the reply ends `refused`, and the sender is told |
+
+The run row's `input.reply` names the reply, and the reply's
+`interpreter` names the agent, so the audit reads both ways.
 
 ## Verify an address, reset a password
 
@@ -366,7 +399,9 @@ identity service's `reset_password`. Rust has no ambient caller, so a
 recipient's read of the record opens the repositories for the recipient
 (`with_access`). The wall time of quiet hours and digests is read from
 Postgres, which holds the zone database, and on SQLite from the IANA
-database the runtime bundles. A route that names an agent puts
+database the runtime bundles. Quiet hours count wall minutes there, so
+on a night the clocks change inside the window they hold a notice an
+hour too long or too short (#602). A route that names an agent puts
 a run request on the agent dispatcher's queue in the routing transaction,
 once `with_agents` gives the notifier that queue (D193); without it, the
 route's agent is logged and reaches no one. A party's address whose grants
@@ -430,8 +465,10 @@ reads into the table's filter. `FromBehaviorEvent` takes a behavior's
 event from the project's Workers method, `Cleared` a cleared reference's
 message, and `notify.PasswordReset` sends a reset code through the email
 adapter and sets the password with the identity service's
-`ResetPassword`. The wall time of quiet hours and digests is read from
-Postgres, which holds the zone database. Whether an adapter reports
+`ResetPassword`. The wall time of digests is read from Postgres, which
+holds the zone database. Quiet hours start and end at their instants in
+the recipient's zone (`QuietDelayAt`, #602), from Go's zone database,
+which the runtime carries. Whether an adapter reports
 statuses or reads inbound messages is whether it implements
 `providers.ChannelStatusReader` and `providers.ChannelInboundReader`. A
 route that names an agent puts a run request on the dispatcher's queue
@@ -457,7 +494,7 @@ words: a parameter `?n`, a list read through `json_each`, a time as RFC
 ([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). Its
 `Raise` enqueues in the caller's `*SQLiteTx`, so an event commits with
 the change, and `WorkerQueue()` claims the dispatch queue on SQLite, which
-has no slots and no next due time (D145). The wall time of quiet hours
-and digests is read from Go's zone database there, which the runtime
+has no slots and no next due time (D145). The wall time of digests is
+read from Go's zone database there, which the runtime
 carries. The generated server does not wire it over a database that lists
 `sqlite` first yet (#717): the implementation builds it over `Deps.DB`.

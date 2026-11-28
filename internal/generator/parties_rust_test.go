@@ -90,12 +90,12 @@ func rustRuntimeCrate(t *testing.T, cargo, db, name, manifest, source, dsn strin
 		t.Fatalf("the HTTP runtime's lockfile: %v", err)
 	}
 	for file, content := range map[string]string{
-		"Cargo.toml":             fmt.Sprintf(manifest, naming.Default().RustTypesCrate(db), filepath.ToSlash(typesDir), filepath.ToSlash(paths.HTTPRuntimeRust)),
-		"Cargo.lock":             string(lock),
-		"create.sqlite.sql":      string(ddl),
-		"src/lib.rs":             "//! " + db + "'s Rust repositories and runtime: see tests/.\n",
-		"tests/" + name + ".rs":  source,
-		"tests/backend/mod.rs":   storeBackendRust,
+		"Cargo.toml":            fmt.Sprintf(manifest, naming.Default().RustTypesCrate(db), filepath.ToSlash(typesDir), filepath.ToSlash(paths.HTTPRuntimeRust)),
+		"Cargo.lock":            string(lock),
+		"create.sqlite.sql":     string(ddl),
+		"src/lib.rs":            "//! " + db + "'s Rust repositories and runtime: see tests/.\n",
+		"tests/" + name + ".rs": source,
+		"tests/backend/mod.rs":  storeBackendRust,
 	} {
 		if err := os.WriteFile(filepath.Join(crateDir, file), []byte(content), 0o644); err != nil {
 			t.Fatal(err)

@@ -272,6 +272,13 @@ func NewAttachments(host Host, def *AttachmentsDefinition, references *Reference
 	return &Attachments{host: inDialect(host), def: def, references: references, now: time.Now}
 }
 
+// Holds is whether table is an @attachments table, whose rows hold files;
+// no other is asked for a file.
+func (a *Attachments) Holds(table string) bool {
+	_, ok := a.def.Holders[table]
+	return ok
+}
+
 func (a *Attachments) holderOf(table string) (AttachmentsHolder, error) {
 	holder, ok := a.def.Holders[table]
 	if !ok {

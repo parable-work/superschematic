@@ -452,6 +452,8 @@ export {
   type SearchableDefinition,
   type SnippetPart,
 } from './search-tables.js';
+// The query syntax of search across tables (#740).
+export { MAX_QUERY_TERMS, ftsQuery, postgresQuery, searchPlan, type SearchPlan, type SearchTerm } from './search-query.js';
 // Events, notifications and channels (D153): the notifier that raises a
 // table's events in the caller's transaction, routes them by rows, holds
 // each recipient to the record's audience, delivers through the channel
@@ -539,6 +541,7 @@ export {
   type InboundDisposition,
   type InboundOptions,
   type InboundOutcome,
+  type SettleOnto,
   type MessageRow,
   type ReceivedMessage,
   type RunRequest,

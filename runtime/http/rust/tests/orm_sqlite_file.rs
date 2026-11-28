@@ -181,7 +181,10 @@ async fn a_held_write_spans_awaits_and_holds_the_writer_until_it_ends() {
         })
     };
     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    assert!(!other.is_finished(), "a second write ran beside the held one");
+    assert!(
+        !other.is_finished(),
+        "a second write ran beside the held one"
+    );
     // Another task's read does not see the held write's row; the task that
     // holds it reads it, and its nested writes join it, one that fails
     // rolled back to its savepoint.

@@ -555,12 +555,51 @@ const { items, total, more } = await searchTables(orm, principal, { q: "walnut d
 // items: [{ table: "Task", key, title, matched: "body", snippet: [{ text: "a " }, { text: "walnut", match: true }, ...], place: 1 }, ...]
 ```
 
-A row matches when it holds every word of `q`, folded to lower case, and
+A row matches when it holds every term of `q`, folded to lower case, and
 the hits come best first: Postgres's `ts_rank_cd` over the weighed words,
 then table and key, as the engine's Search ranks. `tables` keeps to some
 tables, and `scope` to the rows whose scope field holds one of its values.
 A snippet comes in parts, each match marked, so no markup in a row reaches
 a page.
+
+`q` reads as a search box does (#740), the same in TypeScript, Go and
+Rust, on Postgres and on SQLite:
+
+| `q` | Finds the rows that hold |
+| --- | --- |
+| `walnut desk` | both words, anywhere |
+| `"walnut desk"` | the phrase, its words side by side |
+| `wal*` | a word that starts with `wal` |
+| `walnut -pine` | walnut, and not pine; `-"pine table"` keeps out a phrase |
+| `oak OR pine` | either word: `OR`, upper case, joins the terms beside it, so `walnut oak OR pine` is walnut, and oak or pine |
+
+A `+` before a term says it is required, as every term is. A term with no
+letter or digit is dropped, and so is an `OR` with no term before it. A
+query of excluded terms alone finds nothing, and the first 16 terms count.
+Each term is a phrase of the words the database finds in it, so
+`o'brien` is the phrase `o brien` on both.
+
+With `foldDiacritics`, a word finds its accented forms: `cafe` finds the
+word written with an e acute, and so does the word itself.
+
+```ts
+export default defineConfig({
+  name: "records",
+  kind: SchemaKind.DB,
+  outputs: { sql: { dialects: ["postgres", "sqlite"], search: { foldDiacritics: true } } },
+});
+```
+
+On Postgres the index's words and a search's query go through the
+`unaccent` dictionary, in a text search configuration the migrations make,
+`search_unaccent`. The migration makes the `unaccent` extension where the
+database lacks it, in the schema `superschematic_extensions`, which a role
+with `CREATE` on the database may do; a database that will not have it
+fails the migration and says so. On SQLite the FTS5 table removes
+diacritics. Turning it on or off migrates the index: on Postgres its GIN
+index is built again, and on SQLite its FTS5 table is filled again from
+the index rows. It is off unless set, so a database that searches already
+is not migrated for it.
 
 Access is checked inside the query, so `total` and every page are exact
 and a hidden row never shows as a gap:
@@ -600,6 +639,21 @@ text alone costs no model call. A search embeds its query and re-ranks its
 first 200 hits by reciprocal rank fusion of their text place and their
 similarity; the hits and the total stay the rows that hold the words. A
 model that fails leaves the text order.
+
+A search with a `vector` and no term to hold ranks by the vector alone
+(#740): every row the caller may read whose embedding is of the model, by
+cosine similarity, best first, with the exact total. Each hit is matched
+by its title, which is its snippet. Excluded terms still keep rows out:
+`{ q: "-draft", vector }`.
+
+```ts
+// vector: an embedding of the model the options name, from any source.
+const near = await searchTables(orm, principal, { q: "", vector }, options);
+```
+
+It reads every embedded row the caller may read, once per search, with no
+vector index, so it serves an index of moderate size. Embeddings, and a
+search by vector, are Postgres's alone; SQLite refuses them.
 
 | Settled | Why |
 | --- | --- |
@@ -2545,9 +2599,11 @@ version on SQLite, and its history by the SQLite DDL's row triggers
 (D189). The Go repository reads no history there, as the TypeScript one
 reads none: `GetVersion`, `GetVersions`, `ListVersions`, `GetAsOf` and the
 `ListAsOfBy...` reads answer `ErrSQLiteUnsupported`. The generated Go
-server's wiring of the notifier and its workers over a database that
-lists `sqlite` first is a follow-up: the implementation builds them over
-`Deps.DB` itself.
+server and its workers wire them over a database that lists `sqlite`
+first as over a pool (#717): the API package's `Wire`, `Authenticator`,
+`Routes` and runtime queues take the ORM's `SQLiteDatabase`, and every
+worker, the app's `@worker`, a table's behavior worker and the runtime's
+own, claims its queue on the SQLite file.
 
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a

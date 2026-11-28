@@ -240,8 +240,9 @@ func minutesOf(text string) (int, bool) {
 // QuietDelaySeconds is how many seconds from a wall time (its minutes of
 // the day and its second) until the quiet hours [start, end) end, or 0
 // when it is outside them. A window that crosses midnight (22:00 to
-// 07:00) is read as one. The notifier reads the wall time of an instant in
-// a zone from Postgres (AT TIME ZONE), which holds the zone database.
+// 07:00) is read as one. It counts wall minutes, which a night the clocks
+// change inside the window gets wrong by the change: the notifier holds a
+// notice with QuietDelayAt (quiet.go, #602), from the instant in the zone.
 func QuietDelaySeconds(wallMinutes, second int, start, end string) int {
 	from, okFrom := minutesOf(start)
 	to, okTo := minutesOf(end)
