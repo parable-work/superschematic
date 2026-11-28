@@ -1,0 +1,21 @@
+# A Rust API over fixture-agent-runs-db, whose runtime parts its generated
+# server, workers and jobs build themselves (#620, #622, #617, #610): the
+# notifier, the agent dispatcher, the inbound path, the search route and
+# the grants' authenticator. Its workers are the parts' queues: Notify the
+# notifier's dispatch queue, Dispatch the dispatcher's requests,
+# InboundRuns the inbound path's run requests and Index the search
+# indexing queue, none a method of its Workers. Its implementation
+# establishes the caller of each route that needs one, and its MCP
+# endpoint holds an agent run's calls to the run's autonomy.
+name: fixture-wired-api
+kind: API
+dependencies:
+  - { name: fixture-agent-runs-db, kind: DB }
+providers:
+  - "../../../../../../examples/runtime-providers/rust/local-sandbox"
+  - "../../../../../../examples/runtime-providers/rust/stub-model"
+  - "../../../../../../examples/runtime-providers/rust/sms-relay-a"
+outputs:
+  types:
+    rust: { enabled: true }
+  api: { enabled: true, language: RUST, mcp: true }

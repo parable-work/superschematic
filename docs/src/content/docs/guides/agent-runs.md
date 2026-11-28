@@ -22,7 +22,7 @@ stop switch ends every run in flight.
 | budgets per agent and in total, warnings, pauses; stop switches | |
 | asking in a row's thread, with a follow-up row at the deadline | |
 | redacted transcripts in a bucket; credentials that stay in the sandbox | |
-| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; a Rust server that builds the dispatcher into its `Deps`; `@autonomy` in a Go server, which serves no MCP endpoint |
+| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues, and a generated Rust server that does the same on Postgres | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; `@autonomy` in a Go server, which serves no MCP endpoint |
 | the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres and SQLite | |
 | a generated Go server that builds the dispatcher, the notifier and the inbound path into its `Deps`, mounts their routes and runs their queues ([the generated Go server](#the-generated-go-server)) | the same over a database that lists `sqlite` first (#717) |
 | the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres and SQLite | a generated Rust server that builds the dispatcher over a database that lists `sqlite` first (#725) |
@@ -337,10 +337,14 @@ of `session.GrantAuthenticator`, which refuses one: the route runs as the
 run's principal, narrowed as above, and each call is held to the run's
 autonomy first, so an entered sender's write answers 428 until someone
 approves it. The
-sandbox's side is `providers.RunAgentInstance`. A Go server is refused an
-operation's `@autonomy`, which holds an agent run's calls of the API's MCP
-tools, since it serves no MCP endpoint; `MCPGate` is that gate for the day
-one does.
+sandbox's side is `providers.RunAgentInstance`. An operation's
+`@autonomy` holds an agent run's calls of the API's MCP tools (#621): the
+Go API's MCP endpoint (#660) takes the dispatcher's `MCPCallGate` as its
+call gate, which a stack's server passes, so a run's call of a tool asks
+by the tool's `@autonomy` until an approval of its exact parameters is
+approved, runs once, and asks again for any changed parameter.
+`Authenticator` leaves the endpoint's own request, and a call's request to
+the tool's route, to that gate.
 
 On SQLite the Go runtime runs the same dispatcher (#618), as the
 TypeScript one does (D189). `(*SQLiteDatabase).Orchestration()` is its
@@ -387,8 +391,7 @@ An app that builds a part itself puts it in `Deps` before `Wire` runs, or
 mounts routes of its own beside the generated ones. Over a database that
 lists `sqlite` first the generated server wires none of it yet and its
 workers are refused (#717): the implementation builds the parts over
-`Deps.DB` itself, which run on SQLite as above. `@autonomy` waits for a Go
-MCP endpoint.
+`Deps.DB` itself, which run on SQLite as above.
 
 ## In Rust
 
@@ -429,9 +432,15 @@ A tool of the app is an `AgentToolRun`, given the repositories of a
 transaction that act as the run's principal. A run's token resolves
 through `principal_of`, or `authenticator(inner)` on the API's own routes.
 The MCP tool records of a generated Rust router carry each operation's
-`@autonomy`, which `mcp_gate` holds an agent run's call to once the app
-passes it in the router's MCP endpoint options; the generated Rust server
-does not build the dispatcher into its `Deps` yet. The sandbox's side is
+`@autonomy`, which `mcp_gate` holds an agent run's call to once it is the
+router's MCP endpoint's call gate. A generated Rust server builds the
+dispatcher into its `Deps`, then the notifier and the inbound path, which
+take its reply actions, its queue and its send approval, mounts the agent
+routes, passes `mcp_gate` as its MCP endpoint's call gate, and runs a
+`@worker` of the requests queue or of the `@runRequests` queue through
+`handle` (#622); the implementation names the endpoint and adds its tools
+in `Wire::agent_endpoint` and `Wire::agents` ([the generated Rust server's
+wiring](/superschematic/guides/api-routes/#the-generated-rust-servers-wiring)). The sandbox's side is
 `providers::run_agent_instance`, under the runtime's `http-client`
 feature. The agent routes run each call's work in a task of its own, so a
 run cancelled while its turn runs, by a pause or a budget's cap, does not

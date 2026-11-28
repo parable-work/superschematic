@@ -1,0 +1,115 @@
+name: fixture-wired-api
+kind: API
+imports:
+  - package: "@schemas/fixture-agent-runs-db"
+    types: [NoticeWork, AgentRunRequest, RunRequest, SearchIndexing, AgentRun, Task]
+types:
+  # The API's config (D159, D185): a slot per runtime interface the
+  # database's parts need, a sandbox and a model for its agent runs and a
+  # channel for its notices, each with the settings of its provider.
+  WiredConfig:
+    name: WiredConfig
+    role: EmbeddedStruct
+    envVars: true
+    providerSlots: { SANDBOX: sandbox, MODEL: model, SMS: channel }
+    fields:
+      - name: SANDBOX
+        typeRef: { name: string }
+      - name: SANDBOX_WORKDIR
+        typeRef: { name: string }
+      - name: MODEL
+        typeRef: { name: string }
+      - name: MODEL_MODEL
+        typeRef: { name: string }
+      - name: SMS
+        typeRef: { name: string }
+      - name: SMS_URL
+        typeRef: { name: string }
+      - name: SMS_SENDER
+        typeRef: { name: string }
+      - name: SMS_TOKEN
+        typeRef: { name: string }
+        secret: true
+  Seeded:
+    name: Seeded
+    comment: The rows a test seeds, by key.
+    role: APIView
+    fields:
+      - name: user
+        typeRef: { name: string }
+        required: true
+      - name: task
+        typeRef: { name: string }
+        required: true
+  Done:
+    name: Done
+    role: APIView
+    fields:
+      - name: ok
+        typeRef: { name: boolean }
+        required: true
+operationSets:
+  - name: Work
+    operations:
+      # Seeds the rows of a test: an approver, its roles and a task.
+      - name: seed
+        typeRef: { name: Seeded }
+        required: true
+        httpMethod: POST
+        restPath: seed
+      # Asks the reviewer agent to review a task, a run request.
+      - name: review
+        typeRef: { name: Done }
+        required: true
+        httpMethod: POST
+        restPath: tasks/{task}/review
+        auth: true
+        permissions: [agents]
+        arguments:
+          - name: task
+            typeRef: { name: string }
+            required: true
+      # Raises a budget warning, which the notifier routes to the approvers.
+      - name: warn
+        typeRef: { name: Done }
+        required: true
+        httpMethod: POST
+        restPath: warn
+        auth: true
+      # Whether the latest run is done: the MCP tool work_status.
+      - name: status
+        typeRef: { name: Done }
+        required: true
+        httpMethod: GET
+        restPath: status
+        auth: true
+        docs:
+          title: Work status
+          description: Says whether the work is up.
+          capability: work.status.read
+          lifecycle: active
+          visibility: public
+          mappingStatus: mapped
+          replayMode: read_only
+        mcp: { handle: work_status, hidden: false }
+workers:
+  - name: Notify
+    comment: The notifier's dispatch queue.
+    queue: NoticeWork
+  - name: Dispatch
+    comment: The agent dispatcher's requests.
+    queue: AgentRunRequest
+  - name: InboundRuns
+    comment: The run requests an inbound message puts on its queue.
+    queue: RunRequest
+  - name: Index
+    comment: The rows whose indexed text changed.
+    queue: SearchIndexing
+  # The runs' Lease and Retries deadlines, and the tasks' Schedules,
+  # whose run event the implementation's Workers hand to the notifier.
+  - name: RunDeadlines
+    comment: The runs' lease expiries and retries.
+    behaviorWorker: { type: AgentRun }
+  - name: TaskBehaviors
+    comment: The tasks' schedules.
+    behaviorWorker: { type: Task }

@@ -370,3 +370,23 @@ pub trait CallGate: Send + Sync {
         arguments: &Map<String, Value>,
     ) -> Result<Option<Problem>, BoxError>;
 }
+
+/// A tool of a generated router's MCP endpoint that is no route's (#617):
+/// the calendar's and the search's (`orm::calendar::CalendarTool`,
+/// `orm::search_tables::SearchTool`), which run over the repositories as
+/// the endpoint's caller reads them. The endpoint lists one to a caller
+/// alone, and holds no call of one to a gate: each is a read.
+#[async_trait]
+pub trait EndpointTool: Send + Sync {
+    /// What `tools/list` answers of it.
+    fn tool(&self) -> Tool;
+
+    /// Runs a call with `arguments` as `principal`, the caller the
+    /// endpoint's controls established: its result, or a problem for
+    /// arguments it cannot read.
+    async fn call(
+        &self,
+        principal: &crate::auth::Principal,
+        arguments: &Map<String, Value>,
+    ) -> Result<CallOutcome, ToolError>;
+}

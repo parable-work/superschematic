@@ -744,6 +744,10 @@ func normalizeGoTypeIdentifier(typeName string) string {
 	return strings.ReplaceAll(typeName, ".", "")
 }
 
+// GoFieldName is the EnvConfig field's name of the @envVars field key, as
+// the Go config writes it.
+func GoFieldName(key string) string { return toEnvGoName(key) }
+
 // toEnvGoName converts an environment variable key to a Go field name.
 // Example: "DATABASE_URL" -> "DatabaseUrl"
 func toEnvGoName(key string) string {

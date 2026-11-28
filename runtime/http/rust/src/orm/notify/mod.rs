@@ -68,6 +68,8 @@
 mod notifier;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod replies;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod routes;
 
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub use notifier::{
@@ -77,6 +79,8 @@ pub use notifier::{
 };
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub use replies::{approval_replies, ReplyAction, ReplyContext};
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub use routes::NotifierRoutes;
 
 use crate::auth::covers;
 use crate::uuid62::{parse_uuid, uuid_to_base62};

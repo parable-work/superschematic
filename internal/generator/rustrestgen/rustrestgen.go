@@ -553,6 +553,13 @@ type APIOutput struct {
 	// core, by functions src/behaviors.rs holds, and has no method of the
 	// Workers trait nor of the scaffold.
 	BehaviorWorkers []WorkerInfo
+	// RuntimeWorkers are the API's @worker classes of a queue the runtime
+	// handles, sorted by name (#620, #622, #617): the notifier's dispatch
+	// queue, the agent dispatcher's requests queue, the inbound path's run
+	// requests queue and a @searchable declaration's queue. Each runs
+	// through src/wiring.rs and has no method of the Workers trait nor of
+	// the scaffold. SetDeps moves them out of Workers.
+	RuntimeWorkers []WorkerInfo
 	// Derivers are the API's derivers, sorted by name: a trait each in
 	// deps.rs, which the implementation's create_derivers builds with the
 	// API's Deps (D74). The dispatch layer sets them with SetDerivers.
@@ -561,6 +568,10 @@ type APIOutput struct {
 	// src/apps.rs, which the app's entrypoint builds and hands to the
 	// app's program (D78).
 	Apps []AppInfo
+
+	// databases are the DB schemas the API reads, by name, which SetDeps
+	// reads the wiring of its database from (wiringOf).
+	databases map[string]*ir.Schema
 }
 
 // HasIdempotent reports whether a route the router mounts is @idempotent
@@ -911,6 +922,12 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
 	output.PostgresFeatures = postgresFeaturesOf(databases)
+	output.databases = map[string]*ir.Schema{}
+	for name, dep := range opts.Dependencies {
+		if dep != nil && dep.Kind == ir.SchemaKindDB {
+			output.databases[name] = dep
+		}
+	}
 	output.heldDatabases = held
 	for _, database := range databases {
 		for _, td := range database.Types {
@@ -1201,6 +1218,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
 		{"graphs.tmpl", GraphsFile, output.HasGraphOperations()},
 		{"providers.tmpl", ProvidersFile, output.Providers != nil},
+		{"wiring.tmpl", WiringFile, output.HasWiring()},
 	} {
 		path := filepath.Join("src", module.file)
 		if module.written {

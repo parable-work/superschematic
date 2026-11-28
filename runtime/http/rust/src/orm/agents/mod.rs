@@ -79,6 +79,8 @@
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod dispatcher;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
+mod queue;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod routes;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod tools;
@@ -89,6 +91,8 @@ pub use dispatcher::{
     AgentsError, AskDeadline, AskThread, Clock, FollowUp, GateOutcome, OnReturn, PrincipalRef,
     RunAuthenticator, SandboxExtra, SandboxSpecOf, TranscriptEntry, TranscriptStore,
 };
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub use queue::AgentsQueue;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub use routes::AgentRoutes;
 

@@ -530,6 +530,11 @@ type APIOutput struct {
 	// the dispatch layer before WriteAPI.
 	EnvConfig *envgen.ConfigOutput `json:"-"`
 
+	// MCP is the API's MCP endpoint with outputs.api.mcp on (D81, D116,
+	// #660), which mcp.go mounts; nil without it. The generator package
+	// sets it on the Go server's output (mcp_go.go).
+	MCP *GoMCP `json:"-"`
+
 	// Deps is what the generated Deps holds beside the config and the
 	// logger. Generate sets the upstream auth schema's ORM for a public
 	// API; the dispatch layer sets the rest with SetDeps before WriteAPI.
