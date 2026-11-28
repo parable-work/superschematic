@@ -256,6 +256,10 @@ async function main(): Promise<void> {
   // authenticator establishes every other caller, a run's token among
   // them where it is the dispatcher's (D194).
 {{- end }}
+{{- if .CallerKeys }}
+  // A provider that calls the app with its key, its slot's CALLER_KEY,
+  // runs as the provider with its role alone, before any other (#744).
+{{- end }}
   const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', {{ .AuthenticatorFactory }});
 {{- end }}
 {{- if .Identity }}

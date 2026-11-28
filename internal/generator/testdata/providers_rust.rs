@@ -16,12 +16,12 @@ use api::runtime::orm::postgres::{deadpool_postgres, tokio_postgres, Repositorie
 use api::runtime::orm::{AccessCaller, Values};
 use api::runtime::postgres::Pool;
 use api::runtime::providers::{
-    use_credential, ConfigValue, CredentialQuery, ExtensionAuthenticator, ExtensionKey, FileInput,
-    InjectionRunner, InjectionTarget, ModelEmbedRequest, ModelMessage, ModelRole, ModelStop,
-    ModelTool, ModelTurn, OutboundMessage, PreviewOptions, Providers, RuntimeInterface,
-    SandboxSpec, SandboxState, SecretValue, UseCredential,
+    use_credential, ConfigValue, CredentialQuery, FileInput, InjectionRunner, InjectionTarget,
+    ModelEmbedRequest, ModelMessage, ModelRole, ModelStop, ModelTool, ModelTurn, OutboundMessage,
+    PreviewOptions, Providers, RuntimeInterface, SandboxSpec, SandboxState, SecretValue,
+    UseCredential,
 };
-use api::runtime::{BoxError, PrincipalKind};
+use api::runtime::{ApiError, Authenticator, BoxError, Principal, PrincipalKind};
 use api::{build_router, Deps, Handlers, Implementations};
 use async_trait::async_trait;
 use axum::body::Body;
@@ -115,6 +115,18 @@ impl InjectionRunner for Headers {
     }
 }
 
+/// The implementation's authenticator, which the caller key's wraps: a
+/// person's token is the person, who holds no permission of a relay's.
+struct People;
+
+#[async_trait]
+impl Authenticator for People {
+    async fn authenticate(&self, request: &http::request::Parts) -> Result<Option<Principal>, ApiError> {
+        let bearer = request.headers.get(http::header::AUTHORIZATION).and_then(|v| v.to_str().ok());
+        Ok((bearer == Some("Bearer person-token")).then(|| Principal::new("person-1", ["notes.read"])))
+    }
+}
+
 async fn get(router: &axum::Router, path: &str, key: Option<&str>) -> (u16, Value) {
     let mut request = Request::builder().uri(path);
     if let Some(key) = key {
@@ -149,6 +161,10 @@ async fn runtime_providers_in_the_rust_server() {
     ] {
         std::env::set_var(name, value);
     }
+    // The key sms-relay-a calls the app with (#744), made here, so no
+    // fixture holds one.
+    let caller_key = format!("caller-{}", SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos());
+    std::env::set_var("SMS_CALLER_KEY", &caller_key);
     let (pool, admin, schema) = database(&url).await;
     let config = api::config::load_env_config().unwrap();
     let dev = Deps {
@@ -360,24 +376,33 @@ async fn runtime_providers_in_the_rust_server() {
 
     case("a provider that calls the app is authenticated as itself, with its role alone");
     {
-        let relay = dev.providers.principal_of("SMS").unwrap();
-        let model = dev.providers.principal_of("MODEL").unwrap();
-        let authenticator = ExtensionAuthenticator::new(vec![
-            ExtensionKey { key: SecretValue::new("relay-key"), name: "sms-relay-a".into(), role: relay.permissions.clone() },
-            ExtensionKey { key: SecretValue::new("model-key"), name: "stub-model".into(), role: model.permissions.clone() },
-        ]);
-        let router = build_router(Implementations::new(Handlers { authenticator: Arc::new(authenticator) }, pool.clone()));
+        // The server's entrypoint wraps the implementation's authenticator
+        // in the API crate's caller_authenticator, outermost, over the keys
+        // the config's providers call the app with: SMS_CALLER_KEY alone.
+        let keys = dev.providers.extension_keys();
+        assert_eq!(keys.iter().map(|k| (k.name.as_str(), k.role.clone())).collect::<Vec<_>>(), [("sms-relay-a", vec!["messages.relay".to_owned()])]);
+        assert!(!format!("{keys:?}").contains(&caller_key));
+        let authenticator = api::providers::caller_authenticator(&dev.providers, Arc::new(People));
+        let router = build_router(Implementations::new(Handlers { authenticator }, pool.clone()));
         for delivered in [&delivered_a, &delivered_b] {
             let id = delivered["id"].as_str().unwrap();
-            let (status, body) = get(&router, &format!("/api/deliveries/{id}"), Some("relay-key")).await;
+            let (status, body) = get(&router, &format!("/api/deliveries/{id}"), Some(&caller_key)).await;
             assert_eq!(status, 200, "{body}");
             assert_eq!(body["data"]["provider"], delivered["provider"]);
             assert_eq!(body["data"]["recipient"], "+15550100");
         }
         let id = delivered_a["id"].as_str().unwrap();
-        assert_eq!(get(&router, &format!("/api/deliveries/{id}"), Some("model-key")).await.0, 403);
+        // A person's token goes on to the implementation's authenticator,
+        // and the person holds no relay's permission.
+        assert_eq!(get(&router, &format!("/api/deliveries/{id}"), Some("person-token")).await.0, 403);
         assert_eq!(get(&router, &format!("/api/deliveries/{id}"), Some("forged-key")).await.0, 401);
         assert_eq!(get(&router, &format!("/api/deliveries/{id}"), None).await.0, 401);
+        // An environment that sets no key lets the relay call nothing.
+        let mut values = BTreeMap::new();
+        for (field, value) in [("SMS", text("sms-relay-a")), ("SMS_URL", text("http://relay-a.test/")), ("SMS_TOKEN", secret(RELAY_TOKEN))] {
+            values.insert(field.to_owned(), value);
+        }
+        assert!(api::providers::from_values(values).unwrap().extension_keys().is_empty());
     }
 
     pool.close();

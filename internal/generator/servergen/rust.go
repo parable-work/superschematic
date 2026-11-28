@@ -500,6 +500,17 @@ type RustAPI struct {
 	// reads from its config.
 	Providers bool
 
+	// CallerProviders is the variable a server keeps Deps' providers in
+	// when a provider the API's config lists calls the app with its key
+	// (#744): the handlers' authenticator is then the API crate's
+	// providers::caller_authenticator around it, outermost. Empty
+	// otherwise, and for an API whose identity service establishes its
+	// callers, which takes no key yet.
+	CallerProviders string
+	// HandlersRest is whether Handlers has fields beside the
+	// authenticator, which the wrapped handlers keep (..handlers).
+	HandlersRest bool
+
 	// Database is the pool Deps.db holds, nil without one.
 	Database *RustDatabase
 
@@ -966,6 +977,10 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		if a.Config != nil && o.HasEnvConfig {
 			api.Config = taken.take(stem + "_config")
 			api.Providers = o.Providers != nil
+			if api.Providers && o.Providers.CallerKeys && o.ChecksEndUsers() && !background {
+				api.CallerProviders = taken.take(stem + "_caller_providers")
+				api.HandlersRest = len(o.HandlersFields()) > 1
+			}
 			for _, f := range a.Config.Derived {
 				derived[string(f.Kind)+" "+f.Service] = f.Key
 			}

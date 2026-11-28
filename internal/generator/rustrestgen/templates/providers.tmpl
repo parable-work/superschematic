@@ -8,10 +8,17 @@
 //! which runs as its own principal (`providers.principal_of(slot)`).
 
 use std::collections::BTreeMap;
+{{- if .Providers.CallerKeys }}
+use std::sync::Arc;
+{{- end }}
 
 use crate::runtime::providers::{
     providers_from, ConfigValue, ProviderConfigError, ProviderDefinition, Providers, ProvidersOptions,
 };
+{{- if .Providers.CallerKeys }}
+use crate::runtime::providers::ExtensionAuthenticator;
+use crate::runtime::Authenticator;
+{{- end }}
 {{- if .HasEnvConfig }}
 use crate::runtime::providers::SecretValue;
 
@@ -95,5 +102,17 @@ pub fn from_config(config: &EnvConfig) -> Result<Providers, ProviderConfigError>
     let _ = config;
     from_values(BTreeMap::new())
 {{- end }}
+}
+{{- end }}
+{{- if .Providers.CallerKeys }}
+
+/// The authenticator of the API's routes around `inner` (#744): a request
+/// whose Bearer token is one of `providers.extension_keys()`, a key a
+/// provider calls the app with, its slot's `CALLER_KEY`, runs as that
+/// provider, with its role alone, and any other goes on to `inner`, the
+/// grants' or the implementation's. The server's entrypoint wraps it
+/// outermost.
+pub fn caller_authenticator(providers: &Providers, inner: Arc<dyn Authenticator>) -> Arc<dyn Authenticator> {
+    Arc::new(ExtensionAuthenticator::new(providers.extension_keys()).with_next(inner))
 }
 {{- end }}

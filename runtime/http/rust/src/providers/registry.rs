@@ -18,9 +18,9 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-use super::define::{check_provider_manifest, extension_principal, ConfigValue};
+use super::define::{check_provider_manifest, extension_principal, ConfigValue, ExtensionKey};
 use super::{
-    provider_config_field, ChannelAdapter, CredentialProvider, FileProcessor, ModelProvider,
+    provider_config_field, ChannelAdapter, CALLER_KEY, CredentialProvider, FileProcessor, ModelProvider,
     ProviderContext, ProviderContractError, ProviderDefinition, ProviderInstance, ProviderSettings,
     RuntimeInterface, SandboxProvider,
 };
@@ -349,6 +349,27 @@ impl Providers {
     pub fn provider_of(&self, slot: &str) -> Result<&str, ProviderNotConfiguredError> {
         Ok(&self.entry(slot, None)?.definition.name)
     }
+
+    /// The keys the providers the environment configures call the app with
+    /// (#744): one per slot whose provider lists [`CALLER_KEY`] and whose
+    /// `<SLOT>_CALLER_KEY` the config sets, with the provider's name and
+    /// role, sorted by slot. A server wraps its routes' authenticator in an
+    /// [`ExtensionAuthenticator`](super::ExtensionAuthenticator) over them,
+    /// outermost; [`providers_from`] has already held the key to a secret.
+    pub fn extension_keys(&self) -> Vec<ExtensionKey> {
+        self.entries
+            .values()
+            .filter(|entry| entry.definition.config.contains_key(CALLER_KEY))
+            .filter_map(|entry| {
+                let key = entry.settings.secret(CALLER_KEY).ok()?;
+                (!key.reveal().is_empty()).then(|| ExtensionKey {
+                    key,
+                    name: entry.definition.name.clone(),
+                    role: entry.definition.role.clone(),
+                })
+            })
+            .collect()
+    }
 }
 
 #[cfg(test)]
@@ -583,6 +604,62 @@ mod tests {
             err.to_string().contains("create made a model provider"),
             "{err}"
         );
+    }
+
+    #[tokio::test]
+    async fn the_extension_keys_are_the_slots_whose_provider_calls_the_app() {
+        use crate::auth::Authenticator;
+        use crate::providers::ExtensionAuthenticator;
+        // A key the test makes, so no fixture holds one.
+        let key = format!(
+            "key-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let mut options = options(
+            &[
+                ("CHAT", text("relay-b")),
+                ("CHAT_URL", text("http://chat.test")),
+                ("CHAT_TOKEN", ConfigValue::Secret(SecretValue::new("t"))),
+                (
+                    "CHAT_CALLER_KEY",
+                    ConfigValue::Secret(SecretValue::new(key.clone())),
+                ),
+                ("SMS", text("relay-a")),
+                ("SMS_URL", text("http://relay.test")),
+                ("SMS_TOKEN", ConfigValue::Secret(SecretValue::new("t"))),
+                (
+                    "SMS_CALLER_KEY",
+                    ConfigValue::Secret(SecretValue::new("unread")),
+                ),
+            ],
+            &[("CHAT", "channel"), ("SMS", "channel")],
+        );
+        options.definitions[1] = recording("relay-b")
+            .with_setting(CALLER_KEY, ProviderSettingSpec::secret().optional());
+        let providers = providers_from(options).unwrap();
+        let keys = providers.extension_keys();
+        assert_eq!(keys.len(), 1, "{keys:?}");
+        assert_eq!(keys[0].name, "relay-b");
+        assert_eq!(keys[0].role, ["messages.relay"]);
+        assert!(!format!("{keys:?}").contains(&key));
+
+        let parts = |token: &str| {
+            http::Request::builder()
+                .header("authorization", format!("Bearer {token}"))
+                .body(())
+                .unwrap()
+                .into_parts()
+                .0
+        };
+        let auth = ExtensionAuthenticator::new(keys);
+        let principal = auth.authenticate(&parts(&key)).await.unwrap().unwrap();
+        assert_eq!(principal.subject, "extension:relay-b");
+        assert_eq!(principal.kind, PrincipalKind::Extension);
+        assert_eq!(principal.permissions, ["messages.relay"]);
+        assert!(auth.authenticate(&parts("unread")).await.unwrap().is_none());
     }
 
     struct Stub;

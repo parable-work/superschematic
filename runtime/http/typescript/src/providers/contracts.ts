@@ -39,6 +39,14 @@ export function extensionSubject(provider: string): string {
   return `extension:${provider}`;
 }
 
+/**
+ * The reserved setting of a provider that calls the app with a key of its
+ * own (#744): slot SMS reads it from SMS_CALLER_KEY, a Secret<string>, and a
+ * request whose Bearer token is the key runs as the provider, with its role
+ * alone (extensionKeysOf, extensionAuthenticator).
+ */
+export const CALLER_KEY = 'CALLER_KEY';
+
 /** The config field a provider in slot reads its setting key from: SMS and URL give SMS_URL. */
 export function providerConfigField(slot: string, key: string): string {
   return `${slot}_${key}`;

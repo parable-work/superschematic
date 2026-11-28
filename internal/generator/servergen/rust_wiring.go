@@ -197,3 +197,27 @@ func (a *RustAPI) providersLet() string {
 	}
 	return indent + "let " + a.Wiring.Providers + " = Arc::new(configure(\n" + indent + indent + service + ",\n" + indent + indent + config + ",\n" + indent + ")?);"
 }
+
+// CallerProvidersLet is a server's statement that keeps Deps' providers
+// before the implementation's create takes Deps (#744).
+func (a *RustAPI) CallerProvidersLet() string {
+	return rustLet(a.CallerProviders, "Arc::clone(&"+a.Deps+".providers)")
+}
+
+// CallerHandlersLet is a server's statement that wraps the handlers'
+// authenticator, the wired one or the implementation's, in the API crate's
+// providers::caller_authenticator, outermost (#744).
+func (a *RustAPI) CallerHandlersLet() string {
+	const indent = "    "
+	var b strings.Builder
+	b.WriteString(indent + "let " + a.Handlers + " = " + a.Alias + "::Handlers {\n")
+	b.WriteString(indent + indent + "authenticator: " + a.Alias + "::providers::caller_authenticator(\n")
+	b.WriteString(indent + indent + indent + "&" + a.CallerProviders + ",\n")
+	b.WriteString(indent + indent + indent + a.Handlers + ".authenticator,\n")
+	b.WriteString(indent + indent + "),\n")
+	if a.HandlersRest {
+		b.WriteString(indent + indent + ".." + a.Handlers + "\n")
+	}
+	b.WriteString(indent + "};")
+	return b.String()
+}

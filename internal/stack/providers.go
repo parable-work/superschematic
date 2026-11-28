@@ -99,13 +99,13 @@ func (r *resolver) slotProvider(d *deployable, svc *Service, slot string, bindin
 		switch {
 		case !declared && key.Optional:
 		case !declared:
-			r.fail(CodeProvider, "%s names provider %s, which reads setting %s from config field %s, and %s declares no such field; declare %s?: %s (D159)", where, p.Name, key.Key, fieldName, svc.Name, fieldName, settingType(key))
+			r.fail(CodeProvider, "%s names provider %s, which reads setting %s from config field %s, and %s declares no such field; declare %s?: %s (D159)", where, p.Name, settingName(key), fieldName, svc.Name, fieldName, settingType(key))
 			ok = false
 		case f.Secret != key.Secret:
-			r.fail(CodeProvider, "%s names provider %s, whose setting %s is %s, and config field %s of %s is %s (D159)", where, p.Name, key.Key, secrecy(key.Secret), fieldName, svc.Name, secrecy(f.Secret))
+			r.fail(CodeProvider, "%s names provider %s, whose setting %s is %s, and config field %s of %s is %s (D159)", where, p.Name, settingName(key), secrecy(key.Secret), fieldName, svc.Name, secrecy(f.Secret))
 			ok = false
 		case !key.Optional && bindings[fieldName] == nil:
-			r.fail(CodeProvider, "%s names provider %s, which needs setting %s, and the environment binds no value to %s; set it in the deployable's env, or with `stack secrets set` for a secret (D159)", where, p.Name, key.Key, fieldName)
+			r.fail(CodeProvider, "%s names provider %s, which needs setting %s, and the environment binds no value to %s; set it in the deployable's env, or with `stack secrets set` for a secret (D159)", where, p.Name, settingName(key), fieldName)
 			ok = false
 		}
 	}
@@ -218,6 +218,15 @@ func providerNames(providers []*ir.RuntimeProvider, iface string) string {
 		return "none"
 	}
 	return strings.Join(names, ", ")
+}
+
+// settingName is a provider's setting as a message names it: the reserved
+// CALLER_KEY says what it is (#744).
+func settingName(key ir.ProviderConfigKey) string {
+	if key.Key == ir.ProviderCallerKey {
+		return key.Key + " (the key it calls the app with, #744)"
+	}
+	return key.Key
 }
 
 func settingType(key ir.ProviderConfigKey) string {

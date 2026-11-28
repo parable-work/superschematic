@@ -4,10 +4,10 @@
 // no open port (plan section 9's rule 4). The app sends through the
 // network's API, POST <URL>/v1/messages with a Bearer token. The bridge
 // (runBridge, below) posts what the network received to the app's
-// /webhooks/<slot>/inbound with the relay key, which inbound checks: the
-// key can only relay messages, since the API resolves it to this
-// provider's principal, whose role is messages.relay
-// (extensionAuthenticator). Senders are handles, which a party's or a
+// /webhooks/<slot>/inbound with the relay key, its slot's CALLER_KEY,
+// which inbound checks: the key can only relay messages, since the API
+// resolves it to this provider's principal, whose role is messages.relay
+// (#744: the generated server's extension authenticator). Senders are handles, which a party's or a
 // user's channel identity of kind handle names (D157).
 import {
   defineProvider,
@@ -57,17 +57,17 @@ export function chatBridge(options: ChatBridgeOptions = {}) {
     config: {
       URL: { description: "The messaging network's API base URL." },
       TOKEN: { secret: true, description: "The network's API token, which sends." },
-      RELAY_KEY: {
+      CALLER_KEY: {
         secret: true,
         description:
-          "The key the bridge relays with: the inbound route takes a request that bears it, and the API resolves it to this provider's principal, which may relay messages and nothing else.",
+          "The key the bridge relays with (#744): the inbound route takes a request that bears it, and the API resolves it to this provider's principal, which may relay messages and nothing else.",
       },
     },
     role: ['messages.relay'],
     create(settings, context): ChannelAdapter {
       const base = settings.text('URL').replace(/\/+$/u, '');
       const token = settings.secret('TOKEN');
-      const relayKey = settings.secret('RELAY_KEY');
+      const relayKey = settings.secret('CALLER_KEY');
       const call = options.fetch ?? globalThis.fetch;
 
       /** The relayed body, once the request bears the relay key. */
@@ -125,7 +125,7 @@ export interface BridgeOptions {
   readonly messages: AsyncIterable<RelayedMessage>;
   /** The app's inbound route of the slot this adapter fills: <api>/webhooks/<slot>/inbound. */
   readonly inbound: string;
-  /** The relay key, the slot's RELAY_KEY, which may relay messages and nothing else. */
+  /** The relay key, the slot's CALLER_KEY, which may relay messages and nothing else. */
   readonly key: string;
   /** How the bridge reaches the app; globalThis.fetch unless a test gives another. */
   readonly fetch?: typeof fetch;

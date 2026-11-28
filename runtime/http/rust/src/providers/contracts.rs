@@ -120,6 +120,16 @@ pub fn extension_subject(provider: &str) -> String {
     format!("extension:{provider}")
 }
 
+/// The reserved setting of a provider that calls the app with a key of its
+/// own (#744): slot `SMS` reads it from `SMS_CALLER_KEY`, a
+/// `Secret<string>`, and a request whose Bearer token is the key runs as
+/// the provider, with its role alone ([`Providers::extension_keys`],
+/// [`ExtensionAuthenticator`]).
+///
+/// [`Providers::extension_keys`]: super::Providers::extension_keys
+/// [`ExtensionAuthenticator`]: super::ExtensionAuthenticator
+pub const CALLER_KEY: &str = "CALLER_KEY";
+
 /// The config field a provider in `slot` reads its setting `key` from:
 /// `SMS` and `URL` give `SMS_URL`.
 pub fn provider_config_field(slot: &str, key: &str) -> String {

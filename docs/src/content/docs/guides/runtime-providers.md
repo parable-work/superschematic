@@ -225,12 +225,64 @@ problem and never a value. A provider is made on first use. Each call
 into it runs within its own principal, of kind `extension`, whose subject
 is `extension:<name>` and whose permissions are its role: what it writes
 through an ORM opened with no user is recorded as the provider.
-`extensionAuthenticator` authenticates a provider that calls the app with
-its own key, such as a messaging bridge that connects outward and relays
-replies, as that principal. `examples/runtime-providers`'s `chat-bridge`
-is one: its loop relays what a messaging network received to the slot's
-inbound route with a key that can only relay messages
+A provider that calls the app with its own key runs as that principal too
+([below](#a-provider-that-calls-the-app)).
+
+## A provider that calls the app
+
+A provider that calls the app over HTTP, such as a messaging bridge that
+connects outward and relays replies, holds a key of its own (#744). Its
+manifest lists the reserved setting `CALLER_KEY`, a secret, as it lists
+any setting:
+
+```json
+"config": {
+  "TOKEN": { "secret": true },
+  "CALLER_KEY": { "secret": true, "description": "The key the bridge relays with." }
+}
+```
+
+The key is the slot's `<SLOT>_CALLER_KEY` field, a `Secret<string>` of
+the API's config, which `stack secrets set` enters per environment:
+
+```ts
+@envVars
+@providers({ CHAT: "channel" })
+export abstract class NotesApiConfig {
+  CHAT: Nullable<string>;
+  CHAT_TOKEN: Nullable<Secret<string>>;
+  CHAT_CALLER_KEY: Nullable<Secret<string>>;
+}
+```
+
+The checks are those every setting has. The build refuses a manifest
+whose `CALLER_KEY` is not secret, and an environment whose slot names
+such a provider while the config has no such field or holds it as no
+secret. An environment whose provider of the slot lists no `CALLER_KEY`
+asks for none. A provider may list it optional: an environment that
+leaves it unset lets the provider call nothing.
+
+The generated server wraps the authenticator of the API's routes in the
+extension authenticator, outermost, around the grants' or the
+implementation's. A request whose Bearer token is a slot's key runs as
+that slot's provider, `extension:<name>`, with its role alone. Any other
+token goes on to the authenticator inside. Two slots of one provider hold
+two keys and run as the one provider. Rotating a key is `stack secrets
+set` of the field and a deploy.
+
+| Language | The keys | The wrapping |
+|---|---|---|
+| TypeScript | `extensionKeysOf` (`/providers`); the API package's `extensionKeys(config)` | `providers.ts`'s `callerAuthenticator(config, inner)`, which `main.ts` and `fetch.ts` build the router's authenticator with |
+| Go | `providers.ExtensionKeysOf`; the API package's `ExtensionKeysOf(cfg)` | `providers.go`'s `CallerAuthenticator(cfg, inner)`, around the API package's `Authenticator` or the implementation's `AuthMiddleware` in `main.go` |
+| Rust | `Providers::extension_keys` | the API crate's `providers::caller_authenticator(&providers, inner)`, around what `Wire::authenticator` answers, in `main.rs` |
+
+An API whose identity service establishes its callers takes no key yet.
+
+`examples/runtime-providers`'s `chat-bridge` lists `CALLER_KEY`: its loop
+relays what a messaging network received to the slot's inbound route with
+the key, which can only relay messages
 ([a messaging bridge](/superschematic/guides/parties/#a-messaging-bridge)).
+`mail-relay` and `sms-relay-a` list it optional.
 
 ## Credentials never reach the caller
 

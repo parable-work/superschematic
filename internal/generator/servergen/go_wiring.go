@@ -56,3 +56,18 @@ func (a *API) WiredVar() string { return a.Var + "Wired" }
 func (a *API) UsesAuthenticate() bool {
 	return a.Wiring != nil && (a.Wiring.Authenticates() || a.Wiring.Serves())
 }
+
+// RouteAuthVar is the variable of the auth step the API's routes take,
+// which a provider's key wraps (#744): the API package's Authenticator's,
+// its AuthMiddleware's, or for an API with neither the key's alone, which
+// its router uses.
+func (a *API) RouteAuthVar() string {
+	if a.UsesAuthenticate() {
+		return a.AuthenticateVar()
+	}
+	return a.Var + "Auth"
+}
+
+// DeclaresRouteAuth reports whether the provider's key is the only auth
+// step of the API's routes, which main.go declares (#744).
+func (a *API) DeclaresRouteAuth() bool { return !a.Public && !a.UsesAuthenticate() }

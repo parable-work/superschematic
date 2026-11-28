@@ -141,7 +141,7 @@ test('each provider package declares in its package.json what its definition and
   const bridgePkg = JSON.parse(readFileSync(here('../providers/chat-bridge/package.json'), 'utf8')) as unknown;
   const bridge = providersFrom({
     slots: { CHAT: 'channel' },
-    config: { CHAT: 'chat-bridge', CHAT_URL: 'http://chat.test', CHAT_TOKEN: new SecretValue('t'), CHAT_RELAY_KEY: new SecretValue('k') },
+    config: { CHAT: 'chat-bridge', CHAT_URL: 'http://chat.test', CHAT_TOKEN: new SecretValue('t'), CHAT_CALLER_KEY: new SecretValue('k') },
     definitions: [chatBridge()],
     log: capturedLog().log,
   });
@@ -323,7 +323,7 @@ test('a messaging bridge connects outward and relays with a key that relays mess
   }) as typeof fetch;
   const providers = providersFrom({
     slots: { CHAT: 'channel' },
-    config: { CHAT: 'chat-bridge', CHAT_URL: 'http://chat.test', CHAT_TOKEN: new SecretValue(CHAT_TOKEN), CHAT_RELAY_KEY: new SecretValue(RELAY_KEY) },
+    config: { CHAT: 'chat-bridge', CHAT_URL: 'http://chat.test', CHAT_TOKEN: new SecretValue(CHAT_TOKEN), CHAT_CALLER_KEY: new SecretValue(RELAY_KEY) },
     definitions: [chatBridge({ fetch: network })],
     log,
   });

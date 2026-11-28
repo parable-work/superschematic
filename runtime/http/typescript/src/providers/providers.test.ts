@@ -11,6 +11,7 @@ import {
   checkProviderPackage,
   defineProvider,
   extensionAuthenticator,
+  extensionKeysOf,
   Injection,
   InjectionError,
   ProviderConfigError,
@@ -123,6 +124,7 @@ describe('defineProvider', () => {
     expect(() => defineProvider({ ...base, name: 'relay', implements: 'payments' as 'channel' })).toThrow('which is no runtime interface');
     expect(() => defineProvider({ ...base, name: 'relay', role: ['messages'] })).toThrow('names an area');
     expect(() => defineProvider({ ...base, name: 'relay', config: { url: {} } })).toThrow('upper-case');
+    expect(() => defineProvider({ ...base, name: 'relay', config: { CALLER_KEY: {} } })).toThrow('the key the provider calls the app with');
   });
 
   test('checkProviderPackage holds a package.json manifest to the definition and its provider', async () => {
@@ -197,5 +199,38 @@ describe('an extension principal', () => {
     expect(await authenticate(ctx('other'))).toBeNull();
     expect(() => authorize(principal, { public: false, required: true, permissions: ['messages.relay'] })).not.toThrow();
     expect(() => authorize(principal, { public: false, required: true, permissions: ['notes.write'] })).toThrow();
+  });
+});
+
+describe("a provider's caller key", () => {
+  // A key the test makes, so no fixture holds one.
+  const key = `key-${crypto.randomUUID()}`;
+  const bridge = defineProvider({
+    name: 'chat-bridge',
+    implements: 'channel',
+    config: { CALLER_KEY: { secret: true }, TOKEN: { secret: true } },
+    role: ['messages.relay'],
+    create: () => ({ kind: 'chat', send: async () => ({ providerMessageId: '1', state: 'sent' as const }), health: async () => ({ ok: true }) }),
+  });
+  const relay = defineProvider({ name: 'sms-relay', implements: 'channel', config: { TOKEN: { secret: true } }, role: ['messages.relay'], create: bridge.create });
+
+  test('is one entry per slot whose provider lists CALLER_KEY and whose config sets it', async () => {
+    const options = {
+      slots: { CHAT: 'channel', SMS: 'channel', OTHER: 'channel' } as const,
+      config: { CHAT: 'chat-bridge', CHAT_CALLER_KEY: new SecretValue(key), CHAT_TOKEN: new SecretValue('t'), SMS: 'sms-relay', SMS_TOKEN: new SecretValue('t'), SMS_CALLER_KEY: new SecretValue('unread') },
+      definitions: [bridge, relay],
+    };
+    const keys = extensionKeysOf(options);
+    expect(keys.map(entry => [entry.provider.name, entry.provider.role])).toEqual([['chat-bridge', ['messages.relay']]]);
+    expect(providersFrom(options).configured().map(p => p.slot)).toEqual(['CHAT', 'SMS']);
+    expect(extensionKeysOf({ ...options, config: { ...options.config, CHAT_CALLER_KEY: undefined } })).toEqual([]);
+
+    const inner = async () => ({ subject: 'user-1', permissions: ['notes.write'] });
+    const authenticate = extensionAuthenticator(keys, inner);
+    const ctx = (bearerToken?: string) => ({ bearerToken }) as RequestContext;
+    expect(await authenticate(ctx(key))).toEqual({ subject: 'extension:chat-bridge', kind: 'extension', permissions: ['messages.relay'] });
+    expect(await authenticate(ctx('another token'))).toEqual({ subject: 'user-1', permissions: ['notes.write'] });
+    expect(JSON.stringify(keys)).not.toContain(key);
+    expect(inspect(keys, { depth: 5 })).not.toContain(key);
   });
 });
