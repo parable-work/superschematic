@@ -1391,6 +1391,10 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 				deps.SQLite = outputs.SQLDialects()[0] == registry.SQLDialectSQLite
 			}
 		}
+		// The runtime the generated server wires over the database: its
+		// notifier, dispatcher and inbound path, its calendar and search,
+		// and its grants (D190, D192, D187, D180).
+		deps.Wiring = apigen.WiringOf(schema, deps.SQLite)
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)

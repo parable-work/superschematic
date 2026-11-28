@@ -23,7 +23,7 @@ takes one path, which decides who sent it and what it may reach.
 | a lapsed identity, verified again by a code | |
 | sending as a permission, with a rate limit, an approval policy and opt-outs | |
 | a message's trust narrowing the agent run that takes its request: a sender entered by hand asks before every write ([agent runs](/superschematic/guides/agent-runs/)) | |
-| the Go runtime's `inbound` package, on Postgres | |
+| the Go runtime's `inbound` package, on Postgres, which a generated Go server builds into its `Deps` with its relay callbacks and its run requests' worker | |
 | the Rust runtime's `orm::parties` and `orm::inbound`, on Postgres | |
 
 [D157](https://github.com/parable-work/superschematic/issues/606)
@@ -201,6 +201,16 @@ the agent dispatcher, which is built before the path and given it
 repositories write a key. A Go server over a database that lists `sqlite`
 first is refused the parties' tables, which run on SQLite and D1 in
 TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+
+A stack's Go server builds the path into `Deps.Inbound` itself, after the
+notifier and with the dispatcher as its send approval when the database
+has agents, and the bucket, the inbound address and the rest its
+implementation's `NewWiring` answers in `Wiring.Inbound`. A relay's
+callback at `POST /webhooks/<slot>/inbound` takes the path, which hands a
+user's reply to the notifier, and a `@worker` of the `@runRequests` queue
+hands each request to the dispatcher, with no method of the
+implementation's. [The generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)
+lists the whole wiring.
 
 ## In Rust
 

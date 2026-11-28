@@ -657,8 +657,15 @@ found, err := crosstable.SearchTables(ctx, db.CrossTables(), crosstable.Caller{P
 ```
 
 `crosstable.SearchRoutes` serves `GET /api/search` as an `http.Handler`,
-and `SearchMCPTool` with `CallSearchTool` the MCP tool; an app mounts the
-handler on its router. `ReindexSearch` builds every row's index row again.
+and `SearchMCPTool` with `CallSearchTool` the MCP tool. A stack's Go server
+mounts the handler itself, behind the API's auth step, over
+`CrossTables()` and the caller with its roles' permissions, with the
+options its implementation's `NewWiring` answers in `Wiring.Search`; and a
+`@worker` of a `@searchable` declaration's queue hands each message to
+`IndexSearch` with `Wiring.Indexing`, with no method of the
+implementation's ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)).
+A Go server serves no MCP endpoint (D81, D116), so it serves neither
+tool. `ReindexSearch` builds every row's index row again.
 A Go server whose database lists `sqlite` first is refused a `@searchable`
 table, since `crosstable` ranks by Postgres statements alone.
 
@@ -4079,6 +4086,11 @@ router.Mount("/api/calendar", crosstable.CalendarRoutes(crosstable.CalendarRoute
 `CallCalendarTool` answers the MCP tool `CalendarMCPTool` describes, and
 `IssueFeed`, `RotateFeed` and `RevokeFeed` are the feed's operations; the
 ORM's `AuthenticateGrant` refuses a feed's token on every other route. A
+stack's Go server mounts `CalendarRoutes` itself at `/api/calendar`,
+behind the API's auth step but for a feed's fetch, with the options its
+implementation's `NewWiring` answers in `Wiring.Calendar`
+([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server));
+it serves no MCP endpoint, so no calendar tool. A
 Go server whose database lists `sqlite` first is refused Recurrence, a
 calendar source and search, and one whose calendar source is titled by an
 `Encrypted<T>` field is refused it.

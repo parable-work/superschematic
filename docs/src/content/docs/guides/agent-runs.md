@@ -22,8 +22,9 @@ stop switch ends every run in flight.
 | budgets per agent and in total, warnings, pauses; stop switches | |
 | asking in a row's thread, with a follow-up row at the deadline | |
 | redacted transcripts in a bucket; credentials that stay in the sandbox | |
-| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; a generated Go server that builds the dispatcher into its `Deps`, and a Rust server that does the same; `@autonomy` in a Go server, which serves no MCP endpoint |
+| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; a Rust server that builds the dispatcher into its `Deps`; `@autonomy` in a Go server, which serves no MCP endpoint |
 | the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres | |
+| a generated Go server that builds the dispatcher, the notifier and the inbound path into its `Deps`, mounts their routes and runs their queues ([the generated Go server](#the-generated-go-server)) | |
 | the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres | |
 
 [D158](https://github.com/parable-work/superschematic/issues/607) and [D183](https://github.com/parable-work/superschematic/issues/612)
@@ -332,6 +333,41 @@ sandbox's side is `providers.RunAgentInstance`. A Go server is refused an
 operation's `@autonomy`, which holds an agent run's calls of the API's MCP
 tools, since it serves no MCP endpoint; `MCPGate` is that gate for the day
 one does.
+
+### The generated Go server
+
+A stack's Go server wires all of the above itself (D190, D192, D187). The
+API package of an API whose database hosts the notifier, has a calendar
+source or a `@searchable` table, or keeps grants, holds `wiring.go`:
+
+| What | What it does |
+| --- | --- |
+| `Wiring` | The options of the notifier, the inbound path, the dispatcher, its routes and authenticator, the calendar's and search's routes, and the indexing. The implementation's `NewWiring(deps Deps) (Wiring, error)` answers them, and a member left zero takes the wiring's default. |
+| `Wire(deps, db, wiring)` | Builds `Deps.Agents`, `Deps.Notifier` and `Deps.Inbound` in the order above, giving each `Deps.Providers` and `Deps.Logger`, the notifier the dispatcher's requests and its `approve` and `deny`, and the inbound path the dispatcher's send approval. A member `Deps` already holds is kept. |
+| `Authenticator(deps, db, wiring, inner)` | The API's auth step, its identity's middleware or its `AuthMiddleware`, behind the dispatcher's `Authenticator` and so `session.GrantAuthenticator`. |
+| `Routes(deps, db, wiring, auth)` | The inbox (`GET /api/inbox`, `POST /api/inbox/{id}/read` and `/ack`) and the calendar and search behind `auth`; the relays' callbacks (`POST /webhooks/{slot}/inbound` and `/status`), a calendar feed's fetch and the agent routes outside it; the approvals' routes behind it. |
+| `<Worker>Queue(deps, db, wiring)` | The queue of a `@worker` of the dispatch queue, the requests queue, the `@runRequests` queue or a `@searchable` declaration's queue: the notifier's, the dispatcher's, the inbound path's run requests, or `crosstable.IndexSearch` over each message. The `Workers` interface has no method for it. |
+
+The server's `main.go` asks `NewWiring`, calls `Wire`, establishes every
+route's caller with `Authenticator` and serves `Routes` beside the API's
+router. A job and a worker build the same `Deps`, and a worker of one of
+those queues runs its `<Worker>Queue` and calls no `NewWorkers`. The
+scaffolded implementation's `NewWiring` names the endpoint, which an app
+reads from its config:
+
+```go
+func NewWiring(deps api.Deps) (api.Wiring, error) {
+	return api.Wiring{
+		Agents:   agents.Options{Endpoint: deps.Config.AgentEndpoint, Tools: tools},
+		Notifier: notify.Options{Replies: replies},
+	}, nil
+}
+```
+
+An app that builds a part itself puts it in `Deps` before `Wire` runs, or
+mounts routes of its own beside the generated ones. On SQLite the Go server
+is refused all of it, as above, and `@autonomy` waits for a Go MCP
+endpoint.
 
 ## In Rust
 
