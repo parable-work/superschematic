@@ -16,6 +16,9 @@ pub mod graphs;
 {{ if .HasRowFeatureOperations -}}
 pub mod rowfeatures;
 {{ end -}}
+{{ if .HasFileProcessing -}}
+pub mod files;
+{{ end -}}
 {{ if .HasEnvConfig -}}
 pub mod config;
 {{ end -}}
@@ -58,7 +61,8 @@ pub const IDEMPOTENCY_TABLE: runtime::idempotency::Table = {{ .IdempotencyTableL
 /// with and an implementation enqueues with (D65){{ if .HasTableOperations }}, and the repositories its
 /// table operations are served from (D106, D116){{ end }}{{ if .HasGraphOperations }}, and the facades its
 /// graph operations run through (D138){{ end }}{{ if .HasRowFeatureOperations }}, and the repositories its
-/// row feature operations run through (#723){{ end }}{{ if .BehaviorsHeld }}, and the repositories its
+/// row feature operations run through (#723){{ end }}{{ if .HasFileProcessing }}, and the attachments its
+/// file processor's pass reads (#614){{ end }}{{ if .BehaviorsHeld }}, and the repositories its
 /// behavior operations check the caller's reach of a row through (D156, D181){{ end }}.
 pub use {{ .Deps.DatabaseTypesCrateIdent }} as {{ databaseTypesModule }};
 {{- else if .HasDerivers }}

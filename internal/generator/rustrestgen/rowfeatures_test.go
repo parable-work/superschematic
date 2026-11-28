@@ -29,10 +29,27 @@ var rowFeaturesBucket = DepsBucket{Service: "fixture-references-files", Field: "
 // its bucket.
 func rowFeaturesOutput(t *testing.T, sqlite bool) *APIOutput {
 	t.Helper()
+	return rowFeaturesOutputWith(t, sqlite, nil)
+}
+
+// rowFeaturesOutputWith is rowFeaturesOutput with rewrite, when given,
+// editing the API's schema and the Deps the dispatch layer sets first.
+func rowFeaturesOutputWith(t *testing.T, sqlite bool, rewrite func(*ir.Schema, *DepsInfo)) *APIOutput {
+	t.Helper()
 	_, db, _ := rowFeaturesFixture.load(t)
 	api, err := loader.LoadService(filepath.Join(fixturesDir, rowFeaturesFixture.api))
 	if err != nil {
 		t.Fatalf("load %s: %v", rowFeaturesFixture.api, err)
+	}
+	deps := DepsInfo{
+		Database:           rowFeaturesFixture.db,
+		SQLite:             sqlite,
+		Buckets:            []DepsBucket{rowFeaturesBucket},
+		DatabaseTypesCrate: naming.Default().RustTypesCrate(rowFeaturesFixture.db),
+		DatabaseTypesPath:  "../../types/rust/" + rowFeaturesFixture.db,
+	}
+	if rewrite != nil {
+		rewrite(api, &deps)
 	}
 	outDir := t.TempDir()
 	output, err := generateFrom(api, apiSource{upstream: rowFeaturesFixture.db, upstreamIR: db}, Options{
@@ -47,13 +64,7 @@ func rowFeaturesOutput(t *testing.T, sqlite bool) *APIOutput {
 	if err != nil || output == nil {
 		t.Fatalf("generate %s: %v, %v", rowFeaturesFixture.api, output, err)
 	}
-	if err := output.SetDeps(DepsInfo{
-		Database:           rowFeaturesFixture.db,
-		SQLite:             sqlite,
-		Buckets:            []DepsBucket{rowFeaturesBucket},
-		DatabaseTypesCrate: naming.Default().RustTypesCrate(rowFeaturesFixture.db),
-		DatabaseTypesPath:  "../../types/rust/" + rowFeaturesFixture.db,
-	}); err != nil {
+	if err := output.SetDeps(deps); err != nil {
 		t.Fatalf("set deps: %v", err)
 	}
 	return output

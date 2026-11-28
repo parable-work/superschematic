@@ -17,7 +17,12 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use api::runtime::{handle, ApiError, Authenticator, Principal, RequestContext};
+use api::runtime::orm::file_processing::FileProcessingRun;
+use api::runtime::providers::{
+    providers_from, ConfigValue, ExtractedText, FileInput, FileProcessor, Preview, PreviewOptions,
+    ProviderDefinition, ProviderInstance, Providers, ProvidersOptions, RuntimeInterface,
+};
+use api::runtime::{handle, ApiError, Authenticator, BoxError, Principal, RequestContext};
 use api::{build_router, Handlers, Implementations, TicketGetTicketArgs, TicketImplementation};
 use async_trait::async_trait;
 use axum::Router;
@@ -346,6 +351,36 @@ mod store {
     }
 }
 
+/// A stub file processor of plain text (D159): a file's text is its
+/// bytes, and it makes no preview.
+struct PlainText;
+
+#[async_trait]
+impl FileProcessor for PlainText {
+    fn media_types(&self) -> Vec<String> {
+        vec!["text/plain".to_owned()]
+    }
+
+    async fn extract_text(&self, file: &FileInput) -> Result<Option<ExtractedText>, BoxError> {
+        Ok(Some(ExtractedText { text: String::from_utf8_lossy(&file.bytes).into_owned(), ..ExtractedText::default() }))
+    }
+
+    async fn preview(&self, _file: &FileInput, _options: &PreviewOptions) -> Result<Option<Preview>, BoxError> {
+        Ok(None)
+    }
+}
+
+/// The providers of the API's files slot, PREVIEWS: the plain-text stub.
+fn file_processors() -> Providers {
+    let mut options = ProvidersOptions::default();
+    options.slots.insert("PREVIEWS".to_owned(), "files".to_owned());
+    options.config.insert("PREVIEWS".to_owned(), ConfigValue::Text("plain-text".to_owned()));
+    options.definitions.push(ProviderDefinition::new("plain-text", RuntimeInterface::Files, |_, _| {
+        Ok(ProviderInstance::Files(Arc::new(PlainText)))
+    }));
+    providers_from(options).unwrap()
+}
+
 /// The store, the bucket and the router over both.
 struct Server {
     store: Store,
@@ -433,6 +468,17 @@ impl Server {
         let (status, reply) = self.call(token, Method::POST, "/api/mcp", Some(message)).await;
         assert_eq!(status, StatusCode::OK, "{reply}");
         reply
+    }
+
+    /// The API's Deps as a server builds them, with the stub's providers.
+    fn deps(&self) -> api::Deps {
+        api::Deps {
+            config: api::config::load_env_config().unwrap(),
+            providers: Arc::new(file_processors()),
+            db: self.store.db.clone(),
+            fixture_references_files: self.bucket.clone(),
+            span: tracing::Span::none(),
+        }
     }
 
     async fn drop(self) {
@@ -610,6 +656,25 @@ async fn row_features() {
         let result = &reply["result"];
         assert_ne!(result["isError"], true, "{reply}");
         assert_eq!(result["structuredContent"]["items"].as_array().map(Vec::len), Some(1), "{reply}");
+    }
+
+    case("an uploaded file's text is extracted by the pass the API generates, and the next pass asks nothing");
+    {
+        let row = s.ticket("Extracted").await;
+        let ticket = format!("/api/ticket/{row}");
+        let body = b"Hawthorn rows along the north wall.";
+        let pending = s.upload(&alice, &ticket, "rows.txt", body, &hex(body)).await;
+        let id = pending["id"].as_str().unwrap();
+        let file = s.ok(&alice, Method::POST, &format!("{ticket}/files/{id}/complete"), None).await;
+        assert_eq!(file["extraction"], "pending", "{file}");
+        let deps = s.deps();
+        let run = api::files::process_pending_files(&deps, s.bucket.clone()).await.unwrap();
+        assert!(run.extracted >= 1, "{run:?}");
+        let files = s.ok(&alice, Method::GET, &format!("{ticket}/files"), None).await;
+        assert_eq!(files[0]["extraction"], "done", "{files}");
+        assert_eq!(files[0]["extractedText"], "Hawthorn rows along the north wall.", "{files}");
+        let next = api::files::process_pending_files(&deps, s.bucket.clone()).await.unwrap();
+        assert_eq!(next, FileProcessingRun::default());
     }
 
     s.drop().await;

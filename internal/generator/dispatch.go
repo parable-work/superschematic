@@ -1800,6 +1800,7 @@ func (r run) rustDeps(schemas map[string]*ir.Schema) (rustrestgen.DepsInfo, erro
 		if err := r.rustQueueTypes(db, apiDir, &deps); err != nil {
 			return deps, err
 		}
+		deps.FileProcessing = r.rustFiles(db)
 		if err := r.rustFieldKeys(db, &deps); err != nil {
 			return deps, err
 		}
@@ -1893,6 +1894,7 @@ func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
 	graphs := slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsGraphOperations() })
 	rows := slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsRowFeatureOperations() })
+	files := r.rustFiles(db)
 	held := false
 	if slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsBehaviorOperations() }) {
 		schema, err := r.LoadDependency(db)
@@ -1901,7 +1903,7 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 		}
 		held = schema != nil && (len(schema.AudienceTables()) > 0 || schema.AccessGrantsTable() != nil)
 	}
-	if !r.Schema.HasTableOperations() && !graphs && !rows && !held && !r.rustWires(db) {
+	if !r.Schema.HasTableOperations() && !graphs && !rows && !files && !held && !r.rustWires(db) {
 		return nil
 	}
 	if r.Options.DependencyConfig != nil {
@@ -1909,6 +1911,9 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 			outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
 			if err != nil {
 				return fmt.Errorf("generator: schema config for %s: %w", db, err)
+			}
+			if !outputs.TypesEnabled(LangRust) && files && !rows && !r.Schema.HasTableOperations() && !graphs {
+				return fmt.Errorf("generator: the Rust server of %s runs the file processor's pass over the attachments of %s, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (#614)", r.Config.Name, db, db, LangRust, db)
 			}
 			if !outputs.TypesEnabled(LangRust) && rows && !r.Schema.HasTableOperations() && !graphs {
 				return fmt.Errorf("generator: the Rust server of %s serves the references and files of tables of %s through its repositories, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (#723)", r.Config.Name, db, db, LangRust, db)

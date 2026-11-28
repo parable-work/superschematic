@@ -1230,6 +1230,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
 		{"graphs.tmpl", GraphsFile, output.HasGraphOperations()},
 		{"rowfeatures.tmpl", RowFeaturesFile, output.HasRowFeatureOperations()},
+		{"files.tmpl", FilesFile, output.HasFileProcessing()},
 		{"providers.tmpl", ProvidersFile, output.Providers != nil},
 		{"wiring.tmpl", WiringFile, output.HasWiring()},
 	} {

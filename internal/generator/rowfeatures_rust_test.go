@@ -32,6 +32,7 @@ var rowFeaturesRustCases = []string{
 	"an upload whose bytes differ is refused, and a file of another row is not found",
 	"a permission the set names for an operation replaces the class's",
 	"the MCP endpoint lists the reads and addReference as tools, and a call runs the route as its caller",
+	"an uploaded file's text is extracted by the pass the API generates, and the next pass asks nothing",
 }
 
 // rowFeaturesRustConfig sets a fixture's config as the test builds it:
@@ -112,6 +113,16 @@ func runRustRowFeatures(t *testing.T, dialect, dsn string) {
 			t.Fatalf("load %s: %v", service, err)
 		}
 		rowFeaturesRustConfig(service, cfg, dialects)
+		if service == api {
+			// A files slot, so the crate holds the file processor's pass
+			// over the database's attachments (#614).
+			schema.Types["FilesConfig"] = &ir.TypeDef{
+				Name:          "FilesConfig",
+				EnvVars:       true,
+				ProviderSlots: map[string]string{"PREVIEWS": "files"},
+				Fields:        []*ir.FieldDef{{Name: "PREVIEWS", TypeRef: ir.TypeRef{Name: "string"}}},
+			}
+		}
 		result, err := Run(schema, cfg, Options{
 			OutputRoot: outputRoot,
 			Paths:      paths,
@@ -198,7 +209,11 @@ func runRustRowFeatures(t *testing.T, dialect, dsn string) {
 	} {
 		cmd := exec.Command(cargo, args...)
 		cmd.Dir = crateDir
-		cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+target, "ROW_FEATURES_TEST_DATABASE_URL="+dsn)
+		// The API's config, which the file processor's pass case loads
+		// as a server does: the fields a stack derives for its database
+		// and its bucket, which the case reads none of.
+		cmd.Env = append(os.Environ(), "CARGO_TARGET_DIR="+target, "ROW_FEATURES_TEST_DATABASE_URL="+dsn,
+			"FIXTURE_REFERENCES_DB_DATABASE_URL=postgres://unused", "FIXTURE_REFERENCES_FILES_BUCKET_NAME=reference-files")
 		out, err = cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("cargo %s in %s: %v\n%s", args[0], crateDir, err, out)
@@ -235,6 +250,7 @@ http = "1"
 ring = "0.17.14"
 serde_json = "1.0.149"
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread", "time"] }
+tracing = { version = "0.1.41", default-features = false, features = ["std"] }
 api = { package = %q, path = %q }
 types = { package = %q, path = %q, features = [%q] }
 runtime = { package = "superschematic-http-runtime", path = %q, features = [%q] }
