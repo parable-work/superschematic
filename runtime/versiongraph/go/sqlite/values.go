@@ -13,6 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/canonical"
 )
 
@@ -41,18 +43,16 @@ func ResultCode(err error) (int, bool) {
 
 const base62Alphabet = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz"
 
-// randRead fills an id's bytes: crypto/rand's Read, which a test swaps for a
-// seeded generator (export_test.go) to write a file byte for byte.
-var randRead = rand.Read
+// idSource is where an id's bytes come from: crypto/rand's Reader, which a
+// test swaps for a seeded generator (export_test.go) to write a file byte
+// for byte.
+var idSource io.Reader = rand.Reader
 
 // newID returns a new version-4 UUID in its canonical form (base62).
 func newID() string {
-	var b [16]byte
-	// crypto/rand's Read never fails, and always fills b.
-	_, _ = randRead(b[:])
-	b[6] = b[6]&0x0f | 0x40
-	b[8] = b[8]&0x3f | 0x80
-	n := new(big.Int).SetBytes(b[:])
+	// crypto/rand's Reader never fails, and always fills the id.
+	id, _ := uuid.NewRandomFromReader(idSource)
+	n := new(big.Int).SetBytes(id[:])
 	if n.Sign() == 0 {
 		return "0"
 	}

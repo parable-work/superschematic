@@ -6,9 +6,8 @@ import (
 )
 
 // Deriver is a deriver an API service declares with `@deriver` on a class
-// of its schema: a deployable that fills the Derived fields of types of
-// the API's database, its engine types (D73, D74) or its tables that
-// implement Derived (D146). It pulls the fields that are stale
+// of its schema: a deployable that fills the Derived fields of the API's
+// database's tables that implement Derived (D73, D146). It pulls the fields that are stale
 // (staleDerivations), hands each to the project's generated Derivers
 // interface, which calls a model, and settles the answers
 // (settleDerivations). It runs until it is stopped, as a worker does, and

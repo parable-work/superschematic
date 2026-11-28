@@ -46,7 +46,7 @@ func checkDependenciesConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorR
 			continue
 		}
 		blocker := schema.Types[name]
-		if blocker == nil || blocker.Role != ir.RoleDBTable || blocker.JsonField || blocker.IsEngineType() {
+		if blocker == nil || blocker.Role != ir.RoleDBTable || blocker.JsonField {
 			fail("schemas names %s, which is not a table of %s", name, schema.Name)
 			return
 		}

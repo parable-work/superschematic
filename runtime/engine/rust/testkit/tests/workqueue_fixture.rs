@@ -1,6 +1,7 @@
-//! The document the core binary builds in the CLI smoke
-//! (`internal/loader/testdata/services/fixture-workqueue-json`), on the Rust
-//! engine (D58): the cases of the work queue's `test/package.test.ts` and
+//! The document the core binary built in the CLI smoke
+//! (`internal/loader/testdata/services/fixture-workqueue-json`) before D103
+//! folded Queue and Links into schema features, the engine's copy of it in
+//! `runtime/engine/testdata/documents`, on the Rust engine (D58): the cases of the work queue's `test/package.test.ts` and
 //! `test/guidance.test.ts` over it, whose jobs compose Workflow, Lease,
 //! Assignment, Queue, Budget and Retries, whose workers compose Presence,
 //! and whose batches stamp steps with Blueprint. Workers claim jobs in
@@ -37,7 +38,7 @@ fn lead() -> Principal {
 
 fn fixture_file(file: &str) -> Value {
     let path = repository().join(format!(
-        "internal/loader/testdata/services/fixture-workqueue-json/src/{file}.schema.json"
+        "runtime/engine/testdata/documents/fixture-workqueue-json/{file}.schema.json"
     ));
     serde_json::from_str(&std::fs::read_to_string(&path).expect("the fixture")).expect("JSON")
 }

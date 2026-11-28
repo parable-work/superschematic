@@ -262,9 +262,6 @@ fn connection_info(
         client_tls: None,
         root_cert: connection.ca.as_ref().map(|ca| ca.as_bytes().to_vec()),
     };
-    // rustls's provider, ring, whichever other provider a crate of the
-    // build turns on.
-    let _ = rustls::crypto::ring::default_provider().install_default();
     let client = Client::build_with_tls(info, certificates)
         .map_err(|_| refused("the CA holds no PEM certificate the client can use"))?;
     Ok(client.get_connection_info().clone())

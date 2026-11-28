@@ -10,6 +10,7 @@ import json
 import re
 from typing import Any
 
+from ..validation.pattern import compile_pattern
 from ..validation.types import (
     ArgumentDef,
     EnumDef,
@@ -429,7 +430,7 @@ def _parse_scalar_definition(name: str, definition: dict[str, Any]) -> ScalarDef
     pattern = _as_string(definition.get("pattern"))
     if pattern:
         try:
-            re.compile(pattern)
+            compile_pattern(pattern)
         except re.error as exc:
             raise SchemaParseError(
                 f"runtime schema parse error: invalid regex pattern for scalar {name}: {exc}"

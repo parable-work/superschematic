@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 
 /*
-Session tokens, API keys and the credential a request carries (D50, D114).
+Session tokens, API keys, OAuth tokens (#695) and the credential a request
+carries (D50, D114).
 A token is 32 random bytes in base64url without padding, and an API key the
 prefix key_ and as many; the database keeps the lowercase hexadecimal
 SHA-256 of the whole text. A request's credential is its Authorization
@@ -23,6 +24,16 @@ export const TOKEN_LENGTH = 43;
 export const API_KEY_PREFIX = 'key_';
 export const API_KEY_LENGTH = API_KEY_PREFIX.length + TOKEN_LENGTH;
 
+/**
+ * What starts an OAuth access token's text and a refresh token's (#695),
+ * each followed by TOKEN_BYTES random bytes as TOKEN_LENGTH characters of
+ * base64url without padding, as an API key is. Only the token endpoint
+ * takes a refresh token; the Authorization header carries an access token.
+ */
+export const OAUTH_ACCESS_TOKEN_PREFIX = 'oat_';
+export const OAUTH_REFRESH_TOKEN_PREFIX = 'ort_';
+export const OAUTH_TOKEN_LENGTH = OAUTH_ACCESS_TOKEN_PREFIX.length + TOKEN_LENGTH;
+
 /** How a session travels: the Authorization header or the cookie. It is also LoginInput's session member. */
 export type Transport = 'bearer' | 'cookie';
 
@@ -36,6 +47,16 @@ export function newToken(random: (size: number) => Uint8Array = randomBytes): st
 /** Returns a new API key (D114): API_KEY_PREFIX, then TOKEN_BYTES random bytes from random (node:crypto's when absent) in base64url without padding. */
 export function newApiKey(random: (size: number) => Uint8Array = randomBytes): string {
   return API_KEY_PREFIX + newToken(random);
+}
+
+/** Returns a new OAuth access token (#695): OAUTH_ACCESS_TOKEN_PREFIX and a token's random text. */
+export function newOAuthAccessToken(random: (size: number) => Uint8Array = randomBytes): string {
+  return OAUTH_ACCESS_TOKEN_PREFIX + newToken(random);
+}
+
+/** Returns a new OAuth refresh token (#695): OAUTH_REFRESH_TOKEN_PREFIX and a token's random text. */
+export function newOAuthRefreshToken(random: (size: number) => Uint8Array = randomBytes): string {
+  return OAUTH_REFRESH_TOKEN_PREFIX + newToken(random);
 }
 
 /**
@@ -55,6 +76,16 @@ export function isToken(s: string): boolean {
 /** Whether s has an API key's shape: API_KEY_PREFIX, exactly, and a token's TOKEN_LENGTH characters of the base64url alphabet. */
 export function isApiKey(s: string): boolean {
   return s.length === API_KEY_LENGTH && s.startsWith(API_KEY_PREFIX) && isToken(s.slice(API_KEY_PREFIX.length));
+}
+
+/** Whether s has an OAuth access token's shape: OAUTH_ACCESS_TOKEN_PREFIX, exactly, and a token's characters. */
+export function isOAuthAccessToken(s: string): boolean {
+  return s.length === OAUTH_TOKEN_LENGTH && s.startsWith(OAUTH_ACCESS_TOKEN_PREFIX) && isToken(s.slice(OAUTH_ACCESS_TOKEN_PREFIX.length));
+}
+
+/** Whether s has an OAuth refresh token's shape: OAUTH_REFRESH_TOKEN_PREFIX, exactly, and a token's characters. */
+export function isOAuthRefreshToken(s: string): boolean {
+  return s.length === OAUTH_TOKEN_LENGTH && s.startsWith(OAUTH_REFRESH_TOKEN_PREFIX) && isToken(s.slice(OAUTH_REFRESH_TOKEN_PREFIX.length));
 }
 
 /**
@@ -113,12 +144,16 @@ export function extractCredential(headers: HeaderSource, cookieName: string): Cr
   return { outcome: 'usable', transport: 'cookie', token: value, apiKey: false };
 }
 
-/** Reads "Bearer <token>": the scheme in any case, one or more spaces, and a session token or an API key. */
+/**
+ * Reads "Bearer <token>": the scheme in any case, one or more spaces, and a
+ * session token, an API key or an OAuth access token (#695). A refresh
+ * token is none of them, so it authenticates no request.
+ */
 function bearerToken(value: string): string | undefined {
   const space = value.indexOf(' ');
   if (space < 0 || value.slice(0, space).toLowerCase() !== 'bearer') return undefined;
   const token = value.slice(space + 1).replace(/^ +/u, '');
-  return isToken(token) || isApiKey(token) ? token : undefined;
+  return isToken(token) || isApiKey(token) || isOAuthAccessToken(token) ? token : undefined;
 }
 
 // What Go's net/http reads of Cookie headers: each header is split on ';',

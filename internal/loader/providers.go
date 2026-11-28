@@ -38,12 +38,13 @@ type providerManifestItem struct {
 	Doc      string `json:"description" toml:"description"`
 }
 
-// loadProviders reads each runtime provider package cfg lists, relative to
-// servicePath, checks it against its interface's contract and puts it on
-// schema.Providers, then checks the provider slots of the schema's
-// @envVars classes against the config's fields and the providers. A
-// schema whose config lists none and whose classes declare no slot is
-// left as it is.
+// loadProviders reads each runtime provider package cfg lists, by its
+// directory relative to servicePath or by its npm name from the service's
+// node_modules (#608), checks it against its interface's contract and
+// puts it on schema.Providers, then checks the provider slots of the
+// schema's @envVars classes against the config's fields and the
+// providers. A schema whose config lists none and whose classes declare
+// no slot is left as it is.
 func loadProviders(servicePath string, schema *ir.Schema, cfg *schemaconfig.SchemaConfig) error {
 	if schema == nil {
 		return nil
@@ -53,23 +54,45 @@ func loadProviders(servicePath string, schema *ir.Schema, cfg *schemaconfig.Sche
 		// A schema loaded before, which a load may hand back, holds the
 		// providers it read then.
 		schema.Providers = nil
-		for _, dir := range cfg.Providers {
-			p, err := readProvider(filepath.Join(servicePath, filepath.FromSlash(dir)))
+		for _, entry := range cfg.Providers {
+			p, err := ReadListedProvider(servicePath, entry)
 			if err != nil {
-				return fmt.Errorf("%s: providers: %s: %w", schema.Name, dir, err)
-			}
-			p.Path = dir
-			if p.Dir, err = filepath.Abs(filepath.Join(servicePath, filepath.FromSlash(dir))); err != nil {
-				return fmt.Errorf("%s: providers: %s: %w", schema.Name, dir, err)
+				return fmt.Errorf("%s: providers: %s: %w", schema.Name, entry, err)
 			}
 			if other, dup := names[p.Name]; dup {
-				return fmt.Errorf("%s: providers %s and %s are both named %s; an environment names a provider by its name, so each is named once (D159)", schema.Name, other, dir, p.Name)
+				return fmt.Errorf("%s: providers %s and %s are both named %s; an environment names a provider by its name, so each is named once (D159)", schema.Name, other, entry, p.Name)
 			}
-			names[p.Name] = dir
+			names[p.Name] = entry
 			schema.Providers = append(schema.Providers, p)
 		}
 	}
 	return checkProviderSlots(schema)
+}
+
+// ReadListedProvider reads the provider entry names, one of the providers
+// the config of the service at servicePath lists: its directory, or the
+// package of its npm name in the service's node_modules (#608), whose
+// package.json then declares the provider under that name.
+func ReadListedProvider(servicePath, entry string) (*ir.RuntimeProvider, error) {
+	dir, err := schemaconfig.ResolveProvider(servicePath, entry)
+	if err != nil {
+		return nil, err
+	}
+	p, err := readProvider(dir)
+	if err != nil {
+		return nil, err
+	}
+	p.Path = entry
+	if p.Dir, err = filepath.Abs(dir); err != nil {
+		return nil, err
+	}
+	if schemaconfig.IsProviderPackageName(entry) {
+		if p.Package != entry {
+			return nil, fmt.Errorf("%s holds package %q, whose package.json names it other than %s; a provider listed by its npm name is that package (#608)", dir, p.Package, entry)
+		}
+		p.Npm = entry
+	}
+	return p, nil
 }
 
 // ReadRuntimeProvider reads the runtime provider the directory dir holds

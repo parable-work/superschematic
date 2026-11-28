@@ -5,9 +5,8 @@
 //! `export_engine_c_abi!` (`superschematic-engine-abi`). The library exports
 //! nothing itself: `superschematic-engine-addon` (`runtime/engine/rust/addon`)
 //! is the core's addon, over the core's behaviors and the work queue's, and
-//! a project whose schemas compose an extension's behaviors builds its own
-//! from the `napi/` member of the engine crate `projectengine` writes, over
-//! that crate's `behaviors()`. Two addons in one Cargo workspace, whose
+//! a host whose engine runs other behaviors builds its own, a cdylib that
+//! expands the macro over them. Two addons in one Cargo workspace, whose
 //! features Cargo unifies, so never register a class twice.
 //!
 //! An addon holds one engine per `NativeEngine` and makes its calls by name

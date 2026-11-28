@@ -30,7 +30,7 @@ run request queues.
 
 // orchestrationDefinitions are the conversations' and the agents' tables
 // by part, the @party tables, each table's uses, and the two queues.
-var orchestrationDefinitions = orchestration.MustParse(`{"parts":{"conversations":{"type":"Conversation","table":"conversation","columns":{"address":{"name":"address"},"channelKind":{"name":"channel_kind"},"createdAt":{"name":"created_at"},"id":{"name":"id","uuid":true},"lastMessageAt":{"name":"last_message_at"},"party":{"name":"party","uuid":true},"partyTable":{"name":"party_table"},"subject":{"name":"subject"}}},"messages":{"type":"Message","table":"message","columns":{"at":{"name":"at"},"authentication":{"name":"authentication"},"author":{"name":"author"},"authorKind":{"name":"author_kind"},"body":{"name":"body"},"conversation":{"name":"conversation","uuid":true},"createdAt":{"name":"created_at"},"detail":{"name":"detail"},"direction":{"name":"direction"},"disposition":{"name":"disposition"},"forSubject":{"name":"for_subject"},"fromAddress":{"name":"from_address"},"grant":{"name":"\"grant\"","uuid":true},"id":{"name":"id","uuid":true},"identity":{"name":"identity","uuid":true},"inReplyTo":{"name":"in_reply_to"},"messageId":{"name":"message_id"},"party":{"name":"party","uuid":true},"partyTable":{"name":"party_table"},"providerMessageId":{"name":"provider_message_id"},"slot":{"name":"slot"},"state":{"name":"state"},"subject":{"name":"subject"},"threadRefs":{"name":"thread_refs"},"toAddress":{"name":"to_address"},"triage":{"name":"triage"},"triageClosedAt":{"name":"triage_closed_at"},"triageClosedBy":{"name":"triage_closed_by"},"trust":{"name":"trust"},"via":{"name":"via"}}}},"parties":{"Contact":{"title":"name"}},"tables":{"Account":{},"ChannelIdentity":{},"ChannelTrust":{},"Contact":{},"Conversation":{"part":"conversations"},"Delivery":{},"Grant":{},"Job":{},"Message":{"part":"messages"},"Notice":{},"NoticeRoute":{},"Reply":{},"Report":{"relations":{"job":{"target":"Job","column":"job","member":"job"}}},"Role":{},"Session":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserApiKey":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserCredential":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserRoleGrant":{"relations":{"role":{"target":"Role","column":"role","member":"role"},"user":{"target":"Account","column":"user","member":"user"}}}},"runRequests":"RunRequest"}`)
+var orchestrationDefinitions = orchestration.MustParse(`{"parts":{"conversations":{"type":"Conversation","table":"conversation","columns":{"address":{"name":"address"},"channelKind":{"name":"channel_kind"},"createdAt":{"name":"created_at","sqlite":"time"},"id":{"name":"id","uuid":true},"lastMessageAt":{"name":"last_message_at","sqlite":"time"},"party":{"name":"party","uuid":true},"partyTable":{"name":"party_table"},"subject":{"name":"subject"}}},"messages":{"type":"Message","table":"message","columns":{"at":{"name":"at","sqlite":"time"},"authentication":{"name":"authentication","sqlite":"json"},"author":{"name":"author"},"authorKind":{"name":"author_kind"},"body":{"name":"body"},"conversation":{"name":"conversation","uuid":true},"createdAt":{"name":"created_at","sqlite":"time"},"detail":{"name":"detail"},"direction":{"name":"direction"},"disposition":{"name":"disposition"},"forSubject":{"name":"for_subject"},"fromAddress":{"name":"from_address"},"grant":{"name":"\"grant\"","uuid":true},"id":{"name":"id","uuid":true},"identity":{"name":"identity","uuid":true},"inReplyTo":{"name":"in_reply_to"},"messageId":{"name":"message_id"},"party":{"name":"party","uuid":true},"partyTable":{"name":"party_table"},"providerMessageId":{"name":"provider_message_id"},"slot":{"name":"slot"},"state":{"name":"state"},"subject":{"name":"subject"},"threadRefs":{"name":"thread_refs","sqlite":"json"},"toAddress":{"name":"to_address"},"triage":{"name":"triage"},"triageClosedAt":{"name":"triage_closed_at","sqlite":"time"},"triageClosedBy":{"name":"triage_closed_by"},"trust":{"name":"trust"},"via":{"name":"via"}}}},"parties":{"Contact":{"title":"name"}},"tables":{"Account":{},"ChannelIdentity":{},"ChannelTrust":{},"Contact":{},"Conversation":{"part":"conversations"},"Delivery":{},"Grant":{},"Job":{},"Message":{"part":"messages"},"Notice":{},"NoticeRoute":{},"OAuthClient":{},"OAuthCode":{"relations":{"client":{"target":"OAuthClient","column":"client","member":"client"},"grant":{"target":"OAuthGrant","column":"grant","member":"grant"},"user":{"target":"Account","column":"user","member":"user"}}},"OAuthGrant":{"relations":{"client":{"target":"OAuthClient","column":"client","member":"client"},"user":{"target":"Account","column":"user","member":"user"}}},"OAuthToken":{"relations":{"grant":{"target":"OAuthGrant","column":"grant","member":"grant"}}},"Reply":{},"Report":{"relations":{"job":{"target":"Job","column":"job","member":"job"}}},"Role":{},"Session":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserApiKey":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserCredential":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserRoleGrant":{"relations":{"role":{"target":"Role","column":"role","member":"role"},"user":{"target":"Account","column":"user","member":"user"}}}},"runRequests":"RunRequest"}`)
 
 // Orchestration is the database as the inbound path and the agent
 // dispatcher run through it (D192).
@@ -58,6 +58,10 @@ type orchestrationRepositories interface {
 	GetMessageRepository() MessageRepositoryInterface
 	GetNoticeRepository() NoticeRepositoryInterface
 	GetNoticeRouteRepository() NoticeRouteRepositoryInterface
+	GetOAuthClientRepository() OAuthClientRepositoryInterface
+	GetOAuthCodeRepository() OAuthCodeRepositoryInterface
+	GetOAuthGrantRepository() OAuthGrantRepositoryInterface
+	GetOAuthTokenRepository() OAuthTokenRepositoryInterface
 	GetReplyRepository() ReplyRepositoryInterface
 	GetReportRepository() ReportRepositoryInterface
 	GetRoleRepository() RoleRepositoryInterface
@@ -70,6 +74,9 @@ type orchestrationRepositories interface {
 func (h notifierHost) orchestrationRepositories() orchestrationRepositories {
 	if h.tx != nil {
 		return h.tx
+	}
+	if h.lite != nil {
+		return h.lite
 	}
 	return h.db
 }
@@ -187,6 +194,46 @@ func (h notifierHost) Create(ctx context.Context, typeName string, input json.Ra
 			return nil, err
 		}
 		return notifierJSON(row)
+	case "OAuthClient":
+		var in types.OAuthClient
+		if err := notifierDecode(input, &in); err != nil {
+			return nil, err
+		}
+		row, err := repositories.GetOAuthClientRepository().CreateOne(ctx, &in)
+		if err != nil {
+			return nil, err
+		}
+		return notifierJSON(row)
+	case "OAuthCode":
+		var in types.OAuthCode
+		if err := notifierDecode(input, &in); err != nil {
+			return nil, err
+		}
+		row, err := repositories.GetOAuthCodeRepository().CreateOne(ctx, &in)
+		if err != nil {
+			return nil, err
+		}
+		return notifierJSON(row)
+	case "OAuthGrant":
+		var in types.OAuthGrant
+		if err := notifierDecode(input, &in); err != nil {
+			return nil, err
+		}
+		row, err := repositories.GetOAuthGrantRepository().CreateOne(ctx, &in)
+		if err != nil {
+			return nil, err
+		}
+		return notifierJSON(row)
+	case "OAuthToken":
+		var in types.OAuthToken
+		if err := notifierDecode(input, &in); err != nil {
+			return nil, err
+		}
+		row, err := repositories.GetOAuthTokenRepository().CreateOne(ctx, &in)
+		if err != nil {
+			return nil, err
+		}
+		return notifierJSON(row)
 	case "Reply":
 		var in types.Reply
 		if err := notifierDecode(input, &in); err != nil {
@@ -292,6 +339,9 @@ func (h notifierHost) orchestrationGrants() grantRepositories {
 	if h.tx != nil {
 		return h.tx
 	}
+	if h.lite != nil {
+		return h.lite
+	}
 	return h.db
 }
 
@@ -354,6 +404,9 @@ func (h notifierHost) Role(ctx context.Context, name string) (orchestration.Role
 }
 
 func (h notifierHost) AuthenticateGrant(ctx context.Context, token string, now time.Time) (access.GrantAuthentication, error) {
+	if h.lite != nil {
+		return h.lite.AuthenticateGrant(ctx, token, now)
+	}
 	return h.db.AuthenticateGrant(ctx, token, now)
 }
 
@@ -361,12 +414,18 @@ func (h notifierHost) References() *rowrefs.References {
 	if h.tx != nil {
 		return h.tx.References()
 	}
+	if h.lite != nil {
+		return h.lite.References()
+	}
 	return h.db.References()
 }
 
 func (h notifierHost) Attachments() *rowrefs.Attachments {
 	if h.tx != nil {
 		return h.tx.Attachments()
+	}
+	if h.lite != nil {
+		return h.lite.Attachments()
 	}
 	return h.db.Attachments()
 }
@@ -376,6 +435,9 @@ func (h notifierHost) CrossTables() crosstable.Host {
 }
 
 func (h notifierHost) EnqueueOn(ctx context.Context, queue string, message json.RawMessage, delay time.Duration) error {
+	if h.lite != nil {
+		return h.sqliteEnqueueOn(ctx, queue, message, delay)
+	}
 	switch queue {
 	case orchestration.RunRequests:
 		var msg types.RunRequest
@@ -391,6 +453,9 @@ func (h notifierHost) EnqueueOn(ctx context.Context, queue string, message json.
 }
 
 func (h notifierHost) QueueOf(queue string) orchestration.Queue {
+	if h.lite != nil {
+		return h.sqliteQueueOf(queue)
+	}
 	switch queue {
 	case orchestration.RunRequests:
 		return orchestrationQueue[types.RunRequest, RunRequestClaim]{name: "RunRequest", lease: RunRequestLease, queue: h.db.RunRequestQueue(), message: func(c RunRequestClaim) (string, string, int, types.RunRequest) {
@@ -400,24 +465,12 @@ func (h notifierHost) QueueOf(queue string) orchestration.Queue {
 	return nil
 }
 
-// orchestrationClaims is a generated queue as the orchestration claims it.
-type orchestrationClaims[C any] interface {
-	Claim(ctx context.Context, n int, lease time.Duration) ([]C, error)
-	Complete(ctx context.Context, id, token string) error
-	Fail(ctx context.Context, id, token, cause string) (bool, error)
-	Extend(ctx context.Context, id, token string, lease time.Duration) error
-	Release(ctx context.Context, id, token string) error
-	Prune(ctx context.Context, limit int) (int, error)
-	Slot(ctx context.Context, slots int) (release func(), ok bool, err error)
-	NextDue(ctx context.Context) (time.Duration, bool, error)
-}
-
 // orchestrationQueue is a queue of messages of type M, claimed as C, with
 // each message as its JSON.
 type orchestrationQueue[M any, C any] struct {
 	name    string
 	lease   time.Duration
-	queue   orchestrationClaims[C]
+	queue   notifierClaims[C]
 	message func(C) (string, string, int, M)
 }
 

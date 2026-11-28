@@ -19,8 +19,6 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-var configNames = []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"}
-
 // Service describes one buildable schema service.
 type Service struct {
 	Name       string
@@ -142,11 +140,14 @@ func DiscoverWith(servicesRoot string, outputRoot string, reg *registry.Registry
 			continue
 		}
 		serviceDir := filepath.Join(servicesRoot, entry.Name())
-		configPath := configPath(serviceDir)
-		if configPath == "" {
+		configPath, form, ok, err := schemaconfig.Locate(serviceDir)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
 			continue
 		}
-		cfg, err := readConfig(serviceDir, configPath, reg)
+		cfg, err := readConfig(serviceDir, form, reg)
 		if err != nil {
 			return nil, fmt.Errorf("reading config for %s: %w", serviceDir, err)
 		}
@@ -222,29 +223,22 @@ func validateDependencyKinds(services []Service) error {
 	return nil
 }
 
-func configPath(serviceDir string) string {
-	for _, name := range configNames {
-		candidate := filepath.Join(serviceDir, name)
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
-		}
-	}
-	return ""
-}
-
 // ReadConfig reads the config of the service in serviceDir in whichever form
 // it has, as discovery reads every service's. A single build reads the
 // configs of the services a stack reaches with it.
 func ReadConfig(serviceDir string, reg *registry.Registry) (*schemaconfig.SchemaConfig, error) {
-	path := configPath(serviceDir)
-	if path == "" {
-		return nil, fmt.Errorf("%s has no schema.config.ts, schema.config.json or schema.config.yaml", serviceDir)
+	_, form, ok, err := schemaconfig.Locate(serviceDir)
+	if err != nil {
+		return nil, err
 	}
-	return readConfig(serviceDir, path, reg)
+	if !ok {
+		return nil, fmt.Errorf("%s has no service config (%s)", serviceDir, strings.Join(schemaconfig.FileNames, ", "))
+	}
+	return readConfig(serviceDir, form, reg)
 }
 
-func readConfig(serviceDir string, configPath string, reg *registry.Registry) (*schemaconfig.SchemaConfig, error) {
-	if filepath.Base(configPath) == "schema.config.ts" {
+func readConfig(serviceDir string, form schemaconfig.Form, reg *registry.Registry) (*schemaconfig.SchemaConfig, error) {
+	if form == schemaconfig.FormTS {
 		// The static read applies the config import rule (D34): the config
 		// package, and other services' sentinels, which EnsureSentinels
 		// writes before discovery.

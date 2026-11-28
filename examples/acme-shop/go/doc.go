@@ -3,7 +3,7 @@
 // go template gives, go/{service} (go/shop-api and go/shop-orders), and the
 // tests, which serve both APIs and call them through their generated SDKs;
 // and acmepay, a fake payment provider, which shop-orders' checkouts pay
-// through, over shop-db's engine (commerce_test.go; D70).
+// through, over shop-db's Checkout table (commerce_test.go; D70).
 //
 // No package here authenticates a caller. shop-db's User table has the
 // core User trait (D50), so both APIs' generated servers authenticate with

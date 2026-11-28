@@ -33,7 +33,7 @@ run request queues.
 
 // orchestrationDefinitions are the conversations' and the agents' tables
 // by part, the @party tables, each table's uses, and the two queues.
-var orchestrationDefinitions = orchestration.MustParse(`{"parts":{"approvals":{"type":"AgentApproval","table":"agent_approval","columns":{"agent":{"name":"agent","uuid":true},"decidedAt":{"name":"decided_at"},"decidedBy":{"name":"decided_by"},"decidedVia":{"name":"decided_via"},"expiresAt":{"name":"expires_at"},"holds":{"name":"holds"},"id":{"name":"id","uuid":true},"operation":{"name":"operation"},"operationClass":{"name":"operation_class"},"params":{"name":"params"},"paramsHash":{"name":"params_hash"},"permission":{"name":"permission"},"requestedAt":{"name":"requested_at"},"run":{"name":"run","uuid":true},"state":{"name":"state"},"summary":{"name":"summary"},"usedAt":{"name":"used_at"}}},"controls":{"type":"AgentControl","table":"agent_control","columns":{"_version":{"name":"_version"},"agent":{"name":"agent","uuid":true},"budgetLimit":{"name":"budget_limit"},"id":{"name":"id","uuid":true},"paused":{"name":"paused"},"pausedAt":{"name":"paused_at"},"pausedBy":{"name":"paused_by"},"pausedReason":{"name":"paused_reason"},"total":{"name":"total_id"},"warnAt":{"name":"warn_at"}}},"conversations":{"type":"Conversation","table":"conversation","columns":{"address":{"name":"address"},"channelKind":{"name":"channel_kind"},"createdAt":{"name":"created_at"},"id":{"name":"id","uuid":true},"lastMessageAt":{"name":"last_message_at"},"party":{"name":"party","uuid":true},"partyTable":{"name":"party_table"},"subject":{"name":"subject"}}},"definitions":{"type":"Agent","table":"agent","columns":{"_version":{"name":"_version"},"command":{"name":"command"},"createdAt":{"name":"created_at"},"credentials":{"name":"credentials"},"id":{"name":"id","uuid":true},"image":{"name":"image"},"inbound":{"name":"inbound"},"instructions":{"name":"instructions"},"limits":{"name":"limits"},"model":{"name":"model"},"modelSlot":{"name":"model_slot"},"name":{"name":"\"name\""},"purpose":{"name":"purpose"},"role":{"name":"role"},"sandboxSlot":{"name":"sandbox_slot"},"task":{"name":"task"},"tools":{"name":"tools"}}},"messages":{"type":"Message","table":"message","columns":{"at":{"name":"at"},"authentication":{"name":"authentication"},"author":{"name":"author"},"authorKind":{"name":"author_kind"},"body":{"name":"body"},"conversation":{"name":"conversation","uuid":true},"createdAt":{"name":"created_at"},"detail":{"name":"detail"},"direction":{"name":"direction"},"disposition":{"name":"disposition"},"forSubject":{"name":"for_subject"},"fromAddress":{"name":"from_address"},"grant":{"name":"\"grant\"","uuid":true},"id":{"name":"id","uuid":true},"identity":{"name":"identity","uuid":true},"inReplyTo":{"name":"in_reply_to"},"messageId":{"name":"message_id"},"party":{"name":"party","uuid":true},"partyTable":{"name":"party_table"},"providerMessageId":{"name":"provider_message_id"},"slot":{"name":"slot"},"state":{"name":"state"},"subject":{"name":"subject"},"threadRefs":{"name":"thread_refs"},"toAddress":{"name":"to_address"},"triage":{"name":"triage"},"triageClosedAt":{"name":"triage_closed_at"},"triageClosedBy":{"name":"triage_closed_by"},"trust":{"name":"trust"},"via":{"name":"via"}}},"policies":{"type":"AutonomyPolicy","table":"autonomy_policy","columns":{"agent":{"name":"agent","uuid":true},"createdAt":{"name":"created_at"},"id":{"name":"id","uuid":true},"mode":{"name":"mode"},"operation":{"name":"operation"},"operationClass":{"name":"operation_class"},"permission":{"name":"permission"}}},"runs":{"type":"AgentRun","table":"agent_run","columns":{"_version":{"name":"_version"},"actingFor":{"name":"acting_for"},"actingForKind":{"name":"acting_for_kind"},"actingForTable":{"name":"acting_for_table"},"agent":{"name":"agent","uuid":true},"agentName":{"name":"agent_name"},"approvals":{"name":"approvals"},"attempts":{"name":"attempts"},"cost":{"name":"cost"},"createdAt":{"name":"created_at"},"credentialUses":{"name":"credential_uses"},"definitionVersion":{"name":"definition_version"},"detail":{"name":"detail"},"endedAt":{"name":"ended_at"},"event":{"name":"event"},"grants":{"name":"grants"},"id":{"name":"id","uuid":true},"input":{"name":"input"},"inputTokens":{"name":"input_tokens"},"instance":{"name":"instance"},"leaseAcquiredAt":{"name":"lease_acquired_at"},"leaseEnded":{"name":"lease_ended"},"leaseExpiresAt":{"name":"lease_expires_at"},"leaseExpiries":{"name":"lease_expiries"},"leaseHolder":{"name":"lease_holder"},"leaseRenewedAt":{"name":"lease_renewed_at"},"leaseToken":{"name":"lease_token"},"messagesSent":{"name":"messages_sent"},"modelSlot":{"name":"model_slot"},"outcome":{"name":"outcome"},"outputTokens":{"name":"output_tokens"},"reads":{"name":"reads"},"requestedBy":{"name":"requested_by"},"requestedByKind":{"name":"requested_by_kind"},"retriesBestScore":{"name":"retries_best_score"},"retriesClassAttempts":{"name":"retries_class_attempts"},"retriesExhausted":{"name":"retries_exhausted"},"retriesFailingSince":{"name":"retries_failing_since"},"retriesKeyedBy":{"name":"retries_keyed_by"},"retriesRetryAt":{"name":"retries_retry_at"},"retriesStuck":{"name":"retries_stuck"},"retriesTotal":{"name":"retries_total"},"sandboxSlot":{"name":"sandbox_slot"},"startedAt":{"name":"started_at"},"status":{"name":"status"},"statusEnteredAt":{"name":"status_entered_at"},"targets":{"name":"targets"},"transcript":{"name":"transcript"},"transcriptObject":{"name":"transcript_object"},"transcriptPrunedAt":{"name":"transcript_pruned_at"},"trigger":{"name":"\"trigger\""},"triggerKey":{"name":"trigger_key"},"triggerTable":{"name":"trigger_table"},"trust":{"name":"trust"},"turns":{"name":"turns"},"untrusted":{"name":"untrusted"},"untrustedCalls":{"name":"untrusted_calls"},"writes":{"name":"writes"}}}},"parties":{"Customer":{"title":"name"}},"tables":{"Account":{},"Agent":{"versioned":true,"part":"definitions"},"AgentApproval":{"part":"approvals"},"AgentBudget":{"uses":{"budget":"Budget"}},"AgentControl":{"uses":{"budget":"Budget"},"relations":{"total":{"target":"AgentBudget","column":"total","member":"total"}},"part":"controls"},"AgentRun":{"uses":{"lease":"Lease","retries":"Retries","status":"status"},"part":"runs"},"AutonomyPolicy":{"part":"policies"},"ChannelIdentity":{},"ChannelTrust":{},"Conversation":{"part":"conversations"},"Customer":{},"Delivery":{},"Grant":{},"Invoice":{"relations":{"task":{"target":"Task","column":"task","member":"task"}}},"Message":{"part":"messages"},"Notice":{},"NoticePreference":{},"NoticeRoute":{},"Reply":{},"Role":{},"Session":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"Task":{"uses":{"comments":"Comments","schedules":"Schedules"}},"TaskNote":{"relations":{"task":{"target":"Task","column":"task","member":"task"}}},"UserApiKey":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserCredential":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserRoleGrant":{"relations":{"role":{"target":"Role","column":"role","member":"role"},"user":{"target":"Account","column":"user","member":"user"}}}},"runRequests":"RunRequest","requests":"AgentRunRequest"}`)
+var orchestrationDefinitions = orchestration.MustParse(`{"parts":{"approvals":{"type":"AgentApproval","table":"agent_approval","columns":{"agent":{"name":"agent","uuid":true},"decidedAt":{"name":"decided_at","sqlite":"time"},"decidedBy":{"name":"decided_by"},"decidedVia":{"name":"decided_via"},"expiresAt":{"name":"expires_at","sqlite":"time"},"holds":{"name":"holds"},"id":{"name":"id","uuid":true},"operation":{"name":"operation"},"operationClass":{"name":"operation_class"},"params":{"name":"params","sqlite":"json"},"paramsHash":{"name":"params_hash"},"permission":{"name":"permission"},"requestedAt":{"name":"requested_at","sqlite":"time"},"run":{"name":"run","uuid":true},"state":{"name":"state"},"summary":{"name":"summary"},"usedAt":{"name":"used_at","sqlite":"time"}}},"controls":{"type":"AgentControl","table":"agent_control","columns":{"_version":{"name":"_version"},"agent":{"name":"agent","uuid":true},"budgetLimit":{"name":"budget_limit"},"id":{"name":"id","uuid":true},"paused":{"name":"paused","sqlite":"bool"},"pausedAt":{"name":"paused_at","sqlite":"time"},"pausedBy":{"name":"paused_by"},"pausedReason":{"name":"paused_reason"},"total":{"name":"total_id","sqlite":"uuid"},"warnAt":{"name":"warn_at"}}},"conversations":{"type":"Conversation","table":"conversation","columns":{"address":{"name":"address"},"channelKind":{"name":"channel_kind"},"createdAt":{"name":"created_at","sqlite":"time"},"id":{"name":"id","uuid":true},"lastMessageAt":{"name":"last_message_at","sqlite":"time"},"party":{"name":"party","uuid":true},"partyTable":{"name":"party_table"},"subject":{"name":"subject"}}},"definitions":{"type":"Agent","table":"agent","columns":{"_version":{"name":"_version"},"command":{"name":"command","sqlite":"json"},"createdAt":{"name":"created_at","sqlite":"time"},"credentials":{"name":"credentials","sqlite":"json"},"id":{"name":"id","uuid":true},"image":{"name":"image"},"inbound":{"name":"inbound","sqlite":"bool"},"instructions":{"name":"instructions"},"limits":{"name":"limits","sqlite":"json"},"model":{"name":"model"},"modelSlot":{"name":"model_slot"},"name":{"name":"\"name\""},"purpose":{"name":"purpose"},"role":{"name":"role"},"sandboxSlot":{"name":"sandbox_slot"},"task":{"name":"task"},"tools":{"name":"tools","sqlite":"json"}}},"messages":{"type":"Message","table":"message","columns":{"at":{"name":"at","sqlite":"time"},"authentication":{"name":"authentication","sqlite":"json"},"author":{"name":"author"},"authorKind":{"name":"author_kind"},"body":{"name":"body"},"conversation":{"name":"conversation","uuid":true},"createdAt":{"name":"created_at","sqlite":"time"},"detail":{"name":"detail"},"direction":{"name":"direction"},"disposition":{"name":"disposition"},"forSubject":{"name":"for_subject"},"fromAddress":{"name":"from_address"},"grant":{"name":"\"grant\"","uuid":true},"id":{"name":"id","uuid":true},"identity":{"name":"identity","uuid":true},"inReplyTo":{"name":"in_reply_to"},"messageId":{"name":"message_id"},"party":{"name":"party","uuid":true},"partyTable":{"name":"party_table"},"providerMessageId":{"name":"provider_message_id"},"slot":{"name":"slot"},"state":{"name":"state"},"subject":{"name":"subject"},"threadRefs":{"name":"thread_refs","sqlite":"json"},"toAddress":{"name":"to_address"},"triage":{"name":"triage"},"triageClosedAt":{"name":"triage_closed_at","sqlite":"time"},"triageClosedBy":{"name":"triage_closed_by"},"trust":{"name":"trust"},"via":{"name":"via"}}},"policies":{"type":"AutonomyPolicy","table":"autonomy_policy","columns":{"agent":{"name":"agent","uuid":true},"createdAt":{"name":"created_at","sqlite":"time"},"id":{"name":"id","uuid":true},"mode":{"name":"mode"},"operation":{"name":"operation"},"operationClass":{"name":"operation_class"},"permission":{"name":"permission"}}},"runs":{"type":"AgentRun","table":"agent_run","columns":{"_version":{"name":"_version"},"actingFor":{"name":"acting_for"},"actingForKind":{"name":"acting_for_kind"},"actingForTable":{"name":"acting_for_table"},"agent":{"name":"agent","uuid":true},"agentName":{"name":"agent_name"},"approvals":{"name":"approvals"},"attempts":{"name":"attempts"},"cost":{"name":"cost"},"createdAt":{"name":"created_at","sqlite":"time"},"credentialUses":{"name":"credential_uses","sqlite":"json"},"definitionVersion":{"name":"definition_version"},"detail":{"name":"detail"},"endedAt":{"name":"ended_at","sqlite":"time"},"event":{"name":"event","sqlite":"json"},"grants":{"name":"grants","sqlite":"json"},"id":{"name":"id","uuid":true},"input":{"name":"input","sqlite":"json"},"inputTokens":{"name":"input_tokens"},"instance":{"name":"instance"},"leaseAcquiredAt":{"name":"lease_acquired_at","sqlite":"time"},"leaseEnded":{"name":"lease_ended","sqlite":"json"},"leaseExpiresAt":{"name":"lease_expires_at","sqlite":"time"},"leaseExpiries":{"name":"lease_expiries"},"leaseHolder":{"name":"lease_holder"},"leaseRenewedAt":{"name":"lease_renewed_at","sqlite":"time"},"leaseToken":{"name":"lease_token"},"messagesSent":{"name":"messages_sent"},"modelSlot":{"name":"model_slot"},"outcome":{"name":"outcome"},"outputTokens":{"name":"output_tokens"},"reads":{"name":"reads"},"requestedBy":{"name":"requested_by"},"requestedByKind":{"name":"requested_by_kind"},"retriesBestScore":{"name":"retries_best_score"},"retriesClassAttempts":{"name":"retries_class_attempts","sqlite":"json"},"retriesExhausted":{"name":"retries_exhausted","sqlite":"bool"},"retriesFailingSince":{"name":"retries_failing_since","sqlite":"time"},"retriesKeyedBy":{"name":"retries_keyed_by"},"retriesRetryAt":{"name":"retries_retry_at","sqlite":"time"},"retriesStuck":{"name":"retries_stuck","sqlite":"bool"},"retriesTotal":{"name":"retries_total"},"sandboxSlot":{"name":"sandbox_slot"},"startedAt":{"name":"started_at","sqlite":"time"},"status":{"name":"status"},"statusEnteredAt":{"name":"status_entered_at","sqlite":"time"},"targets":{"name":"targets","sqlite":"json"},"transcript":{"name":"transcript","sqlite":"json"},"transcriptObject":{"name":"transcript_object"},"transcriptPrunedAt":{"name":"transcript_pruned_at","sqlite":"time"},"trigger":{"name":"\"trigger\""},"triggerKey":{"name":"trigger_key"},"triggerTable":{"name":"trigger_table"},"trust":{"name":"trust"},"turns":{"name":"turns"},"untrusted":{"name":"untrusted"},"untrustedCalls":{"name":"untrusted_calls","sqlite":"json"},"writes":{"name":"writes"}}}},"parties":{"Customer":{"title":"name"}},"tables":{"Account":{},"Agent":{"versioned":true,"part":"definitions"},"AgentApproval":{"part":"approvals"},"AgentBudget":{"uses":{"budget":"Budget"}},"AgentControl":{"uses":{"budget":"Budget"},"relations":{"total":{"target":"AgentBudget","column":"total","member":"total"}},"part":"controls"},"AgentRun":{"uses":{"lease":"Lease","retries":"Retries","status":"status"},"part":"runs"},"AutonomyPolicy":{"part":"policies"},"ChannelIdentity":{},"ChannelTrust":{},"Conversation":{"part":"conversations"},"Customer":{},"Delivery":{},"Grant":{},"Invoice":{"relations":{"task":{"target":"Task","column":"task","member":"task"}}},"Message":{"part":"messages"},"Notice":{},"NoticePreference":{},"NoticeRoute":{},"OAuthClient":{},"OAuthCode":{"relations":{"client":{"target":"OAuthClient","column":"client","member":"client"},"grant":{"target":"OAuthGrant","column":"grant","member":"grant"},"user":{"target":"Account","column":"user","member":"user"}}},"OAuthGrant":{"relations":{"client":{"target":"OAuthClient","column":"client","member":"client"},"user":{"target":"Account","column":"user","member":"user"}}},"OAuthToken":{"relations":{"grant":{"target":"OAuthGrant","column":"grant","member":"grant"}}},"Reply":{},"Role":{},"Session":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"Task":{"uses":{"comments":"Comments","schedules":"Schedules"}},"TaskNote":{"relations":{"task":{"target":"Task","column":"task","member":"task"}}},"UserApiKey":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserCredential":{"relations":{"user":{"target":"Account","column":"user","member":"user"}}},"UserRoleGrant":{"relations":{"role":{"target":"Role","column":"role","member":"role"},"user":{"target":"Account","column":"user","member":"user"}}}},"runRequests":"RunRequest","requests":"AgentRunRequest"}`)
 
 // Orchestration is the database as the inbound path and the agent
 // dispatcher run through it (D192).
@@ -68,6 +68,10 @@ type orchestrationRepositories interface {
 	GetNoticeRepository() NoticeRepositoryInterface
 	GetNoticePreferenceRepository() NoticePreferenceRepositoryInterface
 	GetNoticeRouteRepository() NoticeRouteRepositoryInterface
+	GetOAuthClientRepository() OAuthClientRepositoryInterface
+	GetOAuthCodeRepository() OAuthCodeRepositoryInterface
+	GetOAuthGrantRepository() OAuthGrantRepositoryInterface
+	GetOAuthTokenRepository() OAuthTokenRepositoryInterface
 	GetReplyRepository() ReplyRepositoryInterface
 	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
@@ -81,6 +85,9 @@ type orchestrationRepositories interface {
 func (h notifierHost) orchestrationRepositories() orchestrationRepositories {
 	if h.tx != nil {
 		return h.tx
+	}
+	if h.lite != nil {
+		return h.lite
 	}
 	return h.db
 }
@@ -268,6 +275,46 @@ func (h notifierHost) Create(ctx context.Context, typeName string, input json.Ra
 			return nil, err
 		}
 		return notifierJSON(row)
+	case "OAuthClient":
+		var in types.OAuthClient
+		if err := notifierDecode(input, &in); err != nil {
+			return nil, err
+		}
+		row, err := repositories.GetOAuthClientRepository().CreateOne(ctx, &in)
+		if err != nil {
+			return nil, err
+		}
+		return notifierJSON(row)
+	case "OAuthCode":
+		var in types.OAuthCode
+		if err := notifierDecode(input, &in); err != nil {
+			return nil, err
+		}
+		row, err := repositories.GetOAuthCodeRepository().CreateOne(ctx, &in)
+		if err != nil {
+			return nil, err
+		}
+		return notifierJSON(row)
+	case "OAuthGrant":
+		var in types.OAuthGrant
+		if err := notifierDecode(input, &in); err != nil {
+			return nil, err
+		}
+		row, err := repositories.GetOAuthGrantRepository().CreateOne(ctx, &in)
+		if err != nil {
+			return nil, err
+		}
+		return notifierJSON(row)
+	case "OAuthToken":
+		var in types.OAuthToken
+		if err := notifierDecode(input, &in); err != nil {
+			return nil, err
+		}
+		row, err := repositories.GetOAuthTokenRepository().CreateOne(ctx, &in)
+		if err != nil {
+			return nil, err
+		}
+		return notifierJSON(row)
 	case "Reply":
 		var in types.Reply
 		if err := notifierDecode(input, &in); err != nil {
@@ -356,6 +403,9 @@ func (h notifierHost) Operation(ctx context.Context, typeName, key, use, operati
 	var given any = params
 	if len(params) == 0 {
 		given = nil
+	}
+	if h.lite != nil {
+		return h.sqliteOperation(ctx, typeName, key, use, operation, given)
 	}
 	repositories := h.orchestrationRepositories()
 	switch typeName {
@@ -452,6 +502,9 @@ func (h notifierHost) orchestrationGrants() grantRepositories {
 	if h.tx != nil {
 		return h.tx
 	}
+	if h.lite != nil {
+		return h.lite
+	}
 	return h.db
 }
 
@@ -514,12 +567,18 @@ func (h notifierHost) Role(ctx context.Context, name string) (orchestration.Role
 }
 
 func (h notifierHost) AuthenticateGrant(ctx context.Context, token string, now time.Time) (access.GrantAuthentication, error) {
+	if h.lite != nil {
+		return h.lite.AuthenticateGrant(ctx, token, now)
+	}
 	return h.db.AuthenticateGrant(ctx, token, now)
 }
 
 func (h notifierHost) References() *rowrefs.References {
 	if h.tx != nil {
 		return h.tx.References()
+	}
+	if h.lite != nil {
+		return h.lite.References()
 	}
 	return h.db.References()
 }
@@ -529,10 +588,16 @@ func (h notifierHost) Attachments() *rowrefs.Attachments {
 }
 
 func (h notifierHost) CrossTables() crosstable.Host {
+	if h.lite != nil {
+		return h.lite.CrossTables()
+	}
 	return h.db.CrossTables()
 }
 
 func (h notifierHost) EnqueueOn(ctx context.Context, queue string, message json.RawMessage, delay time.Duration) error {
+	if h.lite != nil {
+		return h.sqliteEnqueueOn(ctx, queue, message, delay)
+	}
 	switch queue {
 	case orchestration.RunRequests:
 		var msg types.RunRequest
@@ -557,6 +622,9 @@ func (h notifierHost) EnqueueOn(ctx context.Context, queue string, message json.
 }
 
 func (h notifierHost) QueueOf(queue string) orchestration.Queue {
+	if h.lite != nil {
+		return h.sqliteQueueOf(queue)
+	}
 	switch queue {
 	case orchestration.RunRequests:
 		return orchestrationQueue[types.RunRequest, RunRequestClaim]{name: "RunRequest", lease: RunRequestLease, queue: h.db.RunRequestQueue(), message: func(c RunRequestClaim) (string, string, int, types.RunRequest) {
@@ -570,24 +638,12 @@ func (h notifierHost) QueueOf(queue string) orchestration.Queue {
 	return nil
 }
 
-// orchestrationClaims is a generated queue as the orchestration claims it.
-type orchestrationClaims[C any] interface {
-	Claim(ctx context.Context, n int, lease time.Duration) ([]C, error)
-	Complete(ctx context.Context, id, token string) error
-	Fail(ctx context.Context, id, token, cause string) (bool, error)
-	Extend(ctx context.Context, id, token string, lease time.Duration) error
-	Release(ctx context.Context, id, token string) error
-	Prune(ctx context.Context, limit int) (int, error)
-	Slot(ctx context.Context, slots int) (release func(), ok bool, err error)
-	NextDue(ctx context.Context) (time.Duration, bool, error)
-}
-
 // orchestrationQueue is a queue of messages of type M, claimed as C, with
 // each message as its JSON.
 type orchestrationQueue[M any, C any] struct {
 	name    string
 	lease   time.Duration
-	queue   orchestrationClaims[C]
+	queue   notifierClaims[C]
 	message func(C) (string, string, int, M)
 }
 

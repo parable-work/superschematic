@@ -777,6 +777,21 @@ pub mod sqlite {
     use super::*;
 
     pub use orm::sqlite::rusqlite;
+{{- if or .ORM.References .ORM.Attachments}}
+    // What the references and attachments of the database's rows read and
+    // answer (D154, #611).
+    pub use orm::rowfeatures;
+{{- end}}
+{{- if .ORM.Calendar}}
+    // The calendar read, feed and routes over the database's calendar
+    // sources on SQLite (D152, #615).
+    pub use orm::calendar::sqlite as calendar;
+{{- end}}
+{{- if .ORM.Searchable}}
+    // Search across the database's @searchable tables on SQLite, its
+    // indexing and its route (D155, D186, #615).
+    pub use orm::search_tables::sqlite as search_tables;
+{{- end}}
 {{- if .BindsRules}}
     use rules::adapter;
 {{- end}}
@@ -1085,6 +1100,27 @@ pub mod sqlite {
         pub fn untyped(&self) -> &orm::sqlite::Repositories<'a> {
             &self.0
         }
+{{- if .ORM.References}}
+
+        /// The references of the database's rows, and the rows that point at a
+        /// row, each held to what the repositories' caller reads (D154, #611):
+        /// `add`, `remove`, `of` and `referenced_by`. `add` runs in a
+        /// transaction.
+        pub fn references(&self) -> Result<rowfeatures::sqlite::References<'_, 'a>, orm::Error> {
+            self.0.references()
+        }
+{{- end}}
+{{- if .ORM.Attachments}}
+
+        /// The files of the database's rows (D154, #611): a direct upload
+        /// `begin` signs and `complete` checks, `list`, `get`, `download`,
+        /// `caption`, `detach`, `file` onto another row, `release`, and a file
+        /// processor's `pending` and `processed`. `begin`, `file` and `release`
+        /// run in a transaction; those that reach the bucket are async.
+        pub fn attachments(&self) -> Result<rowfeatures::sqlite::Attachments<'_, 'a>, orm::Error> {
+            self.0.attachments()
+        }
+{{- end}}
 {{range .ORM.Tables}}
         /// The repository of `{{.Type}}`{{if .ReadOnly}}, which only reads: the graph's
         /// release owns the rows (D139){{end}}.

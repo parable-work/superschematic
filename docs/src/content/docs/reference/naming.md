@@ -9,8 +9,8 @@ sidebar:
 `build`, `build-all` and `migrate plan` load it from there, or from
 `--naming`; `migrate plan` loads the previous version's from that
 version's own schemas root when it has one. `format` walks up from the
-file you pass and loads the first one it finds, and so does
-`engine-client`, from its first schema file, unless you pass `--naming`.
+file you pass and loads the first one it finds, unless you pass
+`--naming`.
 `json-schema`, `behaviors` and `catalog` have no service directory; they
 use the built-in defaults unless you pass `--naming`.
 
@@ -67,10 +67,9 @@ Suffix of generated Python SDK modules.
 Default: `schemas-`
 
 Prefix of generated crates: `<prefix><name>-types`, `<prefix><name>-sdk`,
-`<prefix><name>-api`, and `<prefix><name>-engine`, the project's engine
-crate of a schema whose types compose an extension's behavior (D58), with
-its member `<prefix><name>-engine-ffi`, the engine archive a Go server
-links.
+`<prefix><name>-api`, and `<prefix><name>-rules`, the project's rules
+crate of a DB schema whose tables compose a behavior the core's crate
+does not ship (D103).
 
 ### `scalar_go_module`
 
@@ -227,24 +226,6 @@ Default: `superschematic_versiongraph`
 Python import name of the Python version-graph runtime. A generated
 facade (`<module>/versiongraph_<name>.py`) imports the facade base from
 its `facade` module.
-
-### `engine_go_module`
-
-Default: `github.com/parable-work/superschematic/runtime/engine/go`
-
-Go module path of the behavior engine's Go binding (D58). The entrypoint
-of a Go server whose API's database holds engine types imports it to
-open the engine, deploy the database's engine document and mount the
-engine's routes, and its `enginehttp` package. The binding links the
-engine's static archive through cgo.
-
-### `engine_npm_package`
-
-Default: `@superschematic/engine`
-
-npm package name of the engine. The module `superschematic engine-client`
-writes imports the typed client from its `/client` entry point
-([CLI](/superschematic/reference/cli/#engine-client---out-filets-schema-file)).
 
 ### `ptr_go_module`
 
@@ -579,69 +560,6 @@ Default: unset. This repository's own file sets
 Directory of the version graph's Rust engine crate. Unset, a generated
 Rust types crate names the crate's version instead of a path.
 
-### `paths.engine_rust`
-
-Default: unset. This repository's own file sets
-`runtime/engine/rust/engine`.
-
-Directory of the behavior engine's Rust crate, `superschematic-engine`
-(D58), which a Rust server links with its `postgres` and `axum` features
-to mount the engine's routes, and the project's engine crate depends on:
-the crate the `projectengine` generator writes for a schema whose types
-compose an extension's behavior
-([The project's engine crate](/superschematic/guides/engine-behaviors/#the-projects-engine-crate)).
-Unset, that crate names the engine's version instead of a path.
-
-### `paths.engine_behaviors_rust`
-
-Default: unset. This repository's own file sets
-`runtime/engine/rust/behaviors`.
-
-Directory of the core's behaviors for the Rust engine,
-`superschematic-engine-behaviors` (D58), which the project's engine crate
-depends on. Unset, it names the crate's version instead of a path.
-
-### `paths.engine_workqueue_rust`
-
-Default: unset. This repository's own file sets
-`runtime/engine-workqueue/rust`.
-
-Directory of the work queue's behaviors for the Rust engine,
-`superschematic-engine-workqueue` (D58), which the project's engine crate
-depends on when a type composes one of them. Unset, it names the crate's
-version instead of a path.
-
-### `paths.engine_commerce_rust`
-
-Default: unset. This repository's own file sets
-`runtime/engine-commerce/rust`.
-
-Directory of the commerce behaviors for the Rust engine, `Stock`,
-`Calendar`, `Holds` and `Payments`, `superschematic-engine-commerce`
-(D70), which the project's engine crate depends on when a type composes
-one of them. Unset, it names the crate's version instead of a path.
-
-### `paths.engine_abi_rust`
-
-Default: unset. This repository's own file sets
-`runtime/engine/rust/abi`.
-
-Directory of the engine's C ABI as a library, `superschematic-engine-abi`
-(D58), whose `export_engine_c_abi!` the project's engine crate's `ffi`
-member expands into the archive a Go server links. Unset, it names the
-crate's version instead of a path.
-
-### `paths.engine_napi_rust`
-
-Default: unset. This repository's own file sets
-`runtime/engine/rust/napi`.
-
-Directory of the engine's Node-API addon as a library,
-`superschematic-engine-napi` (D58), whose `export_engine_napi!` the
-project's engine crate's `napi` member expands into the addon a
-TypeScript server loads. Unset, it names the crate's version instead of a
-path.
-
 ### `paths.rules_adapter_rust`
 
 Default: unset. This repository's own file sets
@@ -687,42 +605,6 @@ Directory of the migration runner a binary links,
 SQLite file with it as the binary starts, from the plans it carries. The
 crate is unpublished, so the build writes no embedded crate while this
 key is unset, and says so.
-
-### `paths.engine_go`
-
-Default: unset. This repository's own file sets `runtime/engine/go`.
-
-Directory of the behavior engine's Go binding module (D58). The
-entrypoint of a Go server whose API's database holds engine types
-requires it, and its `go.mod` replaces it with this directory; unset, the
-module comes from the module proxy at the release's tag. The server's
-Dockerfile builds the engine's static archive from the Cargo workspace
-beside it (`../rust`), which reaches the work queue's crate, the commerce
-crate, the schema IR's and the version graph's engine at their places in
-the same checkout;
-unset, the image downloads it with the release's other archives.
-
-### `paths.engine_typescript`
-
-Default: unset. This repository's own file sets
-`runtime/engine/typescript`.
-
-Directory of the behavior engine's npm package, `@superschematic/engine`
-(D58). A TypeScript server, job, worker or engine runner whose API's
-database holds engine types imports its `./server` entry, which opens the
-engine through its Node-API addon, and depends on it with `*`; with this
-key set, the output root's Bun workspace overrides that with a `file:`
-path to the checkout, which the install copies with its `dist/` and the
-addon in its `native/`, so build both first (`bun run build` there, and
-`scripts/engine-napi.sh`). The server's Dockerfile builds the core's
-addon from the Cargo workspace beside the package (`../rust`), with the
-crates it reaches by path at their places in the same checkout, and the
-`./server` entry's `dist/`; on an engine database that composes an
-extension's behavior it builds the project's engine crate's `napi`
-member instead and names it with `SUPERSCHEMATIC_ENGINE_ADDON`, as
-`stack dev` builds it and names it for the server's process. Unset,
-such a server gets no Dockerfile, and the install fetches the package
-from the registry.
 
 ### `paths.versiongraph_python`
 

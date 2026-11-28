@@ -122,7 +122,7 @@ async function build() {
 {{- if .SecretBindings }}
   // The string bindings, and the value of each Secrets Store secret the
   // config names, awaited once per isolate.
-  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]);
+  const values = await stackEnvWithSecrets(env, [{{ range $i, $s := .SecretBindings }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ with .OptionalSecretBindings }}, [{{ range $i, $s := . }}{{ if $i }}, {{ end }}{{ tsQuote $s }}{{ end }}]{{ end }});
 {{- else }}
   // The string bindings.
   const values = stackEnvOf(env);

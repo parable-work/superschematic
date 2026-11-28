@@ -14,16 +14,16 @@ person who sent it.
 
 | Built | Not built yet |
 | --- | --- |
-| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
+| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
 | the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
-| the same notifier in the Go runtime, on Postgres, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | |
+| the same notifier in the Go runtime, on Postgres and SQLite, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | the same generated over a database that lists `sqlite` first (#717) |
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties; a generated TypeScript server that builds the notifier into its `Deps`, mounts the relays' callbacks and the inbox, and drains the dispatch queue ([the generated server](#what-the-generated-server-wires)) | the same in a generated Go or Rust server |
-| the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
+| the recipient's audience held at routing and at send time; every adapter's health asked on a schedule by the dispatch queue's worker | |
 | urgent, normal, digest and record; quiet hours; digests and briefs | an inbox page in Topcoat |
 | deliveries that fall through, time out and escalate | an event at an occurrence's due time itself; a reply interpreter other than keywords |
 | replies by reference, trust per channel kind, echo and undo, and the audit | |
-| verifying an address by a code, and password reset by email | the dispatch queue drained on Workers over D1 |
+| verifying an address by a code, and password reset by email; the dispatch queue drained on Workers over D1 | |
 
 [D153](https://github.com/parable-work/superschematic/issues/602)
 records the design and what is left. `examples/notifications` is the
@@ -224,9 +224,12 @@ adapter, and `complete` sets the new password with the identity service's
 
 ## What the generated server wires
 
-A generated TypeScript server of an API over a Postgres database that
-declares the notifier wires it itself (#702), in every entrypoint: `main.ts`,
-`fetch.ts`, and each job's and worker's `main.ts` and `drain.ts`.
+A generated TypeScript server of an API over a database that declares the
+notifier wires it itself (#702), in every entrypoint: `main.ts`,
+`fetch.ts`, and each job's and worker's `main.ts` and `drain.ts`. Over a
+database that lists `sqlite` first the pieces come from the runtime's
+`./d1` entry, over a SQLite file under `stack dev` and a D1 binding on
+Workers.
 
 | Piece | What the server does |
 | --- | --- |
@@ -235,6 +238,7 @@ declares the notifier wires it itself (#702), in every entrypoint: `main.ts`,
 | relay callbacks | `POST /webhooks/<slot>/inbound` and `/webhooks/<slot>/status` per channel slot, the slot in lower case (`SMS` is `/webhooks/sms`) |
 | the inbox | `GET /api/inbox`, `POST /api/inbox/<id>/read` and `/ack`, as the caller the API's authenticator establishes |
 | a `@worker` of the dispatch queue | hands each message to `notifier.handle`; the implementation has no method for it |
+| the worker's prune | `notifierUpkeepOf(deps)`: as it starts and every five minutes, and at each firing on Workers, it asks every adapter's `health` on its own (`notifier.checkHealth`), which raises `channel.down` for each that fails, at most every five minutes, and deletes the deliveries past their retention |
 
 What only the app knows goes in `createRuntimeOptions`, which the
 implementation may export; the server builds the notifier with what it
@@ -279,8 +283,10 @@ await runWorker(notifier.workerQueue(db), { signal });
 | a delivery after quiet hours, a timeout, an escalation and a digest are messages with a delay, due by the database's clock | the queue's `dueIn` statement on SQLite |
 | the queue on SQLite has no slots and no next due time | a worker in drain mode over a SQLite file is not built (D145) |
 
-A Worker drains no queue on D1 yet: a Workflow that wakes the
-dispatch queue's worker on D1 is D151's design, and not built.
+On Cloudflare, a worker of the dispatch queue over D1 drains it at each
+firing of its Cron Trigger through its D1 binding, and an enqueue due
+before the next firing wakes its Workflow, as on Postgres through
+Hyperdrive (D151, #702).
 
 ## In Rust
 
@@ -399,3 +405,16 @@ and `/status`, outside it, `/webhooks/sms` for slot `SMS`. A `@worker` of
 the dispatch queue is the notifier's, and the implementation has no
 method for it. [The generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)
 lists the whole wiring.
+
+On SQLite the Go runtime runs the same notifier (#618), as the TypeScript one
+does (D189). `(*SQLiteDatabase).Notifications()` is its host over the SQLite file,
+and the runtime writes its statements over its own tables in SQLite's
+words: a parameter `?n`, a list read through `json_each`, a time as RFC
+3339 text, each cell read back as the Postgres driver reads its column
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). Its
+`Raise` enqueues in the caller's `*SQLiteTx`, so an event commits with
+the change, and `WorkerQueue()` claims the dispatch queue on SQLite, which
+has no slots and no next due time (D145). The wall time of quiet hours
+and digests is read from Go's zone database there, which the runtime
+carries. The generated server does not wire it over a database that lists
+`sqlite` first yet (#717): the implementation builds it over `Deps.DB`.

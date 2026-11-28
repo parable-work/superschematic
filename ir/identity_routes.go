@@ -52,6 +52,10 @@ const (
 	// IdentityKeyIDArgument is the {keyId} of an administrator's route to
 	// one of a user's API keys, users/{id}/keys/{keyId} (D114).
 	IdentityKeyIDArgument = "keyId"
+	// IdentityGrantIDArgument is the {grantId} of an administrator's route
+	// to one of a user's OAuth grants, users/{id}/oauth/grants/{grantId}
+	// (#695).
+	IdentityGrantIDArgument = "grantId"
 )
 
 // The requests per minute the rate-limited operations allow, per client.
@@ -69,6 +73,11 @@ const IdentityPasswordToolReason = "It carries a password, which an agent does n
 // IdentityAPIKeyToolReason is the @mcp hidden reason of createApiKey
 // (D114), whose answer is a credential.
 const IdentityAPIKeyToolReason = "It answers a credential, which an agent's context should not hold."
+
+// IdentityOAuthToolReason is the @mcp hidden reason of the OAuth routes
+// (#695): a person consents in their own browser, and a grant is theirs to
+// see and revoke, not an agent's that holds one.
+const IdentityOAuthToolReason = "It answers a person's consent to an OAuth client, which an agent must not give or see for them."
 
 // The key of the UserApiKey table, which the loader adds: an
 // AutoGenerate<Identity.UUID>, whatever the User table's key is.
@@ -116,6 +125,87 @@ type UserSessionsConfig struct {
 	// createApiKey, listApiKeys and revokeApiKey, with which a user signed
 	// in with a session makes, lists and revokes their API keys.
 	APIKeys bool `json:"apiKeys,omitempty" yaml:"apiKeys,omitempty"`
+
+	// OAuth is @userSessions({ oauth }) (#695): the API is its own OAuth
+	// 2.1 authorization server, so a client such as Claude's connectors
+	// signs a person in with the API's logins and holds a grant that
+	// narrows their permissions as an API key does. oauth: true is the
+	// empty config, every member at its default. It needs the login and an
+	// API that serves MCP.
+	OAuth *IdentityOAuthConfig `json:"oauth,omitempty" yaml:"oauth,omitempty"`
+}
+
+// IdentityOAuthConfig is @userSessions' oauth (#695). A member left out
+// takes its default.
+type IdentityOAuthConfig struct {
+	// AccessTokenTTLSeconds is how long an access token lasts.
+	// 0 means DefaultOAuthAccessTokenTTLSeconds (1 h).
+	AccessTokenTTLSeconds int64 `json:"accessTokenTtlSeconds,omitempty" yaml:"accessTokenTtlSeconds,omitempty"`
+	// RefreshTokenTTLSeconds is how long a refresh token lasts, renewed on
+	// each rotation. 0 means DefaultOAuthRefreshTokenTTLSeconds (30 d).
+	RefreshTokenTTLSeconds int64 `json:"refreshTokenTtlSeconds,omitempty" yaml:"refreshTokenTtlSeconds,omitempty"`
+	// GrantMaxTTLSeconds is the longest a grant lasts, however often its
+	// refresh token rotates. 0 means DefaultOAuthGrantMaxTTLSeconds (365 d).
+	GrantMaxTTLSeconds int64 `json:"grantMaxTtlSeconds,omitempty" yaml:"grantMaxTtlSeconds,omitempty"`
+	// Clients says which kinds of client the server admits. Nil admits
+	// both.
+	Clients *IdentityOAuthClients `json:"clients,omitempty" yaml:"clients,omitempty"`
+	// ConsentPath, when set, is the path or URL of the project's own
+	// consent page, which the authorize endpoint sends the browser to with
+	// ?request=<id> in place of the runtime's default page. It drives the
+	// consent routes as the default page does.
+	ConsentPath string `json:"consentPath,omitempty" yaml:"consentPath,omitempty"`
+}
+
+// IdentityOAuthClients is oauth.clients (#695): whether a client may name
+// itself by a Client ID Metadata Document's URL, and whether one may
+// register through Dynamic Client Registration (RFC 7591). Nil means true.
+type IdentityOAuthClients struct {
+	MetadataDocuments *bool `json:"metadataDocuments,omitempty" yaml:"metadataDocuments,omitempty"`
+	Registration      *bool `json:"registration,omitempty" yaml:"registration,omitempty"`
+}
+
+// The defaults of IdentityOAuthConfig's lifetimes (#695).
+const (
+	DefaultOAuthAccessTokenTTLSeconds  int64 = 60 * 60
+	DefaultOAuthRefreshTokenTTLSeconds int64 = 30 * 24 * 60 * 60
+	DefaultOAuthGrantMaxTTLSeconds     int64 = 365 * 24 * 60 * 60
+)
+
+// AccessTokenTTL returns AccessTokenTTLSeconds or its default.
+func (c *IdentityOAuthConfig) AccessTokenTTL() int64 {
+	if c == nil || c.AccessTokenTTLSeconds == 0 {
+		return DefaultOAuthAccessTokenTTLSeconds
+	}
+	return c.AccessTokenTTLSeconds
+}
+
+// RefreshTokenTTL returns RefreshTokenTTLSeconds or its default.
+func (c *IdentityOAuthConfig) RefreshTokenTTL() int64 {
+	if c == nil || c.RefreshTokenTTLSeconds == 0 {
+		return DefaultOAuthRefreshTokenTTLSeconds
+	}
+	return c.RefreshTokenTTLSeconds
+}
+
+// GrantMaxTTL returns GrantMaxTTLSeconds or its default.
+func (c *IdentityOAuthConfig) GrantMaxTTL() int64 {
+	if c == nil || c.GrantMaxTTLSeconds == 0 {
+		return DefaultOAuthGrantMaxTTLSeconds
+	}
+	return c.GrantMaxTTLSeconds
+}
+
+// MetadataDocuments reports whether a client may name itself by a Client
+// ID Metadata Document.
+func (c *IdentityOAuthConfig) MetadataDocuments() bool {
+	return c != nil && (c.Clients == nil || c.Clients.MetadataDocuments == nil || *c.Clients.MetadataDocuments)
+}
+
+// Registration reports whether a client may register through Dynamic
+// Client Registration.
+func (c *IdentityOAuthConfig) Registration() bool {
+	return c != nil && (c.Clients == nil || c.Clients.Registration == nil || *c.Clients.Registration)
 }
 
 // IdentityFirstUser is @userSessions' firstUser: the role the first
@@ -149,6 +239,11 @@ type UserAdministrationConfig struct {
 	// also has listUserApiKeys and revokeUserApiKey, with which an
 	// administrator lists and revokes any user's API keys.
 	APIKeys bool `json:"apiKeys,omitempty" yaml:"apiKeys,omitempty"`
+
+	// OAuth is @userAdministration({ oauth: true }) (#695): the set also
+	// has listUserOAuthGrants and revokeUserOAuthGrant, with which an
+	// administrator lists and revokes any user's OAuth grants.
+	OAuth bool `json:"oauth,omitempty" yaml:"oauth,omitempty"`
 }
 
 // The default route prefixes.
@@ -214,6 +309,64 @@ const (
 	// IdentityOpRevokeAPIKey is DELETE <path>/keys/{id}, to true: @auth,
 	// only with APIKeys; revokes a key of the caller's.
 	IdentityOpRevokeAPIKey = "revokeApiKey"
+	// IdentityOpGetOAuthRequest is GET <path>/oauth/requests/{id}, to
+	// OAuthRequest: @auth, only with OAuth (#695). The consent page reads
+	// what a client asks for with it.
+	IdentityOpGetOAuthRequest = "getOAuthRequest"
+	// IdentityOpApproveOAuthRequest is POST
+	// <path>/oauth/requests/{id}/approve, ApproveOAuthRequestInput to
+	// OAuthDecision: @auth, only with OAuth. It needs a caller signed in
+	// with a session, makes the grant and its code, and answers where the
+	// browser goes next.
+	IdentityOpApproveOAuthRequest = "approveOAuthRequest"
+	// IdentityOpDenyOAuthRequest is POST <path>/oauth/requests/{id}/deny,
+	// DenyOAuthRequestInput to OAuthDecision: @auth, only with OAuth.
+	IdentityOpDenyOAuthRequest = "denyOAuthRequest"
+	// IdentityOpListOAuthGrants is GET <path>/oauth/grants, to
+	// ConnectedApp[]: @auth, only with OAuth; the caller's grants that are
+	// neither revoked nor past their end, newest first.
+	IdentityOpListOAuthGrants = "listOAuthGrants"
+	// IdentityOpRevokeOAuthGrant is DELETE <path>/oauth/grants/{id}, to
+	// true: @auth, only with OAuth; revokes a grant of the caller's and
+	// every token it issued.
+	IdentityOpRevokeOAuthGrant = "revokeOAuthGrant"
+)
+
+// The protocol endpoints of @userSessions({ oauth }) (#695). They are no
+// operations: they take form-encoded requests, answer redirects and RFC
+// 6749's errors, and no SDK calls them. The identity runtime serves them at
+// the API's root, beside the set's routes, and the discovery documents at
+// the root of the origin the API is reached through.
+const (
+	// IdentityOAuthAuthorizePath is GET and POST: sign-in if the person
+	// has no session, then consent, then a redirect with code, state and
+	// iss.
+	IdentityOAuthAuthorizePath = "oauth/authorize"
+	// IdentityOAuthTokenPath is POST: authorization_code with PKCE, or
+	// refresh_token.
+	IdentityOAuthTokenPath = "oauth/token"
+	// IdentityOAuthRegisterPath is POST: Dynamic Client Registration (RFC
+	// 7591), public clients alone.
+	IdentityOAuthRegisterPath = "oauth/register"
+	// IdentityOAuthRevokePath is POST: token revocation (RFC 7009).
+	IdentityOAuthRevokePath = "oauth/revoke"
+	// IdentityOAuthConsentPath is GET: the runtime's default consent page,
+	// unless the config names a ConsentPath.
+	IdentityOAuthConsentPath = "oauth/consent"
+	// IdentityOAuthProtectedResourcePath is the protected resource
+	// metadata (RFC 9728), at the origin's root and, with the MCP
+	// endpoint's path after it, at the path RFC 9728 inserts.
+	IdentityOAuthProtectedResourcePath = "/.well-known/oauth-protected-resource"
+	// IdentityOAuthAuthorizationServerPath is the authorization server
+	// metadata (RFC 8414), with the issuer's path after it.
+	IdentityOAuthAuthorizationServerPath = "/.well-known/oauth-authorization-server"
+	// IdentityOpenIDConfigurationPath answers what
+	// IdentityOAuthAuthorizationServerPath does, for a client that looks
+	// for OpenID Connect discovery.
+	IdentityOpenIDConfigurationPath = "/.well-known/openid-configuration"
+	// IdentityOAuthOfflineAccessScope is the scope, beside the API's
+	// permission names, a client asks for a refresh token with.
+	IdentityOAuthOfflineAccessScope = "offline_access"
 )
 
 // A set with NoLogin has IdentityOpMe and IdentityOpCapabilities alone;
@@ -278,6 +431,13 @@ const (
 	// IdentityOpRevokeUserAPIKey is DELETE <path>/users/{id}/keys/{keyId},
 	// to true (users.write), only with APIKeys (D114).
 	IdentityOpRevokeUserAPIKey = "revokeUserApiKey"
+	// IdentityOpListUserOAuthGrants is GET <path>/users/{id}/oauth/grants,
+	// to ConnectedApp[] (users.read), only with OAuth (#695).
+	IdentityOpListUserOAuthGrants = "listUserOAuthGrants"
+	// IdentityOpRevokeUserOAuthGrant is DELETE
+	// <path>/users/{id}/oauth/grants/{grantId}, to true (users.write), only
+	// with OAuth (#695).
+	IdentityOpRevokeUserOAuthGrant = "revokeUserOAuthGrant"
 )
 
 // DefaultIdentityPermissionPrefix is the naming key
@@ -364,6 +524,44 @@ const (
 	IdentityCreatedAPIKeyType = "CreatedApiKey"
 )
 
+// The types the route expansion adds for a set with OAuth (#695).
+const (
+	// IdentityOAuthRequestType: id, client (OAuthClientInfo), permissions
+	// (string[], the ones the client asks for), held (string[], those the
+	// caller holds, which consent can give), offlineAccess (bool),
+	// resource, expiresAt, nonce (the value approve and deny send back).
+	IdentityOAuthRequestType = "OAuthRequest"
+	// IdentityOAuthClientInfoType: id (the client_id), name, uri
+	// (optional), redirectHost and loopbackOnly (bool: the redirect is to
+	// the person's own machine), of the request's redirect on the consent
+	// page and of every redirect of the client's among connected apps, and
+	// kind ("metadataDocument", whose id's host vouches for it, or
+	// "registered").
+	IdentityOAuthClientInfoType = "OAuthClientInfo"
+	// IdentityApproveOAuthRequestInputType: nonce, permissions (string[],
+	// optional; the ones the request asks for and the caller holds when
+	// absent).
+	IdentityApproveOAuthRequestInputType = "ApproveOAuthRequestInput"
+	// IdentityDenyOAuthRequestInputType: nonce.
+	IdentityDenyOAuthRequestInputType = "DenyOAuthRequestInput"
+	// IdentityOAuthDecisionType: redirectTo, the URL the browser goes to
+	// next: the client's redirect with code, state and iss, or with error.
+	IdentityOAuthDecisionType = "OAuthDecision"
+	// IdentityConnectedAppType: an OAuth grant as its user and an
+	// administrator see it: id, client (OAuthClientInfo), permissions
+	// (string[], absent for a grant that holds every permission of its
+	// user), createdAt, expiresAt, lastUsedAt (absent until its first
+	// request). It is named apart from the authDb's OAuthGrant table.
+	IdentityConnectedAppType = "ConnectedApp"
+)
+
+// IdentityOAuthTypes are the types the route expansion adds for a set
+// with OAuth (#695), which an API reserves only then.
+var IdentityOAuthTypes = []string{
+	IdentityOAuthRequestType, IdentityOAuthClientInfoType, IdentityApproveOAuthRequestInputType,
+	IdentityDenyOAuthRequestInputType, IdentityOAuthDecisionType, IdentityConnectedAppType,
+}
+
 // IdentityAPIKeyTypes are the types the route expansion adds for a set
 // with APIKeys (D114), which an API reserves only then.
 var IdentityAPIKeyTypes = []string{IdentityCreateAPIKeyInputType, IdentityAPIKeyType, IdentityCreatedAPIKeyType}
@@ -439,6 +637,11 @@ var identityOperationErrors = func() map[string][]IdentityRouteError {
 	byKey := IdentityRouteError{403, IdentityCodeForbidden, "The caller is authenticated by an API key, which does not act on its own account."}
 	noKey := IdentityRouteError{404, IdentityCodeNotFound, "No API key of the caller's has the id, or it is revoked."}
 	noUserKey := IdentityRouteError{404, IdentityCodeNotFound, "No user has the id, or no API key of theirs the keyId, or it is revoked."}
+	byToken := IdentityRouteError{403, IdentityCodeForbidden, "The caller is authenticated by an API key or an OAuth token, which does not act on its own account."}
+	noRequest := IdentityRouteError{404, IdentityCodeNotFound, "No pending OAuth request has the id, or it has ended."}
+	badNonce := IdentityRouteError{409, IdentityCodeConflict, "The nonce is not the request's."}
+	noGrant := IdentityRouteError{404, IdentityCodeNotFound, "No OAuth grant of the caller's has the id, or it is revoked."}
+	noUserGrant := IdentityRouteError{404, IdentityCodeNotFound, "No user has the id, or no OAuth grant of theirs the grantId, or it is revoked."}
 	return map[string][]IdentityRouteError{
 		IdentityOpLogin: {
 			{401, IdentityCodeInvalidCredentials, "The login or the password does not verify, or the user is disabled."},
@@ -461,22 +664,29 @@ var identityOperationErrors = func() map[string][]IdentityRouteError {
 			crossOrigin,
 			invalidPermission,
 		},
-		IdentityOpListAPIKeys:      {unauthorized, byKey},
-		IdentityOpRevokeAPIKey:     {unauthorized, byKey, crossOrigin, noKey},
-		IdentityOpListUserAPIKeys:  {unauthorized, permission, noUser},
-		IdentityOpRevokeUserAPIKey: {unauthorized, permission, crossOrigin, noUserKey},
-		IdentityOpCreateUser:       {unauthorized, permission, crossOrigin, loginTaken},
-		IdentityOpListUsers:        {unauthorized, permission},
-		IdentityOpGetUser:          {unauthorized, permission, noUser},
-		IdentityOpDisableUser:      {unauthorized, permission, crossOrigin, noUser},
-		IdentityOpEnableUser:       {unauthorized, permission, crossOrigin, noUser},
-		IdentityOpApproveUser:      {unauthorized, permission, crossOrigin, noUser, notPending},
-		IdentityOpSetUserPassword:  {unauthorized, permission, crossOrigin, noUser},
-		IdentityOpListRoles:        {unauthorized, permission},
-		IdentityOpCreateRole:       {unauthorized, granting, crossOrigin, nameTaken, invalidPermission},
-		IdentityOpUpdateRole:       {unauthorized, granting, crossOrigin, noRole, nameTaken, invalidPermission},
-		IdentityOpDeleteRole:       {unauthorized, permission, crossOrigin, noRole},
-		IdentityOpGrantRole:        {unauthorized, granting, crossOrigin, noUserOrRole},
-		IdentityOpRevokeRole:       {unauthorized, permission, crossOrigin, noUserOrRole},
+		IdentityOpListAPIKeys:          {unauthorized, byKey},
+		IdentityOpRevokeAPIKey:         {unauthorized, byKey, crossOrigin, noKey},
+		IdentityOpGetOAuthRequest:      {unauthorized, byToken, noRequest},
+		IdentityOpApproveOAuthRequest:  {unauthorized, {403, IdentityCodeForbidden, "The caller is authenticated by an API key or an OAuth token, or names a permission the request does not ask for or they do not hold."}, crossOrigin, noRequest, badNonce, invalidPermission},
+		IdentityOpDenyOAuthRequest:     {unauthorized, byToken, crossOrigin, noRequest, badNonce},
+		IdentityOpListOAuthGrants:      {unauthorized, byToken},
+		IdentityOpRevokeOAuthGrant:     {unauthorized, byToken, crossOrigin, noGrant},
+		IdentityOpListUserOAuthGrants:  {unauthorized, permission, noUser},
+		IdentityOpRevokeUserOAuthGrant: {unauthorized, permission, crossOrigin, noUserGrant},
+		IdentityOpListUserAPIKeys:      {unauthorized, permission, noUser},
+		IdentityOpRevokeUserAPIKey:     {unauthorized, permission, crossOrigin, noUserKey},
+		IdentityOpCreateUser:           {unauthorized, permission, crossOrigin, loginTaken},
+		IdentityOpListUsers:            {unauthorized, permission},
+		IdentityOpGetUser:              {unauthorized, permission, noUser},
+		IdentityOpDisableUser:          {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpEnableUser:           {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpApproveUser:          {unauthorized, permission, crossOrigin, noUser, notPending},
+		IdentityOpSetUserPassword:      {unauthorized, permission, crossOrigin, noUser},
+		IdentityOpListRoles:            {unauthorized, permission},
+		IdentityOpCreateRole:           {unauthorized, granting, crossOrigin, nameTaken, invalidPermission},
+		IdentityOpUpdateRole:           {unauthorized, granting, crossOrigin, noRole, nameTaken, invalidPermission},
+		IdentityOpDeleteRole:           {unauthorized, permission, crossOrigin, noRole},
+		IdentityOpGrantRole:            {unauthorized, granting, crossOrigin, noUserOrRole},
+		IdentityOpRevokeRole:           {unauthorized, permission, crossOrigin, noUserOrRole},
 	}
 }()

@@ -15,23 +15,14 @@
 //! stdout, and exports its traces when the environment names an OTLP
 //! endpoint (D67).
 //!
-//! The API's database is an engine database, whose engine (D58) its Deps
-//! hold: `engine.rs` opens it in the background and deploys nothing, which
-//! the API's server does. It opens once the live version of each schema of
-//! the database's engine document is the one this app was built with, so
-//! an app image from another build never publishes its own; the app waits
-//! for it to open before it serves.
-//!
 //! It then calls the app's program with the app's parts, which hold the
-//! Deps, the Implementations, the open engine and the address to listen on:
+//! Deps, the Implementations and the address to listen on:
 //! every interface, at $PORT, 8080 when it is unset. The program is the
 //! crate at the naming file's `[implementation_paths] rust_app` template,
 //! which each build copies into the output root's `impl/`, the mirror this
 //! crate builds against: schemas-desk-app-api-backoffice-app, at apps/backoffice. Its `serve` answers
 //! every route of the app, stops on the signals it chooses, and the process
 //! exits when it returns: 1 when it returns an error.
-
-mod engine;
 
 use std::net::SocketAddr;
 use std::process::ExitCode;
@@ -47,7 +38,6 @@ use superschematic_http_runtime::{IdentityAuthenticator, JwtServiceAuthenticator
 use schemas_desk_app_api_api as desk_app_api_api;
 use schemas_desk_app_api_backoffice_app as desk_app_api_backoffice_app;
 use schemas_desk_app_api_implementation as desk_app_api_impl;
-use schemas_desk_db_types as desk_db_types;
 
 /// The app, which its log and its failures name: its @app class and its
 /// API.
@@ -111,24 +101,10 @@ async fn run() -> Result<(), Failure> {
             .map_err(|err| format!("identity store of desk-db: {err}"))?,
     );
 
-    // The engine of desk-db, an engine database (D58), opened on the
-    // same database in the background, which deploys nothing: it opens once
-    // the API's server has deployed the engine document this app was built
-    // with.
-    let desk_db_engine = engine::open(
-        "desk-db",
-        "DESK_DB_DATABASE",
-        &desk_app_api_config.desk_db_database,
-        desk_db_types::ENGINE_DOCUMENT,
-        r#""permission""#,
-        Some(r#"{"maxAgeMs":2592000000}"#),
-    )?;
-
     // desk-app-api: its implementation, built from its Deps.
     let desk_app_api_deps = desk_app_api_api::Deps {
         config: desk_app_api_config.clone(),
         db: desk_db_pool.clone(),
-        engine: desk_db_engine.clone(),
         span: logging::api_span("desk-app-api"),
     };
     let desk_app_api_handlers = desk_app_api_impl::create(desk_app_api_deps.clone())
@@ -152,24 +128,13 @@ async fn run() -> Result<(), Failure> {
         Arc::new(desk_app_api_service_authenticator),
     );
 
-    // The app's program calls the engine in-process, so the app serves once
-    // the engine has opened on the document it was built with: until then
-    // it does not listen.
-    let desk_db_opened = desk_db_engine
-        .wait()
-        .await
-        .map_err(|err| format!("the engine of desk-db: {err}"))?;
-
     let parts = desk_app_api_api::apps::BackofficeParts {
         deps: desk_app_api_deps,
         implementations: desk_app_api_implementations,
-        engine: desk_db_opened,
         addr: SocketAddr::from(([0, 0, 0, 0], port)),
     };
     tracing::info!(app = APP, api = API, addr = %parts.addr, "app starting");
     let served = desk_app_api_backoffice_app::serve(parts).await;
-    // The engine closes once the app stops serving, off the runtime.
-    desk_db_engine.shutdown().await;
     if let Err(err) = served {
         return Err(format!("app {APP} of {API}: {err}").into());
     }

@@ -1,5 +1,6 @@
-Loaded schema shop-api (kind API): 16 types, 1 enums, 7 scalars, 4 operation sets
+Loaded schema shop-api (kind API): 45 types, 12 enums, 8 scalars, 5 operation sets
   - sentinel up to date
+  - not checked: shop-db must enable outputs.types.go and outputs.types.typescript, since shop-api's types import theirs; build --with-deps and build-all check it
   + types-go written to .../schemas/dist/types/go/shop-api
   + types-typescript written to .../schemas/dist/types/typescript/shop-api
   + api written to .../schemas/dist/api/shop-api

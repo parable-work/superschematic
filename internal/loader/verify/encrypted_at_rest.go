@@ -52,9 +52,6 @@ func checkEncryptedFields(schema *ir.Schema, r *Result) {
 func checkEncryptedField(schema *ir.Schema, td *ir.TypeDef, fd *ir.FieldDef, owner string, r *Result) {
 	ref := fd.TypeRef
 	switch {
-	case codegen.IsEngineType(td):
-		r.errorf(td.Owner, "%s: %s composes behaviors, so the engine keeps its rows, and the engine does not encrypt a field; keep the value in a table of its own, which the ORMs keep (support follows)", owner, td.Name)
-		return
 	case td.User != nil || td.Origin == ir.OriginIdentity:
 		r.errorf(td.Owner, "%s: the identity stores read and write the user model's tables without the ORMs, so they cannot encrypt a field; keep the value in a table of its own that relates to %s", owner, td.Name)
 		return

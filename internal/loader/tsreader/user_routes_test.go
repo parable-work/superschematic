@@ -185,7 +185,7 @@ export class Account {}
 @userSessions({ roles: true })
 export class Account {}
 `,
-			want: []string{`a.schema.ts:3:15: @userSessions config has unknown key "roles"; it takes apiKeys, defaultRoles, firstUser, login, path, register and registration`},
+			want: []string{`a.schema.ts:3:15: @userSessions config has unknown key "roles"; it takes apiKeys, defaultRoles, firstUser, login, oauth, path, register and registration`},
 		},
 		{
 			name: "an unknown key of @userAdministration",
@@ -194,7 +194,7 @@ export class Account {}
 @userAdministration({ register: true })
 export class Admin {}
 `,
-			want: []string{`a.schema.ts:3:21: @userAdministration config has unknown key "register"; it takes apiKeys and path`},
+			want: []string{`a.schema.ts:3:21: @userAdministration config has unknown key "register"; it takes apiKeys, oauth and path`},
 		},
 		{
 			name: "apiKeys without the login",

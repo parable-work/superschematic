@@ -27,7 +27,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 # The engine's JSON features (D58): a number keeps its text, an object its
 # members' order.
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 superschematic-rules = { path = "../rules" }
 
 [dev-dependencies]

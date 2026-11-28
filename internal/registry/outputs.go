@@ -227,69 +227,6 @@ func (o *Outputs) MCPConfirmationKey() string {
 	return o.API.MCPConfirmationKey
 }
 
-// EngineOutputConfig configures a DB service's engine document (D58): the
-// document the enginedoc generator writes when a type of the schema
-// composes a behavior, an engine type, whose instances the engine keeps.
-// The generator's OutputSchema refuses a key it does not have.
-type EngineOutputConfig struct {
-	// Namespace is the engine namespace the schema's engine types are
-	// defined and published in. Empty is the service's name.
-	Namespace string `json:"namespace,omitempty"`
-
-	// Mount is the path a server of an API on the database mounts the
-	// engine's routes at, its event stream and its MCP endpoint under it.
-	// Empty is /engine/<service> (DefaultEngineMount).
-	Mount string `json:"mount,omitempty"`
-
-	// Policy is the access policy the servers open the engine with, as the
-	// engine reads it: "permission" (a caller holding <Type>.<action>),
-	// "allowAll", or {"rules": [...]}. Empty is "permission".
-	Policy json.RawMessage `json:"policy,omitempty"`
-
-	// Retention is how long the engine's event log keeps events, as the
-	// engine reads it: {maxAgeMs?, maxEvents?, maxHoldMs?, everyMs?,
-	// batchSize?}, an age, a count or both. Every entrypoint that opens the
-	// engine on the database opens it with it, and the database's runner
-	// prunes the log. Empty keeps every event.
-	Retention json.RawMessage `json:"retention,omitempty"`
-
-	// Tools are the engine's tool options the deployment sets beside the
-	// binary's invocation policy and vendor keys.
-	Tools *EngineToolsConfig `json:"tools,omitempty"`
-}
-
-// EngineToolsConfig is outputs.engine.tools: what a deployment sets of the
-// engine's tool options (D11, D70).
-type EngineToolsConfig struct {
-	// Invocation is the MCP invocation policy of an engine tool or
-	// operation, by the name the engine's tools.invocation takes: a
-	// built-in tool's (create, delete, defineSchema), or a behavior
-	// operation's, <Behavior>.<operation> (Payments.capturePayment), in
-	// its declaration's place. Each value is one of the binary's invocation
-	// policy's. The engine document carries it, and each entrypoint opens
-	// the engine with it, so an agent's MCP client asks before it runs the
-	// operations the deployment marks.
-	Invocation map[string]string `json:"invocation,omitempty"`
-
-	// Hidden are behavior operations, by <Behavior>.<operation>, that the
-	// engine's tools leave out: a service calls them through the API or
-	// in-process, and no agent is offered them. The engine document adds
-	// the core commerce behaviors' service operations (D70).
-	Hidden []string `json:"hidden,omitempty"`
-}
-
-// DefaultEnginePolicy is the access policy a server opens the engine with
-// unless outputs.engine.policy sets one (D58): the engine's permission
-// policy, which allows an action on a type to a caller holding
-// <Type>.<action>.
-const DefaultEnginePolicy = `"permission"`
-
-// DefaultEngineMount is where a server of an API on the DB service
-// service mounts the engine unless outputs.engine.mount sets it (D58).
-func DefaultEngineMount(service string) string {
-	return "/engine/" + service
-}
-
 // SQL dialects outputs.sql.dialects may list (the SqlDialect type in
 // @superschematic/schema-config), in the order messages name them.
 const (
@@ -347,13 +284,23 @@ type Outputs struct {
 	// is written by, keyed by the renderer's name (D47).
 	CI map[string]CIOptions `json:"ci,omitempty"`
 
-	// Engine configures a DB service's engine document (D58).
-	Engine *EngineOutputConfig `json:"engine,omitempty"`
-
 	// Raw holds every key of the block verbatim so extension generators can
 	// decode their own section with DecodeOutput.
 	Raw map[string]json.RawMessage `json:"-"`
 }
+
+// EngineOutputKey is outputs.engine, which configured the engine a DB
+// service's engine types ran on (D58) and which ErrEngineOutputs refuses.
+const EngineOutputKey = "engine"
+
+// ErrEngineOutputs is the refusal of outputs.engine (D103). It set the
+// namespace, mount, access policy, event retention and MCP tool options of
+// the engine that kept a DB service's engine types, its types that
+// composed a behavior with @behavior. A DB type is a table now, which
+// composes its behaviors by implements and field types: an API serves
+// their operations through @behaviorOperations, under its own permissions,
+// and an operation's @mcp sets its tool's invocation policy.
+var ErrEngineOutputs = errors.New("outputs.engine configured the engine a DB service's engine types ran on (D58), and a DB type is a table, which composes its behaviors by implements and field types (D103): an API serves their operations through @behaviorOperations, and an operation's @mcp sets its tool's invocationPolicy; remove outputs.engine")
 
 // ParseOutputs decodes the raw outputs block from schema.config into its
 // typed form, rejecting keys no registered generator claims, sections that
@@ -366,6 +313,9 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 		return &Outputs{}, nil
 	}
 
+	if _, ok := raw[EngineOutputKey]; ok {
+		return nil, ErrEngineOutputs
+	}
 	known := reg.OutputKeys()
 	for key := range raw {
 		if !containsString(known, key) {
@@ -568,67 +518,6 @@ func (o *Outputs) SQLMigrationsDir() string {
 		return ""
 	}
 	return o.SQL.MigrationsDir
-}
-
-// EngineNamespace returns outputs.engine.namespace ("" when unset, which
-// is the service's name).
-func (o *Outputs) EngineNamespace() string {
-	if o == nil || o.Engine == nil {
-		return ""
-	}
-	return o.Engine.Namespace
-}
-
-// EngineMount returns outputs.engine.mount, else DefaultEngineMount of
-// service, the DB service the outputs are of.
-func (o *Outputs) EngineMount(service string) string {
-	if o == nil || o.Engine == nil || o.Engine.Mount == "" {
-		return DefaultEngineMount(service)
-	}
-	return o.Engine.Mount
-}
-
-// EnginePolicy returns outputs.engine.policy as compact JSON, else
-// DefaultEnginePolicy.
-func (o *Outputs) EnginePolicy() json.RawMessage {
-	if o == nil || o.Engine == nil || len(o.Engine.Policy) == 0 {
-		return json.RawMessage(DefaultEnginePolicy)
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, o.Engine.Policy); err != nil {
-		return o.Engine.Policy
-	}
-	return compact.Bytes()
-}
-
-// EngineRetention returns outputs.engine.retention as compact JSON, nil
-// when unset: the log keeps every event.
-func (o *Outputs) EngineRetention() json.RawMessage {
-	if o == nil || o.Engine == nil || len(o.Engine.Retention) == 0 {
-		return nil
-	}
-	var compact bytes.Buffer
-	if err := json.Compact(&compact, o.Engine.Retention); err != nil {
-		return o.Engine.Retention
-	}
-	return compact.Bytes()
-}
-
-// EngineInvocation returns outputs.engine.tools.invocation, nil when
-// unset.
-func (o *Outputs) EngineInvocation() map[string]string {
-	if o == nil || o.Engine == nil || o.Engine.Tools == nil {
-		return nil
-	}
-	return o.Engine.Tools.Invocation
-}
-
-// EngineHidden returns outputs.engine.tools.hidden, nil when unset.
-func (o *Outputs) EngineHidden() []string {
-	if o == nil || o.Engine == nil || o.Engine.Tools == nil {
-		return nil
-	}
-	return o.Engine.Tools.Hidden
 }
 
 // SQLViewOwner returns outputs.sql.viewOwner ("" when unset).

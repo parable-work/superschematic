@@ -215,13 +215,13 @@ export function releaseRecipe(engine: Engine, id: string): number {
 }
 
 /**
- * jobsFixture is the General schema-file document the core binary loads
- * with no extension linked (make cli-smoke, fixture-workqueue-json): its
- * Job type composes Workflow, Lease, Assignment, Queue, Budget and
- * Retries.
+ * jobsFixture is the General schema-file document of fixture-workqueue-json
+ * as the loader held it before it refused Queue (D103), the engine's copy
+ * in runtime/engine/testdata/documents: its Job type composes Workflow,
+ * Lease, Assignment, Queue, Budget and Retries.
  */
 export function jobsFixture(): Record<string, unknown> {
   return JSON.parse(
-    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-workqueue-json/src/job.schema.json', import.meta.url), 'utf8')
+    readFileSync(new URL('../../../engine/testdata/documents/fixture-workqueue-json/job.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }

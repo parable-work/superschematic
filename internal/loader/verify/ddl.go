@@ -14,10 +14,8 @@ import (
 
 // checkIndexOptions refuses an @index option the DDL cannot honor: a
 // method or an operator class it does not know, which a data form can
-// write; any of method, ops, where, expression and concurrently on an
-// engine type, whose index the engine keeps over its fields alone; a where
-// or an expression that holds more than one statement; and what pgvector
-// does not build (checkVectorIndex, D84).
+// write; a where or an expression that holds more than one statement;
+// and what pgvector does not build (checkVectorIndex, D84).
 func checkIndexOptions(schema *ir.Schema, r *Result) {
 	scalarTypes := sqlutil.ScalarSQLTypes(schema)
 	for _, name := range sortedTypeNames(schema.Types) {
@@ -35,10 +33,6 @@ func checkIndexOptions(schema *ir.Schema, r *Result) {
 			}
 			if idx.Ops != "" && !sqlutil.ValidOpclass(idx.Ops) {
 				r.errorf(td.Owner, "%s: %s ops %q must name an operator class, a lowercase identifier such as gin_trgm_ops", td.Name, label, idx.Ops)
-			}
-			if codegen.IsEngineType(td) {
-				r.errorf(td.Owner, "%s: %s sets method, ops, where, expression or concurrently, which only a table's index has; %s is an engine type, whose index the engine keeps over its fields alone", td.Name, label, td.Name)
-				continue
 			}
 			for _, part := range []struct{ name, sql string }{{"where", idx.Where}, {"expression", idx.Expression}} {
 				if part.sql == "" {
@@ -195,7 +189,7 @@ func indexKeyField(td *ir.TypeDef, key string) *ir.FieldDef {
 
 // checkRawSQL refuses @rawSql on a type that gets no table, which is where
 // the decorator lives (a base class, a @jsonField type, a queue's message,
-// an engine type, a projection), and every problem sqlutil.CheckRawSQL
+// a projection), and every problem sqlutil.CheckRawSQL
 // finds: a piece the DDL could not place, or could not run again when it
 // changes.
 func checkRawSQL(schema *ir.Schema, r *Result) {
@@ -215,8 +209,6 @@ func checkRawSQL(schema *ir.Schema, r *Result) {
 			on = "a @jsonField type"
 		case td.Queue != nil:
 			on = "a @queue message"
-		case codegen.IsEngineType(td):
-			on = "an engine type, whose instances the engine keeps"
 		case bases[td.Name]:
 			on = "a base class"
 		default:

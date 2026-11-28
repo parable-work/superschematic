@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -130,12 +129,15 @@ func targetImportsSiblingSentinels(servicePath string, reg *registry.Registry) b
 		spec, ok := reg.Kind(kind)
 		return ok && spec.ImportsSiblingSentinels
 	}
-	if cfg, err := schemaconfig.ReadFile(servicePath, reg); err == nil {
-		return imports(string(cfg.Kind))
-	} else if !errors.Is(err, os.ErrNotExist) {
+	path, form, ok, err := schemaconfig.Locate(servicePath)
+	if err != nil || !ok {
 		return false
 	}
-	data, err := os.ReadFile(filepath.Join(servicePath, "schema.config.ts"))
+	if form != schemaconfig.FormTS {
+		cfg, err := schemaconfig.ReadFile(servicePath, reg)
+		return err == nil && imports(string(cfg.Kind))
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}
@@ -162,7 +164,11 @@ var configImportPattern = regexp.MustCompile(`(?m)^\s*import\b[^'"]*['"]([^'"]+)
 // it needs no compiler program; a false positive only triggers an extra
 // idempotent sentinel sweep.
 func configImportsSentinels(servicePath string, n naming.Naming) bool {
-	data, err := os.ReadFile(filepath.Join(servicePath, "schema.config.ts"))
+	path, form, ok, err := schemaconfig.Locate(servicePath)
+	if err != nil || !ok || form != schemaconfig.FormTS {
+		return false
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
 	}

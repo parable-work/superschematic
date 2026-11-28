@@ -529,7 +529,12 @@ describe('identity routes', () => {
     // The API key operations are routed only when turned on (D114).
     const apiKeyOperations = identityOperations.filter(op => op.apiKeys).length;
     expect(apiKeyOperations).toBe(5);
-    expect(identityRoutes(service, { sessions: { register: true }, administration: {} })).toHaveLength(identityOperations.length - apiKeyOperations);
+    // And the OAuth operations only with an OAuth server (#695).
+    const oauthOperations = identityOperations.filter(op => op.oauth).length;
+    expect(oauthOperations).toBe(7);
+    expect(identityRoutes(service, { sessions: { register: true }, administration: {} })).toHaveLength(
+      identityOperations.length - apiKeyOperations - oauthOperations
+    );
     expect(paths(identityRoutes(service, { administration: { path: '/staff/' } }))).toStartWith('POST /staff/users, GET /staff/users');
     expect(identityOperations.find(op => op.name === 'grantRole')!.path).toBe('users/{id}/roles/{roleId}');
   });

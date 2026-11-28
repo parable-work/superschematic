@@ -322,6 +322,11 @@ func (ih *InputHasher) surface(service buildplan.Service) string {
 	h := sha256.New()
 	_, _ = h.Write([]byte(ih.base))
 	_, _ = h.Write([]byte("|service:" + ih.serviceDigests[service.Name]))
+	if providers := providersDigest(service); providers != "" {
+		// The manifests of the runtime provider packages its config lists,
+		// which sit outside its tree (D159, #608, providers.go).
+		_, _ = h.Write([]byte("|providers:" + providers))
+	}
 	if service.Config.AuthDB != "" {
 		// The authDb's own hash covers its dependencies: the API go.mod
 		// requires the Go types modules its ORM reaches through them.

@@ -1442,9 +1442,10 @@ pub mod pg {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use bytes::BytesMut;
-    use tokio_postgres::types::{to_sql_checked, Format, IsNull, ToSql, Type};
-    use tokio_postgres::{Client, NoTls};
+    use superschematic_engine_pg::tls_for;
+    pub use superschematic_rules_adapter::sql::Text;
+    use tokio_postgres::types::ToSql;
+    use tokio_postgres::Client;
 
     use super::Param;
 
@@ -1460,9 +1461,11 @@ pub mod pg {
         }
     }
 
-    /// A connection, its search path the schema's when one is named.
+    /// A connection, with the TLS the URL's sslmode asks for, its search
+    /// path the schema's when one is named.
     pub async fn connect(url: &str, schema: Option<&str>) -> Client {
-        let (client, connection) = tokio_postgres::connect(url, NoTls)
+        let (url, tls) = tls_for(url).expect("the TLS");
+        let (client, connection) = tokio_postgres::connect(&url, tls)
             .await
             .expect("Postgres connects");
         tokio::spawn(async move {
@@ -1529,37 +1532,6 @@ pub mod pg {
             }
             panic!("the test's task did not finish: {error}");
         }
-    }
-
-    /// A parameter sent as text, which Postgres reads into the type it
-    /// meets, or NULL.
-    #[derive(Debug)]
-    pub struct Text(Option<String>);
-
-    impl ToSql for Text {
-        fn to_sql(
-            &self,
-            _ty: &Type,
-            out: &mut BytesMut,
-        ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>> {
-            match &self.0 {
-                Some(text) => {
-                    out.extend_from_slice(text.as_bytes());
-                    Ok(IsNull::No)
-                }
-                None => Ok(IsNull::Yes),
-            }
-        }
-
-        fn accepts(_ty: &Type) -> bool {
-            true
-        }
-
-        fn encode_format(&self, _ty: &Type) -> Format {
-            Format::Text
-        }
-
-        to_sql_checked!();
     }
 
     pub fn texts(values: &[Param]) -> Vec<Text> {

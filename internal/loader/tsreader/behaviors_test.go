@@ -78,8 +78,8 @@ func TestABehaviorFieldLoadsAsAUseOnTheTable(t *testing.T) {
 		t.Fatalf("Shipment fields = %v, want %v", got, want)
 	}
 	for _, td := range []*ir.TypeDef{order, shipment} {
-		if td.Role != ir.RoleDBTable || td.IsEngineType() {
-			t.Fatalf("%s: role %s, engine type %v; a type whose behaviors are on its fields stays a table", td.Name, td.Role, td.IsEngineType())
+		if td.Role != ir.RoleDBTable || len(td.TypeBehaviors()) > 0 {
+			t.Fatalf("%s: role %s, @behavior %v; a type whose behaviors are on its fields stays a table", td.Name, td.Role, len(td.TypeBehaviors()) > 0)
 		}
 	}
 }

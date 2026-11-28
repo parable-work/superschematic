@@ -100,7 +100,8 @@ writes each API's permission catalog beside its OpenAPI document
 (<schemas-root>/dist/api/<api>/permissions.json). When catalogs of APIs
 whose authDb is this service are there, a --permission that is none of
 their permissions and covers none draws a warning, and is granted all
-the same: an engine's schemas name permissions at run time.
+the same: a project in development or runtime mode names permissions in
+the schemas it publishes at run time.
 
 Examples:
   superschematic identity bootstrap ./schemas/services/shop-db --login admin@example.com --permission identity --permission orders

@@ -11,10 +11,8 @@ import (
 	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
-	"github.com/parable-work/superschematic/internal/generator/engineclientgen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/loader"
-	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -180,32 +178,6 @@ func TestRunWithFixtureNamingEmitsFixtureNames(t *testing.T) {
 		Clock:      fixedClock,
 	}); err != nil {
 		t.Fatalf("run fixture-env-go: %v", err)
-	}
-
-	// The engine client module (superschematic engine-client, D49) imports
-	// the client from the package named by engine_npm_package.
-	engineRegistry := CoreRegistry(names)
-	notesPath := filepath.Join("..", "..", "examples", "engine-notes", "schemas", "notes.schema.json")
-	notesDoc, err := jsonreader.ReadFileWith(notesPath, "notes.schema.json", engineRegistry)
-	if err != nil {
-		t.Fatalf("read the engine-notes schema: %v", err)
-	}
-	notesSchema, err := loader.LoadDocument(notesDoc, "notes.schema.json", loader.WithRegistry(engineRegistry), loader.WithNaming(names))
-	if err != nil {
-		t.Fatalf("load the engine-notes schema: %v", err)
-	}
-	engineModule, err := engineclientgen.Generate([]*ir.Schema{notesSchema}, engineclientgen.Options{Registry: engineRegistry, Naming: names})
-	if err != nil {
-		t.Fatalf("generate the engine client module: %v", err)
-	}
-	if !strings.Contains(string(engineModule), "from '"+names.EngineNpmPackage+"/client'") {
-		t.Errorf("the engine client module does not import the client from %s", names.EngineNpmPackage)
-	}
-	if err := os.MkdirAll(filepath.Join(outputRoot, "engine-client"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(outputRoot, "engine-client", "notes.client.ts"), engineModule, 0o644); err != nil {
-		t.Fatal(err)
 	}
 
 	if err := filepath.WalkDir(outputRoot, func(path string, d os.DirEntry, err error) error {

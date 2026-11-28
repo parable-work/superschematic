@@ -35,18 +35,7 @@ pub(crate) trait Db {
     fn has_table(&mut self, table: &str) -> Result<bool, Refusal>;
 }
 
-/// An identifier quoted as Postgres and SQLite both read one.
-pub(crate) fn quote(identifier: &str) -> String {
-    format!("\"{}\"", identifier.replace('"', "\"\""))
-}
-
-/// The nth placeholder of a dialect: `?n` on SQLite, `$n` on Postgres.
-pub(crate) fn placeholder(dialect: Dialect, n: usize) -> String {
-    match dialect {
-        Dialect::Sqlite => format!("?{n}"),
-        Dialect::Postgres => format!("${n}"),
-    }
-}
+pub(crate) use superschematic_rules_adapter::sql::{placeholder, quote};
 
 /// A time in epoch milliseconds as a statement writes it into a queue's
 /// `due_at`: SQLite's ISO text, as the queue's default writes it, or a
@@ -110,6 +99,14 @@ pub(crate) fn select_live(
     )
 }
 
+/// A NULL of a table's row type, which `jsonb_populate_record` reads a
+/// row's values into each column's type through, taken from the relation
+/// itself: the type of the name alone may be a built-in one that the
+/// catalog finds first (`line`, `point`, `box`), which has no columns.
+fn row_type(table: &str) -> String {
+    format!("(SELECT t FROM {table} AS t WHERE false)")
+}
+
 /// Inserts a row of columns: on Postgres through `jsonb_populate_record`,
 /// which reads each value into its column's type.
 pub(crate) fn insert_row(
@@ -135,8 +132,9 @@ pub(crate) fn insert_row(
         }
         Dialect::Postgres => db.execute(
             &format!(
-                "INSERT INTO {table} ({names}) SELECT {names} FROM jsonb_populate_record(NULL::{table}, $1::jsonb)",
+                "INSERT INTO {table} ({names}) SELECT {names} FROM jsonb_populate_record({row}, $1::jsonb)",
                 table = quote(table),
+                row = row_type(&quote(table)),
                 names = names.join(", ")
             ),
             &[Value::Object(columns.clone())],
@@ -221,8 +219,9 @@ pub(crate) fn update_live(
             }
             db.execute(
                 &format!(
-                    "UPDATE {target} SET {} FROM jsonb_populate_record(NULL::{target}, $1::jsonb) AS r WHERE {}",
+                    "UPDATE {target} SET {} FROM jsonb_populate_record({}, $1::jsonb) AS r WHERE {}",
                     sets.join(", "),
+                    row_type(&target),
                     wheres.join(" AND ")
                 ),
                 &params,

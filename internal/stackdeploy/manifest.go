@@ -271,7 +271,7 @@ func nextManifest(prev *Manifest, run registry.Run, digests map[string]string) *
 	}
 	for _, d := range env.Deployables {
 		switch d.Kind {
-		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableRunner, ir.DeployableDeriver, ir.DeployableApp:
+		case ir.DeployableServer, ir.DeployableJob, ir.DeployableWorker, ir.DeployableDeriver, ir.DeployableApp:
 			if b := prev.Bundles[d.Name]; d.HasBundle() && b != nil {
 				m.setBundle(d.Name, *b)
 			}

@@ -10,6 +10,7 @@ import {
   grantAuthenticator,
   indexSearch,
   issueGrant,
+  processFiles,
   reindexSearch,
   revokeGrant,
   searchRoutes,
@@ -17,7 +18,8 @@ import {
   type SearchEmbeddings,
   type SearchOptions,
 } from '@superschematic/http-runtime/postgres';
-import type { Principal } from '@superschematic/http-runtime';
+import { ObjectNotFoundError, type Bucket, type Principal } from '@superschematic/http-runtime';
+import { defineProvider, providersFrom, type FileProcessor } from '@superschematic/http-runtime/providers';
 import { createOrm, type FixtureSearchDbOrm } from './orm';
 import { alice, bob, database, dsn, type TestDatabase } from './harness';
 
@@ -189,6 +191,49 @@ describe.skipIf(dsn === '')('search across tables on Postgres', () => {
     expect((await found(user(alice), 'obsidian')).result.total).toBe(0);
     const { rows } = await db.pool.query(`SELECT count(*)::int AS n FROM search_index WHERE concat_ws(' ', title, body, comments, files) ILIKE '%obsidian%'`);
     expect(rows[0].n).toBe(0);
+  });
+
+  test("a file's text the file processor extracts is indexed with its row (D154, D159, #702)", async () => {
+    // A completed upload of a plain text file asks its text: extraction pending.
+    const objects = new Map<string, Uint8Array>([['attachments/plan', new TextEncoder().encode('Hawthorn rows along the north wall.')]]);
+    const bucket = {
+      name: 'mem',
+      async get(name: string) {
+        const bytes = objects.get(name);
+        if (!bytes) throw new ObjectNotFoundError('mem', name);
+        return { object: { name, size: bytes.byteLength }, body: new Response(bytes).body! };
+      },
+      async put(name: string, body: Uint8Array) {
+        objects.set(name, body);
+        return { name, size: body.byteLength, created: true };
+      },
+    } as unknown as Bucket;
+    await db.pool.query(
+      `INSERT INTO unit_attachments (unit_id, name, media_type, size, content_hash, object_key, state, extraction)
+       VALUES ($1, 'plan.txt', 'text/plain', 35, $2, 'attachments/plan', 'ready', 'pending')`,
+      [uuidOf(ids.unitA), '1'.repeat(64)]
+    );
+    await drain();
+    expect((await found(user(alice), 'hawthorn')).result.total).toBe(0);
+    const plainText = defineProvider({
+      name: 'plain-text',
+      implements: 'files',
+      config: {},
+      create: (): FileProcessor => ({
+        mediaTypes: ['text/plain'],
+        extractText: async file => ({ text: new TextDecoder().decode(file.bytes) }),
+        preview: async () => null,
+      }),
+    });
+    const providers = providersFrom({ slots: { FILES: 'files' }, config: { FILES: 'plain-text' }, definitions: [plainText] });
+    expect(await processFiles({ orm, providers, bucket })).toEqual({ extracted: 1, previewed: 0, failed: 0 });
+    const { rows } = await db.pool.query(`SELECT extraction, extracted_text FROM unit_attachments WHERE object_key = 'attachments/plan'`);
+    expect(rows[0]).toEqual({ extraction: 'done', extracted_text: 'Hawthorn rows along the north wall.' });
+    // The write of the text enqueues the row, whose index row then holds it.
+    expect(await drain()).toBe(1);
+    const hawthorn = (await found(user(alice), 'hawthorn')).result.items;
+    expect(hawthorn.map(hit => `${hit.table}:${hit.key}`)).toEqual([`Unit:${ids.unitA}`]);
+    expect(hawthorn[0]!.matched).toBe('files');
   });
 
   test('an index row follows its row: an audience change and a delete at once, a change of text once the queue drains', async () => {

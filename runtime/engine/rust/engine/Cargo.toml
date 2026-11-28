@@ -46,7 +46,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 # superscalar's core turns them on in any build that links it anyway.
 serde_json = { version = "1.0.149", features = ["arbitrary_precision", "preserve_order"] }
 # A schema's hash, an index's name and a value's hash (RFC 8785).
-sha2 = "0.10.9"
+sha2 = "0.11.1"
 # The schema reader: the IR reader and validation over superscalar's core,
 # and the strict schema-file loader (its schemafile feature). Not published,
 # so a path dependency (D58).

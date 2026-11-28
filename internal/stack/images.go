@@ -36,7 +36,6 @@ func Images(in Input) (map[string]*ir.ResolvedImage, error) {
 	r.defaultWorkers()
 	r.defaultDerivers()
 	r.defaultApps()
-	r.defaultRunners()
 	r.resolveImages()
 	if r.failed() {
 		return nil, r.errs
@@ -65,7 +64,7 @@ func (r *resolver) resolveImages() {
 			continue
 		}
 		if !d.res.Kind.RunsCode() {
-			r.fail(CodeInvalidStack, "%s names %s %s, which runs no image; a server, a job, a worker, a deriver, an app or an engine's runner has one", where, d.res.Kind, d.res.Name)
+			r.fail(CodeInvalidStack, "%s names %s %s, which runs no image; a server, a job, a worker, a deriver or an app has one", where, d.res.Kind, d.res.Name)
 			continue
 		}
 		if first, dup := seen[d.res.Name]; dup {

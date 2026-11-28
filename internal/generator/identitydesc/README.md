@@ -74,6 +74,11 @@ The descriptor is version 1.
 | `credential.columns` | `id`, the row's key. `user`, unique, so a user has at most one. `passwordHash`, the password's PHC string (`$argon2id$v=19$...`). `passwordChangedAt`. `disabledAt`, null unless the user is disabled. `pendingAt`, null unless the user registered under `registration: "approval"` and waits for an administrator (D81). |
 | `apiKey.table` | The `UserApiKey` table the loader adds (D114): one row per API key. A descriptor written before D114 has no `apiKey`, and a store built from one has no API keys. |
 | `apiKey.columns` | `id`, the row's key. `user`, the key's user. `name`, what its user calls it. `tokenHash`, unique: the lowercase hexadecimal SHA-256 of the key's token, `key_` and 43 characters of base64url; the token itself is never stored. `permissions`, nullable: the list of permissions the key was made with (`TEXT[]` in Postgres), null for a key that holds every permission of its user. `createdAt` and `expiresAt`. `lastUsedAt`, nullable: when a request last used the key. `revokedAt`, null until a revocation, or its user being disabled, ends the key. |
+| `oauth` | The four tables of the API's OAuth authorization server (#695), which the loader adds beside every `User` table. A descriptor written before them has no `oauth`, and a store built from one serves no OAuth. |
+| `oauth.client` | `oauth_client`, one row per client. Columns: `id`. `clientId`, unique: the `client_id` the client is known by, its metadata document's `https` URL or the id registration made. `kind`, `metadataDocument` or `registered`. `name`. `uri`, nullable. `redirectUris`, a list of text (`TEXT[]` in Postgres). `createdAt`. `refreshedAt` and `freshUntil`, nullable: when a metadata document was last fetched, and until when its cache headers keep it. `lastUsedAt`, nullable. |
+| `oauth.grant` | `oauth_grant`, one row per grant a person gave a client. Columns: `id`. `user`. `client`, the client row's key. `permissions`, nullable, as an API key's. `resource`, the URL the grant was given for. `createdAt` and `expiresAt`. `lastUsedAt` and `revokedAt`, nullable. |
+| `oauth.code` | `oauth_code`, one row per authorization request. Columns: `id`, the id the consent routes take. `client`. `user` and `grant`, nullable until the person approves. `redirectUri`, `codeChallenge`, `state` (nullable), `scope` (nullable) and `resource`, as the request named them. `nonce`. `codeHash`, nullable and unique: the SHA-256 of the code approval made, as a token's. `createdAt`, `expiresAt`, and `usedAt`, nullable. |
+| `oauth.token` | `oauth_token`, one row per access or refresh token. Columns: `id`. `grant`. `kind`, `access` or `refresh`. `tokenHash`, unique: the SHA-256 of the token's text, `oat_` or `ort_` and 43 characters of base64url. `createdAt` and `expiresAt`. `usedAt`, nullable: when a refresh token rotated. `revokedAt`, nullable. |
 | `role` | Absent when the schema has no `UserRole` table, and `roleGrant` with it. `type` and `table` name the type with the `UserRole` trait and its table. |
 | `role.columns` | `key`, the role table's key column. `name`, the role's unique name. `permissions`, a list of permission strings (`TEXT[]` in Postgres). |
 | `role.keyScalar` | The role table's key field's type, as `user.keyScalar` is the user table's. A role's id is a value of it. |
@@ -82,13 +87,17 @@ The descriptor is version 1.
 
 The members are always in this order, and every member but `role` and
 `roleGrant` is present; a store also reads a descriptor without `apiKey`,
-which a build before D114 wrote. Every name is non-empty.
+which a build before D114 wrote, and one without `oauth`, which a build
+before #695 wrote. Every name is non-empty.
 
 The key of each table the loader adds is an `AutoGenerate<Identity.UUID>`,
 which the column's default fills in when a row is written without one. Every
 `user` and `role` column is a foreign key to the user or role table's key
 that cascades on delete: deleting a user deletes their sessions,
-credential, API keys and grants, and deleting a role deletes its grants. The
+credential, API keys, OAuth grants and role grants, and deleting a role
+deletes its grants. So does every `client` and `grant` column of the OAuth
+tables: deleting a client deletes its grants and requests, and deleting a
+grant its tokens. The
 timestamps are `Temporal.DateTime`, stored as `TIMESTAMPTZ` in Postgres.
 
 ## Names
