@@ -28,7 +28,10 @@ const deploySmoke = "../../examples/deploy-smoke"
 // each minute's Cron firing, and the site's Worker taking the API's paths
 // first and reaching it through a service binding (D91, D92); and on both,
 // the bucket a line item's files upload to through a signed URL, and the
-// worker that releases their objects (D154).
+// worker that releases their objects (D154); the stub relay in smoke-api's
+// SMS slot, and the workers of a bill's recurrence, the notifier, search's
+// index and the run requests a payee's text makes (D152, D153, D155,
+// D157).
 func TestDeploySmokeEnvironments(t *testing.T) {
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
@@ -38,6 +41,9 @@ func TestDeploySmokeEnvironments(t *testing.T) {
 	project := t.TempDir()
 	schemasRoot := filepath.Join(project, "schemas")
 	copyTree(t, filepath.Join(example, "schemas", "services"), filepath.Join(schemasRoot, "services"))
+	// The stub relay, the provider package smoke-api's config lists by its
+	// path from the services (D159).
+	copyTree(t, filepath.Join(example, "providers"), filepath.Join(project, "providers"))
 	// The naming file's paths are relative to the project and the
 	// tsconfig's to the schemas root: each points from the copy back at
 	// this checkout.
@@ -158,6 +164,20 @@ func TestDeploySmokeEnvironments(t *testing.T) {
 	}
 	props(t, gcp, "smoke-files.bucket")
 	props(t, gcp, "smoke-api.storage.smoke-files")
+
+	// Each environment sends SMS through the stub relay, and runs the
+	// workers of plan2's features: on Cloudflare, each a drainer of its own.
+	for name, env := range envs {
+		raw, _ := json.Marshal(env)
+		if !bytes.Contains(raw, []byte("stub-relay")) {
+			t.Errorf("%s names no stub-relay in smoke-api's SMS slot (D159)", name)
+		}
+	}
+	for _, worker := range []string{"smoke-api-bill-reminders", "smoke-api-notify", "smoke-api-index-search", "smoke-api-runs"} {
+		if platforms[worker] == "" {
+			t.Errorf("Cloudflare deploys no %s", worker)
+		}
+	}
 }
 
 // props are the properties of the resource id of an environment.json.
@@ -169,4 +189,41 @@ func props(t *testing.T, env map[string]any, id string) map[string]any {
 		t.Fatalf("%s %s has no resource %s", env["stack"], env["environment"], id)
 	}
 	return resources[i].(map[string]any)["properties"].(map[string]any)
+}
+
+// TestDeploySmokeImageHoldsItsProvider builds examples/deploy-smoke into
+// an output root inside the checkout, the image's build context, and holds
+// smoke-api's image to the stub relay's directory: providers.ts imports
+// the provider package smoke-api's config lists by its directory (D159),
+// so the Dockerfile's context takes it in and its last stage copies it
+// beside the workspace, as gcp's deploy runs it.
+func TestDeploySmokeImageHoldsItsProvider(t *testing.T) {
+	example, err := filepath.Abs(deploySmoke)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services := filepath.Join(example, "schemas", "services")
+	sentinels := readSentinels(t, services)
+	t.Cleanup(func() { restoreSentinels(t, sentinels) })
+	out, err := os.MkdirTemp(filepath.Join(example, "schemas"), ".dist-image-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(out) })
+	if stdout, stderr, err := execute("build-all", services, "--out", out); err != nil {
+		t.Fatalf("superschematic build-all %s: %v\n%s%s", services, err, stdout, stderr)
+	}
+	server := filepath.Join(out, "server", "smoke-stack", "smoke-api")
+	for file, want := range map[string]string{
+		"Dockerfile.dockerignore": "!examples/deploy-smoke/providers/stub-relay\n",
+		"Dockerfile":              "COPY --from=build /src/examples/deploy-smoke/providers/stub-relay /src/examples/deploy-smoke/providers/stub-relay\n",
+	} {
+		data, err := os.ReadFile(filepath.Join(server, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), want) {
+			t.Errorf("smoke-api's %s holds no %q:\n%s", file, want, data)
+		}
+	}
 }

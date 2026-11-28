@@ -212,7 +212,10 @@ default export by its directory, and whose `providersOf(config, log)`
 calls `providersFrom` over the API's slots and those definitions; every
 entrypoint puts its answer in `deps.providers`, and the notifier sends on
 its channel slots, the agent dispatcher runs on its sandbox and model
-slots ([agent runs](/superschematic/guides/agent-runs/)). A listed provider
+slots ([agent runs](/superschematic/guides/agent-runs/)). A server's image
+holds each package listed by its directory: its Dockerfile's context takes
+the directory in, and its last stage copies it beside the workspace. A
+listed provider
 of a Rust crate alone is no package the server links: a slot that names
 it is refused at start.
 

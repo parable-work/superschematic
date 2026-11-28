@@ -88,8 +88,11 @@ export abstract class FileOnto {
   lineItemId: Identity.UUID;
 }
 
+// A row that points at a line item: another line item a file was filed
+// from (D154), or a message filed onto it (D157).
 export abstract class Backlink {
-  lineItemId: Identity.UUID;
+  table: string;
+  key: string;
   role: string;
 }
 
