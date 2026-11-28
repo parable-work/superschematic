@@ -30,8 +30,9 @@ export abstract class Contract {
 // a while after it was last done, or a while before its contract ends. Each
 // occurrence opens two weeks before it is due, reminds three days before,
 // and is missed a day after. A filing's due dates move to the next business
-// day of its holiday calendar. Each occurrence is on the calendar.
-@calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing" })
+// day of its holiday calendar. Each occurrence is on the calendar, for a
+// caller who may work filings (#601).
+@calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing", permission: "filings.work" })
 export abstract class Filing
   implements
     Recurrence<Filing, {

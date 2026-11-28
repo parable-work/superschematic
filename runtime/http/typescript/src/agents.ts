@@ -231,7 +231,7 @@ export interface TranscriptEntry {
    * A completion's ModelCompletion.providerState, which the turns after it
    * pass back on its assistant message. It is the one member kept
    * unredacted while the run lives, since a provider checks it as it
-   * returned it (a Claude thinking block's signature); a read of the
+   * returned it (a signed reasoning block's signature); a read of the
    * transcript, and the transcript the run leaves, hold it redacted.
    */
   readonly providerState?: unknown;

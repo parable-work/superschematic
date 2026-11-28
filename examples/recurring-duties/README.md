@@ -12,7 +12,7 @@ section covers it in full.
 |---|---|
 | `schemas/services/duties-db` | DB, Postgres: `Duty` implements `Recurrence` and is an `@audience` table its owner sees; `Holiday`, the rows of the holiday calendars the app fills; `Agreement`, whose end a duty may count back from; both `Duty` (its occurrences) and `Agreement` (its end date) are `@calendarSource`s; `Account`, `Role` and `Grant`, which a feed's token is one of |
 | `schemas/services/duties-api` | API over `duties-db`: `DutyActions` serves `setRecurrence`, `complete`, `skip`, `moveOne` and `listOccurrences`; `DutyDeadlines` is the behavior worker that fires each occurrence's open, remind, overdue and plan deadlines |
-| `server/server.ts` | what the implementation adds to the generated server, which mounts `calendarRoutes` for the calendar read, the feed, and the feeds' issue, rotation and revocation: each source's permission (`createRuntimeOptions`) |
+| `server/server.ts` | what the implementation adds to the generated server, which mounts `calendarRoutes` for the calendar read, the feed, and the feeds' issue, rotation and revocation; each source's permission is the schema's, and `createRuntimeOptions` may name another |
 
 ## What it shows
 

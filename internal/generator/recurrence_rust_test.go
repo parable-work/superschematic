@@ -29,6 +29,7 @@ var recurrenceRustCases = []string{
 	"setRecurrence plans the occurrences up to the horizon, moved off the row calendar holidays, and arms the open, remind and overdue deadlines",
 	"a rule change leaves the open occurrence untouched and replans the ones that have not opened",
 	"the remind deadline fires on the worker, records the reminder and emits the opening and the reminder",
+	"the due deadline fires on the worker at an occurrence due, records it and emits due (#601)",
 	"complete records what completed an occurrence and who, and an afterDone recurrence dates its next from it",
 	"without filings.manage setRecurrence is 403 and a rule that is no RRULE is 400",
 	"the calendar merges a contract end date and a filing occurrences, each dated as its source says",

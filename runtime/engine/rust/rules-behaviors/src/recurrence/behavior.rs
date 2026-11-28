@@ -29,10 +29,13 @@
 //! it is planned). It is missed at its `overdueAt` (`overdueAfter` past its
 //! due, its due when absent) unless it is done. It reminds at its
 //! `remindAt` (`remindBefore` its due) while it is upcoming or open,
-//! recording `remindedAt`. Each is a deadline of the row on the table's
-//! deadline queue, by name: `open` at the earliest upcoming occurrence's
-//! `opensAt`, `remind` at the earliest `remindAt` not yet reminded,
-//! `overdue` at the earliest open occurrence's `overdueAt`, and `plan`,
+//! recording `remindedAt`, and falls due at its `dueAt` while it is upcoming
+//! or open, recording `fellDueAt` (#601). Each is a deadline of the row on
+//! the table's deadline queue, by name: `open` at the earliest upcoming
+//! occurrence's `opensAt`, `remind` at the earliest `remindAt` not yet
+//! reminded, `due` at the earliest `dueAt` of an upcoming or open one not
+//! yet fallen due, `overdue` at the earliest open occurrence's
+//! `overdueAt`, and `plan`,
 //! when no occurrence is upcoming, at the time the horizon reaches the
 //! next. Every fire runs the same plan, which catches up every occurrence
 //! due by its time, so a worker that was down fires once. The payload is
@@ -64,8 +67,10 @@
 //! recurrence as it was set, and answers `unchanged` only when the plan
 //! dates what the row already holds.
 //!
-//! What it raises is left to section 3's events: each change of state is
-//! a named deadline's fire today, recorded on the occurrence.
+//! Each run that moves an occurrence on raises the event of the move
+//! (D153): `opened`, `reminded`, `due` and `missed`, recorded on the
+//! occurrence (`changedAt`, `remindedAt`, `fellDueAt`), so a later run
+//! raises none of them again.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
@@ -105,6 +110,7 @@ pub const LIST_OCCURRENCES: &str = "listOccurrences";
 /// The deadlines it arms, by name.
 pub const OPEN: &str = "open";
 pub const REMIND: &str = "remind";
+pub const DUE: &str = "due";
 pub const OVERDUE: &str = "overdue";
 pub const PLAN: &str = "plan";
 
@@ -118,6 +124,7 @@ pub const SKIPPED: &str = "skipped";
 // The events a run emits as it moves an occurrence on (D153).
 pub const EVENT_OPENED: &str = "opened";
 pub const EVENT_REMINDED: &str = "reminded";
+pub const EVENT_DUE: &str = "due";
 pub const EVENT_MISSED: &str = "missed";
 
 const DAY_MS: i64 = 86_400_000;
@@ -421,6 +428,7 @@ struct Occ {
     moved: bool,
     changed_at: Option<i64>,
     reminded_at: Option<i64>,
+    fell_due_at: Option<i64>,
     completed_at: Option<i64>,
     completed_by_table: Option<String>,
     completed_by_key: Option<String>,
@@ -454,6 +462,7 @@ impl Occ {
                 .unwrap_or(false),
             changed_at: number("changedAt"),
             reminded_at: number("remindedAt"),
+            fell_due_at: number("fellDueAt"),
             completed_at: number("completedAt"),
             completed_by_table: text("completedByTable"),
             completed_by_key: text("completedByKey"),
@@ -486,6 +495,7 @@ impl Occ {
         );
         out.insert("changedAt".into(), opt(&self.changed_at));
         out.insert("remindedAt".into(), opt(&self.reminded_at));
+        out.insert("fellDueAt".into(), opt(&self.fell_due_at));
         out.insert("completedAt".into(), opt(&self.completed_at));
         out.insert(
             "completedByTable".into(),
@@ -565,13 +575,20 @@ impl Plan {
 
     // catch_up moves every occurrence on by the time: upcoming to open at
     // its opening, open to missed at its overdue time, and records a
-    // reminder due. Answers whether any was missed.
+    // reminder due and a due passed, the due before the miss it may fall
+    // at. Answers whether any was missed.
     fn catch_up(&mut self, now: i64) -> bool {
         let mut missed = false;
         for occ in self.occs.values_mut() {
             if occ.state == UPCOMING && occ.opens_at <= now {
                 occ.state = OPENED.to_owned();
                 occ.changed_at = Some(now);
+            }
+            if matches!(occ.state.as_str(), UPCOMING | OPENED)
+                && occ.fell_due_at.is_none()
+                && occ.due_at <= now
+            {
+                occ.fell_due_at = Some(now);
             }
             if occ.state == OPENED && occ.overdue_at <= now {
                 occ.state = MISSED.to_owned();
@@ -769,6 +786,13 @@ impl Plan {
                 }),
             ),
             (
+                DUE,
+                earliest(&|occ| {
+                    (matches!(occ.state.as_str(), UPCOMING | OPENED) && occ.fell_due_at.is_none())
+                        .then_some(occ.due_at)
+                }),
+            ),
+            (
                 OVERDUE,
                 earliest(&|occ| (occ.state == OPENED).then_some(occ.overdue_at)),
             ),
@@ -784,8 +808,8 @@ impl Plan {
     }
 
     // emit raises an event for each occurrence the run moved on (D153):
-    // opened, reminded or missed, in key order, each once, since the run
-    // that moves an occurrence is the one that writes the move.
+    // opened, reminded, due or missed, in key order, each once, since the
+    // run that moves an occurrence is the one that writes the move.
     fn emit(&self, cx: &Cx<'_, RecurrenceConfig>) -> Hook<()> {
         for (key, occ) in &self.occs {
             let before = self.read.get(key);
@@ -796,6 +820,9 @@ impl Plan {
             }
             if occ.reminded_at.is_some() && before.is_none_or(|b| b.reminded_at.is_none()) {
                 cx.emit(EVENT_REMINDED, payload())?;
+            }
+            if occ.fell_due_at.is_some() && before.is_none_or(|b| b.fell_due_at.is_none()) {
+                cx.emit(EVENT_DUE, payload())?;
             }
             if occ.state == MISSED && !was(MISSED) {
                 cx.emit(EVENT_MISSED, payload())?;
@@ -821,6 +848,7 @@ fn new_occ(occurrence: &Occurrence, spec: &Spec, now: i64) -> Occ {
         moved: false,
         changed_at: Some(now),
         reminded_at: None,
+        fell_due_at: None,
         completed_at: None,
         completed_by_table: None,
         completed_by_key: None,
@@ -1494,6 +1522,9 @@ fn move_one(cx: &Cx<'_, RecurrenceConfig>, params: &Value) -> Hook<Value> {
     occ.revision = spec.revision;
     if occ.reminded_at.is_some() && occ.remind_at.is_some_and(|at| at > now) {
         occ.reminded_at = None;
+    }
+    if occ.fell_due_at.is_some() && occ.due_at > now {
+        occ.fell_due_at = None;
     }
     let view = occ.view();
     let plan_at = settle_plan(cx, &mut plan)?;

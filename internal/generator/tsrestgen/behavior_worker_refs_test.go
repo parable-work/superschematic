@@ -90,6 +90,7 @@ export const workers: Workers = {
   async filingDeadlinesRecurrenceReminded(event, tx) {
     await tx.attachments.list({ table: 'Filing', key: event.key });
   },
+  async filingDeadlinesRecurrenceDue() {},
   async filingDeadlinesRecurrenceMissed() {},
 };
 export const queues: WorkerQueue[] = filingDeadlinesQueues(pool, orm, workers);

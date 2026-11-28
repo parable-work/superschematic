@@ -1570,7 +1570,9 @@ The Go and Rust runtimes make the same pass, over the same scenarios
 `ProcessPendingFiles(ctx, deps, wiring)` runs over `Deps.DB` with the
 bucket `Wiring.Files` names, and Rust's
 `orm::file_processing::process_files` over the repositories'
-`attachments()`, on Postgres and on a SQLite file (#603). A pass does
+`attachments()`, which a generated Rust API's
+`files::process_pending_files(&deps, bucket)` runs over `Deps.db`, on
+Postgres and on a SQLite file (#603, #614). A pass does
 not retry a file: a processor that fails on it ends it `failed`. An
 error of the database's is the pass's own, which its job retries.
 
@@ -1645,8 +1647,7 @@ An API serves a table's references, backlinks and files as routes, SDK
 methods and MCP tools with no code of yours, from a
 `@rowFeatureOperations` set
 ([A table's references and files](/superschematic/guides/api-routes/#a-tables-references-and-files)),
-in TypeScript and Go; a Rust server keeps each a method of the
-implementation's trait for now (#723).
+in TypeScript, Go and Rust (#723).
 
 ## State machines
 
@@ -4159,14 +4160,15 @@ replaces it, `cancelSchedule`.
 
 A table implements `Recurrence` as it implements Schedules, with the table
 itself as its first type argument (D152): a rule on each row that turns
-into dated occurrences, each opened, reminded, done, missed or skipped.
+into dated occurrences, each opened, reminded, fallen due, done, missed
+or skipped.
 Schedules runs code at times; Recurrence keeps a record of what is due and
 what was done. The behaviors' core alone implements it, and dates every
 language's occurrences alike.
 
 ```ts
 // recurrence-db
-@calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing" })
+@calendarSource<Filing>({ occurrences: true, title: "title", kind: "deadline", color: "filing", permission: "filings.work" })
 export abstract class Filing
   implements
     Recurrence<Filing, {
@@ -4219,10 +4221,10 @@ The build adds the owned fields `recurrence` (the row's rule as set),
 nominal wall date-time before any adjustment (`2026-10-31T09:00`), with
 `due`, `due_at`, `opens_at`, `remind_at`, `overdue_at`, `state`,
 `revision`, `shifted`, `moved`, `changed_at`, `reminded_at`,
-`completed_at`, `completed_by_table`, `completed_by_key`,
+`fell_due_at`, `completed_at`, `completed_by_table`, `completed_by_key`,
 `completed_by_principal` and `note`; the deadline queue
-`filing_deadline_queue`, where the deadlines `open`, `remind`, `overdue`
-and `plan` wait; and the change queue `filing_change_queue`, through which
+`filing_deadline_queue`, where the deadlines `open`, `remind`, `due`,
+`overdue` and `plan` wait; and the change queue `filing_change_queue`, through which
 a write of the calendar field or the relation plans again. Its operations
 are `recurrence.setRecurrence({ anchor, rule?, start?, every?, offset?,
 timeZone?, adjust? })`, which answers `{ recurrence, planned, kept,
@@ -4234,6 +4236,16 @@ the read-only `listOccurrences({ from?, to?, states? })`.
   until it is `done` or, at its overdue time, `missed`. `skip` finishes one
   that is not done. A missed one can still be completed late, and it never
   blocks the next.
+- **Events.** The run that moves an occurrence on emits its event:
+  `opened`, `reminded`, `due` (its due came while it was neither done nor
+  skipped, recorded in `fell_due_at`) and `missed`. The behavior worker
+  hands each to your `Workers` method (`filingDeadlinesRecurrenceDue`),
+  which can raise it through the notifier as `recurrence.due`. With no
+  `overdueAfter`, `due` and then `missed` come at the same time.
+- **Typed anchors.** A client's types name only the anchors your config
+  takes: `setRecurrence`'s `anchor` is `FilingRecurrenceAnchor`, and it
+  takes no `rule` without the `calendar` anchor, no `offset` without
+  `relative`.
 - **Rule changes.** `setRecurrence` replans only the occurrences that
   have not opened. Open and finished ones stay as they are; `kept` names
   the open ones.
@@ -4271,7 +4283,8 @@ the read-only `listOccurrences({ from?, to?, states? })`.
 
 `@calendarSource` puts a table on the calendar: each row dated by a date
 or date-time `field` (to an `end`), or each occurrence of its Recurrence
-(`occurrences: true`), titled by a field, with a `kind` and a `color` key.
+(`occurrences: true`), titled by a field, with a `kind` and a `color` key,
+and a `permission` a caller needs to see any of its entries.
 `readCalendar(orm, principal, { from, to, sources?, scope? })` from
 `@superschematic/http-runtime/postgres` merges every source in a window.
 It reads each table through its repository as the caller, so a row's
@@ -4294,16 +4307,18 @@ A generated TypeScript server of an API over the database mounts
 `calendarRoutes` beside its router and serves the `calendar` tool on its
 MCP endpoint, and puts `grantAuthenticator` in front of the
 implementation's authenticator, which refuses a feed's token on every
-other route. A source's permission is the implementation's
-`createRuntimeOptions`' `calendar: { permissions: { duty: "duties.work" } }`
-(`examples/recurring-duties`). Recurrence and the calendar are served end
+other route. A source's permission is the schema's (`@calendarSource`'s
+`permission`), and the implementation's `createRuntimeOptions` may name
+another for a source, which wins: `calendar: { permissions: { duty:
+"duties.work" } }`. Recurrence and the calendar are served end
 to end by a TypeScript server, a Rust one and a Go one on Postgres, and
 by a TypeScript one on SQLite and D1 too.
 
 A Rust server serves Recurrence on Postgres as the TypeScript one does
 (D188): the router's `recurrence` routes run the operations through the
 behaviors' core, and the behavior worker's generated queues fire the
-`open`, `remind`, `overdue` and `plan` deadlines and hear a raw write. The
+`open`, `remind`, `due`, `overdue` and `plan` deadlines and hear a raw
+write. The
 runtime's `orm::calendar` reads the calendar over the Postgres definition,
 which carries each table's calendar sources:
 
@@ -4363,8 +4378,9 @@ behind the API's auth step but for a feed's fetch, with the options its
 implementation's `NewWiring` answers in `Wiring.Calendar`
 ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server));
 with `outputs.api.mcp` on, its MCP endpoint serves the calendar tool
-through `MCPTools`, as the endpoint's caller (#616). A Go server whose
-calendar source is titled by an `Encrypted<T>` field is refused it. Over a
+through `MCPTools`, as the endpoint's caller (#616). A calendar source
+titled by an `Encrypted<T>` field opens each title under the database's
+field keys (`WithFieldKeys`), as its repository's read does. Over a
 database that lists `sqlite`, Recurrence's operations run through the core
 in the SQLite repositories' transactions, and the SQLite database's
 `CrossTables()` reads the calendar and serves its feed on the file

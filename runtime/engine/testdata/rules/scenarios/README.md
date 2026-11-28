@@ -82,6 +82,20 @@ writes them, and `test/corpus.test.ts` does not list them.
   operation, params]`), which the replayer runs as a command without a row
   on the one use whose behavior declares the operation on the table, and
   a transcript writes as a `command` step that names no row.
+- `core-recurrence.json` (#601): Recurrence on a table: a weekly calendar
+  rule in America/New_York planned to the horizon across the change of
+  the clocks, a due date moved off a holiday of the row's calendar (a row
+  of another type the plan reads); the open, remind, due, overdue and
+  plan deadlines on the runner, each fire's events (`opened`, `reminded`,
+  `due`, `missed`), a late fire raising a due and a miss together;
+  `complete` with `completedBy` and its repeat, `skip`, `moveOne` and
+  `listOccurrences`, with the permissions and vetoes; an afterDone
+  recurrence dated from a missed due and from a late completion, and a
+  rule change that keeps the open occurrence; a relative recurrence read
+  through its relation, planned when the horizon reaches it, dated again
+  by `setRecurrence` with the rule it holds after the target's date moves,
+  and planning nothing once the relation is cleared; and the define
+  refusals. No engine implements Recurrence.
 - `core-comments-beside.json` (D103, step 4): Comments on a table, every
   write beside the row (D77's primitive 1): a post that moves no version of
   the row and asks no other behavior's guard, so another principal posts
@@ -160,6 +174,7 @@ A test behavior a file composes is the test kit's fixture
 `runtime/engine/rust/rules-testkit/tests/reconcile_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/schedules_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/pool_scenarios.rs`,
+`runtime/engine/rust/rules-testkit/tests/recurrence_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/aliased_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/bundles_scenarios.rs`,
 `runtime/engine/rust/rules-testkit/tests/declarative_scenarios.rs` and

@@ -68,9 +68,10 @@ export abstract class Agreement {
 // it was last done, or a while before its agreement ends. Each occurrence
 // opens a week before it is due and reminds two days before; a due date
 // moves to the next business day of the duty's holiday calendar. Its owner
-// alone sees a private duty, on the calendar and in its feed.
+// alone sees a private duty, on the calendar and in its feed, and a caller
+// without duties.work sees none there.
 @audience<Duty>({ owner: "owner" })
-@calendarSource<Duty>({ occurrences: true, title: "title", kind: "duty", color: "duty", owner: "owner" })
+@calendarSource<Duty>({ occurrences: true, title: "title", kind: "duty", color: "duty", owner: "owner", permission: "duties.work" })
 export abstract class Duty
   implements
     Recurrence<Duty, {

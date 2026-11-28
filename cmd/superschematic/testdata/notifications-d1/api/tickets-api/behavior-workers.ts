@@ -37,7 +37,7 @@ import type { WorkerQueue } from '@superschematic/http-runtime/worker';
 import { dutyChangeQueue, dutyDeadlineQueue, dutyEventQueue } from '@schemas/tickets-db-types/queues';
 import type { TicketsDbOrm, TicketsDbTx } from '@schemas/tickets-db-types/orm';
 import type { DutyEvent } from '@schemas/tickets-db-types';
-import type { DutyRecurrenceMissedPayload, DutyRecurrenceOpenedPayload, DutyRecurrenceRemindedPayload } from '@schemas/tickets-api-types/types';
+import type { DutyRecurrenceDuePayload, DutyRecurrenceMissedPayload, DutyRecurrenceOpenedPayload, DutyRecurrenceRemindedPayload } from '@schemas/tickets-api-types/types';
 import type { Workers } from './deps';
 
 /** The caller DutyDeadlines' commands run as (D103). */
@@ -135,6 +135,9 @@ async function dutyDeadlinesEvent(workers: Workers, tx: TicketsDbTx, message: Du
   }
   if (message.useId === 'Recurrence' && message.kind === 'reminded') {
     return workers.dutyDeadlinesRecurrenceReminded({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as DutyRecurrenceRemindedPayload }, tx, signal);
+  }
+  if (message.useId === 'Recurrence' && message.kind === 'due') {
+    return workers.dutyDeadlinesRecurrenceDue({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as DutyRecurrenceDuePayload }, tx, signal);
   }
   if (message.useId === 'Recurrence' && message.kind === 'missed') {
     return workers.dutyDeadlinesRecurrenceMissed({ key: message.rowKey, at: Number(message.at), payload: message.payload as unknown as DutyRecurrenceMissedPayload }, tx, signal);

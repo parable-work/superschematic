@@ -119,6 +119,8 @@ export interface CalendarSourceOptions<T> {
   readonly color?: string;
   /** The field that holds a row's owner, which a read's scope "mine" keeps to the caller. */
   readonly owner?: keyof T & string;
+  /** The permission a caller needs to read any entry of the source, beside its table's audience and grants (#601). A server's calendar options may name another for the source, which wins. */
+  readonly permission?: string;
 }
 
 /**

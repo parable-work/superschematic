@@ -18,8 +18,9 @@
 //! Schedules' and Pool's (`core-seats`, `core-reconcile`, `core-schedules`,
 //! `core-pool`) among them, behaviors no engine implements, Schedules' and
 //! Pool's holding the events each command wrote, and Pool's its picks, each
-//! a command without a row (D104), and Aliased's (`core-aliased`, D147), its
-//! resolves commands without a row.
+//! a command without a row (D104), Aliased's (`core-aliased`, D147), its
+//! resolves commands without a row, and Recurrence's (`core-recurrence`,
+//! #601), its occurrences as sub-rows and its deadlines' events.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -290,6 +291,17 @@ const SCHEDULES_FLOOR: usize = 161;
 /// adapter's replay holds its own count to this one.
 const POOL_FLOOR: usize = 82;
 
+/// The steps `core-recurrence.transcript.json` holds, of the hand-written
+/// `core-recurrence.json`'s 86 (#601): its define and publish checks, eleven
+/// of them refused, and its commands: creates, updates, Recurrence's
+/// operations, refusals and repeats answered unchanged among them, and the
+/// deadlines the runner's runDues ran, each fire with the events it wrote
+/// as its `events`, each holding its row's version after the step, with its
+/// occurrences as its sub-rows and its armed deadlines, in its 4 scenarios.
+/// The ones left out are the opens and the runDues that ran nothing. An
+/// adapter's replay holds its own count to this one.
+const RECURRENCE_FLOOR: usize = 88;
+
 /// The steps `core-rollups.transcript.json` holds, of `core-rollups.json`'s
 /// 286 (D104's step 4): 72 define and publish checks and 108 creates,
 /// updates (the engine's link and unlink as updates of a relation's
@@ -536,6 +548,7 @@ fn the_hand_written_transcripts_are_what_the_writer_writes() {
         ("core-reconcile", RECONCILE_FLOOR, true),
         ("core-schedules", SCHEDULES_FLOOR, true),
         ("core-pool", POOL_FLOOR, true),
+        ("core-recurrence", RECURRENCE_FLOOR, true),
         ("core-comments-beside", COMMENTS_BESIDE_FLOOR, false),
         ("core-derived-provenance", DERIVED_PROVENANCE_FLOOR, false),
         ("core-commerce", COMMERCE_FLOOR, false),

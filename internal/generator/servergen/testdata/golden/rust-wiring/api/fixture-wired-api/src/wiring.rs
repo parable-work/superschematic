@@ -138,6 +138,8 @@ pub struct Wired {
     pub agents: Agents,
     pub inbound: Inbound,
     pub search: SearchOptions,
+    /// The implementation's `Wire`, which `handlers` asks for the
+    /// authenticator; a wiring that wraps none has no use for it.
     wire: Arc<dyn Wire>,
 }
 

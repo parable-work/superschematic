@@ -196,6 +196,10 @@ func (w *workers) FilingDeadlinesRecurrenceReminded(_ context.Context, _ orm.TxI
 	return w.hear("reminded", e.Payload.Key, e.Key.String())
 }
 
+func (w *workers) FilingDeadlinesRecurrenceDue(_ context.Context, _ orm.TxInterface, e types.FilingRecurrenceDueEvent) error {
+	return w.hear("due", e.Payload.Key, e.Key.String())
+}
+
 func (w *workers) FilingDeadlinesRecurrenceMissed(_ context.Context, _ orm.TxInterface, e types.FilingRecurrenceMissedEvent) error {
 	return w.hear("missed", e.Payload.Key, e.Key.String())
 }
@@ -442,6 +446,44 @@ func TestRecurrence(t *testing.T) {
 		}
 	})
 
+	t.Run("the due deadline fires on the worker at an occurrence due, records it and emits due (#601)", func(t *testing.T) {
+		id, column := newFiling(t, "", "")
+		// Due in ten days: its two-week window is open at once.
+		if status, body := call(t, manager, id, "set-recurrence", map[string]any{"anchor": "calendar", "rule": "FREQ=MONTHLY", "start": londonDay(10)}); status != http.StatusOK {
+			t.Fatalf("set-recurrence: %d %v", status, body)
+		}
+		first := occurrences(t, column)[0]
+		if text(first.State) != "open" || deadlines(t, column)["due"] != millis(first.DueAt) {
+			t.Fatalf("the first occurrence is %s, its due deadline at %d, want open at %d", text(first.State), deadlines(t, column)["due"], millis(first.DueAt))
+		}
+		// Its due comes: the occurrence's due is a second ago, and its
+		// deadline now.
+		if _, err := pool.Exec(ctx, `UPDATE filing_recurrence_occurrences SET due_at = now() - interval '1 second' WHERE filing_id = $1 AND key = $2`, column, first.Key); err != nil {
+			t.Fatal(err)
+		}
+		makeDue(t, column, "due")
+		workUntil(t, func() bool {
+			return slices.ContainsFunc(project.of(id), func(e event) bool { return e.kind == "due" })
+		})
+		var fell *time.Time
+		var state string
+		if err := pool.QueryRow(ctx, `SELECT state, fell_due_at FROM filing_recurrence_occurrences WHERE filing_id = $1 AND key = $2`, column, first.Key).Scan(&state, &fell); err != nil {
+			t.Fatal(err)
+		}
+		if state != "open" || fell == nil {
+			t.Errorf("the occurrence is %s, fell due at %v, want open and fallen due", state, fell)
+		}
+		var dues []string
+		for _, e := range project.of(id) {
+			if e.kind == "due" {
+				dues = append(dues, e.key)
+			}
+		}
+		if !slices.Equal(dues, []string{first.Key}) {
+			t.Errorf("heard due of %q, want %q", dues, first.Key)
+		}
+	})
+
 	t.Run("complete records what completed an occurrence and who, and an afterDone recurrence dates its next from it", func(t *testing.T) {
 		id, column := newFiling(t, "", "")
 		if status, body := call(t, manager, id, "set-recurrence", map[string]any{"anchor": "afterDone", "every": "P90D", "start": londonDay(5)}); status != http.StatusOK {
@@ -516,6 +558,16 @@ func TestRecurrence(t *testing.T) {
 		}
 		if f := filed[0]; f.Kind != "deadline" || f.Color != "filing" || f.Title != "Quarterly return" || f.Occurrence == nil || f.Occurrence.Key != londonDay(10) || f.Occurrence.State != "open" || f.AllDay {
 			t.Errorf("the filing's entry: %+v %+v", f, f.Occurrence)
+		}
+		// The filing source needs filings.work, the schema's permission
+		// (#601): a caller without it reads the contract's end alone.
+		unworked := crosstable.Caller{Principal: caller.Principal, Permissions: []string{"filings.manage"}}
+		other, err := crosstable.ReadCalendar(ctx, db.CrossTables(), unworked, crosstable.CalendarRead{From: now.UTC().Format(time.RFC3339), To: now.Add(45 * day).UTC().Format(time.RFC3339)}, crosstable.CalendarOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.ContainsFunc(other.Entries, func(e crosstable.CalendarEntry) bool { return e.Source == "filing" }) || !slices.ContainsFunc(other.Entries, func(e crosstable.CalendarEntry) bool { return e.Source == "contract" }) {
+			t.Errorf("a caller without filings.work read %+v", other.Entries)
 		}
 		var starts []string
 		for _, entry := range read.Entries {

@@ -121,6 +121,8 @@ func calendarSourceArgs(source ir.CalendarSourceDef) string {
 	text("kind", source.Kind)
 	text("color", source.Color)
 	text("owner", source.Owner)
+	// permission is the schema's permission of the source (#601).
+	text("permission", source.Permission)
 	return objectLiteral(parts)
 }
 

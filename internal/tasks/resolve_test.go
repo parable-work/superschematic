@@ -113,15 +113,17 @@ func TestSchemaResolver(t *testing.T) {
 		"schemas/services/shop-db/package.json",
 		"schemas/services/shop-db/schema.config.ts",
 		"schemas/services/shop-db/src/db.schema.ts",
-		"schemas/superschematic.toml",
 		"schemas/tsconfig.base.json",
 	}, res.Paths)
 	require.Empty(t, res.Generated)
+	// The naming file is in the set by what it says, and not as a file.
+	require.Len(t, res.Values, 1)
+	require.Equal(t, "naming schemas/superschematic.toml", res.Values[0].Name)
 
 	// A service that names none is itself and the root's shared files.
 	res, err = resolve(t, files, ir.TaskSchemaInput, `{"service":"shop-db"}`)
 	require.NoError(t, err)
-	require.Len(t, res.Paths, 6)
+	require.Len(t, res.Paths, 5)
 
 	// The data forms name a service by its directory's name.
 	files["schemas/services/shop/schema.config.yaml"] = MemoryFile{Data: []byte("name: shop\nkind: General\ndependencies:\n  - name: shop-db\n    kind: DB\n")}
