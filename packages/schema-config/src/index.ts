@@ -184,7 +184,7 @@ export type SqlSearchConfig = {
    */
   readonly foldDiacritics?: boolean;
   /**
-   * Search the database's @searchable tables through its environment's search index, which the stack's search database holds (@stack({ search }), #740): its worker copies each index row there after its commit, its tables' triggers enqueue every write of a row and its grants table's every write of a grant. Postgres alone. Unset is false.
+   * Search the database's searchable tables through its environment's search index, which the stack's search database holds (@stack({ search }), #740): its worker copies each index row there after its commit, its tables' triggers enqueue every write of a row and its grants table's every write of a grant. Postgres alone. Unset is false.
    */
   readonly environment?: boolean;
   /**

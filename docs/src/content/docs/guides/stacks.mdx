@@ -425,7 +425,7 @@ export abstract class Production {}
 export abstract class Preview extends Staging {}
 ```
 
-- **`@stack({ deploy, expose, origins, images })`** declares the stack, once per
+- **`@stack({ deploy, expose, origins, images, search })`** declares the stack, once per
   schema. `deploy` names the entry points, API and DB handles; every
   service they reach through `authDb`, DB dependencies and `calls` joins
   the stack, so `shop-db` needs no mention. `expose` names what is
@@ -436,6 +436,9 @@ export abstract class Preview extends Staging {}
   ShopWeb, apis: [ShopApi] }` ([Static sites](#static-sites)).
   `images` list what the stack adds to a deployable's image, `{ of:
   ShopApi, packages: ["chromium"] }` ([Add to an image](#add-to-an-image)).
+  `search` names the search database, a DB handle that joins the stack
+  and holds the search index of every database of the environment
+  ([Across the databases of an environment](/superschematic/guides/database-tables/#across-the-databases-of-an-environment), #740).
 - **`@server({ serves })`** declares one server for the listed APIs in
   place of their default servers. Here `Orders` serves `shop-orders`, and
   takes its edges from it: `shop-db` through `authDb`, `shop-api` through
@@ -1513,6 +1516,7 @@ The resolved environment is what a provisioner reads, and it is stable:
 fields in a fixed order and map keys sorted, so a wiring change reads as a
 diff in review. Its top-level keys are `version`, `stack`, `environment`, `extends`,
 `target`, `provisioner`, `values`, `parameters`, `domain`, `dns`,
+`search` (the database that holds the environment's search index, #740),
 `deployables`, `disabled` (what the settings turn off and so place
 nowhere, a memory store with `enabled: false`),
 `edges`, `secrets`, `resources` (the resource graph) and

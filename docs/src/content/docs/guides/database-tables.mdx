@@ -657,7 +657,7 @@ search by vector, are Postgres's alone; SQLite refuses them.
 
 | Settled | Why |
 | --- | --- |
-| the index lives in each database | the access check reads each row's audience and, for a grant, the row itself, in the query that ranks |
+| the index lives in each database, unless the stack names a search database ([Across the databases of an environment](#across-the-databases-of-an-environment)) | the access check reads each row's audience and, for a grant, the row itself, in the query that ranks |
 | a vector costs 8 bytes a dimension a row, a model call per changed text and one per search | a 1536-dimension model is about 12 GB a million rows; a search reads at most 200 vectors |
 | leaving out the option switches embeddings off | no call is made and no search re-ranks; `reindexSearch` embeds every row again after a change of model |
 
@@ -780,6 +780,83 @@ let routes = search_routes(SearchRoutes::new(types::orm::sqlite::tables(database
 Each function runs on the connection it is given, in the caller's
 transaction, and answers at once; a request's `vector` is refused as
 invalid and embeddings in the options as a definition's error.
+
+### Across the databases of an environment
+
+A stack whose environment has several databases searches them all in one
+index (#740). The stack names the database that holds it, the search
+database, and every database of the stack with a `@searchable` table
+copies its index rows there:
+
+```ts
+// The search database's config: it holds the environment's index.
+outputs: { sql: { search: { environmentIndex: true } } }
+// Each source database's config: its worker copies its index rows there.
+outputs: { sql: { search: { environment: true } } }
+
+// The stack's schema.
+@stack({ deploy: [RecordsApi, PlannerApi], search: SearchDb })
+export abstract class Records {}
+```
+
+The build adds `environment_search_index` to the search database: a row
+per record of every source, as the source's own `search_index` holds it,
+with the database it came from (its name in the stack), the table, the key
+and the object it indexes (`row`: the record with its conversation and
+files), its audience, its grants' reach, and a version. A source keeps its
+own index too; it is what the copy is read from. The stack refuses a
+search database without the index, and a database with a `@searchable`
+table that does not copy into it.
+
+A source's triggers enqueue every write of a row on its declaration's
+queue, a delete, a soft delete and an audience change among them, and its
+grants table's trigger every write of a grant. Its worker hands each
+message to `indexEnvironmentSearch`, which indexes the row in its database
+as `indexSearch` does and then copies it:
+
+```ts
+import { indexEnvironmentSearch, searchEnvironment } from "@superschematic/http-runtime/postgres";
+import { createOrm as createSearchOrm, environmentSearch } from "@acme/search-db-types/orm";
+
+const index = { orm: createSearchOrm(searchPool), definition: environmentSearch };
+// The worker of the records database's SearchIndexing queue.
+await indexEnvironmentSearch(deps.orm, { database: "records-db", index }, message);
+// A search of every database, as the caller.
+const { items, total } = await searchEnvironment(index, { "records-db": recordsOrm, "planner-db": plannerOrm }, principal, { q: "walnut desk" });
+// items: [{ database: "planner-db", table: "Task", key, title, matched, snippet, place }, ...]
+```
+
+`searchEnvironment` runs the query a database's search runs, over the
+copy: the same plan, ranking and snippets, then database, table and key.
+Over one database's rows it answers what `searchTables` answers, and the
+parity file's searches give the same titles and totals over either.
+`databases` keeps a search to some of them, and `permissions` names a
+table's permission per database.
+
+Access is checked inside the query, as in a database's index:
+
+- a user's audience on the copy of each row's;
+- a party's or an agent run's grants on the row's reach: an entry for a
+  grant's own target, and one for each path of its role that reaches the
+  row, copied from the source's grants that are not revoked or ended by
+  their date, so an agent run's narrowed paths reach only what they name;
+- whether a grant is live now stays the authenticator's.
+
+| Settled | Why |
+| --- | --- |
+| the copy is written after the source's commit, in a transaction of the source that holds an advisory lock of the row, with a version from the source's sequence `search_environment_version` | a transaction across two databases is not to be had; a write over a higher version is held off, so a late copy never overwrites a newer one |
+| a row that is gone becomes a tombstone: no text, no embedding, no audience, no reach | no search finds it, and its version holds off a late copy of the row; `reindexEnvironmentSearch` deletes the tombstones |
+| a grant's write rewrites its entries across its database's rows, under the database's grants lock | a revoked grant's rows stop showing once the worker drains, without each being written again |
+| embeddings are the source's, copied with their model; the exact read of D155's `DOUBLE PRECISION[]` | optional as in a database's index; pgvector waits until a search by vector outgrows the exact read |
+| Postgres alone | a copy holds its lock across its write, which D1 cannot; a database on SQLite or D1 keeps its own index |
+
+A grant's reach through a row two steps away, a request's through its
+unit's contract, is copied when the row itself is next written:
+`reindexEnvironmentSearch(orm, copy)` copies every row of a source again,
+which a database that joins an environment needs once. A generated server
+does not yet connect to the search database, nor run
+`indexEnvironmentSearch` in its worker, and Go and Rust have no
+environment search yet (#740); an implementation wires them itself.
 
 ## Pages
 

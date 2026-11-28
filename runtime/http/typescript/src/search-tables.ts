@@ -73,6 +73,12 @@ reads the row and writes its index row with the row's access columns in
 one statement, so on D1, which holds no transaction open, an audience
 change between its reads and its write is still copied as it stands.
 
+An environment whose stack names a search database (#740) searches its
+databases through one copy of their index rows, which each source's worker
+writes (search-environment.ts); its search ranks that copy with rankIndex,
+the query a search of one database's index runs here, so both answer the
+same for the same rows.
+
 Nothing here imports pg or Hono: the ORM is the generated createOrm's, taken
 as a value; searchRoutes answers a fetch Request with a Response.
 */
