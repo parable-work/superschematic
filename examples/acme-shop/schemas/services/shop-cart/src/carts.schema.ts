@@ -1,13 +1,23 @@
 import { Generic, Identity, Temporal } from "superscalar";
 import { Nullable, Validate } from "@superschematic/schema";
-import { Authenticated, HttpMethod, QueryParam, publicRoute, requirePermission, rest } from "@superschematic/api";
+import {
+  Authenticated,
+  HttpMethod,
+  QueryParam,
+  publicRoute,
+  requirePermission,
+  rest,
+  source,
+  tableOperation
+} from "@superschematic/api";
+import { CollectionPoint } from "@acme/shop-db";
 
 // One line of a cart: a product, how many, and, once the checkout holds
 // it, the price it was held at.
 export abstract class CartLine {
   productId: Identity.UUID;
   quantity: Generic.Int64;
-  // pending until the checkout starts, then held (Holds.items).
+  // pending until the checkout starts, then held (its Holds item).
   state: string;
   unitPriceCents: Nullable<Generic.Int64>;
 }
@@ -78,6 +88,31 @@ export class PickupSlots {
     from: QueryParam<Temporal.DateTime>,
     days: QueryParam<Nullable<Validate<number, { min: 1; max: 7 }>>>
   ): PickupSlot[] {
+    throw new Error("schema declaration only");
+  }
+}
+
+// A counter shoppers collect orders from: shop-db's CollectionPoint, whose
+// Calendar opens its pickup slots.
+@source(CollectionPoint)
+export abstract class CollectionPointView {
+  id: Identity.UUID;
+  name: string;
+}
+
+@source(CollectionPoint)
+export abstract class OpenCollectionPointInput {
+  name: Validate<string, { minLength: 1; maxLength: 200 }>;
+}
+
+// Staff who hold calendar.manage open a counter, whose slots
+// listPickupSlots then lists. The build serves it from the CollectionPoint
+// table (D106): shop-cart's implementation has no method for it.
+export class CollectionPoints extends Authenticated {
+  @rest(HttpMethod.POST, "collection-points")
+  @requirePermission(["calendar.manage"])
+  @tableOperation()
+  openCollectionPoint(input: OpenCollectionPointInput): CollectionPointView {
     throw new Error("schema declaration only");
   }
 }

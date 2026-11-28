@@ -52,7 +52,8 @@ use std::time::{Duration, Instant};
 use bytes::BytesMut;
 use postgres::fallible_iterator::FallibleIterator;
 use postgres::types::{to_sql_checked, Format, FromSql, IsNull, Kind, ToSql, Type};
-use postgres::{Client, Config, NoTls, Statement};
+use postgres::{Client, Config, Statement};
+use superschematic_engine_pg::{classify, tls_for, Class, Tls};
 
 use crate::conn::{Conn, Failure, Outcome, Pool, RawConn};
 use crate::db::{Backend, Db, DEFAULT_BUSY_TIMEOUT};
@@ -175,15 +176,21 @@ const LISTEN_POLL: Duration = Duration::from_millis(100);
 
 impl Db {
     /// Opens the storage on the Postgres database `url` names (a
-    /// `postgres://` URL or a libpq key-value string; TLS is not yet
-    /// supported, so `sslmode=disable`, or a socket the platform secures),
-    /// creating its schema if absent.
+    /// `postgres://` URL or a libpq key-value string), creating its schema
+    /// if absent. Its `sslmode` is read as libpq reads it: `disable`,
+    /// `prefer` (the default: TLS when the server offers it), `require`,
+    /// and `verify-ca` and `verify-full`, which check the server's
+    /// certificate against the system's roots
+    /// ([`superschematic_engine_pg::read_ssl_mode`]).
     pub fn open_postgres(url: &str, options: PostgresOptions) -> Result<Db> {
         check_schema(&options.schema)?;
         if options.pool_max == 0 {
             return Err(Error::usage("pool_max must be at least 1"));
         }
         let schema = options.schema.clone();
+        let (url, tls) = tls_for(url).map_err(|error| Error::Connection {
+            message: error.to_string(),
+        })?;
         let mut config: Config = url.parse().map_err(pg_error)?;
         if config.get_connect_timeout().is_none() {
             config.connect_timeout(options.connect_timeout);
@@ -198,6 +205,7 @@ impl Db {
             .unwrap_or(options.connect_timeout);
         let listen_config = Connecting {
             config: config.clone(),
+            tls: tls.clone(),
             password: options.password.clone(),
         };
         // Every execution is planned for its values: the engine's reads
@@ -221,6 +229,7 @@ impl Db {
         config.options(&options_text);
         let mut config = Connecting {
             config,
+            tls,
             password: options.password.clone(),
         };
         let mut first = PgConn::connect(&config, deadline)?;
@@ -873,11 +882,13 @@ fn numeric(raw: &[u8]) -> Result<SqlValue, String> {
         .map_err(|_| format!("a numeric value {out} that is no number"))
 }
 
-/// What a connection opens with: the client's config, and the provider of
-/// its password when the host gives one.
+/// What a connection opens with: the client's config, the TLS its
+/// `sslmode` asks for, and the provider of its password when the host
+/// gives one.
 #[derive(Clone)]
 struct Connecting {
     config: Config,
+    tls: Tls,
     password: Option<PasswordProvider>,
 }
 
@@ -886,14 +897,14 @@ impl Connecting {
     // on the calling thread.
     fn connect(&self) -> std::result::Result<Client, Error> {
         match &self.password {
-            None => self.config.connect(NoTls).map_err(pg_error),
+            None => self.config.connect(self.tls.clone()).map_err(pg_error),
             Some(provider) => {
                 let password = provider.password().map_err(|message| Error::Connection {
                     message: format!("the password of a Postgres connection: {message}"),
                 })?;
                 let mut config = self.config.clone();
                 config.password(password);
-                config.connect(NoTls).map_err(pg_error)
+                config.connect(self.tls.clone()).map_err(pg_error)
             }
         }
     }
@@ -930,45 +941,36 @@ fn connect_within(config: &Connecting, deadline: Duration) -> Result<Client> {
     }
 }
 
+// pg_error maps a client error to the storage's, by its SQLSTATE's class
+// (superschematic_engine_pg::Class says which code is which): busy, a lost
+// session as a connection failure, a unique violation with its index, and
+// any other refusal of the server's as a database error. An error of the
+// client's own, with no SQLSTATE, is a connection failure.
 fn pg_error(error: postgres::Error) -> Error {
-    if let Some(db) = error.as_db_error() {
-        let state = db.code().code().to_owned();
-        let message = db.message().to_owned();
-        return match state.as_str() {
-            // lock_not_available (a lock_timeout), deadlock_detected,
-            // serialization_failure: another writer held what this one
-            // needed; query_canceled: the server's statement_timeout, most
-            // often a wait for a lock too, or an administrator's cancel.
-            "55P03" | "40P01" | "40001" | "57014" => Error::Busy {
-                code: Some(DbCode::Postgres(state)),
-                message,
-            },
-            // The server ended the session: connection_exception (class
-            // 08), admin_shutdown (pg_terminate_backend, a smart or fast
-            // shutdown), crash_shutdown, cannot_connect_now (starting or
-            // in recovery), idle_session_timeout and
-            // idle_in_transaction_session_timeout. Its transaction is
-            // gone with it.
-            code if code.starts_with("08")
-                || matches!(code, "57P01" | "57P02" | "57P03" | "57P05" | "25P03") =>
-            {
-                Error::Connection {
-                    message: format!("{message} (SQLSTATE {state})"),
-                }
-            }
-            "23505" => Error::Unique {
-                index: db.constraint().map(str::to_owned),
-                code: DbCode::Postgres(state),
-                message,
-            },
-            _ => Error::Database {
-                code: DbCode::Postgres(state),
-                message,
-            },
+    let Some(db) = error.as_db_error() else {
+        return Error::Connection {
+            message: error.to_string(),
         };
-    }
-    Error::Connection {
-        message: error.to_string(),
+    };
+    let state = db.code().code().to_owned();
+    let message = db.message().to_owned();
+    match classify(db) {
+        Class::Busy => Error::Busy {
+            code: Some(DbCode::Postgres(state)),
+            message,
+        },
+        Class::Connection => Error::Connection {
+            message: format!("{message} (SQLSTATE {state})"),
+        },
+        Class::Conflict if state == "23505" => Error::Unique {
+            index: db.constraint().map(str::to_owned),
+            code: DbCode::Postgres(state),
+            message,
+        },
+        Class::Conflict | Class::Privilege | Class::Other => Error::Database {
+            code: DbCode::Postgres(state),
+            message,
+        },
     }
 }
 

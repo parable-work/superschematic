@@ -211,7 +211,7 @@ func TestARustAppOnASQLiteFileIsRefused(t *testing.T) {
 	in.Worker = nil
 	in.App = &servergen.AppInput{Name: "Desk", Implementation: servergen.RustImplementation{Crate: "desk", Lib: "desk"}}
 	_, err := servergen.PlanRust(in)
-	want := "stack timers-stack: app fixture-timers-api-desk serves fixture-timers-api on fixture-timers-db, whose DB service lists sqlite first; a Rust server, job and worker open a SQLite file, and a deriver, an engine's runner and an app do not yet (D116)"
+	want := "stack timers-stack: app fixture-timers-api-desk serves fixture-timers-api on fixture-timers-db, whose DB service lists sqlite first; a Rust server, job and worker open a SQLite file, and a deriver and an app do not yet (D116)"
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("PlanRust = %v, want %q", err, want)
 	}

@@ -20,7 +20,6 @@ func TestReleasePins(t *testing.T) {
 		d.HTTPRuntimeGoModule:   "v1.2.3",
 		d.VersionGraphGoModule:  "v1.2.3",
 		d.RulesGoModule:         "v1.2.3",
-		d.EngineGoModule:        "v1.2.3",
 		d.ScalarGoModule:        "v0.0.0-20260928143325-10cf493f485e",
 	}
 	without := func(modules ...string) Pins {
@@ -49,7 +48,7 @@ func TestReleasePins(t *testing.T) {
 		{"an empty naming file", Naming{}, LocalPaths{}, rel, all},
 		{"[paths] names checkouts", d, LocalPaths{ScalarGo: "/repo/third_party/superscalar/go", SchemaIR: "/repo/ir"}, rel, without(d.ScalarGoModule, d.SchemaIRGoModule)},
 		{"every [paths] key", d, LocalPaths{
-			ScalarGo: "/s", SchemaIR: "/i", SchemaRuntimeGo: "/r", HTTPRuntimeGo: "/h", VersionGraphGo: "/v", EngineGo: "/e", RulesGo: "/b",
+			ScalarGo: "/s", SchemaIR: "/i", SchemaRuntimeGo: "/r", HTTPRuntimeGo: "/h", VersionGraphGo: "/v", RulesGo: "/b",
 		}, rel, Pins{}},
 		{"renamed modules", renamed, LocalPaths{}, rel, without(d.HTTPRuntimeGoModule, d.ScalarGoModule)},
 		{"no superscalar version", d, LocalPaths{}, release.Release{Version: "1.2.3"}, without(d.ScalarGoModule)},

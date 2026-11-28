@@ -242,7 +242,7 @@ func (d *declarations) writeDef(name string, schema any) error {
 				return err
 			}
 			d.sawBehaviorList = true
-			d.writeComment("  ", "The behaviors the type composes, in the order their checks run. A registry admits the behaviors it registers: the core's, which the engine implements, and its extensions'.")
+			d.writeComment("  ", "The behaviors the type composes, in the order their checks run. A registry admits the behaviors it registers: the core's and its extensions'.")
 			typ = "BehaviorRef[]"
 		case name == "BehaviorRef" && key == "name":
 			if err := d.behaviorName(props[key], propAt); err != nil {
@@ -262,7 +262,7 @@ func (d *declarations) writeDef(name string, schema any) error {
 			if err != nil {
 				return err
 			}
-			d.writeComment("  ", "True for a use a DB table implements (D103), `implements Timers<Ticket, Config>`: anchored on the type, on a table that stays a table. A use on the whole type without it is @behavior's, which makes the type an engine type.")
+			d.writeComment("  ", "True for a use a DB table implements (D103), `implements Timers<Ticket, Config>`: anchored on the type, on a table that stays a table. A use on the whole type without it is @behavior's, which a General schema takes (D16) and a DB type does not.")
 		case name == "BundleRef" && key == "name":
 			d.sawBundleName = true
 			d.writeComment("  ", "The bundle's registered name (D103, step 5). A registry admits the bundles it declares: the core's Reservation, Barrier, Mailbox and Assignment.")

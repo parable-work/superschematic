@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 	"reflect"
 	"strings"
 	"unicode/utf8"
@@ -385,7 +385,7 @@ func BatchFromYAMLNonStrict(data []byte) (*Batch, error) {
 	return decoded, nil
 }
 
-// Job - A job a worker claims from its topic's queue and holds under a lease, within a CPU budget, retried per failure class.
+// Job - A job a worker holds under a lease, within a CPU budget, retried per failure class.
 type Job struct {
 	Title string `json:"title"`
 
@@ -1322,7 +1322,7 @@ func RequestFromYAMLNonStrict(data []byte) (*Request, error) {
 	return decoded, nil
 }
 
-// Ticket - A ticket that moves through its states, links to its project, its spec and its reviewers, and keeps deadlines.
+// Ticket - A ticket that moves through its states, waits for the tickets that block it, and keeps deadlines.
 type Ticket struct {
 	Title string `json:"title"`
 

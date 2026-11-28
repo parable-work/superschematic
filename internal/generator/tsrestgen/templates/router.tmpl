@@ -140,8 +140,17 @@ import {
   identityHandler,
 {{- end }}
   identityRouterOptions,
+{{- if .Identity.OAuth }}
+  mountOAuthRoutes,
+{{- if .MCP }}
+  oauthChallenge,
+{{- end }}
+{{- end }}
   routesOf,
   type IdentityServiceOptions,
+{{- if .Identity.OAuth }}
+  type OAuthOptions,
+{{- end }}
 {{- if .Identity.Registration }}
   type RegistrationOptions,
 {{- end }}
@@ -409,14 +418,36 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
  *
  * register admits users as identityRegistration says.
 {{- end }}
+{{- if .Identity.OAuth }}
+ *
+ * The API is its own OAuth authorization server, as identityOAuth says
+ * (#695); options.oauth adds to it, a metadata fetcher for one.
+{{- end }}
  */
 export function identityService(options: Omit<IdentityServiceOptions, 'routes'{{ if .Identity.Registration }} | 'registration'{{ end }}>): IdentityService {
-  return new IdentityService({ ...options, routes: routesOf(operationSpecs){{ if .Identity.Registration }}, registration: identityRegistration{{ end }} });
+  return new IdentityService({
+    ...options,
+    routes: routesOf(operationSpecs),
+{{- if .Identity.Registration }}
+    registration: identityRegistration,
+{{- end }}
+{{- if .Identity.OAuth }}
+    oauth: { ...identityOAuth, ...options.oauth },
+{{- if .Identity.OAuthAdministration }}
+    oauthAdministration: true,
+{{- end }}
+{{- end }}
+  });
 }
 {{- if .Identity.Registration }}
 
 /** How register admits users, as the API's @userSessions declares it (D81). */
 export const identityRegistration: RegistrationOptions = {{ .Identity.Registration }};
+{{- end }}
+{{- if .Identity.OAuth }}
+
+/** The API's OAuth authorization server, as its @userSessions({ oauth }) declares it (#695). */
+export const identityOAuth: OAuthOptions = {{ .Identity.OAuth }};
 {{- end }}
 
 /**
@@ -513,6 +544,11 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
   for (const spec of Object.values(operationSpecs)) cors(spec);
 {{- if .MCP }}
   cors({ method: 'POST', path: MCP_PATH });
+{{- end }}
+{{- if .Identity.OAuth }}
+  // The OAuth authorization server's discovery documents and protocol
+  // endpoints (#695), when the service has one.
+  if (runtime.identity.oauth) mountOAuthRoutes(router, runtime.identity, runtime);
 {{- end }}
 {{- end }}
 {{- range .Endpoints }}
@@ -739,7 +775,12 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     mcpTools,
     {{ $runtime }},
     { api: {{ tsString .SchemaName }}, version: options.openAPIVersion || DEFAULT_OPENAPI_VERSION, requiresAuth: {{ .MCP.RequiresAuth }} },
+{{- if and .Identity .Identity.OAuth }}
+    // The 401 names where a client signs in (#695).
+    { ...options.mcp, challenge: options.mcp?.challenge ?? oauthChallenge(runtime.identity) }
+{{- else }}
     options.mcp
+{{- end }}
   );
 {{- end }}
   return router;

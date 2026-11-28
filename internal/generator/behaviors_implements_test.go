@@ -24,19 +24,20 @@ func TestGeneratorsRefuseAnImplementedBehaviorTheyDoNotRender(t *testing.T) {
 	}
 	reg := CoreRegistry(naming.Default())
 	var rendering []registry.GeneratorSpec
-	for _, name := range []string{typesGenerator, "sql", ormGenerator, "api", "sdks", "envConfig", enginedocGenerator, projectengineGenerator} {
+	for _, name := range []string{typesGenerator, "sql", ormGenerator, "api", "sdks", "envConfig", rulescoreGenerator} {
 		spec, ok := reg.Generator(name)
 		if !ok || !spec.RendersFieldBehaviors {
 			t.Fatalf("generator %s: registered %v, renders a table's behaviors %v", name, ok, spec.RendersFieldBehaviors)
 		}
 		rendering = append(rendering, spec)
 	}
-	if err := refuseBehaviors(db, rendering); err != nil {
+	dbRun := run{registry.GenerateContext{Schema: db, Registry: reg}}
+	if err := dbRun.refuseBehaviors(rendering); err != nil {
 		t.Fatalf("refuseBehaviors with the generators that render a table's behaviors: %v", err)
 	}
 	extension := registry.GeneratorSpec{Name: "acme-docs"}
 	want := "generator: acme-docs does not render behaviors yet: type Invoice implements behavior Timers (D103)"
-	if err := refuseBehaviors(db, append(rendering, extension)); err == nil || err.Error() != want {
+	if err := dbRun.refuseBehaviors(append(rendering, extension)); err == nil || err.Error() != want {
 		t.Errorf("refuseBehaviors with an extension's generator: %v, want %q", err, want)
 	}
 
@@ -53,7 +54,7 @@ func TestGeneratorsRefuseAnImplementedBehaviorTheyDoNotRender(t *testing.T) {
 		Dependencies: []schemaconfig.ServiceDependency{{Name: "fixture-timers-db", Kind: ir.SchemaKindDB}}}
 	r := run{registry.GenerateContext{Schema: schema, Config: cfg, Registry: reg, LoadDependency: load, Options: registry.Options{LoadDependency: load}}}
 	want = "generator: acme-docs does not render behaviors yet: tickets-api imports fixture-timers-db.Ticket, which implements behavior Timers (D103)"
-	if err := r.refuseImportedEngineTypes([]registry.GeneratorSpec{extension}); err == nil || err.Error() != want {
-		t.Errorf("refuseImportedEngineTypes with an extension's generator: %v, want %q", err, want)
+	if err := r.refuseImportedBehaviorTypes([]registry.GeneratorSpec{extension}); err == nil || err.Error() != want {
+		t.Errorf("refuseImportedBehaviorTypes with an extension's generator: %v, want %q", err, want)
 	}
 }

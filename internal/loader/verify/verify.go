@@ -137,6 +137,12 @@ type Input struct {
 	// (D147, D182, sqlite_features.go).
 	TypeScriptServer bool
 
+	// MCPServer is an API whose enabled server serves MCP (outputs.api.mcp),
+	// which the loader reads from the config. @userSessions({ oauth })
+	// (#695) needs it in a TypeScript server, whose MCP endpoint the grants
+	// sign Claude's connectors in to.
+	MCPServer bool
+
 	// DatabaseDialects are the SQL dialects the config of the API's
 	// database lists (outputs.sql.dialects), postgres alone when it lists
 	// none, which the loader reads from the config of the DB service beside

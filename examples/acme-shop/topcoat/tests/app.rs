@@ -47,7 +47,6 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread::sleep;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -60,7 +59,7 @@ use acme_shop_orders_topcoat::procedures::{OrderListOrdersArgsRecord, OrderPlace
 use acme_shop_orders_topcoat::records::{OrderViewPageRecord, PlaceOrderInputRecord, PlaceOrderLineRecord, ShippingAddressRecord};
 use acme_shop_orders_topcoat::views::order_status_label;
 use acme_shop_topcoat::{
-    CATALOG, Engine, PRODUCT, Product, add_people, app, open_engine, product, shop_in_memory, stock_sqlite,
+    CATALOG, PRODUCT, Product, add_people, app, product, shop_in_memory, stock_sqlite,
 };
 use topcoat::asset::{AssetConfig, Manifest};
 use topcoat::context::Cx;
@@ -116,7 +115,7 @@ const SCRIPT: &str = r#"<script type="module" src="/_topcoat/assets/topcoat.js""
 async fn shop() -> Router {
     let users = users_in_memory(CONFIG).unwrap();
     add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
-    app(Arc::new(shop_in_memory()), users, shop_engine(), Some(runtime_assets()))
+    app(Arc::new(shop_in_memory()), users, Some(runtime_assets()))
 }
 
 /// A new SQLite file of shop-db's tables at `name`: a copy of the file
@@ -138,13 +137,6 @@ fn sqlite_file(name: &str) -> PathBuf {
     path
 }
 
-/// shop-db's engine, on a SQLite file of its own, as src/main.rs opens it.
-fn shop_engine() -> Arc<Engine> {
-    static ENGINES: AtomicUsize = AtomicUsize::new(0);
-    let n = ENGINES.fetch_add(1, Ordering::Relaxed);
-    open_engine(temp_path(&format!("engine-{n}.db"))).expect("shop-db's engine opens")
-}
-
 /// A path of this test run's own, with nothing at it.
 fn temp_path(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("acme-shop-topcoat-{}", std::process::id()));
@@ -157,7 +149,7 @@ fn temp_path(name: &str) -> PathBuf {
 /// The app over the SQLite shop at `path`, as src/main.rs opens it.
 async fn sqlite_shop(path: &Path) -> Router {
     let (shop, users) = open_sqlite(path).await;
-    app(Arc::new(shop), users, shop_engine(), Some(runtime_assets()))
+    app(Arc::new(shop), users, Some(runtime_assets()))
 }
 
 /// The SQLite shop at `path` and its users, the file's, with the demo's
@@ -226,7 +218,7 @@ async fn each_shop(file: &str, reviews: &[(&str, &str)]) -> [(&'static str, Rout
     let users = users_in_memory(CONFIG).unwrap();
     add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
     add_alan_and_ada(&users).await;
-    let in_memory = app(Arc::new(memory), users, shop_engine(), Some(runtime_assets()));
+    let in_memory = app(Arc::new(memory), users, Some(runtime_assets()));
 
     let (sqlite, users) = open_sqlite(&sqlite_file(file)).await;
     add_alan_and_ada(&users).await;
@@ -238,7 +230,7 @@ async fn each_shop(file: &str, reviews: &[(&str, &str)]) -> [(&'static str, Rout
         sqlite.add_user(&id, &format!("reviewer{n}@example.com"), "A reviewer").unwrap();
     }
     write_reviews(&sqlite, reviews).await;
-    [("in memory", in_memory), ("over SQLite", app(Arc::new(sqlite), users, shop_engine(), Some(runtime_assets())))]
+    [("in memory", in_memory), ("over SQLite", app(Arc::new(sqlite), users, Some(runtime_assets())))]
 }
 
 struct Response {
@@ -746,7 +738,7 @@ async fn an_old_files_shopper_role_stops_showing_every_customers_orders() {
     add_holding(&users, &old.id, ALAN).await;
     let shop = SqliteShop::open(&url).unwrap();
     stock_sqlite(&shop).unwrap();
-    let router = app(Arc::new(shop), users, shop_engine(), Some(runtime_assets()));
+    let router = app(Arc::new(shop), users, Some(runtime_assets()));
     let alans = place_order(&router, &sign_in_as(&router, ALAN).await).await;
     let id = alans.trim_start_matches("/orders/").to_owned();
     let grace = sign_in(&router).await;
@@ -763,7 +755,7 @@ async fn an_old_files_shopper_role_stops_showing_every_customers_orders() {
     let roles = users.store().list_roles().await.unwrap();
     let shopper = roles.iter().find(|role| role.name == "shopper").expect("the shopper role");
     assert_eq!((shopper.id.as_str(), shopper.permissions.as_slice()), (old.id.as_str(), &SHOPPER_PERMISSIONS.map(String::from)[..]));
-    let router = app(Arc::new(shop), users, shop_engine(), Some(runtime_assets()));
+    let router = app(Arc::new(shop), users, Some(runtime_assets()));
 
     // Grace's session, from before, now reads her own orders alone: Alan's
     // is the 404 of one no one placed, on its page and through the API,
@@ -887,7 +879,7 @@ async fn the_console_shows_what_the_shopper_may_list() {
     let cookie = signed_in.cookie.expect("the session cookie");
     let index = send(&router, "GET", "/console", Some(&cookie), None).await;
     // After the resources, the shopper's account and the button that signs
-    // them out; neither the engine's types nor the users and roles, which a
+    // them out; not the users and roles, which a
     // shopper may not read.
     let links = format!(r#"<li><a href="/console/orders"><span class="ss-icon" data-icon="receipt" aria-hidden="true"></span>Orders</a></li>{products}"#);
     let account = r#"<li><a href="/console/account">Account</a></li>"#;
@@ -1758,7 +1750,7 @@ async fn the_reviews_shard_is_live() {
 async fn without_the_runtime_the_pages_have_no_script() {
     let users = users_in_memory(CONFIG).unwrap();
     add_shopper(&users, "grace@example.com", "Grace Hopper", "grace's password").await.unwrap();
-    let router = app(Arc::new(shop_in_memory()), users, shop_engine(), None);
+    let router = app(Arc::new(shop_in_memory()), users, None);
     let cookie = sign_in(&router).await;
     place_order(&router, &cookie).await;
     for path in ["/reviews", "/orders", "/console/orders", &format!("/console/products/{PRODUCT}/reviews")] {

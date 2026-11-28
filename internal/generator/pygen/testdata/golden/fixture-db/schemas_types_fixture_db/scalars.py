@@ -136,14 +136,14 @@ IdentityName = Annotated[
 ]
 
 # Identity.Slug - A URL friendly version of a string
-_IdentitySlug_pattern = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", re.ASCII)
+_IdentitySlug_pattern = re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*\Z")
 
 def _validate_identity_slug_pattern(v: Any) -> Any:
     """Validate Identity.Slug against its pattern."""
     if v is None:
         return v
     s = str(v)
-    if not _IdentitySlug_pattern.match(s):
+    if not _IdentitySlug_pattern.search(s):
         raise ValueError("invalid format for Identity.Slug")
     return v
 
@@ -165,21 +165,21 @@ IdentitySlug = Annotated[
         description="A URL friendly version of a string",
         max_length=255,
         min_length=1,
-        pattern=re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*$", re.ASCII),
+        pattern=re.compile(r"^[a-z0-9]+(?:[-_][a-z0-9]+)*\Z"),
     ),
     AfterValidator(_validate_identity_slug_pattern),
     AfterValidator(_validate_identity_slug_length),
 ]
 
 # Identity.UUID - UUID v4 with automatic base62 encoding for client-facing APIs
-_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII)
+_IdentityUUID_pattern = re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z")
 
 def _validate_identity_uuid_pattern(v: Any) -> Any:
     """Validate Identity.UUID against its pattern."""
     if v is None:
         return v
     s = str(v)
-    if not _IdentityUUID_pattern.match(s):
+    if not _IdentityUUID_pattern.search(s):
         raise ValueError("invalid format for Identity.UUID")
     return v
 
@@ -188,7 +188,7 @@ IdentityUUID = Annotated[
     str,
     Field(
         description="UUID v4 with automatic base62 encoding for client-facing APIs",
-        pattern=re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", re.ASCII),
+        pattern=re.compile(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z"),
     ),
     BeforeValidator(_custom_parse_identity_uuid),
     AfterValidator(_validate_identity_uuid_pattern),

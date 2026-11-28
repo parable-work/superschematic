@@ -1005,6 +1005,26 @@ func TestValidateInput_InvalidFieldPatternFailsClosed(t *testing.T) {
 	assert.Equal(t, "pattern", brokenErrs[0].Validator)
 }
 
+// A scalar's pattern that does not compile fails closed as a field's does:
+// a schema can declare a scalar of its own with any pattern, so New must
+// not panic on it, and every present value is a pattern error.
+func TestValidateInput_InvalidScalarPatternFailsClosed(t *testing.T) {
+	s := ir.NewSchema("test", ir.SchemaKindGeneral)
+	s.Scalars["Acme.Code"] = &ir.ScalarDef{Name: "Acme.Code", Primitive: "String", Pattern: `[`}
+	s.Inputs["CodeInput"] = &ir.TypeDef{
+		Name:   "CodeInput",
+		Kind:   ir.TypeKindInput,
+		Fields: []*ir.FieldDef{{Name: "code", TypeRef: ir.TypeRef{Name: "Acme.Code"}}},
+	}
+	var v *Validator
+	require.NotPanics(t, func() { v = New(s) })
+
+	errs := v.ValidateInput("CodeInput", map[string]any{"code": "x"})
+	codeErrs := errs.GetFieldErrors("code")
+	require.Len(t, codeErrs, 1)
+	assert.Equal(t, "pattern", codeErrs[0].Validator)
+}
+
 func TestValidateInput_FieldStringLengths(t *testing.T) {
 	v := New(fieldConstraintSchema())
 

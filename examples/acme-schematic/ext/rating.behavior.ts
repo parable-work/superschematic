@@ -1,6 +1,6 @@
 // acme.Rating's class (D103's step 5): the build derives
 // rating.behavior.json from it, the declaration this package embeds and
-// registers, and the acme-behaviors crate's copy. It declares no crate:
+// registers. It declares no crate:
 // its rules are the declarative vocabulary's, which the behaviors' core
 // interprets, so every host runs it from the declaration alone.
 import { Generic, Temporal } from "superscalar";

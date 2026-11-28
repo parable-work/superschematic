@@ -36,9 +36,6 @@ func checkEnqueueOnChange(schema *ir.Schema, in Input, r *Result) {
 		case td.Role != ir.RoleDBTable || td.JsonField || td.Queue != nil || bases[td.Name]:
 			r.errorf(td.Owner, "%s: %s is not a table of the database; put it on a table, whose rows' writes enqueue", where, td.Name)
 			continue
-		case codegen.IsEngineType(td):
-			r.errorf(td.Owner, "%s: %s composes a behavior, so the engine keeps its instances in tables of its own, which no trigger watches", where, td.Name)
-			continue
 		}
 		columns := enqueueColumns(schema, td, scalarTypes)
 		for _, def := range td.EnqueueOnChange {

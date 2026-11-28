@@ -121,6 +121,9 @@ func (e *emitter) emitIdentityRoutesSet(set *ir.OperationSet, owner string) {
 		if cfg.APIKeys {
 			keys = append(keys, "apiKeys: true")
 		}
+		if o := cfg.OAuth; o != nil {
+			keys = append(keys, "oauth: "+oauthLiteral(o))
+		}
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userSessions"), optionalObjectLiteral(keys))
 	}
 	if cfg := set.UserAdministration; cfg != nil {
@@ -130,6 +133,9 @@ func (e *emitter) emitIdentityRoutesSet(set *ir.OperationSet, owner string) {
 		}
 		if cfg.APIKeys {
 			keys = append(keys, "apiKeys: true")
+		}
+		if cfg.OAuth {
+			keys = append(keys, "oauth: true")
 		}
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("userAdministration"), optionalObjectLiteral(keys))
 	}
@@ -620,4 +626,36 @@ func (e *emitter) emitIdempotentDecorator(indent string, config *ir.IdempotentCo
 		return
 	}
 	fmt.Fprintf(&e.body, "%s@%s({ %s })\n", indent, e.use("idempotent"), strings.Join(members, ", "))
+}
+
+// oauthLiteral renders @userSessions' oauth (#695): true for every
+// default, otherwise the members the config sets.
+func oauthLiteral(o *ir.IdentityOAuthConfig) string {
+	var keys []string
+	if o.AccessTokenTTLSeconds != 0 {
+		keys = append(keys, fmt.Sprintf("accessTokenTtlSeconds: %d", o.AccessTokenTTLSeconds))
+	}
+	if o.RefreshTokenTTLSeconds != 0 {
+		keys = append(keys, fmt.Sprintf("refreshTokenTtlSeconds: %d", o.RefreshTokenTTLSeconds))
+	}
+	if o.GrantMaxTTLSeconds != 0 {
+		keys = append(keys, fmt.Sprintf("grantMaxTtlSeconds: %d", o.GrantMaxTTLSeconds))
+	}
+	if c := o.Clients; c != nil && (c.MetadataDocuments != nil || c.Registration != nil) {
+		var clients []string
+		if c.MetadataDocuments != nil {
+			clients = append(clients, fmt.Sprintf("metadataDocuments: %t", *c.MetadataDocuments))
+		}
+		if c.Registration != nil {
+			clients = append(clients, fmt.Sprintf("registration: %t", *c.Registration))
+		}
+		keys = append(keys, "clients: { "+strings.Join(clients, ", ")+" }")
+	}
+	if o.ConsentPath != "" {
+		keys = append(keys, "consentPath: "+quote(o.ConsentPath))
+	}
+	if len(keys) == 0 {
+		return "true"
+	}
+	return "{ " + strings.Join(keys, ", ") + " }"
 }

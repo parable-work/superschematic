@@ -9,6 +9,9 @@
 // held to one contract: @superschematic/schema-config declares it,
 // gen-json-schema projects it to the embedded JSON Schema, and this package
 // enforces it.
+//
+// A service has its config in one form: Locate finds it and refuses a
+// directory that holds more than one.
 package schemaconfig
 
 import (
@@ -17,13 +20,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -121,9 +122,11 @@ type SchemaConfig struct {
 	MaxBytes int64 `json:"maxBytes,omitempty" yaml:"maxBytes,omitempty"`
 
 	// Providers lists the runtime provider packages an API may use (D159):
-	// each a directory relative to the service's directory, in slash form,
-	// whose package.json declares the provider. The loader reads each into
-	// ir.Schema.Providers. It is valid on an API config only.
+	// each its directory relative to the service's directory, in slash
+	// form, which starts with "./" or "../", or its npm name, which
+	// resolves from the service's node_modules (#608, ResolveProvider).
+	// The package's package.json declares the provider. The loader reads
+	// each into ir.Schema.Providers. It is valid on an API config only.
 	Providers []string `json:"providers,omitempty" yaml:"providers,omitempty"`
 
 	// Outputs is the raw outputs configuration. The v2 generators
@@ -169,28 +172,33 @@ type KindSet interface {
 	Kinds() []string
 }
 
-// ReadFile loads and validates the data-form service config: it prefers
-// schema.config.json, then schema.config.yaml. It returns os.ErrNotExist
-// (wrapped) when neither exists, letting callers fall through to the
-// TypeScript form.
+// ReadFile loads and validates the data-form service config, the one
+// Locate finds. It returns os.ErrNotExist (wrapped) when the service has
+// no config or has schema.config.ts, letting callers fall through to the
+// TypeScript form, and Locate's error when it has more than one.
 func ReadFile(servicePath string, known KindSet) (*SchemaConfig, error) {
-	jsonPath := filepath.Join(servicePath, "schema.config.json")
-	if data, err := os.ReadFile(jsonPath); err == nil {
-		return DecodeJSON(data, "schema.config.json", known)
+	path, form, ok, err := Locate(servicePath)
+	if err != nil {
+		return nil, err
 	}
-	yamlPath := filepath.Join(servicePath, "schema.config.yaml")
-	if data, err := os.ReadFile(yamlPath); err == nil {
+	if !ok || form == FormTS {
+		return nil, fmt.Errorf("service %s has no schema.config.{json,yaml}: %w", servicePath, os.ErrNotExist)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	name := form.FileName()
+	if form == FormYAML {
 		var raw any
 		if err := yaml.Unmarshal(data, &raw); err != nil {
-			return nil, fmt.Errorf("schema.config.yaml: %w", err)
+			return nil, fmt.Errorf("%s: %w", name, err)
 		}
-		jsonBytes, err := json.Marshal(raw)
-		if err != nil {
-			return nil, fmt.Errorf("schema.config.yaml: converting to JSON: %w", err)
+		if data, err = json.Marshal(raw); err != nil {
+			return nil, fmt.Errorf("%s: converting to JSON: %w", name, err)
 		}
-		return DecodeJSON(jsonBytes, "schema.config.yaml", known)
 	}
-	return nil, fmt.Errorf("service %s has no schema.config.{json,yaml}: %w", servicePath, os.ErrNotExist)
+	return DecodeJSON(data, name, known)
 }
 
 // DecodeJSON validates a config payload against the generated JSON Schema,
@@ -405,21 +413,22 @@ func (c *SchemaConfig) ContentMaxBytes() int64 {
 }
 
 // validateProviders checks providers (D159): an API config's list of
-// runtime provider package directories, each a clean relative path in
-// slash form, listed once.
+// runtime provider packages, each its directory, a clean relative path in
+// slash form that starts with "./" or "../", or its npm name (#608),
+// listed once.
 func validateProviders(cfg *SchemaConfig) error {
 	if len(cfg.Providers) > 0 && cfg.Kind != ir.SchemaKindAPI {
 		return fmt.Errorf("schema config for %s sets providers, which only an API service may set (this service is kind %s)", cfg.Name, cfg.Kind)
 	}
 	seen := make(map[string]bool, len(cfg.Providers))
-	for _, dir := range cfg.Providers {
-		switch {
-		case dir == "" || path.IsAbs(dir) || strings.Contains(dir, `\`) || path.Clean(dir) != dir:
-			return fmt.Errorf("schema config for %s lists provider %q; a provider is its package's directory, a clean relative path in slash form from the service's directory", cfg.Name, dir)
-		case seen[dir]:
-			return fmt.Errorf("schema config for %s lists provider %s more than once", cfg.Name, dir)
+	for _, entry := range cfg.Providers {
+		if err := checkProviderEntry(entry); err != nil {
+			return fmt.Errorf("schema config for %s lists provider %w", cfg.Name, err)
 		}
-		seen[dir] = true
+		if seen[entry] {
+			return fmt.Errorf("schema config for %s lists provider %s more than once", cfg.Name, entry)
+		}
+		seen[entry] = true
 	}
 	return nil
 }

@@ -35,8 +35,8 @@ func TestReactionsFixturesExpand(t *testing.T) {
 		heardBy []string
 	}{{"Project", nil}, {"Task", []string{"Project"}}} {
 		td := db.Types[want.table]
-		if !td.Optimistic || len(td.ImplementsBehaviors()) != 1 || td.ImplementsBehaviors()[0].Name != "Reactions" || td.IsEngineType() {
-			t.Errorf("%s = optimistic %v, implements %v, engine %v", want.table, td.Optimistic, td.ImplementsBehaviors(), td.IsEngineType())
+		if !td.Optimistic || len(td.ImplementsBehaviors()) != 1 || td.ImplementsBehaviors()[0].Name != "Reactions" || len(td.TypeBehaviors()) > 0 {
+			t.Errorf("%s = optimistic %v, implements %v, @behavior %v", want.table, td.Optimistic, td.ImplementsBehaviors(), len(td.TypeBehaviors()) > 0)
 		}
 		queue := db.BehaviorQueueOf(want.table, ir.BehaviorQueueChanges)
 		if queue == nil || queue.Name != want.table+"Change" || queue.Role != ir.RoleEmbeddedStruct || queue.Origin != ir.OriginBehavior {

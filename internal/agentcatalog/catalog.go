@@ -8,8 +8,8 @@
 //     metadata (and an extension's, when one replaces the catalog).
 //   - decorators: every registered decorator, joined with its TypeScript
 //     declaration in the core authoring packages, and the type wrappers.
-//   - behaviors: every registered engine behavior, from its declaration,
-//     with the core's config types.
+//   - behaviors: every registered behavior @behavior composes, from its
+//     declaration, with the core's config types.
 //   - capabilities: the docs' capability map, with links to the docs site.
 //
 // A decorator's entry joins two sources. The registry says where it may

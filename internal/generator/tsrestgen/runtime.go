@@ -133,6 +133,12 @@ type DepsRoutes struct {
 	// AccessLog is set for a database with an @accessLog table (D156):
 	// the router records each call the log records there (accessLogOf).
 	AccessLog bool
+
+	// Files is set for a database with an @attachments table (D154): with
+	// a files slot among the API's providers, runtime.ts exports
+	// processPendingFiles, the file processor's pass over what the
+	// attachments have pending (D159, #702).
+	Files bool
 }
 
 // HasProviders reports whether Deps holds the runtime providers (D159).
@@ -150,11 +156,27 @@ func (o *APIOutput) HasCalendar() bool { return o.Deps.Routes.Calendar }
 // HasSearch reports whether the server serves search across tables (D155).
 func (o *APIOutput) HasSearch() bool { return o.Deps.Routes.Search }
 
+// HasFileProcessing reports whether runtime.ts exports processPendingFiles
+// (D154, D159, #702): the database declares @attachments, and the API's
+// config names a files slot, whose processors make the attachments' text
+// and previews.
+func (o *APIOutput) HasFileProcessing() bool {
+	if !o.Deps.Routes.Files || !o.HasProviders() {
+		return false
+	}
+	for _, s := range o.Deps.Providers.Slots {
+		if s.Interface == "files" {
+			return true
+		}
+	}
+	return false
+}
+
 // HasRuntime reports whether the API package writes runtime.ts: Deps holds
 // a piece the entrypoint builds (the notifier, the inbound path, the
 // agent dispatcher), or the server serves the calendar or search.
 func (o *APIOutput) HasRuntime() bool {
-	return o.HasNotifier() || o.HasInbound() || o.HasAgents() || o.HasCalendar() || o.HasSearch()
+	return o.HasNotifier() || o.HasInbound() || o.HasAgents() || o.HasCalendar() || o.HasSearch() || o.HasFileProcessing()
 }
 
 // BuildsRuntime reports whether withRuntime adds a member to Deps, which
@@ -177,8 +199,8 @@ func (o *APIOutput) RuntimeMembers() []string {
 	return out
 }
 
-// RuntimeRouteImports are what runtime.ts imports of the runtime's
-// ./postgres entry.
+// RuntimeImports are what runtime.ts imports of the runtime's
+// RuntimeEntry.
 func (o *APIOutput) RuntimeImports() []string {
 	var out []string
 	if o.HasAgents() {
@@ -194,7 +216,10 @@ func (o *APIOutput) RuntimeImports() []string {
 		out = append(out, "createInbound")
 	}
 	if o.HasNotifier() {
-		out = append(out, "createNotifier", "notifierRoutes", "type NoticeWork")
+		out = append(out, "createNotifier", "notifierRoutes", "notifierUpkeep", "type NoticeWork")
+	}
+	if o.HasFileProcessing() {
+		out = append(out, "processFiles", "type FileProcessingRun")
 	}
 	slices.SortFunc(out, func(a, b string) int {
 		key := func(s string) string {
@@ -265,11 +290,20 @@ func runtimeOf(deps DepsInfo, queue string) string {
 	return ""
 }
 
+// RuntimeEntry is the entry of the HTTP runtime that deps.ts and
+// runtime.ts import the runtime pieces from: ./postgres over a pool, and
+// ./d1 over a SqlDatabase, a D1 binding on Workers or a SQLite file under
+// stack dev, which imports no driver (D189, #702).
+func (o *APIOutput) RuntimeEntry() string {
+	if o.DepsSQLite() {
+		return "/d1"
+	}
+	return "/postgres"
+}
+
 // checkRuntimeDeps refuses runtime pieces Deps cannot hold: each runs over
-// the repositories of a database on Postgres, and the inbound path hands a
-// user's reply to the notifier. The dispatch layer sets none for a
-// database that lists sqlite first, whose pieces an app builds over the
-// runtime's ./d1 entry (D189).
+// the repositories of the API's database, on Postgres or on SQLite and D1
+// (D189, #702), and the inbound path hands a user's reply to the notifier.
 func (o *APIOutput) checkRuntimeDeps(deps DepsInfo) error {
 	var piece string
 	switch {
@@ -283,11 +317,13 @@ func (o *APIOutput) checkRuntimeDeps(deps DepsInfo) error {
 		piece = "search across tables (D155)"
 	case deps.Routes.Grants || deps.Routes.AccessLog:
 		piece = "the grants and the access log (D156)"
+	case deps.Routes.Files && deps.Providers != nil:
+		piece = "the file processor (D159)"
 	default:
 		return nil
 	}
-	if !depsORM(deps) || deps.Dialect == SQLiteDialect {
-		return fmt.Errorf("tsrestgen: %s's server wires %s over the repositories %s's TypeScript types export for Postgres, and holds none", o.SchemaName, piece, deps.Database)
+	if !depsORM(deps) {
+		return fmt.Errorf("tsrestgen: %s's server wires %s over the repositories %s's TypeScript types export, and holds none", o.SchemaName, piece, deps.Database)
 	}
 	if deps.Inbound != nil && deps.Notifier == nil {
 		return fmt.Errorf("tsrestgen: %s's Deps holds the inbound path (D157), which hands a user's reply to the notifier, and %s declares no notifier", o.SchemaName, deps.Database)
@@ -296,7 +332,7 @@ func (o *APIOutput) checkRuntimeDeps(deps DepsInfo) error {
 }
 
 // DepsRuntimeTypes are the types deps.ts imports of the runtime's
-// ./postgres entry for the runtime pieces Deps holds and their options.
+// RuntimeEntry for the runtime pieces Deps holds and their options.
 func (o *APIOutput) DepsRuntimeTypes() []string {
 	var out []string
 	if o.HasAgents() {
@@ -304,6 +340,9 @@ func (o *APIOutput) DepsRuntimeTypes() []string {
 	}
 	if o.HasCalendar() {
 		out = append(out, "CalendarRoutesOptions")
+	}
+	if o.HasFileProcessing() {
+		out = append(out, "FileProcessingOptions")
 	}
 	if o.HasInbound() {
 		out = append(out, "Inbound", "InboundOptions")

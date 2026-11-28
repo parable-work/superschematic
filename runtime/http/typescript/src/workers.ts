@@ -137,9 +137,14 @@ const secrets = new WeakMap<object, Map<string, Promise<string>>>();
  * once per isolate: a later call returns what the first read, and a get
  * that failed is tried again on the next call. Rejects with
  * WorkersBindingError naming a binding that is missing or no secret, and
- * with the get's own error, after the binding's name, when it fails.
+ * with the get's own error, after the binding's name, when it fails. A
+ * name optional lists, an optional Secret<T> field's, is left out when the
+ * Worker has no binding of it: the environment binds a provider's secret
+ * setting only where the provider of its slot reads it (D159, #702).
  */
-export async function loadSecrets(env: WorkersEnv, names: readonly string[]): Promise<Record<string, string>> {
+export async function loadSecrets(env: WorkersEnv, names: readonly string[], optional: readonly string[] = []): Promise<Record<string, string>> {
+  const bound = names.filter(name => !optional.includes(name) || (env as Record<string, unknown>)[name] !== undefined);
+  if (bound.length !== names.length) return loadSecrets(env, bound);
   let cache = secrets.get(env);
   if (cache === undefined) {
     cache = new Map();
@@ -174,8 +179,8 @@ export async function loadSecrets(env: WorkersEnv, names: readonly string[]): Pr
  * Secrets Store secret named in names under its name: what a config whose
  * fields include Secret<T> ones loads from on Workers.
  */
-export async function stackEnvWithSecrets(env: WorkersEnv, names: readonly string[]): Promise<StackEnv> {
-  return { ...stackEnvOf(env), ...(await loadSecrets(env, names)) };
+export async function stackEnvWithSecrets(env: WorkersEnv, names: readonly string[], optional: readonly string[] = []): Promise<StackEnv> {
+  return { ...stackEnvOf(env), ...(await loadSecrets(env, names, optional)) };
 }
 
 /** The header Cloudflare sets to the client's address. */

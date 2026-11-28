@@ -1,10 +1,11 @@
-//! The access policy as data (D58): the policies of the two examples that
-//! run the TypeScript engine by hand, `examples/engine-notes/src/auth.ts`
-//! and `examples/engine-jobs/src/auth.ts`, written as rule tables, answer
-//! every question as the TypeScript functions do. Each function is
-//! transcribed here as a Rust policy, line for line, and both are asked
-//! every question the engine asks, for every caller the example knows and
-//! a few it does not.
+//! The access policy as data (D58): the policies the two examples ran the
+//! TypeScript engine with, `examples/engine-notes/src/auth.ts` and
+//! `examples/engine-jobs/src/auth.ts`, written as rule tables, answer
+//! every question as the TypeScript functions did. The examples run on
+//! development mode now (D117), with a policy as data of their own, and
+//! the functions went with their engine half; each is kept here as a Rust
+//! policy, line for line, and both are asked every question the engine
+//! asks, for every caller the example knew and a few it did not.
 
 mod support;
 

@@ -3,6 +3,135 @@
 use serde::{Deserialize, Serialize};
 use crate::scalars::*;
 
+/// An OAuth client: a metadata document's, cached, or one that registered.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OAuthClient {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    /// The client_id the client is known by: its metadata document's URL, or the id registration made.
+    #[serde(rename = "clientId")]
+    pub client_id: String,
+    /// metadataDocument or registered.
+    pub kind: String,
+    /// What the consent page calls the client.
+    pub name: String,
+    /// The client's home page.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub uri: Option<String>,
+    /// The redirects the client may use.
+    #[serde(rename = "redirectUris")]
+    pub redirect_uris: Vec<String>,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    /// When the client's metadata document was last fetched.
+    #[serde(default, rename = "refreshedAt", skip_serializing_if = "Option::is_none")]
+    pub refreshed_at: Option<TemporalDateTime>,
+    /// Until when the metadata document's cache headers keep it.
+    #[serde(default, rename = "freshUntil", skip_serializing_if = "Option::is_none")]
+    pub fresh_until: Option<TemporalDateTime>,
+    /// When an authorization last named the client.
+    #[serde(default, rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<TemporalDateTime>,
+}
+
+/// An OAuth authorization request: pending while its user consents, then the code its client redeems once.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OAuthCode {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    /// The client that asked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<OAuthClient>,
+    /// The user who approved the request.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
+    /// The grant approval made.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<OAuthGrant>,
+    /// The redirect the request named, which the code is bound to.
+    #[serde(rename = "redirectUri")]
+    pub redirect_uri: String,
+    /// The PKCE challenge, S256, which the code's verifier must answer.
+    #[serde(rename = "codeChallenge")]
+    pub code_challenge: String,
+    /// The state the client sent, which the redirect carries back.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    /// The scope the client asked for, as it sent it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    /// The resource the request named, which the code is bound to.
+    pub resource: String,
+    /// The value approve and deny send back, which ties a decision to the request the page read.
+    pub nonce: String,
+    /// The SHA-256 of the code approval made, which only the client holds.
+    #[serde(default, rename = "codeHash", skip_serializing_if = "Option::is_none")]
+    pub code_hash: Option<CryptoSHA256>,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    /// When the request, or once approved its code, ends.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When the code was redeemed; a second redemption revokes its grant.
+    #[serde(default, rename = "usedAt", skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<TemporalDateTime>,
+}
+
+/// An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OAuthGrant {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    /// The user the grant calls as.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<User>,
+    /// The client that holds the grant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client: Option<OAuthClient>,
+    /// The permissions the grant was given, each held while its user holds it; null for every permission its user holds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Vec<String>>,
+    /// The URL of the resource the grant was given for.
+    pub resource: String,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    /// When the grant ends, however often its refresh token rotates.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When the grant's token last authenticated a request, written at most once a minute.
+    #[serde(default, rename = "lastUsedAt", skip_serializing_if = "Option::is_none")]
+    pub last_used_at: Option<TemporalDateTime>,
+    /// When the grant was revoked, by its user, by an administrator, by a replayed code or refresh token, or when its user was disabled.
+    #[serde(default, rename = "revokedAt", skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<TemporalDateTime>,
+}
+
+/// An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct OAuthToken {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<IdentityUUID>,
+    /// The grant that issued the token.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<OAuthGrant>,
+    /// access or refresh.
+    pub kind: String,
+    /// The SHA-256 of the token, which only its client holds.
+    #[serde(rename = "tokenHash")]
+    pub token_hash: CryptoSHA256,
+    #[serde(rename = "createdAt")]
+    pub created_at: TemporalDateTime,
+    /// When the token ends.
+    #[serde(rename = "expiresAt")]
+    pub expires_at: TemporalDateTime,
+    /// When a refresh token rotated; a second use revokes its grant.
+    #[serde(default, rename = "usedAt", skip_serializing_if = "Option::is_none")]
+    pub used_at: Option<TemporalDateTime>,
+    /// When the token was revoked.
+    #[serde(default, rename = "revokedAt", skip_serializing_if = "Option::is_none")]
+    pub revoked_at: Option<TemporalDateTime>,
+}
+
 /// A named set of permissions users are granted.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Role {

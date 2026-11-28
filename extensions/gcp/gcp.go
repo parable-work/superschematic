@@ -43,16 +43,14 @@ const (
 	// CloudRun runs servers as Cloud Run services; CloudRunJob runs jobs
 	// as Cloud Run jobs, each schedule as a Cloud Scheduler job (D52);
 	// CloudRunWorker runs workers as Cloud Run worker pools (D53), and a
-	// worker in drain mode as a Cloud Run job (D145);
-	// CloudRunRunner runs an engine's runner as a Cloud Run worker pool of
-	// one instance (D58); CloudRunDeriver runs a deriver as a Cloud Run
+	// worker in drain mode as a Cloud Run job (D145); CloudRunDeriver runs
+	// a deriver as a Cloud Run
 	// worker pool of one instance (D74); CloudRunApp runs an app as a Cloud
 	// Run service, as a server is run (D78); CloudSQL runs Postgres
 	// databases on Cloud SQL instances.
 	CloudRun        = "gcp.cloudrun"
 	CloudRunJob     = "gcp.cloudrunjob"
 	CloudRunWorker  = "gcp.cloudrunworker"
-	CloudRunRunner  = "gcp.cloudrunrunner"
 	CloudRunDeriver = "gcp.cloudrunderiver"
 	CloudRunApp     = "gcp.cloudrunapp"
 	CloudSQL        = "gcp.cloudsql"
@@ -98,10 +96,6 @@ const (
 	WorkerSQLConnector    = "gcp.cloudrunworker-cloudsql"
 	WorkerHTTPConnector   = "gcp.cloudrunworker-cloudrun"
 	WorkerBucketConnector = "gcp.cloudrunworker-storage"
-
-	// RunnerSQLConnector connects an engine's runner's worker pool to its
-	// engine database on Cloud SQL, its one edge (D58).
-	RunnerSQLConnector = "gcp.cloudrunrunner-cloudsql"
 
 	// DeriverSQLConnector, DeriverHTTPConnector and DeriverBucketConnector
 	// connect a deriver's worker pool, whose edges are its API's, as a
@@ -225,21 +219,10 @@ func (e Extension) Register(r *registry.Registry) error {
 			Lower:     lowerWorker,
 		},
 		{
-			Name:      CloudRunRunner,
-			Extension: Name,
-			Kind:      ir.DeployableRunner,
-			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
-			Settings:  json.RawMessage(cloudRunPoolSettings),
-			NameOf:    serviceName,
-			AddressOf: func(registry.PlatformContext) any { return nil },
-			Lower:     lowerRunner,
-		},
-		{
 			Name:      CloudRunDeriver,
 			Extension: Name,
 			Kind:      ir.DeployableDeriver,
-			// In its API's language, TypeScript or Rust (D74), or Go for a
-			// deriver of tables (D146).
+			// In its API's language, TypeScript, Rust or Go (D146).
 			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
 			Settings:  json.RawMessage(cloudRunPoolSettings),
 			NameOf:    serviceName,
@@ -317,7 +300,6 @@ func (e Extension) Register(r *registry.Registry) error {
 		{Name: WorkerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunWorker, To: CloudSQL, Connect: connectSQL},
 		{Name: WorkerHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunWorker, To: CloudRun, Connect: connectHTTP},
 		{Name: WorkerBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunWorker, To: Storage, Connect: connectBucket},
-		{Name: RunnerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunRunner, To: CloudSQL, Connect: connectSQL},
 		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: CloudRunDeriver, To: CloudSQL, Connect: connectSQL},
 		{Name: DeriverHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: CloudRunDeriver, To: CloudRun, Connect: connectHTTP},
 		{Name: DeriverBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: CloudRunDeriver, To: Storage, Connect: connectBucket},
@@ -349,7 +331,6 @@ func (e Extension) Register(r *registry.Registry) error {
 			ir.DeployableSite:        Site,
 			ir.DeployableBucket:      Storage,
 			ir.DeployableWorker:      CloudRunWorker,
-			ir.DeployableRunner:      CloudRunRunner,
 			ir.DeployableDeriver:     CloudRunDeriver,
 			ir.DeployableMemoryStore: Memorystore,
 			ir.DeployableApp:         CloudRunApp,

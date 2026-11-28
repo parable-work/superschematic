@@ -22,6 +22,17 @@ import (
 // root and the build's error.
 func buildAgentOrchestration(t *testing.T, edit func(implementation string) string, stack ...func(schema string) string) (string, string, error) {
 	t.Helper()
+	files := map[string][]func(string) string{}
+	for _, change := range stack {
+		files["work-stack/src/stack.schema.ts"] = append(files["work-stack/src/stack.schema.ts"], change)
+	}
+	return buildAgentOrchestrationWith(t, edit, files)
+}
+
+// buildAgentOrchestrationWith is buildAgentOrchestration with changes to
+// any schema file, each named by its path under schemas/services.
+func buildAgentOrchestrationWith(t *testing.T, edit func(implementation string) string, files map[string][]func(string) string) (string, string, error) {
+	t.Helper()
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -50,14 +61,16 @@ func buildAgentOrchestration(t *testing.T, edit func(implementation string) stri
 			t.Fatal(err)
 		}
 	}
-	for _, change := range stack {
-		path := filepath.Join(schemasRoot, "services", "work-stack", "src", "stack.schema.ts")
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(path, []byte(change(string(data))), 0o644); err != nil {
-			t.Fatal(err)
+	for rel, changes := range files {
+		path := filepath.Join(schemasRoot, "services", filepath.FromSlash(rel))
+		for _, change := range changes {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, []byte(change(string(data))), 0o644); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	if edit != nil {

@@ -13,17 +13,21 @@ import (
 	orm "example.com/acme/orm/shop-db"
 	stocksdk "example.com/acme/sdk/go/shop-stock"
 	"example.com/acme/shop/acmepay"
+	db "example.com/acme/types/go/shop-db"
 	types "example.com/acme/types/go/shop-orders"
-	engine "github.com/parable-work/superschematic/runtime/engine/go"
+	scalars "github.com/parable-work/superscalar/go"
 	"go.uber.org/zap"
 )
 
-// acmepay's adapter (D70), which is shop-orders' own code: the engine
-// opens no connection to a provider. Payments records what is to be done,
-// the intents, captures, voids and refunds, as actions; payCheckout and
-// the job SettlePayments make them at acmepay, and every outcome, from
-// acmepay's answer or its webhook, is recorded with recordPaymentEvent as
-// acmepay's event, which applies once per event id.
+// acmepay's adapter (D70), which is shop-orders' own code: no behavior
+// opens a connection to a provider. Checkout's Payments records what is to
+// be done, the intents, captures, voids and refunds, as actions;
+// payCheckout and the job SettlePayments make them at acmepay, and every
+// outcome, from acmepay's answer or its webhook, is recorded with
+// recordPaymentEvent as acmepay's event, which applies once per event id.
+// Once a capture leaves a held checkout paid, the adapter moves it to
+// placed, which Payments allows only then; once a refund leaves an
+// approved Refund refunded, it moves the Refund to issued.
 
 // kinds maps acmepay's event types to the kinds recordPaymentEvent takes;
 // an event of another type is acknowledged and dropped.
@@ -38,30 +42,30 @@ var kinds = map[string]string{
 }
 
 // eventParams are recordPaymentEvent's parameters for an acmepay event:
-// the intent it is about, with the engine's attempt, or the refund, with
-// the engine's refund. No payer's name, email or card leaves acmepay, so
-// none is recorded.
-func eventParams(event acmepay.Event) (map[string]any, bool) {
+// the intent it is about, with Payments' attempt, or the refund, with
+// Payments' refund. No payer's name, email or card leaves acmepay, so none
+// is recorded.
+func eventParams(event acmepay.Event) (orm.CheckoutPaymentsRecordPaymentEventParams, bool) {
 	kind, ok := kinds[event.Type]
 	if !ok {
-		return nil, false
+		return orm.CheckoutPaymentsRecordPaymentEventParams{}, false
 	}
 	object := event.Data.Object
-	params := map[string]any{
-		"provider": provider,
-		"eventId":  event.ID,
-		"kind":     kind,
-		"amount":   object.Amount,
-		"currency": object.Currency,
-		"at":       event.Created * 1000,
+	params := orm.CheckoutPaymentsRecordPaymentEventParams{
+		Provider: provider,
+		EventId:  event.ID,
+		Kind:     kind,
+		Amount:   object.Amount,
+		Currency: object.Currency,
+		At:       event.Created * 1000,
 	}
 	if object.ID != "" {
-		params["providerRef"] = object.ID
+		params.ProviderRef = &object.ID
 	}
 	if object.Object == "refund" {
-		params["refund"] = object.Refund
+		params.Refund = &object.Refund
 	} else if object.Attempt != "" {
-		params["attempt"] = object.Attempt
+		params.Attempt = &object.Attempt
 	}
 	return params, true
 }
@@ -78,19 +82,38 @@ func intentEvent(eventType string, intent acmepay.Intent) acmepay.Event {
 }
 
 // recordEvent records an acmepay event on the checkout it is about, as the
-// adapter.
-func recordEvent(ctx context.Context, b *engine.Background, checkout string, event acmepay.Event) error {
+// adapter, and answers the checkout's Payments state after it: none for an
+// event of a type the shop does not record.
+func recordEvent(ctx context.Context, database orm.DatabaseInterface, checkout db.IdentityUUID, event acmepay.Event) (string, error) {
 	params, ok := eventParams(event)
 	if !ok {
-		return nil
+		return "", nil
 	}
-	return call(ctx, b, nil, "instances.invoke", adapterPrincipal(), checkoutSchema, checkout, "recordPaymentEvent", params, inNamespace)
+	recorded, err := database.GetCheckoutRepository().Payments().RecordPaymentEvent(asAdapter(ctx), checkout, params)
+	if err != nil {
+		return "", err
+	}
+	return recorded.State, nil
+}
+
+// place moves a held checkout that is paid to placed, as the adapter: the
+// move commits what it holds, its units sold and its slot booked. One no
+// longer held, by an earlier move or an expiry, is left as it is.
+func place(ctx context.Context, database orm.DatabaseInterface, checkout db.IdentityUUID) (bool, error) {
+	from := orm.CheckoutStatusStateHeld
+	_, err := database.GetCheckoutRepository().Status().Transition(asAdapter(ctx), checkout, orm.CheckoutStatusTransitionParams{From: &from, To: orm.CheckoutStatusStatePlaced})
+	if v, ok := vetoOf(err); ok && v.VetoCode == "stale" {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // PaymentWebhooks implements acmepay's webhook. Its verifier has checked
 // the signature by then (Verifier).
 type PaymentWebhooks struct {
-	Engine *engine.Background
 	DB     orm.DatabaseInterface
 	Stock  *stocksdk.ShopStockSDK
 	Logger *zap.Logger
@@ -102,11 +125,10 @@ var _ api.PaymentWebhooksImplementation = (*PaymentWebhooks)(nil)
 // names, and answers quickly: acmepay sends the event again until it hears
 // 2xx. An event of a type the shop does not record, one about no
 // checkout, and one a behavior vetoes (a currency_mismatch, say), are
-// acknowledged, the last logged, so acmepay does not send them forever;
-// a busy or unopened engine is 503, which acmepay tries again. A
-// checkout the capture placed writes its order here, if the runner's
-// Reactions rule placed it already, else when it is next read or
-// SettlePayments runs.
+// acknowledged, the last logged, so acmepay does not send them forever; a
+// checkout whose row kept moving is 503, which acmepay tries again. A
+// capture that leaves the checkout paid places it, and writes its order;
+// should that fail, SettlePayments places it and writes it.
 func (w *PaymentWebhooks) PaymentEvents(ctx context.Context, in *types.AcmepayEvent) (*types.PaymentEventReceipt, error) {
 	event := acmepay.Event{ID: in.Id, Type: in.Type, Created: int64(in.Created)}
 	object := in.Data.Object
@@ -115,30 +137,33 @@ func (w *PaymentWebhooks) PaymentEvents(ctx context.Context, in *types.AcmepayEv
 		PaymentIntent: object.PaymentIntent, Reference: object.Reference, Attempt: object.Attempt, Refund: object.Refund,
 	}
 	logger := w.Logger.With(zap.String("event", in.Id), zap.String("type", in.Type))
-	if _, ok := kinds[in.Type]; !ok || event.Data.Object.Reference == "" {
+	checkout, err := scalars.ParseUUID(event.Data.Object.Reference)
+	if _, ok := kinds[in.Type]; !ok || err != nil {
 		logger.Info("dropped an acmepay event the shop does not record")
 		return &types.PaymentEventReceipt{Received: true}, nil
 	}
-	err := recordEvent(ctx, w.Engine, event.Data.Object.Reference, event)
-	var unavailableErr *unavailableError
-	switch {
-	case errors.As(err, &unavailableErr):
-		return nil, err
-	case err != nil:
-		if v, ok := vetoOf(err); ok {
-			logger.Warn("the checkout refused acmepay's event", zap.String("veto", v.VetoCode), zap.Error(err))
-			return &types.PaymentEventReceipt{Received: true}, nil
-		}
+	state, err := recordEvent(ctx, w.DB, checkout, event)
+	if err != nil {
+		err = refusal(err)
+		var unavailableErr *unavailableError
 		var appErr *api.AppError
-		if errors.As(err, &appErr) && appErr.HTTPStatus() < 500 {
-			logger.Warn("acmepay's event names no checkout the shop can record it on", zap.Error(err))
+		switch {
+		case errors.As(err, &unavailableErr):
+			return nil, err
+		case errors.As(err, &appErr) && appErr.HTTPStatus() < 500:
+			logger.Warn("the checkout refused acmepay's event, or there is none", zap.Error(err))
 			return &types.PaymentEventReceipt{Received: true}, nil
 		}
 		return nil, err
 	}
-	if kinds[in.Type] == "captured" {
-		if rec, err := readCheckout(ctx, w.Engine, adapterPrincipal(), event.Data.Object.Reference); err == nil && rec != nil && rec.Behaviors.Workflow.Status == "placed" {
-			if _, err := placeOrder(ctx, w.DB, w.Stock, logger, time.Now(), rec); err != nil {
+	if kinds[in.Type] == "captured" && state == "paid" {
+		if _, err := place(ctx, w.DB, checkout); err != nil {
+			logger.Warn("the checkout is placed when SettlePayments runs", zap.Error(err))
+			return &types.PaymentEventReceipt{Received: true}, nil
+		}
+		placed, err := w.DB.GetCheckoutRepository().GetOne(ctx, checkout, nil)
+		if err == nil && placed.Status == string(orm.CheckoutStatusStatePlaced) {
+			if _, err := placeOrder(ctx, w.DB, w.Stock, logger, time.Now(), placed); err != nil {
 				logger.Warn("the order is written when SettlePayments runs", zap.Error(err))
 			}
 		}
@@ -168,53 +193,37 @@ func Verifier(secret string, now func() time.Time) api.WebhookVerifier {
 	}
 }
 
-// action is one of listPaymentActions' items: what acmepay is to do.
-type action struct {
-	Action      string `json:"action"`
-	Kind        string `json:"kind"`
-	Attempt     string `json:"attempt"`
-	Amount      int64  `json:"amount"`
-	Currency    string `json:"currency"`
-	ID          string `json:"id"`
-	ProviderRef string `json:"providerRef"`
-	Refund      string `json:"refund"`
-	// At is when Payments recorded it, in epoch milliseconds.
-	At int64 `json:"at"`
-}
-
 // settle makes each action waiting for acmepay, a page at a time, and
 // records acmepay's answer, under its event's id, so the webhook that
 // brings the same event changes nothing. Each call to acmepay carries the
 // action's id (the attempt's for an intent) as its idempotency key, so a
 // run that stops part-way, or two runs at once, make each action once. A
-// Checkout's actions and a Refund's are the Checkout's: a refund is asked
-// of the checkout it refunds.
-func settle(ctx context.Context, b *engine.Background, pay *acmepay.Client, logger *zap.Logger) (int, error) {
+// Refund's refund is asked of the checkout it refunds, so the checkout's
+// actions hold it.
+func settle(ctx context.Context, database orm.DatabaseInterface, pay *acmepay.Client, logger *zap.Logger) (int, error) {
 	made := 0
-	cursor := ""
+	var cursor *string
+	limit := int64(50)
 	for {
-		params := map[string]any{"provider": provider, "limit": 50}
-		if cursor != "" {
-			params["cursor"] = cursor
-		}
-		var page struct {
-			Items []action `json:"items"`
-			Next  *string  `json:"next"`
-		}
-		if err := call(ctx, b, &page, "instances.invokeSchema", adapterPrincipal(), checkoutSchema, "listPaymentActions", params, inNamespace); err != nil {
+		page, err := database.GetCheckoutRepository().Payments().ListPaymentActions(asAdapter(ctx), orm.CheckoutPaymentsListPaymentActionsParams{Provider: provider, Limit: &limit, Cursor: cursor})
+		if err != nil {
 			return made, fmt.Errorf("list acmepay's actions: %w", err)
 		}
 		for _, a := range page.Items {
-			event, err := makeAction(ctx, pay, a)
+			checkout, err := scalars.ParseUUID(a.Id)
 			if err != nil {
-				return made, fmt.Errorf("%s %s of checkout %s at acmepay: %w", a.Kind, a.Action, a.ID, err)
+				return made, fmt.Errorf("an action of checkout %q: %w", a.Id, err)
+			}
+			event, err := makeAction(ctx, pay, checkout, a)
+			if err != nil {
+				return made, fmt.Errorf("%s %s of checkout %s at acmepay: %w", a.Kind, a.Action, a.Id, err)
 			}
 			if event.ID == "" {
 				continue
 			}
-			if err := recordEvent(ctx, b, a.ID, event); err != nil {
+			if _, err := recordEvent(ctx, database, checkout, event); err != nil {
 				if v, ok := vetoOf(err); ok {
-					logger.Warn("the checkout refused acmepay's answer", zap.String("checkout", a.ID), zap.String("veto", v.VetoCode))
+					logger.Warn("the checkout refused acmepay's answer", zap.String("checkout", a.Id), zap.String("veto", v.VetoCode))
 					continue
 				}
 				return made, err
@@ -224,30 +233,35 @@ func settle(ctx context.Context, b *engine.Background, pay *acmepay.Client, logg
 		if page.Next == nil || *page.Next == "" {
 			return made, nil
 		}
-		cursor = *page.Next
+		cursor = page.Next
 	}
 }
 
 // makeAction makes one action at acmepay and returns the event its answer
 // names: none for a cancel of an intent that ended already, which its
 // last event recorded.
-func makeAction(ctx context.Context, pay *acmepay.Client, a action) (acmepay.Event, error) {
+func makeAction(ctx context.Context, pay *acmepay.Client, checkout db.IdentityUUID, a orm.CheckoutPaymentsListPaymentActionsResultItemsItem) (acmepay.Event, error) {
+	reference := checkout.ToUUID().String()
+	providerRef := ""
+	if a.ProviderRef != nil {
+		providerRef = *a.ProviderRef
+	}
 	switch a.Kind {
 	case "create":
-		intent, err := pay.CreateIntent(ctx, a.Attempt, acmepay.IntentRequest{Amount: a.Amount, Currency: a.Currency, Reference: a.ID, Attempt: a.Attempt})
+		intent, err := pay.CreateIntent(ctx, a.Attempt, acmepay.IntentRequest{Amount: a.Amount, Currency: a.Currency, Reference: reference, Attempt: a.Attempt})
 		if err != nil {
 			return acmepay.Event{}, err
 		}
 		return intentEvent(acmepay.EventIntentCreated, intent), nil
 	case "void":
-		if a.ProviderRef == "" {
+		if providerRef == "" {
 			// The intent was never made: there is nothing to cancel, and
 			// the attempt is cancelled under the action's own id.
 			event := acmepay.Event{ID: "void." + a.Action, Type: acmepay.EventIntentCanceled, Created: a.At / 1000}
-			event.Data.Object = acmepay.Object{Object: "payment_intent", Amount: a.Amount, Currency: a.Currency, Attempt: a.Attempt, Reference: a.ID}
+			event.Data.Object = acmepay.Object{Object: "payment_intent", Amount: a.Amount, Currency: a.Currency, Attempt: a.Attempt, Reference: reference}
 			return event, nil
 		}
-		intent, err := pay.CancelIntent(ctx, a.Action, a.ProviderRef)
+		intent, err := pay.CancelIntent(ctx, a.Action, providerRef)
 		if err != nil {
 			return acmepay.Event{}, err
 		}
@@ -257,8 +271,11 @@ func makeAction(ctx context.Context, pay *acmepay.Client, a action) (acmepay.Eve
 		}
 		return intentEvent(eventType, intent), nil
 	case "refund":
-		intent := a.ProviderRef
-		refund, err := pay.CreateRefund(ctx, a.Action, acmepay.RefundRequest{PaymentIntent: intent, Amount: a.Amount, Reference: a.ID, Refund: a.Refund})
+		refundID := ""
+		if a.Refund != nil {
+			refundID = *a.Refund
+		}
+		refund, err := pay.CreateRefund(ctx, a.Action, acmepay.RefundRequest{PaymentIntent: providerRef, Amount: a.Amount, Reference: reference, Refund: refundID})
 		if err != nil {
 			return acmepay.Event{}, err
 		}
@@ -273,15 +290,29 @@ func makeAction(ctx context.Context, pay *acmepay.Client, a action) (acmepay.Eve
 	return acmepay.Event{}, fmt.Errorf("an action of kind %s, which acmepay's adapter does not make", a.Kind)
 }
 
-// reconcile asks acmepay about each attempt a checkout holds that is still
-// processing, and records what acmepay says, under its intent's last
-// event: a payment whose webhook never came is caught here.
-func reconcile(ctx context.Context, b *engine.Background, pay *acmepay.Client, rec *checkoutRecord) error {
-	for _, a := range rec.Behaviors.Payments.Attempts {
-		if a.Provider != provider || a.ProviderRef == "" || (a.Status != "processing" && a.Status != "requiresAction") {
+// reconcile asks acmepay about each attempt a held checkout has that is
+// still processing, and records what acmepay says, under its intent's last
+// event: a payment whose webhook never came is caught here. Payments keeps
+// its attempts in a sub-table of the checkout, which no repository reads,
+// so the adapter reads them as the core does.
+func reconcile(ctx context.Context, database orm.DatabaseInterface, pay *acmepay.Client, checkout *db.Checkout) error {
+	attempts, err := subRows(ctx, database, "Checkout", *checkout.Id, "Payments", "attempts")
+	if err != nil {
+		return err
+	}
+	for _, row := range attempts {
+		var attempt struct {
+			Provider    string `json:"provider"`
+			ProviderRef string `json:"providerRef"`
+			Status      string `json:"status"`
+		}
+		if err := unmarshalValues(row.Values, &attempt); err != nil {
+			return err
+		}
+		if attempt.Provider != provider || attempt.ProviderRef == "" || (attempt.Status != "processing" && attempt.Status != "requiresAction") {
 			continue
 		}
-		intent, err := pay.GetIntent(ctx, a.ProviderRef)
+		intent, err := pay.GetIntent(ctx, attempt.ProviderRef)
 		if err != nil {
 			return err
 		}
@@ -294,7 +325,7 @@ func reconcile(ctx context.Context, b *engine.Background, pay *acmepay.Client, r
 		if eventType == "" {
 			continue
 		}
-		if err := recordEvent(ctx, b, rec.ID, intentEvent(eventType, intent)); err != nil {
+		if _, err := recordEvent(ctx, database, *checkout.Id, intentEvent(eventType, intent)); err != nil {
 			if _, ok := vetoOf(err); ok {
 				continue
 			}

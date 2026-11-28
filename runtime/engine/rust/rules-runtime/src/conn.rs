@@ -380,13 +380,12 @@ pub(crate) use pg::PgConn;
 
 #[cfg(feature = "postgres")]
 mod pg {
-    use std::error::Error as StdError;
-
-    use bytes::BytesMut;
-    use postgres::types::{to_sql_checked, Format, IsNull, ToSql, Type};
-    use postgres::{Client, NoTls};
+    use postgres::types::ToSql;
+    use postgres::Client;
     use serde_json::{Map, Value};
+    use superschematic_engine_pg::{classify, tls_for, Class};
     use superschematic_rules::{Code, Refusal};
+    use superschematic_rules_adapter::sql::Text;
 
     use crate::db::Db;
     use crate::values::{internal, Dialect};
@@ -404,64 +403,35 @@ mod pg {
         url: String,
     }
 
+    /// A client error as a refusal, by its SQLSTATE's class
+    /// ([`superschematic_engine_pg::Class`]): a refused write is
+    /// `conflict`, another transaction in the way `busy`, the role's want
+    /// of a privilege [`super::PRIVILEGE_CLASS`], and anything else, a
+    /// lost session among them, internal.
     fn failed(error: postgres::Error) -> Refusal {
-        if let Some(db) = error.as_db_error() {
-            let code = db.code().code();
-            if code == "23505" || code == "23503" || code == "23514" || code == "23502" {
-                return Refusal::new(
-                    Code::Conflict,
-                    format!("the runtime database refused the write: {}", db.message()),
-                );
-            }
-            if code == "40001" || code == "40P01" || code == "55P03" {
-                return Refusal::new(
-                    Code::Busy,
-                    format!("the runtime database is busy: {}", db.message()),
-                );
-            }
-            if code == "42501" {
-                return Refusal {
-                    class: super::PRIVILEGE_CLASS.to_owned(),
-                    ..internal(format!(
-                        "the database refused the server's role: {}",
-                        db.message()
-                    ))
-                };
-            }
-            return internal(format!("the database failed: {}", db.message()));
-        }
-        internal(format!("the database failed: {error}"))
-    }
-
-    /// A parameter sent as text, which Postgres reads into whatever type it
-    /// meets, or NULL.
-    #[derive(Debug)]
-    struct Text(Option<String>);
-
-    impl ToSql for Text {
-        fn to_sql(
-            &self,
-            _ty: &Type,
-            out: &mut BytesMut,
-        ) -> Result<IsNull, Box<dyn StdError + Sync + Send>> {
-            match &self.0 {
-                Some(text) => {
-                    out.extend_from_slice(text.as_bytes());
-                    Ok(IsNull::No)
-                }
-                None => Ok(IsNull::Yes),
+        let Some(db) = error.as_db_error() else {
+            return internal(format!("the database failed: {error}"));
+        };
+        match classify(db) {
+            Class::Conflict => Refusal::new(
+                Code::Conflict,
+                format!("the runtime database refused the write: {}", db.message()),
+            ),
+            Class::Busy => Refusal::new(
+                Code::Busy,
+                format!("the runtime database is busy: {}", db.message()),
+            ),
+            Class::Privilege => Refusal {
+                class: super::PRIVILEGE_CLASS.to_owned(),
+                ..internal(format!(
+                    "the database refused the server's role: {}",
+                    db.message()
+                ))
+            },
+            Class::Connection | Class::Other => {
+                internal(format!("the database failed: {}", db.message()))
             }
         }
-
-        fn accepts(_ty: &Type) -> bool {
-            true
-        }
-
-        fn encode_format(&self, _ty: &Type) -> Format {
-            Format::Text
-        }
-
-        to_sql_checked!();
     }
 
     fn text(value: &Value) -> Text {
@@ -473,8 +443,12 @@ mod pg {
     }
 
     impl PgConn {
+        /// Connects with the TLS the URL's `sslmode` asks for
+        /// ([`superschematic_engine_pg::read_ssl_mode`]); the Go runner
+        /// reads the URL as it was given.
         pub(crate) fn open(url: &str) -> Result<Self, Refusal> {
-            let client = Client::connect(url, NoTls).map_err(failed)?;
+            let (text, tls) = tls_for(url).map_err(|error| internal(error.to_string()))?;
+            let client = Client::connect(&text, tls).map_err(failed)?;
             Ok(PgConn {
                 client,
                 url: url.to_owned(),

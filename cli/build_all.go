@@ -73,6 +73,9 @@ type buildAllTask struct {
 	service    buildplan.Service
 	inputHash  string
 	outputRels []string
+	// tree is the digest of the service's own directory, which its cache
+	// entry records beside the depfiles its build wrote.
+	tree string
 	// apiLanguage is build --with-deps's --api-language, set on the
 	// target's task only. build-all leaves it empty.
 	apiLanguage string
@@ -406,7 +409,9 @@ func runBuildAllHooks(ctx context.Context, hooks []registry.BuildAllHook, bc reg
 // package's service field, and a package under no service's directory fails
 // the build rather than entering the graph unowned. dirs are the
 // extensions' package directories (registry.PackageDir), whose packages
-// enter the graph too.
+// enter the graph too, and so do the runtime provider packages each API's
+// config lists (D159, #608), with an edge from the API package that links
+// each one.
 func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []buildplan.Service, dirs []registry.PackageDir) error {
 	extra := make([]schemadeps.PackageDir, len(dirs))
 	for i, d := range dirs {
@@ -422,7 +427,11 @@ func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []
 			producers[filepath.ToSlash(rel)] = service.Name
 		}
 	}
-	if err := schemadeps.EmitFromDist(outputRoot, producers, copyPath, extra...); err != nil {
+	providers, err := graphProviders(services)
+	if err != nil {
+		return fmt.Errorf("emitting %s: %w", schemadeps.DepsFileName, err)
+	}
+	if err := schemadeps.EmitWithProviders(outputRoot, producers, copyPath, providers, extra...); err != nil {
 		return fmt.Errorf("emitting %s: %w", schemadeps.DepsFileName, err)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Wrote %s\n", schemadeps.DepsPath(outputRoot))
@@ -434,8 +443,10 @@ func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []
 
 func makeBuildAllTasks(services []buildplan.Service, repoRoot string, cacheRoot string, names naming.Naming) ([]buildAllTask, *buildcache.InputHasher, map[string]string, error) {
 	// Every build writes a stamp, cached or not, so the input hashes are
-	// always computed.
-	hasher := buildcache.NewInputHasher(services, repoRoot, names)
+	// always computed. With a cache, a service that dist holds no build
+	// of hashes with the depfiles its entry kept, so a fresh checkout
+	// restores it.
+	hasher := buildcache.NewInputHasher(services, repoRoot, names).WithCache(cacheRoot)
 	hashes := hasher.HashAll(services)
 	tasks := make([]buildAllTask, 0, len(services))
 	for _, service := range services {
@@ -451,6 +462,7 @@ func makeBuildAllTasks(services []buildplan.Service, repoRoot string, cacheRoot 
 			service:    service,
 			inputHash:  hashes[service.Name],
 			outputRels: rels,
+			tree:       hasher.Tree(service.Name),
 		})
 	}
 	return tasks, hasher, hashes, nil
@@ -462,7 +474,7 @@ func resolveBuildAllTask(task buildAllTask, cacheRoot string, repoRoot string, e
 	if buildcache.ReadStamp(repoRoot, name) == task.inputHash && stampedOutputsExist(entry, repoRoot, task.service.OutputDirs) {
 		action := "up to date"
 		if entry == "" {
-			if err := buildcache.StoreEntry(cacheRoot, "schemas", name, task.inputHash, repoRoot, task.outputRels); err != nil {
+			if err := buildcache.StoreEntry(cacheRoot, "schemas", name, task.inputHash, repoRoot, task.outputRels, task.tree); err != nil {
 				_, _ = fmt.Fprintf(errOut, "    cache store failed for %s: %v\n", name, err)
 			} else {
 				action += ", cache backfilled"
@@ -762,7 +774,7 @@ func executeBuildAllStep(cmd *cobra.Command, task buildAllTask, stage buildplan.
 		inputHash = ctx.hasher.Recompute(service)
 	}
 	if ctx.cacheRoot != "" {
-		if err := buildcache.StoreEntry(ctx.cacheRoot, "schemas", service.Name, inputHash, ctx.repoRoot, task.outputRels); err != nil {
+		if err := buildcache.StoreEntry(ctx.cacheRoot, "schemas", service.Name, inputHash, ctx.repoRoot, task.outputRels, task.tree); err != nil {
 			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "    cache store failed for %s: %v\n", service.Name, err)
 		}
 		if err := buildcache.PruneEntries(ctx.cacheRoot, "schemas", service.Name, 5); err != nil {

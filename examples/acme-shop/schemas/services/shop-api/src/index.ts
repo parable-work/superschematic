@@ -7,4 +7,5 @@ export {
   ProductQueries,
   ProductView
 } from "./products.schema";
+export { CheckoutTimers, RefundActions } from "./refunds.schema";
 export * from "./service.generated";

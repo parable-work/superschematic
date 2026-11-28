@@ -14,11 +14,10 @@
 # opens, then the work queue's and the commerce ones its options name, so
 # rebuild it after pulling a branch that ports more or changes them.
 #
-# --crate names a project's addon crate instead: the napi/ member of the
-# engine crate the projectengine generator writes (engine/rust/<schema>/napi),
-# a cdylib that expands export_engine_napi! over the project's behaviors().
-# It is written into --out (the crate's native/ unless given), never the
-# checkout's native/, and a host loads it in the core's place by naming the
+# --crate names another addon crate instead: a cdylib that expands
+# export_engine_napi! over the behaviors it is built with. It is written
+# into --out (the crate's native/ unless given), never the checkout's
+# native/, and a host loads it in the core's place by naming the
 # file: the engine option `addon`, or SUPERSCHEMATIC_ENGINE_ADDON for every
 # engine a process opens:
 #

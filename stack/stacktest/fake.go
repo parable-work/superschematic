@@ -58,12 +58,6 @@ const (
 	// on a Cloud Run worker pool (D53).
 	WorkerPlatform = "fake.worker"
 
-	// RunnerPlatform runs an engine's runner as a pool of one instance, as
-	// gcp runs it on a Cloud Run worker pool (D58); RunnerSQLConnector
-	// connects it to its engine database, its one edge.
-	RunnerPlatform     = "fake.runner"
-	RunnerSQLConnector = "fake.runner-sql"
-
 	// DeriverPlatform runs TypeScript and Rust derivers as a pool of one
 	// instance, as gcp runs one on a Cloud Run worker pool (D74);
 	// DeriverSQLConnector, DeriverHTTPConnector and DeriverBucketConnector
@@ -318,7 +312,7 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Dialects:  dialects,
 			Settings:  json.RawMessage(databaseSettings),
 			NameOf: func(ctx registry.PlatformContext) any {
-				return kebab(ctx.Deployable.Name)
+				return ir.Kebab(ctx.Deployable.Name)
 			},
 			AddressOf: func(ctx registry.PlatformContext) any {
 				return ir.Output{Resource: ctx.Deployable.Name + ".instance", Name: "connectionName"}
@@ -418,17 +412,6 @@ func (e *Extension) Register(r *registry.Registry) error {
 			Lower:     lowerWorker,
 		},
 		{
-			Name:      RunnerPlatform,
-			Extension: Name,
-			Kind:      ir.DeployableRunner,
-			// A Rust API's engine runs its runner in Rust (D58), as its app
-			// does (D78).
-			Languages: []string{registry.APILanguageGo, registry.APILanguageTypeScript, registry.APILanguageRust},
-			NameOf:    serverName,
-			AddressOf: func(registry.PlatformContext) any { return nil },
-			Lower:     lowerRunner,
-		},
-		{
 			Name:      DeriverPlatform,
 			Extension: Name,
 			Kind:      ir.DeployableDeriver,
@@ -487,7 +470,6 @@ func (e *Extension) Register(r *registry.Registry) error {
 		{Name: CronHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: CronPlatform, To: SQLPlatform, Connect: connectHyperdrive},
 		{Name: DrainHyperdriveConnector, Extension: Name, Edge: ir.EdgeSQL, From: DrainPlatform, To: SQLPlatform, Connect: connectHyperdrive},
 		{Name: BundleHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: BundlePlatform, To: BundlePlatform, Connect: connectBundleHTTP},
-		{Name: RunnerSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: RunnerPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: DeriverSQLConnector, Extension: Name, Edge: ir.EdgeSQL, From: DeriverPlatform, To: SQLPlatform, Connect: connectSQL},
 		{Name: DeriverHTTPConnector, Extension: Name, Edge: ir.EdgeHTTP, From: DeriverPlatform, To: RunPlatform, Connect: connectHTTP},
 		{Name: DeriverBucketConnector, Extension: Name, Edge: ir.EdgeBucket, From: DeriverPlatform, To: BucketPlatform, Connect: connectBucket},
@@ -523,7 +505,6 @@ func (e *Extension) Register(r *registry.Registry) error {
 			ir.DeployableSite:        SitePlatform,
 			ir.DeployableBucket:      BucketPlatform,
 			ir.DeployableWorker:      WorkerPlatform,
-			ir.DeployableRunner:      RunnerPlatform,
 			ir.DeployableDeriver:     DeriverPlatform,
 			ir.DeployableMemoryStore: MemoryStorePlatform,
 			ir.DeployableApp:         AppPlatform,
@@ -704,7 +685,7 @@ var resourceTypes = map[string]string{
 // serverName names a server after its deployable, suffixed with each
 // parameter's value under a parameter: `shop-api`, `shop-api-<pr>`.
 func serverName(ctx registry.PlatformContext) any {
-	parts := []any{kebab(ctx.Deployable.Name)}
+	parts := []any{ir.Kebab(ctx.Deployable.Name)}
 	for _, param := range ctx.Environment.Parameters {
 		parts = append(parts, "-", ir.Parameter(param))
 	}
@@ -987,32 +968,6 @@ func lowerWorker(ctx registry.PlatformContext) (registry.Lowered, error) {
 	return out, nil
 }
 
-// lowerRunner lowers an engine's runner to an account and a pool of its
-// instances, one, which handles one thing at a time (D58).
-func lowerRunner(ctx registry.PlatformContext) (registry.Lowered, error) {
-	d := ctx.Deployable
-	if d.Runner == nil {
-		return registry.Lowered{}, fmt.Errorf("runner %s has no engine database", d.Name)
-	}
-	out, member, env, err := lowerAccount(ctx)
-	if err != nil {
-		return registry.Lowered{}, err
-	}
-	pool := map[string]any{
-		"name":        d.ResourceName,
-		"image":       ImageRepository(d.Name),
-		"account":     member,
-		"language":    strings.ToLower(d.Language),
-		"instances":   d.Runner.Instances,
-		"concurrency": 1,
-	}
-	if len(env) > 0 {
-		pool["env"] = env
-	}
-	out.Resources = append(out.Resources, &ir.Resource{ID: d.Name + ".pool", Type: TypePool, Properties: pool})
-	return out, nil
-}
-
 // lowerDeriver lowers a deriver (D74) to an account and the secrets it
 // reads, as a server's, and a pool that runs its image with its
 // environment, one instance or none when the environment turns it off,
@@ -1200,7 +1155,7 @@ func connectHTTP(ctx registry.ConnectorContext) (registry.Connected, error) {
 // environment gets a bucket of its own (D54).
 func bucketName(ctx registry.PlatformContext) any {
 	project, _ := ctx.Environment.Values["project"].(string)
-	parts := []any{project, "-", kebab(ctx.Environment.Stack), "-", kebab(ctx.Deployable.Name)}
+	parts := []any{project, "-", ir.Kebab(ctx.Environment.Stack), "-", ir.Kebab(ctx.Deployable.Name)}
 	for _, param := range ctx.Environment.Parameters {
 		parts = append(parts, "-", ir.Parameter(param))
 	}
@@ -1250,7 +1205,7 @@ func connectBucket(ctx registry.ConnectorContext) (registry.Connected, error) {
 // store, so the name holds no parameter (D75).
 func memoryStoreName(ctx registry.PlatformContext) any {
 	project, _ := ctx.Environment.Values["project"].(string)
-	return Join(project, "-", kebab(ctx.Environment.Stack), "-", kebab(ctx.Deployable.Name))
+	return Join(project, "-", ir.Kebab(ctx.Environment.Stack), "-", ir.Kebab(ctx.Deployable.Name))
 }
 
 // lowerMemoryStore lowers a memory store to an instance with TLS in the
@@ -1399,8 +1354,6 @@ func Join(parts ...any) any {
 	return out
 }
 
-// kebab lowercases a name and joins its words with hyphens: Orders is
-// orders, shop-api stays shop-api.
 // ImageRepository is the repository path the fake platforms write as a
 // deployable's image, with no tag or digest, which a deploy pins
 // (stackdeploy.PinImages) and the fake builder returns at a digest. It
@@ -1409,26 +1362,8 @@ func Join(parts ...any) any {
 // account's name: a deploy that pins an image no node holds fails here
 // as it does on a real target.
 func ImageRepository(deployable string) string {
-	return "images.fake.test/" + kebab(deployable)
+	return "images.fake.test/" + ir.Kebab(deployable)
 }
 
-func kebab(name string) string {
-	var b strings.Builder
-	for i, r := range name {
-		switch {
-		case r >= 'A' && r <= 'Z':
-			if i > 0 && name[i-1] != '-' && name[i-1] != '_' {
-				b.WriteByte('-')
-			}
-			b.WriteRune(r - 'A' + 'a')
-		case r == '_':
-			b.WriteByte('-')
-		default:
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-// snake is kebab with underscores.
-func snake(name string) string { return strings.ReplaceAll(kebab(name), "-", "_") }
+// snake is ir.Kebab with underscores.
+func snake(name string) string { return strings.ReplaceAll(ir.Kebab(name), "-", "_") }

@@ -48,9 +48,9 @@ func d1Platform() registry.PlatformSpec {
 		Kind:     ir.DeployableDatabase,
 		Dialects: []string{registry.SQLDialectSQLite},
 		Settings: json.RawMessage(d1Settings),
-		// A worker on Workers claims on Postgres through Hyperdrive, and D1
-		// is reached through a Worker's binding alone (D53, amended, D92).
-		NoQueueClaims: "D1 is reached through a Worker's binding alone, and a worker on Workers, cloudflare.drainer, claims on Postgres through Hyperdrive; list postgres first in the DB service's outputs.sql.dialects so the database is on cloudflare.hyperdrive, or claim where a SQLite file is the database, as under stack dev. A Worker or a Cron job enqueues on D1 with enqueueStatement",
+		// A worker on Workers, cloudflare.drainer, claims a D1 database's
+		// queues through its d1 binding at each firing and wake (#702), so
+		// the platform refuses no worker's claims (PlatformSpec.NoQueueClaims).
 		NameOf: func(ctx registry.PlatformContext) any {
 			return d1Name(ctx.Environment, ctx.Deployable.Name)
 		},
@@ -84,8 +84,13 @@ func d1ID(database, service string) string { return database + ".d1." + service 
 
 // D1Connector connects a server on Workers to a database on D1: the sql
 // edge of a TypeScript API whose DB service lists sqlite first (section
-// 18.2).
-const D1Connector = "cloudflare.workers-d1"
+// 18.2). DrainerD1Connector connects a worker's drainer to it the same
+// way, whose drain.ts claims the database's queues over the binding
+// (#702).
+const (
+	D1Connector        = "cloudflare.workers-d1"
+	DrainerD1Connector = "cloudflare.drainer-d1"
+)
 
 // connectD1 derives the D1 binding a Worker reaches its database through
 // (section 18.2): `d1: {binding, database}`, the binding named after the

@@ -7,13 +7,11 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// TestTSWriterWritesDeriverAndRunnerSettings: a settings element that
-// names a deriver beside its API's handle (D74), or the engine's runner
-// beside its database's (D58), is written with its deriver or runner key,
+// TestTSWriterWritesDeriverSettings: a settings element that names a
+// deriver beside its API's handle (D74) is written with its deriver key,
 // as the reader reads it back.
-func TestTSWriterWritesDeriverAndRunnerSettings(t *testing.T) {
+func TestTSWriterWritesDeriverSettings(t *testing.T) {
 	api := ir.ServiceRef{Name: "shop-cart", Kind: ir.SchemaKindAPI}
-	db := ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
 	off, one := false, 1
 	schema := ir.NewSchema("shop-stack", ir.SchemaKindStack)
 	schema.Types["Shop"] = &ir.TypeDef{Name: "Shop", Role: ir.RoleEmbeddedStruct, Stack: &ir.StackDecl{Deploy: []ir.ServiceRef{api}}}
@@ -21,13 +19,11 @@ func TestTSWriterWritesDeriverAndRunnerSettings(t *testing.T) {
 		Target: "local",
 		Settings: []*ir.DeployableSettings{
 			{Of: ir.DeployableRef{Service: &api, Deriver: "TriageTickets"}, Instances: &one, Enabled: &off},
-			{Of: ir.DeployableRef{Service: &db, Runner: true}, Enabled: &off},
 		},
 	}}
 	source := writtenSource(t, schema, FormatTS)
 	for _, want := range []string{
 		`{ of: ShopCart, deriver: "TriageTickets", enabled: false, instances: 1 }`,
-		`{ of: ShopDb, runner: true, enabled: false }`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("written TypeScript lacks %s:\n%s", want, source)
@@ -86,7 +82,6 @@ func TestTSWriterWritesOrigins(t *testing.T) {
 func TestTSWriterWritesImages(t *testing.T) {
 	api := ir.ServiceRef{Name: "shop-api", Kind: ir.SchemaKindAPI}
 	orders := ir.ServiceRef{Name: "shop-orders", Kind: ir.SchemaKindAPI}
-	db := ir.ServiceRef{Name: "shop-db", Kind: ir.SchemaKindDB}
 	schema := ir.NewSchema("shop-stack", ir.SchemaKindStack)
 	schema.Types["Backend"] = &ir.TypeDef{Name: "Backend", Role: ir.RoleEmbeddedStruct, Server: &ir.ServerDecl{Serves: []ir.ServiceRef{orders}}}
 	schema.Types["Shop"] = &ir.TypeDef{Name: "Shop", Role: ir.RoleEmbeddedStruct, Stack: &ir.StackDecl{
@@ -95,13 +90,12 @@ func TestTSWriterWritesImages(t *testing.T) {
 			{Of: ir.DeployableRef{Service: &api}, Packages: []string{"fonts-liberation", "chromium"}},
 			{Of: ir.DeployableRef{Deployable: "Backend"}, Extend: "docker/backend.Dockerfile"},
 			{Of: ir.DeployableRef{Service: &orders, Worker: "FulfilOrders"}, Packages: []string{"tini"}, Extend: "docker/fulfil/Dockerfile"},
-			{Of: ir.DeployableRef{Service: &db, Runner: true}, Packages: []string{"tini"}},
 		},
 	}}
 	schema.Types["Dev"] = &ir.TypeDef{Name: "Dev", Role: ir.RoleEmbeddedStruct, Environment: &ir.EnvironmentDecl{Target: "local"}}
 	source := writtenSource(t, schema, FormatTS)
 	want := `images: [{ of: ShopApi, packages: ["fonts-liberation", "chromium"] }, { of: Backend, extend: "docker/backend.Dockerfile" }, ` +
-		`{ of: ShopOrders, worker: "FulfilOrders", packages: ["tini"], extend: "docker/fulfil/Dockerfile" }, { of: ShopDb, runner: true, packages: ["tini"] }]`
+		`{ of: ShopOrders, worker: "FulfilOrders", packages: ["tini"], extend: "docker/fulfil/Dockerfile" }]`
 	if !strings.Contains(source, want) {
 		t.Errorf("written TypeScript lacks %s:\n%s", want, source)
 	}

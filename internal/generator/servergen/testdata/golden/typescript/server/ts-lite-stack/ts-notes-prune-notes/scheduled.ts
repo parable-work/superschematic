@@ -40,7 +40,7 @@
 import { env, WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloudflare:workers';
 import { NonRetryableError } from 'cloudflare:workflows';
 import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
-import { binding, stackEnvOf } from '@superschematic/http-runtime/workers';
+import { binding, stackEnvOf, installQueueWakes, queueWakesSettled } from '@superschematic/http-runtime/workers';
 import { startWorkersTelemetry } from '@superschematic/http-runtime/workers-telemetry';
 import type { SqlDatabase } from '@superschematic/http-runtime/d1';
 import { createOrm as createTsNotesDbOrm } from '@schemas/ts-notes-db-types/orm/sqlite';
@@ -64,6 +64,11 @@ const logger = createLogger({ stack: 'ts-lite-stack', job: 'ts-notes-prune-notes
 // Trace export, from the Worker's OTEL_ bindings: a refused value throws
 // here, and Cloudflare refuses the version.
 const telemetry = startWorkersTelemetry(env, { service: 'ts-notes-prune-notes', stack: 'ts-lite-stack', kind: 'job', logger });
+
+// The wakes the job's writes send (D145, D151), as its QUEUE_WAKES binding
+// names them: an enqueue, a deadline or an event due before the next firing
+// of a worker's Cron Trigger starts a run of the worker's Workflow.
+installQueueWakes(env);
 
 /** What Cloudflare hands the scheduled handler beside the controller: waitUntil keeps the isolate for work after the run. */
 interface ExecutionContext {
@@ -133,7 +138,7 @@ export default {
     try {
       await runTries({ cron: controller.cron });
     } finally {
-      ctx.waitUntil(telemetry.flush());
+      ctx.waitUntil(queueWakesSettled().then(() => telemetry.flush()));
     }
   },
 };
@@ -173,6 +178,7 @@ export class JobRun extends WorkflowEntrypoint<unknown, RunPayload | string> {
       try {
         await runTries({ instance: event.instanceId });
       } finally {
+        await queueWakesSettled();
         await telemetry.flush();
       }
     });

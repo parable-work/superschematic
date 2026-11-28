@@ -5,7 +5,6 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -19,9 +18,8 @@ import (
 // A field with neither is not walked: its rows are born in any state.
 //
 // In a DB service it also refuses the declarations no guard could hold:
-// one on an engine type, whose instances no trigger watches, one on a
-// @queue class, and one on a field a behavior owns, whose moves are the
-// behavior's. A class that is no table keeps its machine, and the types'
+// one on a @queue class, and one on a field a behavior owns, whose moves
+// are the behavior's. A class that is no table keeps its machine, and the types'
 // helpers with it.
 //
 // What a declaration decides alone (one machine per field, one entry per
@@ -47,9 +45,6 @@ func checkStateMachine(schema *ir.Schema, in Input, td *ir.TypeDef, machine *ir.
 	}
 	if schema.Kind == ir.SchemaKindDB {
 		switch {
-		case codegen.IsEngineType(td):
-			fail("%s composes a behavior with @behavior, so the engine keeps its instances in tables of its own, which no guard watches; declare the machine on a table", td.Name)
-			return
 		case td.Queue != nil:
 			fail("%s is a @queue class, whose rows are messages the queue's workers move; declare the machine on a table", td.Name)
 			return

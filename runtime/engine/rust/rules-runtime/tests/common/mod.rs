@@ -11,6 +11,7 @@
 
 #![allow(dead_code)]
 
+pub mod moves;
 pub mod parity;
 
 use std::path::PathBuf;

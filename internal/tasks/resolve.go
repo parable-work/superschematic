@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -90,9 +91,6 @@ type SchemaSpec struct {
 	Root    string `json:"root,omitempty"`
 }
 
-// configFiles are the names a service's config takes.
-var configFiles = []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"}
-
 // SchemaRoot is one schemas root of a commit: the directory whose
 // `services` holds a directory per service.
 type SchemaRoot struct {
@@ -116,7 +114,7 @@ func SchemaRoots(tree registry.TaskTree) []SchemaRoot {
 	for _, entry := range tree.Entries() {
 		dir, file := path.Split(entry.Path)
 		isConfig := false
-		for _, name := range configFiles {
+		for _, name := range schemaconfig.FileNames {
 			isConfig = isConfig || file == name
 		}
 		if !isConfig {

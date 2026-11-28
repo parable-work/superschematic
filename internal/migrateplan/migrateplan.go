@@ -23,6 +23,8 @@ import (
 	"github.com/parable-work/superschematic/internal/loader"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
+	"github.com/parable-work/superschematic/internal/loader/schemafile"
+	"github.com/parable-work/superschematic/internal/migrateplan/lower"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
@@ -42,11 +44,16 @@ type Source struct {
 
 // Env is what a plan from documents takes from its caller and not from the
 // documents: the registry, whose kinds, decorators, behaviors and
-// extensions a document may use, as the binary assembles it, and the
-// naming.
+// extensions a document may use, as the binary assembles it, the naming,
+// and the DB service development mode's General documents lower into.
 type Env struct {
 	Registry *registry.Registry
 	Naming   naming.Naming
+	// Service names the DB service General documents lower into (D117,
+	// internal/migrateplan/lower); empty takes the name every one of them
+	// shares. A DB service's documents name their service themselves, and
+	// it must be this one when it is given.
+	Service string
 }
 
 // ReadSources reads a stream of schema documents, JSON values one after
@@ -81,6 +88,12 @@ func ReadSources(r io.Reader, label string) ([]Source, error) {
 // database. A document of the data form is checked against its JSON
 // Schema and merged as a service load merges its files; the documents name
 // no other service, since nothing beside them resolves one.
+//
+// Documents that are all General are development mode's, each an instance
+// type and its behaviors, and lower to the tables of the DB service
+// env.Service names, or of the name they share (lower.Documents): a
+// Workflow on the type is the field `status: Workflow<{ ... }>`, and the
+// type's other behaviors are ones its table implements.
 func Load(sources []Source, dialect sqlmigrate.Dialect, env Env) (*ir.Schema, error) {
 	if len(sources) == 0 {
 		return nil, errors.New("no schema documents: a plan from documents takes every schema document of one DB service, as format --to=json writes them")
@@ -101,7 +114,14 @@ func Load(sources []Source, dialect sqlmigrate.Dialect, env Env) (*ir.Schema, er
 		}
 		docs = append(docs, loader.SourcedDocument{Source: source.Name, Document: doc})
 	}
+	docs, err := lowered(docs, env.Service, reg)
+	if err != nil {
+		return nil, err
+	}
 	first := docs[0].Document
+	if env.Service != "" && first.Name != env.Service {
+		return nil, fmt.Errorf("%s is a document of %s, and the plan is of %s: a plan from documents takes one DB service's documents", docs[0].Source, first.Name, env.Service)
+	}
 	for _, sourced := range docs[1:] {
 		if sourced.Document.Name != first.Name {
 			return nil, fmt.Errorf("%s is a document of %s, and %s of %s: a plan from documents takes one DB service's documents", docs[0].Source, first.Name, sourced.Source, sourced.Document.Name)
@@ -112,6 +132,34 @@ func Load(sources []Source, dialect sqlmigrate.Dialect, env Env) (*ir.Schema, er
 	}
 	return loader.LoadDocuments(docs,
 		loader.WithRegistry(reg), loader.WithNaming(env.Naming), loader.WithDialects(string(dialect)))
+}
+
+// lowered lowers documents that are all General, development mode's, to
+// the documents of the DB service named, or of the name they share
+// (D117); any other documents are returned as they are.
+func lowered(docs []loader.SourcedDocument, service string, reg *registry.Registry) ([]loader.SourcedDocument, error) {
+	names := make([]string, len(docs))
+	general := make([]*schemafile.Document, len(docs))
+	for i, sourced := range docs {
+		if sourced.Document.Kind != ir.SchemaKindGeneral {
+			return docs, nil
+		}
+		names[i] = sourced.Document.Name
+		general[i] = sourced.Document
+	}
+	service, err := lower.Service(names, service)
+	if err != nil {
+		return nil, fmt.Errorf("%w (service, --service)", err)
+	}
+	tables, err := lower.Documents(general, service, lower.RegistryValues(reg))
+	if err != nil {
+		return nil, err
+	}
+	out := make([]loader.SourcedDocument, len(docs))
+	for i, sourced := range docs {
+		out[i] = loader.SourcedDocument{Source: sourced.Source, Document: tables[i]}
+	}
+	return out, nil
 }
 
 // hasDatabase reports whether a schema of kind has a database: whether
