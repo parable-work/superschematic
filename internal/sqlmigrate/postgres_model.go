@@ -231,6 +231,9 @@ func (postgresDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, er
 	for _, s := range out.RoleSeeds {
 		m.Roles = append(m.Roles, modelRole(s, s.InsertSQL(), s.UpdateSQL()))
 	}
+	for _, s := range out.SeedRows {
+		m.Rows = append(m.Rows, &SeedRow{Table: s.Table, Key: s.Key, Origin: s.Origin, Insert: s.InsertSQL()})
+	}
 
 	m.sort()
 	return m, nil
@@ -552,4 +555,6 @@ func (m *Model) sort() {
 		}
 		return m.Roles[i].Name < m.Roles[j].Name
 	})
+	// A table's rows keep the order the schema declares them in.
+	sort.SliceStable(m.Rows, func(i, j int) bool { return m.Rows[i].Table < m.Rows[j].Table })
 }

@@ -7,9 +7,9 @@ guide covers it in full.
 
 | Path | What it is |
 |---|---|
-| `schemas/services/jobs-db` | DB, Postgres: `Contact` is a `@party`, a principal that acts through its grants (`Grant`, D156); `Job` is what a grant names and `Report` what a contractor writes on one, with its files; `Conversation` and `Message` are the conversations, a message holding references and files; `RunRequest` is the queue a granted contact's message puts a run request on; the notifier's tables (D153) and `ChannelIdentity`, the addresses everyone is reached at and writes from |
+| `schemas/services/jobs-db` | DB, Postgres: `Contact` is a `@party`, a principal that acts through its grants (`Grant`, D156); `Job` is what a grant names and `Report` what a contractor writes on one, with its files; `Conversation` and `Message` are the conversations, a message holding references and files; `RunRequest` is the queue a granted contact's message puts a run request on; the notifier's tables (D153) and `ChannelIdentity`, the addresses everyone is reached at and writes from; the roles and each channel kind's trust are seed rows (`@seedRows`) |
 | `schemas/services/jobs-api` | API over `jobs-db`: `JobsApiConfig` names two channel slots, `SMS` and `MAIL`, and the deployment's `INBOUND_ADDRESS`; `Notify` drains the notifier's queue and `Runs` the run requests |
-| `server/server.ts` | What the implementation adds to the generated server: the inbound path's address and send policy (`createRuntimeOptions`), the roles' seed rows, sending to a contact, the timeline and triage, and the `Runs` worker's handler |
+| `server/server.ts` | What the implementation adds to the generated server: the inbound path's address and send policy (`createRuntimeOptions`), sending to a contact, the timeline and triage, and the `Runs` worker's handler |
 
 The channels are the SMS relay and the mail relay of
 `examples/runtime-providers`. The SMS relay fetches a text's photo and

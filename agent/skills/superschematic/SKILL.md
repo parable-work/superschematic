@@ -197,6 +197,9 @@ path for when the store is unavailable.
   `@userSessions` on an API class) instead of writing auth. Seed the
   roles new users get with `@seedRoles([{ name, permissions }])` on the
   `UserRole` table, so an approved user can act with no admin step.
+  Rows any other table starts with (a default preference, a channel
+  kind's trust) are `@seedRows<T>([...], { key })` on it, not a seed
+  script: the migrations insert each once and never overwrite an edit.
   An agent or a script that calls as a user gets an API key, not the
   user's session and not a key table of your own:
   `@userSessions({ apiKeys: true })` adds `createApiKey`, `listApiKeys`

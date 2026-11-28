@@ -210,6 +210,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// The roles a UserRole table holds from its first migration on
 	// (core_seed_roles.go, D88).
 	specs = append(specs, seedRolesDecorator())
+	// The rows any DB table holds from its first migration on
+	// (core_seed_rows.go, #625).
+	specs = append(specs, seedRowsDecorator())
 
 	// An API service's derivers, which fill the Derived fields of its
 	// engine database's types (core_derivers.go, D74).

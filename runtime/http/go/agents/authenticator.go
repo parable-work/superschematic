@@ -92,6 +92,9 @@ func (a *Agents) Authenticator(authority access.GrantAuthority, inner func(http.
 			called := session.ContextWithCaller(r.Context(), principal.Principal.Principal)
 			called = session.ContextWithRoles(called, []session.Role{{Name: "agent-run", Permissions: principal.Permissions}})
 			called = context.WithValue(called, runPrincipalKey{}, principal)
+			// The run's Agent, which the core counts an Approvals sign-off
+			// as (D158, D200).
+			called = session.ContextWithAgent(called, principal.Agent)
 			next.ServeHTTP(w, r.WithContext(called))
 		})
 	}

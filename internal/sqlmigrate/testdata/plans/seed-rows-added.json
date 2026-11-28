@@ -1,0 +1,21 @@
+{
+  "dialect": "postgres",
+  "from": "978bf1a1e8c7f87e0fa385d2a35f0795012d4ddefcc9f91c96a606334676b5ea",
+  "hash": "7cef656fab64853eb39a5ca978e3f1dc429fd91cc1fa3857464dfa0f94239b13",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "seedRow",
+      "phase": "expand",
+      "statements": [
+        "INSERT INTO label (\"name\", color)\nSELECT 'gift'::CITEXT, 'green'::TEXT\nWHERE NOT EXISTS (SELECT 1 FROM label WHERE \"name\" = 'gift'::CITEXT)\nON CONFLICT DO NOTHING"
+      ],
+      "subject": "row/label/{\"name\":\"gift\"}",
+      "transactional": true
+    }
+  ],
+  "to": "b24e777d6d35536dd02d4903a0ac34ca963c844c2df0689a17f1b9f88593336a",
+  "toModel": null,
+  "version": 1
+}

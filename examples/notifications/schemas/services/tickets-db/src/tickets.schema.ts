@@ -12,6 +12,7 @@ import {
   notifier,
   queue,
   references,
+  seedRows,
   unique
 } from "@superschematic/db";
 
@@ -98,12 +99,25 @@ export abstract class Delivery {}
 @notifier("routes")
 export abstract class NoticeRoute {}
 
+// The notifier's defaults are seed rows, which the migrations write
+// (#625): everyone hears by SMS, then email, outside 22:00 to 07:00; a
+// person's own rows override them.
+@seedRows<NoticePreference>(
+  [{ principal: null, eventKind: "*", urgency: "*", channels: ["sms", "email"], quietStart: "22:00", quietEnd: "07:00", timeZone: "UTC" }],
+  { key: ["principal", "eventKind", "urgency"] }
+)
 @notifier("preferences")
 export abstract class NoticePreference {}
 
 @notifier("subscriptions")
 export abstract class Subscription {}
 
+// A text may only acknowledge, since a sender id can be spoofed; an email
+// may run what its sender may.
+@seedRows<ChannelTrust>([
+  { channelKind: "sms", level: "low", permissions: [] },
+  { channelKind: "email", level: "standard", permissions: null },
+])
 @notifier("channelTrust")
 export abstract class ChannelTrust {}
 

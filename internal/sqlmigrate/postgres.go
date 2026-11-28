@@ -125,6 +125,8 @@ func (p postgresDialect) render(c *change) (rendered, error) {
 		return one(stepFor(c, c.role.Insert)), nil
 	case opUpdateRole:
 		return one(stepFor(c, c.role.Update)), nil
+	case opSeedRow:
+		return one(stepFor(c, c.row.Insert)), nil
 	case opCreateView:
 		return one(stepFor(c, createViewSQL(c.view)...)), nil
 	case opReplaceView:
