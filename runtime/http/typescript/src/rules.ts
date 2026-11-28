@@ -271,7 +271,7 @@ export type CoreReadRequest =
   /** The live versions of the types that compose a behavior, in name order (D77's primitive 3): what an operation of the namespace runs over. The adapter answers its layout's types that compose it, since a table's API authorizes. */
   | { readonly kind: 'composing'; readonly behavior: string }
   /** The permissions each subject holds now (D200): what an Approvals requirement with recheckPermission reads of its signers. The adapter answers it from the layout's identity tables, and leaves out a subject it cannot answer for, which the core holds to none. */
-  | { readonly kind: 'permissions'; readonly subjects: readonly string[] };
+  | { readonly kind: 'permissions'; readonly subjects: readonly string[]; readonly agents?: readonly string[] };
 
 /** One sub-table of a use, as a read across a table names it (D104): the use's id and the sub-table's declared name (superschematic_rules::TableRef). */
 export interface CoreTableRef {
@@ -719,6 +719,15 @@ export interface RulesPermissions {
   readonly roles: string;
   readonly roleKey: string;
   readonly rolePermissions: string;
+  /**
+   * The agents' definitions table (#625), its key column and the column of
+   * the role each acts with, which names a row of roles by roleName: where
+   * an Agent's permissions are read. Absent for a database with no agents.
+   */
+  readonly agents?: string;
+  readonly agent?: RulesColumn;
+  readonly agentRole?: string;
+  readonly roleName?: string;
 }
 
 // ---- The store ----
@@ -1849,7 +1858,7 @@ async function answerOf(host: RulesHost, request: CoreReadRequest): Promise<Core
     case 'permissions':
       // The permissions each subject holds now (D200), from the layout's
       // identity tables.
-      return { permissions: await readPermissions(host.store, host.layout.permissions, request.subjects) };
+      return { permissions: await readPermissions(host.store, host.layout.permissions, request.subjects, request.agents ?? []) };
     default:
       throw internal(`the adapter answers no read of this kind: ${JSON.stringify(request)}`);
   }

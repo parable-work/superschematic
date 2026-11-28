@@ -57,6 +57,21 @@ through the DDL, the ORM, the types and migrations like any other table:
 | `UserApiKey` | `id`, `user`, `name`, `tokenHash` (the SHA-256 of the key's token, never the token), `permissions` (the subset the key was made with, null for all), `createdAt`, `expiresAt`, `lastUsedAt`, `revokedAt`; indexed on `user` ([API keys](#api-keys)) |
 | `UserRoleGrant`, with a `UserRole` table | `id`, `user`, `role`, `grantedAt`; unique on `user` and `role` |
 
+A role grant raises an event as any write does: the `UserRole` class
+declares an `@enqueueOnChange` of its grants with `of: "grants"`, whose
+`fields`, `when` and `message` name `UserRoleGrant`'s columns, and the
+build copies it onto `UserRoleGrant` (#625). Granting a role and revoking
+it then enqueue the message whatever writes the grant, the identity
+store's routes or a script:
+
+```ts
+@enqueueOnChange(RoleGrantChanged, { of: "grants", on: ["insert", "delete"], message: { user: "user", role: "role", grant: "id" } })
+export abstract class Role extends Auditable implements UserRole { ... }
+```
+
+A declaration without `of` enqueues on the role table's own writes, a
+role's rename or a change of its permissions.
+
 It also writes the identity descriptor, `identity/<schema>.json` beside the
 Go types and a constant in the Go, TypeScript and Rust types
 (`IdentityDescriptor`, `identityDescriptor`, `IDENTITY_DESCRIPTOR`). The

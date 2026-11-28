@@ -477,6 +477,9 @@ func enqueueOnChangeArgs(def *ir.EnqueueOnChange) string {
 	if def.Backfill {
 		parts = append(parts, "backfill: true")
 	}
+	if def.Of != "" {
+		parts = append(parts, "of: "+quote(def.Of))
+	}
 	return def.Queue + ", " + objectLiteral(parts)
 }
 

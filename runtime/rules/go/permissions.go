@@ -25,6 +25,14 @@ type Permissions struct {
 	Roles           string `json:"roles"`
 	RoleKey         string `json:"roleKey"`
 	RolePermissions string `json:"rolePermissions"`
+	// Agents is the agents' definitions table (#625), Agent its key
+	// column and AgentRole the column of the role each acts with, which
+	// names a row of Roles by RoleName: where an Agent's permissions are
+	// read. Empty for a database with no agents.
+	Agents    string  `json:"agents,omitempty"`
+	Agent     *Column `json:"agent,omitempty"`
+	AgentRole string  `json:"agentRole,omitempty"`
+	RoleName  string  `json:"roleName,omitempty"`
 }
 
 // readPermissions answers a permissions read (D200): the permissions each
@@ -35,8 +43,11 @@ type Permissions struct {
 // core holds it to no permission; so is every subject of a layout that
 // names no identity tables (Layout.Permissions nil), whose database the
 // adapter cannot answer for.
-func readPermissions(ctx context.Context, store Store, from *Permissions, subjects []string) (map[string][]string, error) {
-	out := map[string][]string{}
+func readPermissions(ctx context.Context, store Store, from *Permissions, subjects, agents []string) (map[string][]string, error) {
+	out, err := readAgentPermissions(ctx, store, from, agents)
+	if err != nil {
+		return nil, err
+	}
 	if from == nil || len(subjects) == 0 {
 		return out, nil
 	}
@@ -77,6 +88,75 @@ func readPermissions(ctx context.Context, store Store, from *Permissions, subjec
 	if err != nil {
 		return nil, err
 	}
+	held, err := heldOf(rows, from, from.User, users)
+	if err != nil {
+		return nil, err
+	}
+	for subject, wire := range bySubject {
+		if permissions, ok := held[wire]; ok {
+			out[subject] = permissions
+		}
+	}
+	return out, nil
+}
+
+// readAgentPermissions answers a permissions read's Agents (#625): the
+// permissions of the role each Agent's definition row names, by the
+// roles' name column. An Agent no definition row holds, or that is no key
+// of the definitions table, is left out, and the core holds it to none;
+// so is every Agent of a layout that names no agents table.
+func readAgentPermissions(ctx context.Context, store Store, from *Permissions, agents []string) (map[string][]string, error) {
+	out := map[string][]string{}
+	if from == nil || from.Agents == "" || from.Agent == nil || len(agents) == 0 {
+		return out, nil
+	}
+	dialect := store.Dialect()
+	table := &Table{Type: from.Agents, Table: from.Agents, Key: *from.Agent}
+	byAgent := map[string]string{}
+	var keys []any
+	var placeholders []string
+	for _, agent := range agents {
+		key, err := keyValue(table, agent)
+		if err != nil {
+			continue
+		}
+		wire, err := permissionsKey(key, *from.Agent, table)
+		if err != nil {
+			continue
+		}
+		byAgent[agent] = wire
+		keys = append(keys, key)
+		placeholders = append(placeholders, placeholder(dialect, len(keys)))
+	}
+	if len(keys) == 0 {
+		return out, nil
+	}
+	text := fmt.Sprintf(
+		"SELECT a.%s, r.%s FROM %s AS a LEFT JOIN %s AS r ON r.%s = a.%s WHERE a.%s IN (%s) ORDER BY a.%s",
+		quote(from.Agent.Column), quote(from.RolePermissions),
+		quote(from.Agents), quote(from.Roles), quote(from.RoleName), quote(from.AgentRole),
+		quote(from.Agent.Column), strings.Join(placeholders, ", "), quote(from.Agent.Column),
+	)
+	rows, err := store.Query(ctx, text, keys...)
+	if err != nil {
+		return nil, err
+	}
+	held, err := heldOf(rows, from, *from.Agent, table)
+	if err != nil {
+		return nil, err
+	}
+	for agent, wire := range byAgent {
+		if permissions, ok := held[wire]; ok {
+			out[agent] = permissions
+		}
+	}
+	return out, nil
+}
+
+// heldOf is the permissions each key of rows holds: rows of a key and a
+// role's list of permissions, which may be null for a key no role gives
+// any, each permission once in the order the rows give them.
+func heldOf(rows [][]any, from *Permissions, key Column, table *Table) (map[string][]string, error) {
 	held := map[string][]string{}
 	list := Column{Field: from.RolePermissions, Column: from.RolePermissions, Type: "string", List: true}
 	roles := &Table{Type: from.Roles, Table: from.Roles}
@@ -84,7 +164,7 @@ func readPermissions(ctx context.Context, store Store, from *Permissions, subjec
 		if len(row) != 2 {
 			return nil, Internal("a permissions read answered %d values a row, not 2", len(row))
 		}
-		wire, err := permissionsKey(row[0], from.User, users)
+		wire, err := permissionsKey(row[0], key, table)
 		if err != nil {
 			return nil, err
 		}
@@ -108,12 +188,7 @@ func readPermissions(ctx context.Context, store Store, from *Permissions, subjec
 			}
 		}
 	}
-	for subject, wire := range bySubject {
-		if permissions, ok := held[wire]; ok {
-			out[subject] = permissions
-		}
-	}
-	return out, nil
+	return held, nil
 }
 
 // permissionsKey is a user key, bound or read, as the text the adapter

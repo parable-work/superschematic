@@ -3411,8 +3411,16 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
   it from the identity runtime's tables in the same database: a person
   holds the permissions of every role granted to them, and none while
   disabled or waiting for approval. A signer who is no user of that
-  database, an Agent among them, holds none, and so does every signer of a
-  database without the identity tables.
+  database holds none, and so does every signer of a database without the
+  identity tables.
+- **An Agent through its role** (`agentRole: true`, #625). A sign-off that
+  counts as its run's Agent (`callers` lists `agent`) counts through the
+  permissions its Agent's agent role grants now, read at each guard,
+  whether or not the requirement rechecks: the repositories read the
+  agent's row of the `@agents("definitions")` table and the role its
+  `role` names, by name, in the role table. Without it, a requirement that
+  rechecks counts such a sign-off for nothing, and one that does not counts
+  the permissions the run held when it signed.
 - **When it applies** (`when`). A list of conditions on own fields, all of
   which must hold: `{ field, test, values, negate? }`, `test` one of
   `every-matches` and `any-matches` (glob patterns: `*` within a path

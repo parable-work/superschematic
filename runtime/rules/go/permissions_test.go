@@ -122,8 +122,36 @@ func TestAPermissionsReadAnswersFromTheIdentityTables(t *testing.T) {
 		}})
 		wantJSON(t, "the permissions read", answered(t, layout), string(want))
 
+		// An Agent is answered through its agent role, its definition row's
+		// role naming a role by its name (#625); one whose role no row
+		// names holds none, and one no definition row holds is left out.
+		db.Exec(t, fmt.Sprintf(`CREATE TABLE "agent" (id %s PRIMARY KEY, name %s, role %s)`, agentKeyType(db), db.ColumnTypes().Text, db.ColumnTypes().Text))
+		agent := fmt.Sprintf(`INSERT INTO "agent" (id, name, role) VALUES (%s, %s, %s)`, db.P(1), db.P(2), db.P(3))
+		const triage, roleless = "6ebcd380-ab7f-4c9e-90e3-dfcebdac9b8a", "80def5a2-cd91-4eb0-92a5-f1e0dfcebdac"
+		db.Exec(t, agent, triage, "triage", "reviewer")
+		db.Exec(t, agent, roleless, "roleless", "no-such-role")
+		withAgents := identityPermissions()
+		withAgents.Agents, withAgents.Agent, withAgents.AgentRole, withAgents.RoleName = "agent", &rules.Column{Field: "id", Column: "id", Type: "Identity.UUID"}, "role", "name"
+		read = fmt.Sprintf(`{"read":[{"kind":"permissions","subjects":[%q],"agents":[%q,%q,%q,"no-uuid"]}]}`, benColumn, wire(t, triage), roleless, noneColumn)
+		layout.Permissions = withAgents
+		want, _ = json.Marshal(map[string]any{"permissions": map[string][]string{
+			benColumn: {}, wire(t, triage): {"changes.read", "changes.approve"}, roleless: {},
+		}})
+		wantJSON(t, "the permissions read of Agents", answered(t, layout), string(want))
+		layout.Permissions = identityPermissions()
+		wantJSON(t, "the permissions read of Agents with no agents table", answered(t, layout), `{"permissions":{"`+benColumn+`":[]}}`)
+
 		// A layout that names no identity tables answers no subject.
 		layout.Permissions = nil
 		wantJSON(t, "the permissions read of a layout with no identity tables", answered(t, layout), `{"permissions":{}}`)
 	})
+}
+
+// agentKeyType is the agents table's key column's type: UUID on Postgres,
+// TEXT on SQLite, as sqlgen writes an Identity.UUID key.
+func agentKeyType(db *rulestest.DB) string {
+	if db.Dialect == rules.DialectPostgres {
+		return "UUID"
+	}
+	return "TEXT"
 }

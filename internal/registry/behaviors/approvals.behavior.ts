@@ -116,6 +116,15 @@ interface ApprovalsGateMembers {
    */
   recheckPermission?: boolean;
   /**
+   * Whether a sign-off that counts as its run's Agent (callers lists agent)
+   * counts through the permissions its Agent's agent role grants now, read
+   * at each transition the gate guards (#625); false when absent, which
+   * counts it for nothing when the requirement rechecks permissions and
+   * counts what the run held when it signed otherwise. A table's alone: an
+   * engine type refuses it.
+   */
+  agentRole?: boolean;
+  /**
    * The conditions on the instance's own fields under which the requirement
    * applies, all of them; it always applies when absent. A requirement that
    * does not apply asks for nothing, and a condition on a field with no
@@ -128,8 +137,8 @@ interface ApprovalsGateMembers {
    * the instance, or, with in, at one of the keys the instance's own list
    * field in holds. A row holds a requirement's members as its own fields
    * (count, permission, callers, proof, proofWithinMs, excludeCreator,
-   * excludeCreatorPerson, excludeSubjectsIn, recheckPermission, when) and
-   * may hold name, resetOn and archivedAt. An archived row asks for nothing.
+   * excludeCreatorPerson, excludeSubjectsIn, recheckPermission, agentRole,
+   * when) and may hold name, resetOn and archivedAt. An archived row asks for nothing.
    * A row's resetOn spends a sign-off for that requirement alone: a sign-off
    * records the value of each field the rows reset on, and counts for a
    * requirement only while its fields still hold them. The gate then names

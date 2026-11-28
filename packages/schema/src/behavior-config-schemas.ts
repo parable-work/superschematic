@@ -14,6 +14,8 @@ export type JSONObject = { readonly [key: string]: unknown };
 export type ApprovalsConfigSchema = {
   /** The gates, by the state of the type's Workflow each gates. */
   readonly gates: { readonly [key: string]: {
+    /** Whether a sign-off that counts as its run's Agent (callers lists agent) counts through the permissions its Agent's agent role grants now, read at each transition the gate guards (#625); false when absent, which counts it for nothing when the requirement rechecks permissions and counts what the run held when it signed otherwise. A table's alone: an engine type refuses it. */
+    readonly agentRole?: boolean;
     /** Which callers count, and as whom: person, a person calling as themselves; acting-for-person, an agent run acting for a person, counted as that person; agent, an agent run, counted as its Agent. Every caller counts, as its subject, when absent. A table's alone: an engine type refuses it. */
     readonly callers?: ReadonlyArray<'person' | 'acting-for-person' | 'agent'>;
     /** How many distinct signers must sign off before a transition into the state. Needed unless the gate reads its requirements from rows. */
@@ -38,7 +40,7 @@ export type ApprovalsConfigSchema = {
     readonly proofWithinMs?: number;
     /** Whether each transition the gate guards reads each signer's permission again, so a signer who has lost it stops counting; false when absent, which reads it at the sign-off. A table's alone: an engine type refuses it. */
     readonly recheckPermission?: boolean;
-    /** Reads the gate's requirements from the rows of a type, so each instance writes its own: the rows of schema whose to-one relation link points at the instance, or, with in, at one of the keys the instance's own list field in holds. A row holds a requirement's members as its own fields (count, permission, callers, proof, proofWithinMs, excludeCreator, excludeCreatorPerson, excludeSubjectsIn, recheckPermission, when) and may hold name, resetOn and archivedAt. An archived row asks for nothing. A row's resetOn spends a sign-off for that requirement alone: a sign-off records the value of each field the rows reset on, and counts for a requirement only while its fields still hold them. The gate then names none of the requirement's members, and names its own resetOn. A table's alone: an engine type refuses it. */
+    /** Reads the gate's requirements from the rows of a type, so each instance writes its own: the rows of schema whose to-one relation link points at the instance, or, with in, at one of the keys the instance's own list field in holds. A row holds a requirement's members as its own fields (count, permission, callers, proof, proofWithinMs, excludeCreator, excludeCreatorPerson, excludeSubjectsIn, recheckPermission, agentRole, when) and may hold name, resetOn and archivedAt. An archived row asks for nothing. A row's resetOn spends a sign-off for that requirement alone: a sign-off records the value of each field the rows reset on, and counts for a requirement only while its fields still hold them. The gate then names none of the requirement's members, and names its own resetOn. A table's alone: an engine type refuses it. */
     readonly requirementsFrom?: {
       /** An own list field of the instance that holds the keys link points at; absent, link points at the instance itself. */
       readonly in?: string;

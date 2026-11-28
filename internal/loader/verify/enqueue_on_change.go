@@ -7,6 +7,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
+	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -38,8 +39,26 @@ func checkEnqueueOnChange(schema *ir.Schema, in Input, r *Result) {
 			continue
 		}
 		columns := enqueueColumns(schema, td, scalarTypes)
+		var grants *ir.TypeDef
 		for _, def := range td.EnqueueOnChange {
-			checkOneEnqueueOnChange(schema, td, def, columns, scalarTypes, policy, r)
+			if def.Of == "" {
+				checkOneEnqueueOnChange(schema, td, def, columns, scalarTypes, policy, r)
+				continue
+			}
+			// A UserRole table's declaration of its grants (#625): it
+			// names the fields of UserRoleGrant, which the expansion adds
+			// after this pass, so it is checked against that table.
+			user := schema.UserTable()
+			if td.UserRole == nil || user == nil {
+				r.errorf(td.Owner, "@enqueueOnChange(%s) on %s: of %q is a UserRole table's grants, and %s is no UserRole table of a schema with a User table; leave of out to enqueue on %s's own writes", def.Queue, td.Name, def.Of, td.Name, td.Name)
+				continue
+			}
+			if grants == nil {
+				grants = identity.RoleGrantType(user, td)
+				grants.Owner = td.Owner
+				grants.Role = ir.RoleDBTable
+			}
+			checkOneEnqueueOnChange(schema, grants, def, enqueueColumns(schema, grants, scalarTypes), scalarTypes, policy, r)
 		}
 	}
 }

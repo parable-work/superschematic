@@ -389,6 +389,89 @@ fn a_requirement_reads_each_signers_permission_again() {
     changed(ready(&mut host));
 }
 
+/// agentRole counts a sign-off that counts as its run's Agent through the
+/// permissions its Agent's agent role grants now (#625), rechecked or not:
+/// the host answers the Agent from its agents table, and an Agent whose
+/// role does not cover the requirement's permission, or that the host
+/// cannot answer for, counts for nothing. Without agentRole a requirement
+/// that rechecks reads no Agent, so the Agent's sign-off counts for
+/// nothing, and one that does not counts what the run held when it signed.
+#[test]
+fn an_agents_sign_off_counts_through_its_agent_role_where_the_requirement_says() {
+    for recheck in [false, true] {
+        let mut host = hosting(
+            json!({"count": 1, "permission": "changes.approve", "callers": ["agent"], "agentRole": true, "recheckPermission": recheck, "excludeCreator": false}),
+            json!({}),
+        );
+        changed(sign(
+            &mut host,
+            &run("r1", "reviewer", None),
+            json!({"state": "ready"}),
+        ));
+        assert_eq!(
+            veto_of(ready(&mut host)).1["count"],
+            0,
+            "an Agent the host cannot answer for"
+        );
+        // A person's permissions under the Agent's key do not count: the
+        // read asks for it as an Agent.
+        host.memory
+            .permissions
+            .insert("reviewer".to_owned(), vec!["changes".to_owned()]);
+        assert_eq!(veto_of(ready(&mut host)).1["count"], 0);
+        host.memory
+            .agent_permissions
+            .insert("reviewer".to_owned(), vec!["changes.read".to_owned()]);
+        assert_eq!(
+            veto_of(ready(&mut host)).1["count"],
+            0,
+            "a role that does not cover it"
+        );
+        host.memory
+            .agent_permissions
+            .insert("reviewer".to_owned(), vec!["changes".to_owned()]);
+        changed(ready(&mut host));
+    }
+
+    // Without agentRole, rechecked: the Agent is read for nothing.
+    let mut host = hosting(
+        json!({"count": 1, "permission": "changes.approve", "callers": ["agent"], "recheckPermission": true, "excludeCreator": false}),
+        json!({}),
+    );
+    changed(sign(
+        &mut host,
+        &run("r1", "reviewer", None),
+        json!({"state": "ready"}),
+    ));
+    host.memory
+        .agent_permissions
+        .insert("reviewer".to_owned(), vec!["changes".to_owned()]);
+    host.memory
+        .permissions
+        .insert("reviewer".to_owned(), vec!["changes".to_owned()]);
+    assert_eq!(veto_of(ready(&mut host)).1["count"], 0);
+
+    // A requirement that counts the run as the person it acts for reads the
+    // person, not the Agent, agentRole or not.
+    let mut host = hosting(
+        json!({"count": 1, "permission": "changes.approve", "callers": ["acting-for-person", "agent"], "agentRole": true, "recheckPermission": true, "excludeCreator": false}),
+        json!({}),
+    );
+    changed(sign(
+        &mut host,
+        &run("r1", "reviewer", Some("ann")),
+        json!({"state": "ready"}),
+    ));
+    host.memory
+        .agent_permissions
+        .insert("reviewer".to_owned(), vec!["changes".to_owned()]);
+    assert_eq!(veto_of(ready(&mut host)).1["count"], 0);
+    host.memory
+        .permissions
+        .insert("ann".to_owned(), vec!["changes".to_owned()]);
+    changed(ready(&mut host));
+}
+
 // ---- conditions ----
 
 /// A requirement applies when each of its conditions holds; one that does

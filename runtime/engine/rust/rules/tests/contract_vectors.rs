@@ -235,6 +235,7 @@ fn read_requests() -> Vec<ReadRequest> {
         },
         ReadRequest::Permissions {
             subjects: vec!["alice".to_owned(), "bob".to_owned()],
+            agents: vec!["triage".to_owned()],
         },
     ]
 }

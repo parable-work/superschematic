@@ -371,6 +371,9 @@
         "subjects": [
           "alice",
           "bob"
+        ],
+        "agents": [
+          "triage"
         ]
       }
     ],

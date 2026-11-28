@@ -39,7 +39,19 @@ type EnqueueOnChange struct {
 	// backfill` enqueues for the rows already there. It needs an insert or
 	// an update among On.
 	Backfill bool `json:"backfill,omitempty" yaml:"backfill,omitempty"`
+
+	// Of is EnqueueOfGrants on a UserRole table (#625): the trigger is its
+	// grants', on the user model's UserRoleGrant table, whose fields
+	// Fields, When and Message name (IdentityRoleGrantUserField and the
+	// rest). The loader copies it onto UserRoleGrant with Of unset, and
+	// writes no trigger of its own on the role table. Empty is a trigger
+	// on the table that declares it.
+	Of string `json:"of,omitempty" yaml:"of,omitempty"`
 }
+
+// EnqueueOfGrants is EnqueueOnChange.Of for a UserRole table's grants
+// (#625): a role grant's event.
+const EnqueueOfGrants = "grants"
 
 // EnqueueCondition is one condition of an EnqueueOnChange: a field of the
 // table that is null, that is not, or that equals a literal, as a

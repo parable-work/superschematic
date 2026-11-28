@@ -112,6 +112,11 @@ func buildEnqueueTriggers(tableTypes []*ir.TypeDef, tables []Table, schema *ir.S
 	var out []EnqueueTrigger
 	for _, td := range tableTypes {
 		for _, def := range td.EnqueueOnChange {
+			if def.Of != "" {
+				// A UserRole table's declaration of its grants' trigger,
+				// which the loader copied onto UserRoleGrant (#625).
+				continue
+			}
 			source := byName[td.Name+"/"+sqlutil.TableName(td)]
 			queueDef := schema.Types[def.Queue]
 			if source == nil || queueDef == nil || queueDef.Queue == nil {

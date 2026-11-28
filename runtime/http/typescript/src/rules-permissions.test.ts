@@ -36,6 +36,13 @@ const identity: RulesPermissions = {
   rolePermissions: 'permissions',
 };
 
+/** The same with the agents' definitions table (#625), whose role column names a role by its name. */
+const withAgents: RulesPermissions = { ...identity, agents: 'agent', agent: { field: 'id', column: 'id', type: 'Identity.UUID' }, agentRole: 'role', roleName: 'name' };
+
+const TRIAGE = '6ebcd380-ab7f-4c9e-90e3-dfcebdac9b8a';
+const SORTER = '7fcde491-bc80-4daf-81f4-e0dfcebdac9b';
+const ROLELESS = '80def5a2-cd91-4eb0-92a5-f1e0dfcebdac';
+
 const dialects: { name: string; skip: boolean; open: () => Promise<TestDatabase> }[] = [
   { name: 'bun:sqlite', skip: false, open: async () => sqliteDatabase() },
   { name: 'Postgres', skip: rulesDsn === '', open: postgresDatabase },
@@ -67,6 +74,10 @@ for (const dialect of dialects) {
       const lead = '00000000-0000-4000-8000-0000000000a2';
       await db.exec(`INSERT INTO "role" (id, name, permissions) VALUES (${p(1)}, 'reviewer', ${p(2)})`, [reviewer, list(['changes.read', 'changes.approve'])]);
       await db.exec(`INSERT INTO "role" (id, name, permissions) VALUES (${p(1)}, 'lead', ${p(2)})`, [lead, list(['changes.approve', 'changes.lead'])]);
+      await db.exec(`CREATE TABLE "agent" (id ${uuid} PRIMARY KEY, name TEXT, role TEXT)`);
+      for (const [agent, name, role] of [[TRIAGE, 'triage', 'reviewer'], [SORTER, 'sorter', 'lead'], [ROLELESS, 'roleless', 'no-such-role']] as const) {
+        await db.exec(`INSERT INTO "agent" (id, name, role) VALUES (${p(1)}, ${p(2)}, ${p(3)})`, [agent, name, role]);
+      }
       for (const [i, [user, role]] of [[ANN, reviewer], [ANN, lead], [CAM, reviewer], [DOV, reviewer], [EVE, lead]].entries()) {
         await db.exec(`INSERT INTO "user_role_grant" (id, user_id, role_id) VALUES (${p(1)}, ${p(2)}, ${p(3)})`, [`00000000-0000-4000-8000-0000000000b${i}`, user, role]);
       }
@@ -83,6 +94,14 @@ for (const dialect of dialects) {
         [DOV]: [],
         [EVE]: ['changes.approve', 'changes.lead'],
       });
+    });
+
+    test("each Agent's permissions through its agent role, by the role's name, beside the subjects' (#625)", async () => {
+      const triage = base62UUID(uuidValue(TRIAGE)!);
+      const held = await db.transaction(store => readPermissions(store, withAgents, [BEN], [triage, SORTER, ROLELESS, NOBODY, 'no-uuid']));
+      expect(held).toEqual({ [BEN]: [], [triage]: ['changes.read', 'changes.approve'], [SORTER]: ['changes.approve', 'changes.lead'], [ROLELESS]: [] });
+      // A layout with no agents table answers no Agent, which the core holds to none.
+      expect(await db.transaction(store => readPermissions(store, identity, [], [TRIAGE]))).toEqual({});
     });
 
     test('a layout that names no identity tables answers no subject', async () => {

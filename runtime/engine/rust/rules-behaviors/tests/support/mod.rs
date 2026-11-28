@@ -38,6 +38,9 @@ pub struct Memory {
     /// answers (D200); a subject absent here is one the host cannot answer
     /// for.
     pub permissions: BTreeMap<String, Vec<String>>,
+    /// The permissions each Agent's agent role grants now, which a
+    /// permissions read's agents are answered from (#625).
+    pub agent_permissions: BTreeMap<String, Vec<String>>,
 }
 
 impl Source for Memory {
@@ -107,7 +110,7 @@ impl Source for Memory {
                     more,
                 }))
             }
-            ReadRequest::Permissions { subjects } => Ok(Answer::Permissions(
+            ReadRequest::Permissions { subjects, agents } => Ok(Answer::Permissions(
                 subjects
                     .iter()
                     .filter_map(|subject| {
@@ -115,6 +118,11 @@ impl Source for Memory {
                             .get(subject)
                             .map(|held| (subject.clone(), held.clone()))
                     })
+                    .chain(agents.iter().filter_map(|agent| {
+                        self.agent_permissions
+                            .get(agent)
+                            .map(|held| (agent.clone(), held.clone()))
+                    }))
                     .collect(),
             )),
             ReadRequest::SharedRow {

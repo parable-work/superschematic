@@ -182,6 +182,7 @@ fn the_config_checks_are_the_config_schema() {
                             "proof": {"enum": ["none", "recent-sign-in", "user-verification"], "type": "string"},
                             "proofWithinMs": {"minimum": 1, "type": "integer"},
                             "recheckPermission": {"type": "boolean"},
+                            "agentRole": {"type": "boolean"},
                             "requirementsFrom": {
                                 "additionalProperties": false,
                                 "properties": {

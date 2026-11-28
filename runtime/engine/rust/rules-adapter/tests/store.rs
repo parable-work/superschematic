@@ -3218,8 +3218,28 @@ fn identity_permissions() -> Permissions {
         roles: "role".into(),
         role_key: "id".into(),
         role_permissions: "permissions".into(),
+        agents: None,
+        agent: None,
+        agent_role: None,
+        role_name: None,
     }
 }
+
+/// The same with the agents' definitions table (#625), whose role column
+/// names a role by its name.
+fn agent_permissions() -> Permissions {
+    Permissions {
+        agents: Some("agent".into()),
+        agent: Some(Column::new("id", "id", "Identity.UUID")),
+        agent_role: Some("role".into()),
+        role_name: Some("name".into()),
+        ..identity_permissions()
+    }
+}
+
+/// The Agents, as their definitions' key column holds them.
+const TRIAGE: &str = "6ebcd380-ab7f-4c9e-90e3-dfcebdac9b8a";
+const ROLELESS: &str = "80def5a2-cd91-4eb0-92a5-f1e0dfcebdac";
 
 /// The identity tables as sqlgen writes them: ann holds two roles, which
 /// share a permission; ben holds none; cam holds one and is disabled; dov
@@ -3286,6 +3306,12 @@ async fn identity_tables(db: &mut Db) {
     for (i, (user, role)) in grants.iter().enumerate() {
         statements.push(format!("INSERT INTO \"user_role_grant\" (id, user_id, role_id) VALUES ('00000000-0000-4000-8000-0000000000b{i}', '{user}', '{role}')"));
     }
+    statements.push(format!(
+        "CREATE TABLE \"agent\" (id {uuid} PRIMARY KEY, name TEXT, role TEXT)"
+    ));
+    statements.push(format!(
+        "INSERT INTO \"agent\" (id, name, role) VALUES ('{TRIAGE}', 'triage', 'reviewer'), ('{ROLELESS}', 'roleless', 'no-such-role')"
+    ));
     for statement in statements {
         db.exec(&statement, &[]).await;
     }
@@ -3349,5 +3375,29 @@ async fn a_permissions_read_answers_from_the_identity_tables(mut db: Db) {
         held,
         json!({}),
         "a layout with no identity tables answers no subject"
+    );
+    // An Agent through its agent role, its definition's role naming a role
+    // by its name (#625); one whose role no row names holds none, and one
+    // no definition row holds is left out.
+    let mut layout = Layout::new([common::job_table()]);
+    layout.permissions = Some(agent_permissions());
+    let host = Host::new(&core, &layout).with_clock(|| 9_000_000);
+    let triage = wire(TRIAGE);
+    let params = json!({"subjects": [BEN], "agents": [triage, ROLELESS, NOBODY, "no-uuid"]});
+    let held = db
+        .operate_table(
+            &host,
+            "Job",
+            "Finder",
+            "permissions",
+            params,
+            alice(),
+            &none,
+        )
+        .await
+        .expect("read");
+    assert_eq!(
+        held,
+        json!({BEN: [], triage: ["changes.read", "changes.approve"], ROLELESS: []})
     );
 }
