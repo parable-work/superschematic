@@ -11,12 +11,18 @@ export abstract class User implements UserTrait<{ login: "email"; name: "name" }
 }
 
 // An approved registrant holds member, which reads and writes at once
-// (D88); the first registrant is the administrator.
-@seedRoles([{ name: "member", permissions: ["smoke.read", "smoke.write"] }])
+// (D88); the first registrant is the administrator. A payee's grant holds
+// payee, which reads the line item it names (D156, D157).
+@seedRoles([
+  { name: "member", permissions: ["smoke.read", "smoke.write"] },
+  { name: "payee", permissions: ["smoke.read"] },
+])
 export abstract class Role implements UserRole {
   @key id: AutoGenerate<Identity.UUID>;
   @unique name: Identity.Slug;
   permissions: string[];
+  // The rows a grant of the role reaches from its target; none here.
+  reaches: Nullable<string[]>;
 }
 
 // One message waiting per line item, and one claim per line item at a

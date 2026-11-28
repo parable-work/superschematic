@@ -696,7 +696,12 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 			}
 			var methods []string
 			queues, events := false, false
+			runtime := r.rustRuntimeQueues(services, api)
 			for _, worker := range implemented[api] {
+				if worker.BehaviorWorker == nil && runtime[worker.Queue] {
+					// A runtime part handles its queue's messages (#620).
+					continue
+				}
 				if worker.BehaviorWorker == nil {
 					queues = true
 					methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
@@ -706,6 +711,9 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 					events = true
 					methods = append(methods, fmt.Sprintf("      async fn %s(&self, event: types::%s, run: &EventRun<'_>) -> Result<(), BoxError> {\n          // handle %s\n      }", rustutil.ToSnakeCase(event.Method), event.Event, handles(worker, event)))
 				}
+			}
+			if len(methods) == 0 {
+				continue
 			}
 			names := "Deps, Workers, BoxError and " + rustrestgen.DatabaseTypesModule + ", the Rust types of the database that declares each queue, are %s's"
 			switch {
@@ -1230,10 +1238,18 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 	var scaffolds []scaffold
 	var versionGraph, rules bool
 	var modules []servergen.Module
+	// The API whose router answers the server's POST /api/mcp (D81, #660).
+	mcp := ""
 	for _, ref := range s.Services {
 		output, err := r.servedAPI(stackName, s.Name, ref.Name)
 		if err != nil {
 			return nil, nil, err
+		}
+		if output.MCP != nil && s.Kind == ir.DeployableServer {
+			if mcp != "" {
+				return nil, nil, fmt.Errorf("stack %s: server %s serves %s and %s, which both turn on outputs.api.mcp, and one server answers POST %s for one API; serve them from two servers, or turn mcp off in one (D81)", stackName, s.Name, mcp, ref.Name, tsrestgen.MCPPath)
+			}
+			mcp = ref.Name
 		}
 		apiModules := r.goServerModules(output, s.Job != nil)
 		impl, newModule, err := r.implementation(ref.Name)
@@ -1392,6 +1408,16 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		for _, call := range output.Deps.Calls {
 			in.PackageDirs[call.Package] = SDKDir(out, LangTypeScript, call.Service)
 		}
+		// providers.ts imports each provider package the API's config lists
+		// by its directory (D159), so the image holds that directory too; a
+		// package listed by its npm name resolves from node_modules (#608).
+		if p := output.Deps.Providers; p != nil {
+			for _, pkg := range p.Packages {
+				if strings.HasPrefix(pkg.Import, ".") {
+					in.PackageDirs["provider "+pkg.Name] = filepath.Join(APIDir(out, ref.Name), filepath.FromSlash(pkg.Import))
+				}
+			}
+		}
 		if s.Worker != nil && output.Deps.DatabaseTypesPackage != "" {
 			// The worker imports its queue's definition from the database's
 			// TypeScript types (D53).
@@ -1493,6 +1519,9 @@ func (r run) planRust(stackName string, s *ir.ResolvedDeployable, cors map[strin
 				if err := r.checkRustManualRoutes(stackName, output); err != nil {
 					return nil, nil, nil, err
 				}
+			}
+			if err := r.checkRustWiring(stackName, output); err != nil {
+				return nil, nil, nil, err
 			}
 		}
 		impl, err := servergen.ReadRustImplementation(r.Options.Naming, ref.Name, dir)

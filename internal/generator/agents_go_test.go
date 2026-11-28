@@ -31,6 +31,7 @@ var agentsGoCases = []string{
 	"an agent asks in the row's thread and makes a follow-up row when nobody answers by the deadline",
 	"a sandbox that fails is started again by Retries, and the run holds its Lease while it runs",
 	"a run's token on an app's own route acts as the run, its reach narrowed and every call held to its autonomy",
+	"a run's call of the API's MCP tool is held to the tool's autonomy: an ask waits for its approval and runs once, and a changed amount asks again",
 	"administering agents is permissions, and an agent cannot start a run",
 }
 

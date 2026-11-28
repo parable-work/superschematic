@@ -77,6 +77,7 @@ no member for them.
 
 | Scalar | What it holds | SQL | Base types | Checks | Example |
 | --- | --- | --- | --- | --- | --- |
+| `File.MediaType` | IANA media type (MIME type): type/subtype with optional parameters, normalized to lowercase (e.g., image/png, text/csv;charset=utf-8) | `VARCHAR(255)` | string / string / str / String | at most 255 characters; its own validator; normalizes | `image/png` |
 | `File.SizeBytes` | File size in bytes (non-negative, BIGINT-backed) | `BIGINT` | int64 / number / int / i64 | 0 to 9007199254740991 | `204800` |
 
 ## Finance
@@ -104,6 +105,7 @@ no member for them.
 
 | Scalar | What it holds | SQL | Base types | Checks | Example |
 | --- | --- | --- | --- | --- | --- |
+| `Geo.CountryCode` | Officially assigned ISO 3166-1 alpha-2 country code (e.g., US, DE, JP) | `VARCHAR(2)` | string / string / str / String | length 2 to 2; pattern `^[A-Z]{2}$`; its own validator | `US` |
 | `Geo.Location` | Geographic location with latitude and longitude | `POINT` | struct{ Lat float64 `json:"lat"`; Lon float64 `json:"lon"` } / { lat: number; lon: number } / superscalar.GeoLocation / superscalar::metadata::geo_location::Location |  | `{"lat":37.7749,"lon":-122.4194}` |
 
 ## Git
@@ -134,6 +136,7 @@ no member for them.
 | `Network.DnsLabel` | Single DNS label (RFC 1035): one hostname segment, no dots | `CITEXT` | string / string / str / String | at most 63 characters; pattern `^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$`; case-insensitive | `mycompany` |
 | `Network.DomainName` | Valid domain name (RFC 1035 compliant) | `CITEXT` | string / string / str / String | at most 255 characters; pattern `^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$`; case-insensitive | `example.com` |
 | `Network.IpAddress` | IPv4 or IPv6 address | `INET` | string / string / str / String | at most 45 characters; pattern `^(((25[0-5]\|2[0-4][0-9]\|[01]?[0-9][0-9]?)\.){3}(25[0-5]\|2[0-4][0-9]\|[01]?[0-9][0-9]?)\|([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}\|([0-9a-fA-F]{1,4}:){1,7}:\|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}\|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}\|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}\|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}\|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}\|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})\|:((:[0-9a-fA-F]{1,4}){1,7}\|:))$` | `192.168.1.1` |
+| `Network.Port` | TCP or UDP port number, 1 through 65535 | `INTEGER` | int64 / number / int / i64 | 1 to 65535 | `443` |
 | `Network.Uri` | RFC 3986 URI for connection strings and non-HTTP resources | `TEXT` | string / string / str / String | at most 4096 characters; pattern `^[a-zA-Z][a-zA-Z0-9+.-]*://[^\s]+$` | `postgres://user:pass@localhost:5432/dbname` |
 | `Network.Url` | Valid HTTP/HTTPS URL | `varchar(4096)` | string / string / str / String | at most 2048 characters; pattern `^https?://[\w\-\{\}]+(\.[\w\-\{\}]+)+([:/?#][\w\-\._~:/?#\[\]@!\$&'\(\)\*\+,;=\{\}%]*)?$` | `https://www.example.com/example/path` |
 
@@ -153,9 +156,11 @@ no member for them.
 | `Temporal.Days` | Signed integer count of days: an amount of elapsed time, never a point in time or a calendar date. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `7` |
 | `Temporal.Duration` | Duration for timeouts and intervals | `INTERVAL` | time.Duration / string / str / String | at most 32 characters; pattern `^(\d+(\.\d+)?(ns\|us\|µs\|ms\|s\|m\|h))+$`; its own validator; normalizes | `30s` |
 | `Temporal.Hours` | Signed integer count of hours: an amount of elapsed time, never a point in time. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `2` |
+| `Temporal.LocalDateTime` | Date and time of day with no zone or offset (a wall-clock reading), normalized to 'YYYY-MM-DDTHH:MM:SS'. Accepts 'T', 't' or a space between the date and the time, and a time without seconds. Refuses a value that carries a zone or an offset. | `TIMESTAMP` | string / string / str / String | at most 40 characters; its own validator; normalizes | `2026-10-31T09:00:00` |
 | `Temporal.Milliseconds` | Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `1000` |
 | `Temporal.Minutes` | Signed integer count of minutes: an amount of elapsed time, never a point in time. | `BIGINT` | int64 / number / int / i64 | -9007199254740991 to 9007199254740991 | `5` |
 | `Temporal.Month` | Calendar month, normalized to two-digit numeric (01-12). Accepts '2', '02', 'Feb', 'February' (case-insensitive). | `VARCHAR(2)` | string / string / str / String | at most 9 characters; its own validator | `02` |
+| `Temporal.Period` | ISO 8601 duration: an amount of calendar time in years, months, weeks, days, hours, minutes and seconds (e.g., P2D, P1M, PT30M) | `VARCHAR(64)` | string / string / str / String | length 3 to 64; pattern `^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\.[0-9]{1,9})?S)?)?$`; its own validator; normalizes | `P2D` |
 | `Temporal.Quarter` | Calendar quarter (Q1-Q4) | `VARCHAR(2)` | string / string / str / String | length 2 to 2; pattern `^[Qq][1-4]$`; case-insensitive | `Q1` |
 | `Temporal.QuarterYear` | Quarter and year, normalized to 'YYYY-Q#'. Accepts '2025-Q1', 'Q1/2025', 'Q1-2025', 'Q1-25' (2-digit years interpreted as 20XX). | `VARCHAR(7)` | string / string / str / String | at most 8 characters; its own validator | `2025-Q1` |
 | `Temporal.RecurrenceRule` | RFC 5545 recurrence rule, without DTSTART | `VARCHAR(512)` | string / string / str / String | length 6 to 512; its own validator | `FREQ=WEEKLY;BYMINUTE=0;BYHOUR=9;BYDAY=MO,WE,FR` |

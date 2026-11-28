@@ -418,12 +418,12 @@ const targetValues = `{
   "type": "object",
   "properties": {
     "postgresImage": {"type": "string", "minLength": 1},
-    "postgresPort": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "postgresPort": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535},
     "storageImage": {"type": "string", "minLength": 1},
-    "storagePort": {"type": "integer", "minimum": 1, "maximum": 65535},
+    "storagePort": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535},
     "storageCorsHeaders": {"type": "array", "items": {"type": "string", "pattern": "^[A-Za-z0-9!#$%&'*+.^_|~-]+$"}},
     "memoryStoreImage": {"type": "string", "minLength": 1},
-    "memoryStorePort": {"type": "integer", "minimum": 1, "maximum": 65535}
+    "memoryStorePort": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535}
   },
   "additionalProperties": false
 }`
@@ -439,7 +439,7 @@ const identityConfig = `{"cookie":{"secure":false}}`
 const serverSettings = `{
   "type": "object",
   "properties": {
-    "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+    "port": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535}
   },
   "additionalProperties": false
 }`
@@ -458,8 +458,8 @@ var resourceTypes = map[string]string{
 	      "required": ["host", "hostPort", "containerPort"],
 	      "properties": {
 	        "host": {"type": "string"},
-	        "hostPort": {"type": "integer", "minimum": 1, "maximum": 65535},
-	        "containerPort": {"type": "integer", "minimum": 1, "maximum": 65535}
+	        "hostPort": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535},
+	        "containerPort": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535}
 	      },
 	      "additionalProperties": false
 	    }},
@@ -518,7 +518,7 @@ var resourceTypes = map[string]string{
 	    "module": {"type": "string", "minLength": 1},
 	    "language": {"enum": ["go", "typescript", "rust"]},
 	    "kind": {"enum": ["worker", "deriver", "app"]},
-	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+	    "port": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535},
 	    "readiness": {"type": "string", "pattern": "^(/|started$|listening$)"},
 	    "env": {"type": "array", "items": {
 	      "type": "object",
@@ -538,13 +538,13 @@ var resourceTypes = map[string]string{
 	    "build": {"type": "string", "minLength": 1},
 	    "output": {"type": "string", "minLength": 1},
 	    "fallback": {"type": "string", "minLength": 1},
-	    "port": {"type": "integer", "minimum": 1, "maximum": 65535},
+	    "port": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535},
 	    "dev": {
 	      "type": "object",
 	      "required": ["command", "port"],
 	      "properties": {
 	        "command": {"type": "string", "pattern": "^[^\\s]+$"},
-	        "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+	        "port": {"type": "integer", "x-superschematic-scalar": "Network.Port", "minimum": 1, "maximum": 65535}
 	      },
 	      "additionalProperties": false
 	    },
