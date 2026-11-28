@@ -32,6 +32,19 @@ var hashSkipDirs = map[string]bool{
 	"__pycache__": true, ".venv": true, ".pytest_cache": true, ".ruff_cache": true,
 }
 
+// HashSkipDirs returns the directory names a tree's digest leaves out,
+// sorted: what a build writes and a tool keeps. A task's schema input
+// leaves the same names out of its set (internal/tasks, SkippedDirs), and
+// a test holds the two lists equal.
+func HashSkipDirs() []string {
+	names := make([]string, 0, len(hashSkipDirs))
+	for name := range hashSkipDirs {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
 var linkDirNames = map[string]bool{"node_modules": true}
 var storeSkipDirs = map[string]bool{"target": true}
 var precleanKeep = map[string]bool{"node_modules": true, "target": true}

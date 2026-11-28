@@ -1,11 +1,13 @@
 package tasks
 
 import (
+	"container/heap"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/tasks"
@@ -33,6 +35,39 @@ type PlanInput struct {
 	// base, as a commit that has landed has.
 	Base     string
 	BaseFile *tasks.File
+
+	// Timings, when set, receives what resolving the inputs cost, by
+	// resolver kind.
+	Timings *Timings
+
+	// resolved holds each input resolved once: tasks that name one unit
+	// read one resolution.
+	resolved map[string]*resolvedInput
+}
+
+// Timings is what a plan's inputs cost to resolve, by resolver kind.
+type Timings struct {
+	Kinds map[string]*KindTiming
+}
+
+// KindTiming is the cost of one kind's inputs: how many inputs the tasks
+// name, how many of those differ and were resolved, the tracked files
+// they resolved to, and the time the resolver took.
+type KindTiming struct {
+	Inputs   int
+	Resolved int
+	Files    int
+	Duration time.Duration
+}
+
+// resolvedInput is one input's resolution, or the error it met.
+type resolvedInput struct {
+	// digest is the input's digest and files the number of tracked files
+	// it covers: both are the input's alone, so they are worked out once.
+	digest    string
+	files     int
+	generated []registry.TaskGeneratedPath
+	err       error
 }
 
 // KeyVersion is the key version of a repository of the format: the key
@@ -60,6 +95,10 @@ func KeyVersion(format string) string {
 func Plan(in PlanInput) (*tasks.Plan, error) {
 	if in.Format != FormatSHA1 && in.Format != FormatSHA256 {
 		return nil, fmt.Errorf("object format %q is neither sha1 nor sha256", in.Format)
+	}
+	in.resolved = map[string]*resolvedInput{}
+	if in.Timings != nil && in.Timings.Kinds == nil {
+		in.Timings.Kinds = map[string]*KindTiming{}
 	}
 	order, err := Order(in.File)
 	if err != nil {
@@ -144,35 +183,76 @@ func resolveInputs(in PlanInput, name string, task tasks.Task, strict bool) ([]t
 		if err := in.Registry.CheckTaskInput(input.Kind, input.Spec); err != nil {
 			return nil, fmt.Errorf("task %s: inputs[%d]: %w", name, i, err)
 		}
-		resolution, err := resolver.Resolve(registry.TaskResolveRequest{Tree: in.Tree, Task: name, Spec: input.Spec})
-		if err != nil {
+		// A resolver is pure, so one kind and one spec resolve once for
+		// the plan, however many tasks name them.
+		key := input.Kind + "\x00" + string(input.Spec)
+		res, seen := in.resolved[key]
+		if !seen {
+			start := time.Now()
+			res = &resolvedInput{}
+			resolution, err := resolver.Resolve(registry.TaskResolveRequest{Tree: in.Tree, Task: name, Spec: input.Spec})
+			if err == nil {
+				res.generated = resolution.Generated
+				var lines []string
+				if lines, err = entryLines(in.Tree, resolution.Paths); err == nil {
+					res.digest, res.files = digest(lines), len(lines)
+				}
+			}
+			res.err = err
+			in.resolved[key] = res
+			if in.Timings != nil {
+				timing := in.timing(input.Kind)
+				timing.Resolved++
+				timing.Files += res.files
+				timing.Duration += time.Since(start)
+			}
+		}
+		if in.Timings != nil {
+			in.timing(input.Kind).Inputs++
+		}
+		if res.err != nil {
 			if !strict {
 				out = append(out, tasks.PlanInput{Kind: input.Kind, Digest: digest(nil)})
 				continue
 			}
-			return nil, fmt.Errorf("task %s: inputs[%d] (%s): %w", name, i, input.Kind, err)
+			return nil, fmt.Errorf("task %s: inputs[%d] (%s): %w", name, i, input.Kind, res.err)
 		}
 		if strict {
-			for _, generated := range resolution.Generated {
+			for _, generated := range res.generated {
 				if err := covered(in.File, name, task, generated); err != nil {
 					return nil, err
 				}
 			}
 		}
-		lines, err := entryLines(in.Tree, name, input.Kind, resolution.Paths)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, tasks.PlanInput{Kind: input.Kind, Digest: digest(lines), Files: len(lines)})
+		out = append(out, tasks.PlanInput{Kind: input.Kind, Digest: res.digest, Files: res.files})
 	}
 	return out, nil
+}
+
+// timing returns the timing of a kind.
+func (in PlanInput) timing(kind string) *KindTiming {
+	if in.Timings.Kinds[kind] == nil {
+		in.Timings.Kinds[kind] = &KindTiming{}
+	}
+	return in.Timings.Kinds[kind]
+}
+
+// InputDigest is the digest of an input that resolves to paths in a
+// tree: the SHA-256 over one line per tracked file, `<mode> <path>
+// <object id>`, each once and sorted.
+func InputDigest(tree registry.TaskTree, paths []string) (string, error) {
+	lines, err := entryLines(tree, paths)
+	if err != nil {
+		return "", err
+	}
+	return digest(lines), nil
 }
 
 // entryLines returns one line per tracked file of paths, each once and
 // sorted: `<mode> <path> <object id>`. The mode is in the line, so an
 // executable bit, a symbolic link and a submodule's commit change the
 // digest as a file's bytes do.
-func entryLines(tree registry.TaskTree, task, kind string, paths []string) ([]string, error) {
+func entryLines(tree registry.TaskTree, paths []string) ([]string, error) {
 	seen := make(map[string]bool, len(paths))
 	lines := make([]string, 0, len(paths))
 	for _, p := range paths {
@@ -182,7 +262,7 @@ func entryLines(tree registry.TaskTree, task, kind string, paths []string) ([]st
 		seen[p] = true
 		entry, ok := tree.Entry(p)
 		if !ok {
-			return nil, fmt.Errorf("task %s: the %s resolver named %s, which is no tracked file of the commit; a resolver returns tracked files only", task, kind, p)
+			return nil, fmt.Errorf("the resolver named %s, which is no tracked file of the commit; a resolver returns tracked files only", p)
 		}
 		lines = append(lines, entry.Mode+" "+entry.Path+" "+entry.ID)
 	}
@@ -269,21 +349,21 @@ func Order(file *tasks.File) ([]string, error) {
 			dependents[other] = append(dependents[other], name)
 		}
 	}
-	var ready []string
+	// The ready tasks are a heap by name: the first of them is taken
+	// each time, and a file of many tasks is not sorted once per task.
+	ready := &nameHeap{}
 	for _, name := range names {
 		if waiting[name] == 0 {
-			ready = append(ready, name)
+			heap.Push(ready, name)
 		}
 	}
 	order := make([]string, 0, len(names))
-	for len(ready) > 0 {
-		sort.Strings(ready)
-		name := ready[0]
-		ready = ready[1:]
+	for ready.Len() > 0 {
+		name := heap.Pop(ready).(string)
 		order = append(order, name)
 		for _, dependent := range dependents[name] {
 			if waiting[dependent]--; waiting[dependent] == 0 {
-				ready = append(ready, dependent)
+				heap.Push(ready, dependent)
 			}
 		}
 	}
@@ -297,6 +377,20 @@ func Order(file *tasks.File) ([]string, error) {
 		return nil, fmt.Errorf("the tasks %s form a cycle through uses and after, so none of them can start first", strings.Join(stuck, ", "))
 	}
 	return order, nil
+}
+
+// nameHeap is a heap of task names, the first by name on top.
+type nameHeap []string
+
+func (h nameHeap) Len() int           { return len(h) }
+func (h nameHeap) Less(i, j int) bool { return h[i] < h[j] }
+func (h nameHeap) Swap(i, j int)      { h[i], h[j] = h[j], h[i] }
+func (h *nameHeap) Push(x any)        { *h = append(*h, x.(string)) }
+func (h *nameHeap) Pop() any {
+	old := *h
+	name := old[len(old)-1]
+	*h = old[:len(old)-1]
+	return name
 }
 
 func hasOutput(task tasks.Task, name string) bool {

@@ -469,7 +469,8 @@ A hook is for output that needs every service at once, such as values
 merged across services into one chart. It reads what it merges from
 `Services[i].OutputDirs`, which a cached run fills as well as a full one.
 The core registers one, `tasks-install`, which installs each Tasks
-service's task file from its output directory (section 3.17, D203); it is
+service's task file, and the workflow of each CI renderer its config
+names, from its output directory (section 3.17, D203); it is
 a hook because a build that restores the service from the cache runs no
 generator. acme's `acmeInventory` merges every service's
 manifest (section 10); `cli/build_all_hooks_test.go` covers ordering, error
@@ -1490,6 +1491,19 @@ have written:
 - It uses no network and executes nothing the tree holds.
 - It is pure: one tree and one spec give one answer.
 
+`tasks plan --sandbox` enforces the second and third rules, and the
+first for the machine's files (`internal/tasks/sandbox_linux.go`). The
+plan reads the commit's tree and starts the one git process that serves
+blobs, and then installs a seccomp filter on every thread of the
+process. From there the kernel refuses it a new program, a socket, and
+a file opened, created, renamed or removed. A resolver that reads the
+checkout fails the plan with the kernel's refusal, where without the
+sandbox it would have keyed a task on bytes no commit holds. The filter
+is a guard against drift and not a jail: the plan command is trusted
+code either way. It is Linux's, on amd64 and arm64, and the flag fails
+anywhere else. A plan resolves each kind and spec once, however many
+tasks name it, and `--profile` writes what each kind cost.
+
 A path in `Generated` must be covered by a `paths` output of a task the
 resolving task `uses`. The plan fails otherwise, with the path, the
 manifest that names it, and the edge to add when some task's output
@@ -1514,7 +1528,11 @@ unit's files, without the units nested in it, and to each unit of the
 repository its manifest names, with the workspace's manifests and
 lockfiles. Each parses manifests and runs nothing, and reports a
 replaced module, a path dependency, a workspace member or a `COPY`
-source the commit does not hold as generated. They are an extension's
+source the commit does not hold as generated. `js-package` follows a
+tsconfig's project references, and reads the workspace's lockfile to
+tell a generated member, by its directory, from a package of the
+registry. `image` applies the ignore file BuildKit would read. They are
+an extension's
 and not the core's because which toolchains a repository builds with is
 the repository's (D10); their specs are typed in `@superschematic/tasks`
 all the same, since the installed binary carries them.
@@ -1525,6 +1543,12 @@ which `@task` records as an identity and keeps as the name, to a static
 set found from tracked text: its directory, the directory of each service of its schemas root
 it names by directory name or package name, transitively, the root's
 files that belong to no service, and the naming file's `[cache] inputs`.
+It leaves out the directory names the build cache leaves out of a
+service's digest, which `SkippedDirs` lists and a test holds equal to
+the build cache's, and the naming file's `[deps] copy`: what a build
+writes cannot change what a service generates. `tasks reach` measures
+the set on a repository's history: of the commits that changed a
+schemas root, how many changed every service's input, some and none.
 The build cache's own key for a service holds more than a commit can
 give: depfiles the build writes, tool versions of the machine and a
 stack's checkout path (section 7.4). The task file's image digest stands
@@ -1583,8 +1607,28 @@ The Stack kind's generated workflow (D47; `docs/stack-model.md`,
 section 11.3) and a Tasks schema are two models, and they are not
 merged. A stack's workflow says how one forge deploys one stack. A task
 says what work a commit needs, for any forge. They meet when a deploy
-uses an image a task produced. A CI renderer that writes a workflow
-from a Tasks schema would join them; it is not built (D203, #692).
+uses an image a task produced.
+
+A CI renderer renders either. `CIRendererSpec.RenderTasks` receives a
+`CITasksRequest`, the service's name and its task file, and returns the
+workflow's files; `Render` is the stack's, and a renderer gives one or
+both. A Tasks service opts in with `outputs.tasks.ci.<renderer>`, and
+the `tasks` generator writes the files under
+`<out>/tasks/<service>/ci/<renderer>/`, with a manifest of where each
+installs, which the `tasks-install` hook reads. `RenderTasks` is pure
+and reads no release: the workflow is committed, `tasks --check` holds
+it current, and a file that changed with the binary's version would be
+stale after every upgrade.
+
+The core's `github` renderer has one (`internal/generator/cigen/
+github_tasks.go`, D203, #692): a job per task, both edges as `needs`, a
+paths output carried as an artifact, and a value or an image output as
+a job output. What is GitHub's is a section it registers, `github`: the
+triggers, the permissions, the runner and the repository the image is
+pulled from, and each task's runner, timeout and condition. So the
+renderer is a reader of the task file like any forge, and the core
+holds no trigger. The workflow runs every task on every run: it keeps
+no pass by key, which a forge that reads the plan does.
 
 ## 4. The open IR
 
@@ -2084,7 +2128,7 @@ records the split.
 | Documents | none |
 | Build-all hooks | `tasks-install`, which installs each Tasks service's task file (section 3.8) |
 | Task input resolvers | `path` and `schema` (section 3.17) |
-| Task sections | none; a naming file's `[tasks.sections.<name>]` registers one as data (section 3.18) |
+| Task sections | `github`, which the `github` CI renderer reads; a naming file's `[tasks.sections.<name>]` registers one as data (section 3.18) |
 | Checks, OpenAPI hooks, tool hooks | none |
 | Platforms, connectors, targets, DNS platforms, provisioners | none (`docs/stack-model.md`, section 6) |
 | Runtime features | none yet: notifications, attachments and agents register theirs as they are built (section 13) |

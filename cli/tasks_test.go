@@ -382,7 +382,7 @@ func TestATaskSectionRegisteredAsData(t *testing.T) {
 	editFile(t, schema, "forge: { tier: 3 }", "jenkins: { node: big }")
 	out, err = runTasks(t, "check", service)
 	require.Error(t, err, out)
-	require.Contains(t, out, `section "jenkins" is not registered (registered: [forge])`)
+	require.Contains(t, out, `section "jenkins" is not registered (registered: [forge github])`)
 
 	// A schema file the naming file names and the root lacks.
 	require.NoError(t, os.Remove(filepath.Join(root, "schemas", "forge", "task.schema.json")))

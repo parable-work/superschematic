@@ -189,17 +189,20 @@ var (
 	badName   = regexp.MustCompile(`[/\\\x00-\x1f\x7f]`)
 )
 
+// attachmentColumns are the columns a read of a file lists: each "::text"
+// one read as text in the host's words, and row_key the holder's row
+// column.
 var attachmentColumns = []string{
-	"id::text AS id",
+	"id::text",
 	"row_key",
 	`"name"`,
 	`"media_type"`,
-	`"size"::text AS size`,
+	`"size"::text`,
 	`"content_hash"`,
 	`"object_key"`,
 	`"caption"`,
 	`"state"`,
-	`"uploaded_by"::text AS uploaded_by`,
+	`"uploaded_by"::text`,
 	`"uploaded_at"`,
 	`"expires_at"`,
 	`"filed_from"`,
@@ -209,11 +212,17 @@ var attachmentColumns = []string{
 	`"preview_object"`,
 }
 
-func columnsOf(holder AttachmentsHolder) string {
+// columnsOf is the columns a read of a file of holder lists, in w's
+// words.
+func columnsOf(w sqlWords, holder AttachmentsHolder) string {
 	out := make([]string, len(attachmentColumns))
 	for i, c := range attachmentColumns {
-		if c == "row_key" {
-			c = holder.Row + "::text AS row_key"
+		switch {
+		case c == "row_key":
+			c = w.text(holder.Row) + " AS row_key"
+		case strings.HasSuffix(c, "::text"):
+			column := strings.TrimSuffix(c, "::text")
+			c = w.text(column) + " AS " + strings.Trim(column, `"`)
 		}
 		out[i] = c
 	}
@@ -260,7 +269,7 @@ func NewAttachments(host Host, def *AttachmentsDefinition, references *Reference
 	if host == nil || def == nil {
 		return nil
 	}
-	return &Attachments{host: host, def: def, references: references, now: time.Now}
+	return &Attachments{host: inDialect(host), def: def, references: references, now: time.Now}
 }
 
 func (a *Attachments) holderOf(table string) (AttachmentsHolder, error) {
@@ -312,7 +321,7 @@ func (a *Attachments) read(ctx context.Context, h Host, file FileRef, lockRow st
 	if id == "" {
 		return holder, Attachment{}, notFound
 	}
-	rows, err := h.Query(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE id = $1%s`, columnsOf(holder), holder.Table, lockRow), id)
+	rows, err := h.Query(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE id = $1%s`, columnsOf(wordsOf(h), holder), holder.Table, lockRow), id)
 	if err != nil {
 		return holder, Attachment{}, err
 	}
@@ -346,7 +355,8 @@ func (a *Attachments) admit(ctx context.Context, h Host, holder AttachmentsHolde
 	if err := lock(ctx, h, fmt.Sprintf("attachments:%s:%s", holder.Table, key)); err != nil {
 		return err
 	}
-	held, err := h.Query(ctx, fmt.Sprintf(`SELECT count(*)::int AS files, COALESCE(sum("size"), 0)::text AS bytes FROM %s WHERE %s = $1 AND ("state" = 'ready' OR "expires_at" > now())`, holder.Table, holder.Row), key)
+	w := wordsOf(h)
+	held, err := h.Query(ctx, fmt.Sprintf(`SELECT %s AS files, %s AS bytes FROM %s WHERE %s = $1 AND ("state" = 'ready' OR "expires_at" > %s)`, w.int("count(*)"), w.text(`COALESCE(sum("size"), 0)`), holder.Table, holder.Row, w.now()), key)
 	if err != nil {
 		return err
 	}
@@ -417,7 +427,7 @@ func (a *Attachments) Begin(ctx context.Context, in BeginInput, bucket Bucket, e
 			caption = *in.Caption
 		}
 		rows, err := h.Query(ctx, fmt.Sprintf(`INSERT INTO %s (%s, "name", "media_type", "size", "content_hash", "object_key", "caption", "state", "uploaded_by", "expires_at")
-             VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9) RETURNING %s`, holder.Table, holder.Row, columnsOf(holder)),
+             VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $9) RETURNING %s`, holder.Table, holder.Row, columnsOf(wordsOf(h), holder)),
 			rowKey, in.Name, in.MediaType, in.Size, in.SHA256, objectKey, caption, userArg(ctx, h), expiresAt)
 		if err != nil {
 			return err
@@ -499,7 +509,8 @@ func (a *Attachments) Complete(ctx context.Context, ref FileRef, bucket Bucket) 
 			"sha256": map[string]any{"declared": file.ContentHash, "uploaded": uploaded},
 		}, "the bytes uploaded for file %s are not the ones its upload declared", ref.ID)
 	}
-	rows, err := a.host.Query(ctx, fmt.Sprintf(`UPDATE %s SET "state" = 'ready', "expires_at" = NULL, "uploaded_at" = now(), "extraction" = 'pending' WHERE id = $1 AND "state" = 'pending' RETURNING %s`, holder.Table, columnsOf(holder)), id)
+	w := wordsOf(a.host)
+	rows, err := a.host.Query(ctx, fmt.Sprintf(`UPDATE %s SET "state" = 'ready', "expires_at" = NULL, "uploaded_at" = %s, "extraction" = 'pending' WHERE id = $1 AND "state" = 'pending' RETURNING %s`, holder.Table, w.now(), columnsOf(w, holder)), id)
 	if err != nil {
 		return Attachment{}, err
 	}
@@ -525,7 +536,7 @@ func (a *Attachments) List(ctx context.Context, row RowRef) ([]Attachment, error
 	if err := mustSee(ctx, a.host, row); err != nil {
 		return nil, err
 	}
-	rows, err := a.host.Query(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE %s = $1 AND "state" = 'ready' ORDER BY "uploaded_at", id`, columnsOf(holder), holder.Table, holder.Row), key)
+	rows, err := a.host.Query(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE %s = $1 AND "state" = 'ready' ORDER BY "uploaded_at", id`, columnsOf(wordsOf(a.host), holder), holder.Table, holder.Row), key)
 	if err != nil {
 		return nil, err
 	}
@@ -570,7 +581,7 @@ func (a *Attachments) Download(ctx context.Context, ref FileRef, bucket Bucket, 
 	}
 	viewed := file
 	if file.Preview == ProcessingNone {
-		rows, err := a.host.Query(ctx, fmt.Sprintf(`UPDATE %s SET "preview" = 'pending' WHERE id = $1 AND "preview" = 'none' RETURNING %s`, holder.Table, columnsOf(holder)), UUIDToDB(file.ID))
+		rows, err := a.host.Query(ctx, fmt.Sprintf(`UPDATE %s SET "preview" = 'pending' WHERE id = $1 AND "preview" = 'none' RETURNING %s`, holder.Table, columnsOf(wordsOf(a.host), holder)), UUIDToDB(file.ID))
 		if err != nil {
 			return Download{}, err
 		}
@@ -597,7 +608,7 @@ func (a *Attachments) Caption(ctx context.Context, ref FileRef, caption *string)
 	if caption != nil {
 		value = *caption
 	}
-	rows, err := a.host.Query(ctx, fmt.Sprintf(`UPDATE %s SET "caption" = $2 WHERE id = $1 RETURNING %s`, holder.Table, columnsOf(holder)), UUIDToDB(file.ID), value)
+	rows, err := a.host.Query(ctx, fmt.Sprintf(`UPDATE %s SET "caption" = $2 WHERE id = $1 RETURNING %s`, holder.Table, columnsOf(wordsOf(a.host), holder)), UUIDToDB(file.ID), value)
 	if err != nil {
 		return Attachment{}, err
 	}
@@ -637,7 +648,8 @@ func (a *Attachments) File(ctx context.Context, in FileInput) (Attachment, error
 	}
 	var out Attachment
 	err = a.host.Transaction(ctx, func(h Host) error {
-		from, file, err := a.read(ctx, h, in.FileRef, " FOR SHARE")
+		w := wordsOf(h)
+		from, file, err := a.read(ctx, h, in.FileRef, w.forShare())
 		if err != nil {
 			return err
 		}
@@ -657,7 +669,7 @@ func (a *Attachments) File(ctx context.Context, in FileInput) (Attachment, error
 		id := UUIDToDB(file.ID)
 		rows, err := h.Query(ctx, fmt.Sprintf(`INSERT INTO %s (%s, "name", "media_type", "size", "content_hash", "object_key", "caption", "state", "uploaded_by", "filed_from", "extraction", "extracted_text", "preview", "preview_object")
              SELECT $1, "name", "media_type", "size", "content_hash", "object_key", "caption", 'ready', $2, $3, "extraction", "extracted_text", "preview", "preview_object" FROM %s WHERE id = $4
-             RETURNING %s`, to.Table, to.Row, from.Table, columnsOf(to)), toKey, userArg(ctx, h), filedFrom, id)
+             RETURNING %s`, to.Table, to.Row, from.Table, columnsOf(w, to)), toKey, userArg(ctx, h), filedFrom, id)
 		if err != nil {
 			return err
 		}
@@ -676,7 +688,7 @@ func (a *Attachments) File(ctx context.Context, in FileInput) (Attachment, error
 				if err != nil {
 					return err
 				}
-				keys, err := h.Query(ctx, fmt.Sprintf(`SELECT %s::text AS key FROM %s WHERE %s = $1`, target.Key, target.Table, target.Key), targetKey)
+				keys, err := h.Query(ctx, fmt.Sprintf(`SELECT %s AS key FROM %s WHERE %s = $1`, w.text(target.Key), target.Table, target.Key), targetKey)
 				if err != nil {
 					return err
 				}
@@ -733,10 +745,11 @@ func (a *Attachments) Release(ctx context.Context, objectKey string, bucket Buck
 		for _, table := range sortedKeys(a.def.Holders) {
 			holder := a.def.Holders[table]
 			// An upload never completed goes once its URL has expired.
-			if _, err := h.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE "object_key" = $1 AND "state" = 'pending' AND "expires_at" <= now()`, holder.Table), objectKey); err != nil {
+			w := wordsOf(h)
+			if _, err := h.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE "object_key" = $1 AND "state" = 'pending' AND "expires_at" <= %s`, holder.Table, w.now()), objectKey); err != nil {
 				return err
 			}
-			rows, err := h.Query(ctx, fmt.Sprintf(`SELECT count(*)::int AS n FROM %s WHERE "object_key" = $1`, holder.Table), objectKey)
+			rows, err := h.Query(ctx, fmt.Sprintf(`SELECT %s AS n FROM %s WHERE "object_key" = $1`, w.int("count(*)"), holder.Table), objectKey)
 			if err != nil {
 				return err
 			}

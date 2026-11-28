@@ -15,8 +15,9 @@ import (
 
 // The conversions between the core's JSON and a column's value, by the
 // layout's column: a timestamp is epoch milliseconds in the core, a UUID
-// its base62 wire form (D79), and every other value its JSON as the
-// driver binds and reads it. TypeScript's adapter converts alike
+// its base62 wire form (D79), a list a JSON list of its elements, each
+// converted by the list's type (D156), and every other value its JSON as
+// the driver binds and reads it. TypeScript's adapter converts alike
 // (runtime/http/typescript/src/rules.ts, toColumn and fromColumn).
 
 // uuidTypes are the IR types whose wire form is a UUID's base62 text and
@@ -202,9 +203,11 @@ func millisOf(raw json.RawMessage) (int64, bool) {
 // Postgres and its toISOString text on SQLite; a UUID's hyphenated text;
 // any value of a JSON column, and an object or array of any column, as its
 // JSON text (which Postgres casts to a JSON column, and which a read of a
-// JSON column gives back as the value, a string as a string); a boolean as
-// 1 or 0 on SQLite; a number as an int64 when it is an integer that fits,
-// else a float64; a string as itself.
+// JSON column gives back as the value, a string as a string); a list
+// column's list as listToColumn binds it, and so a list in a UUID column
+// whose layout does not mark it; a boolean as 1 or 0 on SQLite; a number
+// as an int64 when it is an integer that fits, else a float64; a string as
+// itself.
 func toColumn(raw json.RawMessage, column Column, table *Table, dialect Dialect) (any, error) {
 	if isNull(raw) {
 		return nil, nil
@@ -226,6 +229,9 @@ func toColumn(raw json.RawMessage, column Column, table *Table, dialect Dialect)
 			return nil, Internal("%s.%s: %s is no JSON value", table.Type, column.Field, string(trimmed))
 		}
 		return compactText(trimmed), nil
+	}
+	if column.List || (uuidTypes[column.Type] && trimmed[0] == '[') {
+		return listToColumn(trimmed, column, table, dialect)
 	}
 	switch trimmed[0] {
 	case '"':
@@ -261,6 +267,88 @@ func toColumn(raw json.RawMessage, column Column, table *Table, dialect Dialect)
 	}
 }
 
+// listToColumn is a list of the core's, trimmed, as a list column binds it
+// in a dialect (D156), each UUID of a list of UUIDs hyphenated, as a
+// single UUID's column holds it. On SQLite a list is the JSON text of it,
+// as the column's TEXT holds one. On Postgres a list of UUIDs or of
+// strings is a []*string, a null element nil, which pgx binds in its text
+// form: an array's element type reads each text (a uuid[], a text[], a
+// timestamptz[]), and a jsonb holds the list of strings. Any other list of
+// scalars is a []any of its numbers (an int64 when one is an integer that
+// fits, else a float64), booleans and nulls, which pgx binds element by
+// element, as an array or a jsonb list. A list that holds an object or a
+// list is its JSON text, which only a jsonb column holds. A value that is
+// no list, and a list of UUIDs that holds anything but UUIDs and nulls,
+// refuses the command as internal.
+func listToColumn(trimmed json.RawMessage, column Column, table *Table, dialect Dialect) (any, error) {
+	ids := uuidTypes[column.Type]
+	var elements []json.RawMessage
+	if trimmed[0] != '[' || json.Unmarshal(trimmed, &elements) != nil {
+		what := "list"
+		if ids {
+			what = "list of UUIDs"
+		}
+		return nil, Internal("%s.%s: %s is no %s", table.Type, column.Field, compactText(trimmed), what)
+	}
+	texts := make([]*string, len(elements))
+	values := make([]any, len(elements))
+	scalars, allText := true, true
+	for i, element := range elements {
+		element = bytes.TrimSpace(element)
+		if isNull(element) {
+			continue
+		}
+		switch element[0] {
+		case '"':
+			var text string
+			if err := json.Unmarshal(element, &text); err != nil {
+				return nil, Internal("%s.%s: %s is no JSON string", table.Type, column.Field, compactText(element))
+			}
+			if ids {
+				hyphenated, err := uuidToColumn(text)
+				if err != nil {
+					return nil, Internal("%s.%s: %s is no list of UUIDs: %v", table.Type, column.Field, compactText(trimmed), err)
+				}
+				text = hyphenated
+			}
+			texts[i], values[i] = &text, text
+		case '{', '[':
+			scalars, allText = false, false
+		case 't', 'f':
+			allText = false
+			values[i] = string(element) == "true"
+		default:
+			allText = false
+			text := string(element)
+			if n, err := strconv.ParseInt(text, 10, 64); err == nil {
+				values[i] = n
+				continue
+			}
+			f, err := strconv.ParseFloat(text, 64)
+			if err != nil {
+				return nil, Internal("%s.%s: %s is no JSON value", table.Type, column.Field, text)
+			}
+			values[i] = f
+		}
+	}
+	if ids && !allText {
+		return nil, Internal("%s.%s: %s is no list of UUIDs", table.Type, column.Field, compactText(trimmed))
+	}
+	switch {
+	case dialect == DialectSQLite && ids:
+		out, err := json.Marshal(texts)
+		if err != nil {
+			return nil, fmt.Errorf("rules: encode %s.%s: %w", table.Type, column.Field, err)
+		}
+		return string(out), nil
+	case dialect == DialectSQLite || !scalars:
+		return compactText(trimmed), nil
+	case allText:
+		return texts, nil
+	}
+	return values, nil
+}
+
 // compactText is raw's JSON text with no insignificant space.
 func compactText(raw json.RawMessage) string {
 	var out bytes.Buffer
@@ -273,10 +361,11 @@ func compactText(raw json.RawMessage) string {
 // fromColumn is a column's value, as the driver scanned it, as the core
 // holds it: absent (false) for NULL; a timestamp as epoch milliseconds,
 // from a time.Time or from RFC 3339 text; a UUID as its base62 wire form;
-// a boolean column's integer as a boolean; any other time.Time as its
-// toISOString text; a JSON column's text as the JSON it holds; a number of
-// any width as a JSON number of its text; a string or bytes as a JSON
-// string.
+// a list column's list as listFromColumn reads it, and so a list in a UUID
+// column whose layout does not mark it; a boolean column's integer as a
+// boolean; any other time.Time as its toISOString text; a JSON column's
+// text as the JSON it holds; a number of any width as a JSON number of its
+// text; a string or bytes as a JSON string.
 func fromColumn(value any, column Column, table *Table) (json.RawMessage, bool, error) {
 	if value == nil {
 		return nil, false, nil
@@ -288,6 +377,9 @@ func fromColumn(value any, column Column, table *Table) (json.RawMessage, bool, 
 			return nil, false, Internal("%s.%s: %s is no timestamp", table.Type, column.Field, text)
 		}
 		return json.RawMessage(strconv.FormatInt(millis, 10)), true, nil
+	}
+	if (column.List && !jsonTypes[column.Type]) || (uuidTypes[column.Type] && isList(value)) {
+		return listFromColumn(value, column, table)
 	}
 	if uuidTypes[column.Type] {
 		var wire string
@@ -357,6 +449,80 @@ func fromColumn(value any, column Column, table *Table) (json.RawMessage, bool, 
 		return marshalled(rv.Float())
 	}
 	return marshalled(value)
+}
+
+// listFromColumn is a list column's value, as the driver scanned it, as
+// the core holds it (D156): a JSON list of each element as fromColumn reads
+// a column of the list's type, a UUID in its base62 wire form, and a null
+// element null. pgx scans a Postgres array as a []any; SQLite's TEXT, and
+// a change image's member, hold the JSON text of the list, as a string or
+// bytes. A jsonb column's list, which the store gives as the JSON it holds,
+// is the core's as it is, but for a list of UUIDs, whose every element is
+// converted. A value that is no list refuses the command as internal.
+func listFromColumn(value any, column Column, table *Table) (json.RawMessage, bool, error) {
+	var elements []any
+	parse := func(text []byte) error {
+		decoder := json.NewDecoder(bytes.NewReader(text))
+		decoder.UseNumber()
+		if err := decoder.Decode(&elements); err != nil || elements == nil {
+			quoted, _ := json.Marshal(string(text))
+			return Internal("%s.%s: %s is no list", table.Type, column.Field, quoted)
+		}
+		return nil
+	}
+	switch v := value.(type) {
+	case []any:
+		elements = v
+	case json.RawMessage:
+		if !uuidTypes[column.Type] {
+			return append(json.RawMessage(nil), v...), true, nil
+		}
+		if err := parse(v); err != nil {
+			return nil, false, err
+		}
+	case string:
+		if err := parse([]byte(v)); err != nil {
+			return nil, false, err
+		}
+	case []byte:
+		if err := parse(v); err != nil {
+			return nil, false, err
+		}
+	default:
+		if !isList(value) {
+			return nil, false, Internal("%s.%s: a %T is no list", table.Type, column.Field, value)
+		}
+		rv := reflect.ValueOf(value)
+		elements = make([]any, rv.Len())
+		for i := range elements {
+			elements[i] = rv.Index(i).Interface()
+		}
+	}
+	element := column
+	element.List = false
+	out := make([]json.RawMessage, len(elements))
+	for i, value := range elements {
+		converted, present, err := fromColumn(value, element, table)
+		if err != nil {
+			return nil, false, err
+		}
+		if !present {
+			converted = json.RawMessage("null")
+		}
+		out[i] = converted
+	}
+	return marshalled(out)
+}
+
+// isList reports whether a driver's value is a list: a slice of any
+// element but a byte, whose slice is text.
+func isList(value any) bool {
+	switch value.(type) {
+	case []byte, json.RawMessage:
+		return false
+	}
+	rv := reflect.ValueOf(value)
+	return rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() != reflect.Uint8
 }
 
 // marshalled is a Go value's JSON, present.

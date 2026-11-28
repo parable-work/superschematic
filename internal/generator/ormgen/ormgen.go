@@ -495,12 +495,10 @@ type Repository struct {
 
 	// SQLite is the table on SQLite, for a database whose DB service lists
 	// the sqlite dialect (D116); nil for any other. sqliteTargets are the
-	// tables of the database by type, whose keys a relation's column holds,
-	// and sqliteAccess why per-record access refuses the table there
-	// (sqliteAccessRefusal), or "".
+	// tables of the database by type, whose keys a relation's column
+	// holds.
 	SQLite        *SQLiteTable
 	sqliteTargets map[string]sqliteTarget
-	sqliteAccess  string
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -675,9 +673,12 @@ type Field struct {
 	DerefValue bool
 
 	// EnumDefault is the declared @default of a required, non-array enum
-	// field. CreateOne and CreateMany insert it when the caller leaves the
-	// field at its Go zero value, the empty string, which is never an enum
-	// member; without it a struct literal that omits the field inserts ''.
+	// field, and of an @audience table's audience and agentAccess, whose
+	// trigger refuses any value but its few too (accessChoice, D156).
+	// CreateOne and CreateMany insert it when the caller leaves the field
+	// at its Go zero value, the empty string, which is never one of them,
+	// and a create through the behaviors' core hands the core it, as it
+	// binds it; without it a struct literal that omits the field inserts ''.
 	EnumDefault string
 
 	// FilterKind is the kind of the field's filter (sqlutil.FilterKind),
@@ -1218,11 +1219,11 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	crossTables, err := crossTablesOf(schema, tables)
+	crossTables, err := crossTablesOf(schema, tables, opts.SQLite)
 	if err != nil {
 		return nil, err
 	}
-	notifier, err := notificationsOf(schema, tables, repositories)
+	notifier, err := notificationsOf(schema, tables, repositories, opts.SQLite)
 	if err != nil {
 		return nil, err
 	}
@@ -1387,17 +1388,18 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		for i := range output.Repositories {
 			repo := &output.Repositories[i]
 			repo.sqliteTargets = targets
-			repo.sqliteAccess = sqliteAccessRefusal(access, repo.TypeName)
 			if repo.SQLite, err = sqliteTableOf(repo); err != nil {
 				return nil, err
 			}
 		}
 	}
-	// The inbound path and the dispatcher run on Postgres alone (D192).
-	if !opts.SQLite {
-		if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
-			return nil, err
-		}
+	// The inbound path and the dispatcher (D192), on SQLite too for a
+	// database that lists sqlite (#618): orchestration_sqlite.go.
+	if output.Orchestration, err = orchestrationOf(schema, tables, repositories, output); err != nil {
+		return nil, err
+	}
+	if err := checkNotifierQueuesOnSQLite(output); err != nil {
+		return nil, err
 	}
 
 	return output, nil
@@ -1682,7 +1684,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 			repo.HasSearch = true
 			repo.QuotedSearchColumn = sqlutil.QuoteIdentifier(sqlgen.SearchTextColumn)
 		}
-		if enumNames[field.IRType] && field.IsRequired && !field.IsArray && fieldDef.Default != nil {
+		if (enumNames[field.IRType] || accessChoice(fieldDef)) && field.IsRequired && !field.IsArray && fieldDef.Default != nil {
 			field.EnumDefault = *fieldDef.Default
 		}
 		if field.IsJSONField && field.IsUnion {

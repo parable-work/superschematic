@@ -492,6 +492,11 @@ type APIOutput struct {
 	// the runtime's orm::calendar and orm::search_tables read and an app's
 	// routes for them open (D188).
 	ReadsAcrossTables bool
+	// heldDatabases are the databases the API reads whose rows keep to a
+	// caller (D156): an @audience table or grants. A behavior operation on
+	// one checks the caller's reach of the row before the core runs
+	// (BehaviorsHeld).
+	heldDatabases map[string]bool
 	// Providers are the API's runtime providers (D159, D185): its slots,
 	// the provider crates its config lists, which Cargo.toml depends on,
 	// and the config fields they read. src/providers.rs holds them, and
@@ -872,9 +877,11 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	// A feature of D152 to D159 the Rust server does not serve yet, of the
 	// API or of a database it reads, is refused, not dropped (D181).
 	var databases []*ir.Schema
+	held := map[string]bool{}
 	for _, name := range sortedSchemaNames(opts.Dependencies) {
 		if dep := opts.Dependencies[name]; dep != nil && dep.Kind == ir.SchemaKindDB {
 			databases = append(databases, dep)
+			held[name] = len(dep.AudienceTables()) > 0 || dep.AccessGrantsTable() != nil
 		}
 	}
 	if err := verify.RefuseRustServer(schema, databases...); err != nil {
@@ -902,6 +909,7 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
 	output.PostgresFeatures = postgresFeaturesOf(databases)
+	output.heldDatabases = held
 	for _, database := range databases {
 		for _, td := range database.Types {
 			output.ReadsAcrossTables = output.ReadsAcrossTables || len(td.CalendarSources) > 0 || td.Searchable != nil
