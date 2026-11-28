@@ -16,8 +16,13 @@
 # The check is scripts/smoke-check.ts, on Bun: the site's page, fallback
 # and config; an administrator and a member registered, approved and
 # signed in with a cookie on the site's origin; smoke-db's declared query;
-# nearest; and a message the worker drains. It prints the sign-ins' and
-# the drain's times. SMOKE_ADMIN_PASSWORD is the administrator's password,
+# nearest; a message the worker drains; the behaviors' rows (D151), an
+# urgent deadline within ten seconds on Dev and Cloudflare; a file filed
+# with no second upload (D154); a recurrence's reminder (D152), which the
+# notifier puts in the inbox and sends through the stub relay (D153); a
+# memo search finds as its index is kept current (D155); and a payee's
+# text filed onto its granted line item and a stranger's held in triage
+# (D157). It prints the sign-ins' and the workers' times. SMOKE_ADMIN_PASSWORD is the administrator's password,
 # required but for Dev; SMOKE_ADMIN_LOGIN is their login, admin@smoke.test
 # unless set.
 #
@@ -148,7 +153,7 @@ if [[ "$env_name" == Dev ]]; then
     echo "stack dev names no address of site smoke-web" >&2
     exit 1
   }
-  bun scripts/smoke-check.ts --base-url "$site" --ready-seconds 60 --drain-seconds 60
+  bun scripts/smoke-check.ts --base-url "$site" --ready-seconds 60 --drain-seconds 60 --urgent-seconds 10
   if [[ -n "$keep" ]]; then
     # A job of a script ignores SIGINT, so Ctrl-C reaches stack dev as
     # SIGTERM, through this trap.
@@ -267,9 +272,14 @@ deployed=1
 "$BIN" stack deploy "$env_name" --stack "$STACK"
 echo "deployed $env_name in $(seconds "$started")s"
 "$BIN" stack outputs "$env_name" --stack "$STACK" --out "$WORK/outputs.json"
+# An urgent deadline fires within ten seconds of its due on Cloudflare,
+# where a write wakes its worker's Workflow (D151); gcp's worker pools are
+# held to the drain's bound alone.
+urgent=()
+[[ "$env_name" == Cloudflare ]] && urgent=(--urgent-seconds 10)
 bun scripts/smoke-check.ts \
   --environment "schemas/dist/stack/smoke-stack/$env_name/environment.json" \
-  --outputs "$WORK/outputs.json"
+  --outputs "$WORK/outputs.json" "${urgent[@]}"
 if [[ -n "$keep" ]]; then
   echo "$env_name stays up: scripts/smoke.sh $env_name --destroy removes it"
 fi
