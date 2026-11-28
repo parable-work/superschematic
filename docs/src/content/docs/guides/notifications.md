@@ -16,7 +16,7 @@ person who sent it.
 | --- | --- |
 | `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
 | the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
-| the same notifier in the Go runtime, on Postgres ([in Go](#in-go)) | a route to an agent in Go (D158 is TypeScript's alone so far) |
+| the same notifier in the Go runtime, on Postgres, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | |
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties | a generated server that builds the notifier into its `Deps` |
 | the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
@@ -350,5 +350,17 @@ adapter and sets the password with the identity service's
 Postgres, which holds the zone database. Whether an adapter reports
 statuses or reads inbound messages is whether it implements
 `providers.ChannelStatusReader` and `providers.ChannelInboundReader`. A
-route that names an agent is logged and reaches no one: the Go runtime
-does not serve agent runs yet.
+route that names an agent puts a run request on the dispatcher's queue
+when the notifier holds one (`Options.Agents`, D192); without it the
+route is logged and reaches no one.
+
+A stack's Go server builds the notifier into `Deps.Notifier` itself, with
+the reply actions and the rest of the options its implementation's
+`NewWiring` answers in `Wiring.Notifier`. It mounts the notifier's routes
+(`Notifier.Routes`): the caller's inbox at `GET /api/inbox`, and
+`POST /api/inbox/{id}/read` and `/ack`, behind the API's auth step, and
+each channel slot's relay callbacks at `POST /webhooks/<slot>/inbound`
+and `/status`, outside it, `/webhooks/sms` for slot `SMS`. A `@worker` of
+the dispatch queue is the notifier's, and the implementation has no
+method for it. [The generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)
+lists the whole wiring.

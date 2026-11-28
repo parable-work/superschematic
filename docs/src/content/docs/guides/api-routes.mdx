@@ -2138,7 +2138,13 @@ api.RegisterRoutes(router, api.Config{DB: db, Logger: logger})
 
 `session.GrantAuthenticator` runs a request with a `grant_` token as the
 grant's holder; the ORM of a database with an `@accessGrants` table is the
-authority it reads the grant from on every call. The grants are the ORM's:
+authority it reads the grant from on every call. A stack's Go server wires
+it itself: its API package's `Authenticator` puts it before the API's own
+auth step, the identity runtime's middleware or the implementation's
+`AuthMiddleware`, which the router's `Config` then takes, or, for an API
+with neither, on the router, so a grant's holder is the caller of every
+route; with the agent dispatcher it is the dispatcher's `Authenticator`,
+which establishes a running run's token too. The grants are the ORM's:
 
 | Function | Does |
 | --- | --- |
