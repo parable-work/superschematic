@@ -1,0 +1,22 @@
+{
+  "name": "@schemas/fixture-triage-api-implementation",
+  "version": "0.0.0",
+  "description": "The implementation of the fixture-triage-api API.",
+  "private": true,
+  "type": "module",
+  "main": "index.ts",
+  "types": "index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@schemas/fixture-triage-api-api": "workspace:*",
+    "@schemas/fixture-triage-api-types": "workspace:*",
+    "@schemas/fixture-parties-db-types": "workspace:*",
+    "@superschematic/http-runtime": "*"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.9",
+    "typescript": "7.0.2"
+  }
+}
