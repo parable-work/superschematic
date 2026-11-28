@@ -948,9 +948,10 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		s.Worker.planRuntimeHandler(o, w)
 		if w.Behavior != nil {
 			// A behavior worker runs its table's deadlines and changes
-			// through the repositories, on Postgres alone (D103).
-			if !o.DepsORM() || o.DepsSQLite() {
-				return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, a behavior worker (D103), which runs %s through the repositories %s's TypeScript types export for Postgres, and %s has none: a TypeScript behavior worker claims its queues on Postgres alone, and one on a SQLite file or D1 is not built (D116)", in.Stack, in.Server, w.Name, o.SchemaName, w.Behavior.Runs(), o.Deps.Database, o.SchemaName)
+			// through the repositories, claimed over the pool, or over the
+			// SQLite file or the D1 binding (D103, #702).
+			if !o.DepsORM() {
+				return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, a behavior worker (D103), which runs %s through the repositories %s's TypeScript types export, and %s has none; enable outputs.types.typescript in %s's config", in.Stack, in.Server, w.Name, o.SchemaName, w.Behavior.Runs(), o.Deps.Database, o.SchemaName, o.Deps.Database)
 			}
 			s.Worker.Behavior = w.Behavior
 			s.Worker.QueuesFunc = w.QueuesFunc()

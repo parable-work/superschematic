@@ -279,12 +279,12 @@ as on SQLite every behavior does (D186). `createAgents` comes from the
 runtime's `./d1` entry too, over the `./orm/sqlite` entry's repositories,
 and `agents.workerQueue(db)` claims its requests over a `SqlDatabase`.
 
-A generated server builds its dispatcher from the runtime's `./postgres`
-entry, and its workers claim through the Postgres queue client, so an API
-whose database lists `sqlite` first and declares the orchestration is
-refused its generated dispatcher, though its `Deps.orm` is the
-`./orm/sqlite` entry's: the app builds `createAgents` over
-`createOrm(db)` of the `./orm/sqlite` entry itself.
+A generated server over a database that lists `sqlite` first builds its
+dispatcher from the runtime's `./d1` entry, and its workers claim over
+the `SqlDatabase` (#702). A DB service builds its Go types too, and the
+loader refuses a `@versioned` table, the definitions among them, beside
+them on SQLite (D189), so a database with the orchestration lists
+postgres first for now.
 
 ## In Go
 

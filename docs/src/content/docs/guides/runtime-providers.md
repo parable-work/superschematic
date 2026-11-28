@@ -25,9 +25,10 @@ depends on none of them.
 | the five interfaces in the TypeScript HTTP runtime, `defineProvider`, and `providersFrom`, which reads the providers an environment configures | |
 | the same in the Rust HTTP runtime, and a provider crate whose `Cargo.toml` declares it ([In Rust](#in-rust)) | |
 | the same in the Go HTTP runtime's `providers` package, and a Go module in the provider's directory ([In Go](#in-go)) | |
-| a provider package's manifest in its `package.json`, which the build checks against its interface's contract | a provider package named by its npm name; the config lists directories |
+| a provider package's manifest in its `package.json`, which the build checks against its interface's contract; a package listed by its directory or by its npm name, in build-all's dependency graph and its cache key | a TypeScript server that imports an npm-named provider by its name; it imports the directory the name resolved to |
 | `@providers` on an API's `@envVars` class, and the API config's `providers`; a generated TypeScript, Go and Rust server that links the packages and builds `Providers` in its `Deps` | |
-| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), and agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)) | a check for `files` (attachments) and `credentials` (agent runs' credentials): those features register as they are built |
+| the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)), and search over attachments' text, which needs a file processor | a check for `credentials`: an agent's credentials are rows of its definition, which the build does not read |
+| the file processor's pass over attachments' `pending` (`processFiles`, a generated API's `processPendingFiles`), whose text search indexes ([References and files on any row](/superschematic/guides/database-tables/)) | the pass in the Go and Rust runtimes |
 | credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
 
 [D159](https://github.com/parable-work/superschematic/issues/608)

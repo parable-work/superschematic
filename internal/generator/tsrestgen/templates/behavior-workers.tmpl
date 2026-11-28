@@ -24,16 +24,24 @@ completion commit together or not at all, and its rejection fails the
 message. The worker's main runs its queues with runWorkers; each queue's
 complete does nothing, since the handler completes the message in the
 transaction that runs it. A message the handler fails is due again after
-the queue's backoff, and dead once its retries are spent. nextDue tells a
+the queue's backoff, and dead once its retries are spent.{{ if .DepsSQLite }} The queues are
+claimed over the SqlDatabase, a SQLite file or a D1 binding, each claim in
+the connection's turn with the repositories' (claimsOver, D189, #702); a
+queue on SQLite has no slot and no next due time, so a wake's run on
+Workers (D151) stops once its queues were idle a while.{{ else }} nextDue tells a
 run that drains, a wake's on Workers (D151) or a worker's in drain mode
 (D145), when the next falls due, and slot takes the lock a worker in drain
-mode holds while it runs, its first queue's for them all (runWorkers).{{ else }} The worker's main runs its queues with runWorkers; each queue's
+mode holds while it runs, its first queue's for them all (runWorkers).{{ end }}{{ else }} The worker's main runs its queues with runWorkers; each queue's
 complete does nothing, since the handler completes the message in the
 transaction that runs it. A message the handler fails is due again after
-the queue's backoff, and dead once its retries are spent. nextDue tells a
+the queue's backoff, and dead once its retries are spent.{{ if .DepsSQLite }} The queues are
+claimed over the SqlDatabase, a SQLite file or a D1 binding, each claim in
+the connection's turn with the repositories' (claimsOver, D189, #702); a
+queue on SQLite has no slot and no next due time, so a wake's run on
+Workers (D151) stops once its queues were idle a while.{{ else }} nextDue tells a
 run that drains, a wake's on Workers (D151) or a worker's in drain mode
 (D145), when the next falls due, and slot takes the lock a worker in drain
-mode holds while it runs, its first queue's for them all (runWorkers).{{ end }}
+mode holds while it runs, its first queue's for them all (runWorkers).{{ end }}{{ end }}
 */
 {{ if .DepsSQLite }}
 import type { Logger } from '{{ .RuntimePackage }}';

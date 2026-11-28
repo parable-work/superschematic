@@ -6,16 +6,16 @@
 // {{ $api.Service }} on a Cron Trigger every minute (D92). superschematic writes it beside
 // main.ts, which stack dev runs on Bun as a process that claims until it is
 // stopped, because an environment of the stack places the worker on Workers,
-// where no process runs that long; bundle.ts bundles it for workerd, with
-// Node's modules, which node-postgres needs.
+// where no process runs that long; bundle.ts bundles it for workerd{{ if $db.SQLite }}.{{ else }}, with
+// Node's modules, which node-postgres needs.{{ end }}
 //
 // When Cloudflare loads the version, drain.ts reads the API's config from
 // the Worker's string bindings, so a refused config fails the version's
 // upload, naming each variable. At each firing its scheduled handler builds
 // the API's Deps from the Worker's bindings, as a job's scheduled.ts does,
-// with its database reached through the Hyperdrive config its connection
+// with its database reached through the {{ if $db.SQLite }}D1 binding{{ else }}Hyperdrive config{{ end }} its connection
 // names; calls the implementation's createWorkers; and claims the messages
-// of the queue {{ .Worker.Queue }} of {{ $db.Service }} from Postgres, handling each with the
+// of the queue {{ .Worker.Queue }} of {{ $db.Service }} from {{ if $db.SQLite }}D1 (#702){{ else }}Postgres{{ end }}, handling each with the
 // worker's method, as main.ts does: WORKER_CONCURRENCY, which the platform
 // sets, says how many at a time, {{ .Worker.Concurrency }} unless it says otherwise. It extends each
 // message's claim while the method runs, completes the message when the
