@@ -565,6 +565,11 @@ func subTable(td *ir.TypeDef, use ir.BehaviorRef, table registry.BehaviorTable) 
 		}},
 		Indexes: []ir.IndexDef{{Keys: []string{rowField, table.Key}, Unique: true, Origin: ir.OriginBehavior}},
 	}
+	// The indexes its reads need beside it (Comments' blocks, a GIN of
+	// jsonb_path_ops for D154's containment, #713), Postgres's alone.
+	for _, index := range registry.SubTableIndexes(use.Name, table.Name) {
+		sub.Indexes = append(sub.Indexes, ir.IndexDef{Keys: []string{index.Field}, Method: index.Method, Ops: index.Ops, Origin: ir.OriginBehavior})
+	}
 	for _, declared := range table.Fields {
 		sub.Fields = append(sub.Fields, &ir.FieldDef{
 			Name:        declared.Name,

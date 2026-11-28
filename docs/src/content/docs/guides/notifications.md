@@ -17,7 +17,7 @@ person who sent it.
 | `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
 | the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
 | the same notifier in the Go runtime, on Postgres ([in Go](#in-go)) | a route to an agent in Go (D158 is TypeScript's alone so far) |
-| raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
+| raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference; a table's Comments' mentions and replies ([conversations in the inbox](#a-tables-conversation-in-the-inbox)) | a generated behavior worker that hands a behavior's events to the notifier itself |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties | a generated server that builds the notifier into its `Deps` |
 | the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
 | urgent, normal, digest and record; quiet hours; digests and briefs | an inbox page in Topcoat |
@@ -131,6 +131,7 @@ await orm.asSystem().noticeRoute.createOne({
 | `{ path: "owner" }` | the principals a relation path of the record holds: a field of ids, through to-one relations (`project.owner`) |
 | `{ principal: id }` | one user |
 | `{ role: "oncall" }` | the users holding the role |
+| `{ payload: "subjects" }` | the principals a member of the event's payload names, a string or a list: each a user, `role:<name>` the role's holders (a Comments event's subjects, #713) |
 | `{ party: { table, key } }` | a party row, through its grants |
 | `{ agent: name }` | an agent (D158): the route puts a run request about the record on the dispatcher's queue, in place of a notice ([agent runs](/superschematic/guides/agent-runs/)) |
 
@@ -141,6 +142,51 @@ Each recipient reads the record through its table's repository as
 themselves: its audience and their grants hold. One who cannot read it
 gets nothing, and nothing records that they were skipped. The notifier
 asks again when it sends, so one who lost the record since hears nothing.
+
+## A table's conversation in the inbox
+
+The in-app inbox is the notifier's (D153). A table's `Comments` whose
+config sets `events` emits two events about the row, in the transaction
+of the message that caused them
+([#713](https://github.com/parable-work/superschematic/issues/713)):
+
+```ts
+// tickets-db
+@audience<Ticket>({ owner: "owner" })
+export abstract class Ticket implements Comments<Ticket, { events: true }> { ... }
+```
+
+| Event | When | Its `subjects` |
+| --- | --- | --- |
+| `mentioned` | a message comes to stand, or an edit adds mentions | the subjects it mentions, as written |
+| `replied` | a reply comes to stand in a thread with followers | the thread's followers no mention reached |
+
+Neither names the message's author or the subject it was written for
+(`forSubject`). The payload carries the message, its thread, its author,
+its `forSubject` and `via`, and the first 200 code points of its body.
+The table's event queue holds them, so an API over the database declares
+a `@behaviorWorker` of the table, whose Workers methods hand each to the
+notifier as `comments.mentioned` and `comments.replied`:
+
+```ts
+ticketBehaviorsCommentsMentioned: (event, tx) =>
+  notifier.fromBehaviorEvent(tx, "Ticket", "comments", { kind: "mentioned", key: event.key, payload: event.payload }),
+ticketBehaviorsCommentsReplied: (event, tx) =>
+  notifier.fromBehaviorEvent(tx, "Ticket", "comments", { kind: "replied", key: event.key, payload: event.payload }),
+```
+
+A route of each kind reaches the subjects the event names, as any
+route's recipients, each held to reading the row as themselves:
+
+```ts
+await sys.noticeRoute.createOne({ name: "Mentions", eventKind: "comments.mentioned", recipients: [{ payload: "subjects" }] });
+await sys.noticeRoute.createOne({ name: "Replies", eventKind: "comments.replied", urgency: "digest", recipients: [{ payload: "subjects" }] });
+```
+
+So a mention on a row its subject cannot read reaches no one, and nothing
+records it. Go's `notify.Notifier.FromBehaviorEvent` and Rust's
+`Notifier::from_behavior_event` take the same events, and the routes'
+`{ payload }` recipients reach the same principals.
 
 ## Send it
 

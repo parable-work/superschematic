@@ -636,8 +636,9 @@ impl<C: Client> Runner<'_, C> {
 
     /// Reads the row of `key` through the core as the caller (#713), and
     /// answers the fields of the use under `member` each reader reads its
-    /// own of.
+    /// own of. A row the caller may not read (D156) is not found.
     pub(crate) async fn view(&self, member: &str, key: &Value) -> Result<Values, Error> {
+        self.require_reach(key, false).await?;
         let read = self.plan.core_read(member, key)?;
         match self
             .client
