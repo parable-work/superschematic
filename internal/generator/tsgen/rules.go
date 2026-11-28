@@ -54,7 +54,7 @@ var repositoryMembers = []string{
 	"createOne", "createMany", "updateOne", "updateMany", "upsertOne", "upsertOneResult", "upsertMany",
 	"deleteOne", "deleteMany", "hardDeleteOne", "mergeInto", "nearest", "reencrypt",
 
-	"constructor", "encrypted", "behaviors", "peers", "orm", "def", "runner", "acting", "keys", "rules", "behaviorCaller", "user",
+	"constructor", "encrypted", "behaviors", "createParams", "peers", "orm", "def", "runner", "acting", "keys", "rules", "behaviorCaller", "user",
 	"peer", "selects", "selection", "selectText", "strip", "related", "hydrate", "clauses", "column",
 	"keyColumn", "audit", "decode", "read", "atomically", "cell", "ring", "open", "seal", "sealed",
 	"sealedUpdate", "setsEncrypted", "encode", "requireUser", "conditions", "group", "whereOf", "liveWhere",

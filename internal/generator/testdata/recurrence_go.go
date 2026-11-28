@@ -600,7 +600,7 @@ func TestRecurrence(t *testing.T) {
 		return orm.WithBehaviorCaller(ctx, rules.Caller{Subject: who, Permissions: permissions[who]})
 	}
 	monthly := func(start string) orm.CreateOptions {
-		rule, anchor := "FREQ=MONTHLY", "calendar"
+		rule, anchor := "FREQ=MONTHLY", orm.FilingRecurrenceAnchor("calendar")
 		return orm.CreateOptions{Behaviors: map[string]any{"recurrence": orm.FilingRecurrenceCreateParams{Recurrence: &orm.FilingRecurrenceCreateParamsRecurrence{Anchor: anchor, Rule: &rule, Start: &start}}}}
 	}
 

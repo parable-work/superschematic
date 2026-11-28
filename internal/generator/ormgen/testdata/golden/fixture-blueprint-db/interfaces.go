@@ -51,7 +51,7 @@ type JobRepositoryInterface interface {
 	FindOne(ctx context.Context, filter *JobFilter, opts *JobFindOptions) (*types.Job, error)
 	FindMany(ctx context.Context, filter *JobFilter, opts *JobFindOptions) ([]*types.Job, int, error)
 	FindPage(ctx context.Context, filter *JobFilter, opts *JobPageOptions) (*JobPage, error)
-	CreateOne(ctx context.Context, input *JobCreate) (*types.Job, error)
+	CreateOne(ctx context.Context, input *JobCreate, opts ...CreateOptions) (*types.Job, error)
 	CreateMany(ctx context.Context, inputs []*JobCreate) ([]*types.Job, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *JobUpdate) (*types.Job, error)
 	UpdateMany(ctx context.Context, filter *JobFilter, update *JobUpdate) (int, error)
@@ -332,7 +332,7 @@ func (r *NoOpJobRepository) FindPage(_ context.Context, _ *JobFilter, _ *JobPage
 	return &JobPage{Rows: []*types.Job{}}, nil
 }
 
-func (r *NoOpJobRepository) CreateOne(_ context.Context, input *JobCreate) (*types.Job, error) {
+func (r *NoOpJobRepository) CreateOne(_ context.Context, input *JobCreate, _ ...CreateOptions) (*types.Job, error) {
 	return input.row(), nil
 }
 

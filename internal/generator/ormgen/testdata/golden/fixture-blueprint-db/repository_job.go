@@ -51,6 +51,24 @@ func (input *JobCreate) row() *types.Job {
 	return row
 }
 
+// JobDependenciesCreateParams are the create parameters Job's dependencies
+// takes (#729): CreateOptions{Behaviors: map[string]any{"dependencies":
+// JobDependenciesCreateParams{...}}}.
+type JobDependenciesCreateParams struct {
+	// Blockers is the instance's blockers from its create, each held to
+	// addBlocker's rules.
+	Blockers []JobDependenciesCreateParamsBlockersItem `json:"blockers,omitempty"`
+}
+
+// JobDependenciesCreateParamsBlockersItem types an item of
+// JobDependenciesCreateParamsBlockers.
+type JobDependenciesCreateParamsBlockersItem struct {
+	// Id is the blocker's id.
+	Id string `json:"id"`
+	// Schema is the blocker's schema; Job when absent.
+	Schema *string `json:"schema,omitempty"`
+}
+
 // JobDependenciesAddBlockerParams are the parameters of dependencies's
 // addBlocker.
 type JobDependenciesAddBlockerParams struct {
@@ -382,13 +400,13 @@ func (r *JobRepository) operationOptions(ctx context.Context) *rules.ExecuteOpti
 // createThroughCore is CreateOne on the repository's transaction: input's row
 // stamped, created by the behaviors' core, whose uses initialize the fields
 // they own, with the columns the insert writes, and read back.
-func (r *JobRepository) createThroughCore(ctx context.Context, input *JobCreate) (*types.Job, error) {
+func (r *JobRepository) createThroughCore(ctx context.Context, input *JobCreate, params map[string]any) (*types.Job, error) {
 	row := input.row()
 	columns, err := r.createColumns(row)
 	if err != nil {
 		return nil, err
 	}
-	opts := &rules.CreateOptions{ID: r.createKey(row), ExecuteOptions: rules.ExecuteOptions{OwnColumns: columns}}
+	opts := &rules.CreateOptions{ID: r.createKey(row), Params: params, ExecuteOptions: rules.ExecuteOptions{OwnColumns: columns}}
 	key, err := rules.RunCreate(ctx, rulesHost(r.tx), "Job", r.coreOwn(row), behaviorCaller(ctx), opts)
 	if err != nil {
 		return nil, err
@@ -1527,10 +1545,37 @@ func (r *JobRepository) pageKeyExists(ctx context.Context, key any) error {
 // transaction: each behavior's create initializes the fields it owns, and the
 // row is read back. A refusal of the core's is returned as the *rules.Refusal
 // it is.
-func (r *JobRepository) CreateOne(ctx context.Context, input *JobCreate) (*types.Job, error) {
+func (r *JobRepository) CreateOne(ctx context.Context, input *JobCreate, opts ...CreateOptions) (*types.Job, error) {
+	params, err := jobCreateParams(opts)
+	if err != nil {
+		return nil, err
+	}
 	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) (*types.Job, error) {
-		return (&JobRepository{tx: tx, txDB: r.database()}).createThroughCore(ctx, input)
+		return (&JobRepository{tx: tx, txDB: r.database()}).createThroughCore(ctx, input, params)
 	})
+}
+
+// jobCreateParams are a create's Behaviors (#729), by use member, as the
+// core's command takes them, by use id: a member no use of Job takes create
+// parameters under is refused.
+func jobCreateParams(opts []CreateOptions) (map[string]any, error) {
+	var params map[string]any
+	for _, opt := range opts {
+		for member, entry := range opt.Behaviors {
+			var id string
+			switch member {
+			case "dependencies":
+				id = "Dependencies"
+			default:
+				return nil, fmt.Errorf("create Job: Behaviors names %q, and no behavior of Job takes create parameters under it (its members: dependencies)", member)
+			}
+			if params == nil {
+				params = map[string]any{}
+			}
+			params[id] = entry
+		}
+	}
+	return params, nil
 }
 
 // jobUniqueKeys are the conflict targets of Job's unique keys, and
@@ -2112,7 +2157,7 @@ func (r *JobRepository) CreateMany(ctx context.Context, inputs []*JobCreate) ([]
 		repo := &JobRepository{tx: tx, txDB: r.database()}
 		rows := make([]*types.Job, 0, len(inputs))
 		for _, input := range inputs {
-			row, err := repo.createThroughCore(ctx, input)
+			row, err := repo.createThroughCore(ctx, input, nil)
 			if err != nil {
 				return nil, err
 			}

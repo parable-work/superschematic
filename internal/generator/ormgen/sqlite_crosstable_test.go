@@ -45,6 +45,9 @@ var sqliteCrossTablesCases = []sqliteCrossTablesCase{
 			"a relative recurrence is due its offset before each anniversary of its contract's end, as the core expands it",
 			"without filings.manage setRecurrence is refused and a rule that is no RRULE is invalid",
 			"the calendar merges a contract end date and a filing occurrences, each dated as its source says",
+			"a recurrence given at create is set in the create, its occurrences planned and its deadlines armed, and held to filings.manage",
+			"a holiday calendar whose weekend is Friday and Saturday moves a due date off Saturday to the Sunday",
+			"a write of a contract end date writes a change of each filing that names it, which moves nothing of the filing",
 		},
 	},
 	{

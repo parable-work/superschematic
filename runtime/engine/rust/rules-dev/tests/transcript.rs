@@ -56,7 +56,7 @@ const TRANSCRIPTS: [(&str, usize); 40] = [
     ("core-reconcile", 58),
     ("core-schedules", 161),
     ("core-pool", 82),
-    ("core-recurrence", 88),
+    ("core-recurrence", 101),
     ("core-rollups", 180),
     ("core-dependencies", 266),
     ("core-numbering", 104),

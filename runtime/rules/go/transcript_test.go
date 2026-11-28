@@ -101,7 +101,7 @@ var transcriptFiles = []transcriptFile{
 	{"../../engine/testdata/rules/core-reconcile.transcript.json", 58},
 	{"../../engine/testdata/rules/core-schedules.transcript.json", 161},
 	{"../../engine/testdata/rules/core-pool.transcript.json", poolFloor},
-	{"../../engine/testdata/rules/core-recurrence.transcript.json", 88},
+	{"../../engine/testdata/rules/core-recurrence.transcript.json", 101},
 	{"../../engine/testdata/rules/core-rollups.transcript.json", 180},
 	{"../../engine/testdata/rules/core-dependencies.transcript.json", 266},
 	{"../../engine/testdata/rules/core-numbering.transcript.json", 104},

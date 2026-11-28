@@ -257,15 +257,15 @@ const RECONCILE_FLOOR: usize = 58;
 /// events each command wrote held to its table's event queue.
 const SCHEDULES_FLOOR: usize = 161;
 
-/// core-recurrence's floor: 88 steps of the scenarios written by hand
-/// (#601), 29 checks, 11 of them refused, and 59 commands, each holding its
+/// core-recurrence's floor: 101 steps of the scenarios written by hand
+/// (#601, #729), 33 checks, 11 of them refused, and 68 commands, each holding its
 /// row's version and its occurrences as its sub-rows: creates of a holiday,
 /// a contract and filings, updates of a contract's date and a filing's
 /// relation, Recurrence's operations, three of them repeats answered
 /// unchanged, and the deadlines the runner ran, each emitting the events of
 /// the occurrences it moved on (opened, reminded, due, missed), its plan
 /// reading the holiday table and the relation's row.
-const RECURRENCE_FLOOR: usize = 88;
+const RECURRENCE_FLOOR: usize = 101;
 
 /// core-pool's floor, as the core's milestone states it: 82 steps of the
 /// scenarios written by hand (D104), 17 checks, 7 of them refused, and 65

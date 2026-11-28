@@ -164,13 +164,18 @@ pub struct FilingRecurrenceOccurrences {
 
 /// A day a holiday calendar closes (D152). The app fills these rows; core
 /// ships no holidays. A filing's due date moves off the days of the calendar
-/// its holidayCalendar names.
+/// its holidayCalendar names. A row with a weekday and no date closes that
+/// day every week, and a calendar with such rows takes them as its weekend
+/// in place of Saturday and Sunday (#729).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Holiday {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<IdentityUUID>,
     pub calendar: String,
-    pub date: TemporalDate,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<TemporalDate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weekday: Option<String>,
     pub name: String,
 }
 

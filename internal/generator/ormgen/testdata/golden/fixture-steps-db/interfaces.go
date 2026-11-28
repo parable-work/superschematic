@@ -54,7 +54,7 @@ type StepRepositoryInterface interface {
 	FindOne(ctx context.Context, filter *StepFilter, opts *StepFindOptions) (*types.Step, error)
 	FindMany(ctx context.Context, filter *StepFilter, opts *StepFindOptions) ([]*types.Step, int, error)
 	FindPage(ctx context.Context, filter *StepFilter, opts *StepPageOptions) (*StepPage, error)
-	CreateOne(ctx context.Context, input *StepCreate) (*types.Step, error)
+	CreateOne(ctx context.Context, input *StepCreate, opts ...CreateOptions) (*types.Step, error)
 	CreateMany(ctx context.Context, inputs []*StepCreate) ([]*types.Step, error)
 	UpdateOne(ctx context.Context, id types.IdentityUUID, update *StepUpdate) (*types.Step, error)
 	UpdateMany(ctx context.Context, filter *StepFilter, update *StepUpdate) (int, error)
@@ -351,7 +351,7 @@ func (r *NoOpStepRepository) FindPage(_ context.Context, _ *StepFilter, _ *StepP
 	return &StepPage{Rows: []*types.Step{}}, nil
 }
 
-func (r *NoOpStepRepository) CreateOne(_ context.Context, input *StepCreate) (*types.Step, error) {
+func (r *NoOpStepRepository) CreateOne(_ context.Context, input *StepCreate, _ ...CreateOptions) (*types.Step, error) {
 	return input.row(), nil
 }
 

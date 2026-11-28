@@ -292,15 +292,15 @@ const SCHEDULES_FLOOR: usize = 161;
 const POOL_FLOOR: usize = 82;
 
 /// The steps `core-recurrence.transcript.json` holds, of the hand-written
-/// `core-recurrence.json`'s 86 (#601): its define and publish checks, eleven
+/// `core-recurrence.json`'s 100 (#601, #729): its define and publish checks, eleven
 /// of them refused, and its commands: creates, updates, Recurrence's
 /// operations, refusals and repeats answered unchanged among them, and the
 /// deadlines the runner's runDues ran, each fire with the events it wrote
 /// as its `events`, each holding its row's version after the step, with its
-/// occurrences as its sub-rows and its armed deadlines, in its 4 scenarios.
+/// occurrences as its sub-rows and its armed deadlines, in its 5 scenarios.
 /// The ones left out are the opens and the runDues that ran nothing. An
 /// adapter's replay holds its own count to this one.
-const RECURRENCE_FLOOR: usize = 88;
+const RECURRENCE_FLOOR: usize = 101;
 
 /// The steps `core-rollups.transcript.json` holds, of `core-rollups.json`'s
 /// 286 (D104's step 4): 72 define and publish checks and 108 creates,

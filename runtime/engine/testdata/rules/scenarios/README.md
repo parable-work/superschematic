@@ -94,8 +94,11 @@ writes them, and `test/corpus.test.ts` does not list them.
   rule change that keeps the open occurrence; a relative recurrence read
   through its relation, planned when the horizon reaches it, dated again
   by `setRecurrence` with the rule it holds after the target's date moves,
-  and planning nothing once the relation is cleared; and the define
-  refusals. No engine implements Recurrence.
+  and planning nothing once the relation is cleared; the define
+  refusals; and (#729) a holiday calendar whose weekday rows close Friday
+  and Saturday in place of weekendDays, and a create that gives the row
+  its recurrence, refused without managePermission and for a rule that is
+  no RRULE. No engine implements Recurrence.
 - `core-comments-beside.json` (D103, step 4): Comments on a table, every
   write beside the row (D77's primitive 1): a post that moves no version of
   the row and asks no other behavior's guard, so another principal posts

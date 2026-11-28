@@ -47,6 +47,24 @@ func narrowRecurrence(n *Narrowing, config map[string]any, target Target) error 
 			return fmt.Errorf("operation setRecurrence: %w", err)
 		}
 	}
+	// A create's recurrence (#729) takes what setRecurrence takes.
+	if n.CreateParams != nil {
+		recurrence, err := at(n.CreateParams, "properties", "recurrence")
+		if err != nil {
+			return fmt.Errorf("its create parameters: %w", err)
+		}
+		if err := setProperty(recurrence, "anchor", ref(anchor, "")); err != nil {
+			return fmt.Errorf("its create parameters: %w", err)
+		}
+		for _, member := range SortedKeys(recurrenceMembers) {
+			if slices.ContainsFunc(recurrenceMembers[member], func(a string) bool { return slices.Contains(anchors, a) }) {
+				continue
+			}
+			if err := deleteProperty(recurrence, member); err != nil {
+				return fmt.Errorf("its create parameters: %w", err)
+			}
+		}
+	}
 	return setFields(n,
 		typedField{"nextDueAt", integer(), false},
 		typedField{"lastDoneAt", integer(), false},

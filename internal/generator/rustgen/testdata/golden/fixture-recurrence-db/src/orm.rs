@@ -191,12 +191,17 @@ pub struct FilingFilter {
 ///
 /// A day a holiday calendar closes (D152). The app fills these rows; core
 /// ships no holidays. A filing's due date moves off the days of the calendar
-/// its holidayCalendar names.
+/// its holidayCalendar names. A row with a weekday and no date closes that
+/// day every week, and a calendar with such rows takes them as its weekend
+/// in place of Saturday and Sunday (#729).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct HolidayRow {
     pub id: IdentityUUID,
     pub calendar: String,
-    pub date: TemporalDate,
+    #[serde(default)]
+    pub date: Option<TemporalDate>,
+    #[serde(default)]
+    pub weekday: Option<String>,
     pub name: String,
 }
 
@@ -207,7 +212,10 @@ pub struct HolidayCreate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<IdentityUUID>,
     pub calendar: String,
-    pub date: TemporalDate,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<TemporalDate>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weekday: Option<String>,
     pub name: String,
 }
 
@@ -216,8 +224,12 @@ pub struct HolidayCreate {
 pub struct HolidayUpdate {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub calendar: Option<String>,
+    /// `Some(None)` sets the column NULL.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub date: Option<TemporalDate>,
+    pub date: Option<Option<TemporalDate>>,
+    /// `Some(None)` sets the column NULL.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weekday: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 }
@@ -232,6 +244,8 @@ pub struct HolidayFilter {
     pub calendar: Option<orm::Text<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub date: Option<orm::Ordered<TemporalDate>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub weekday: Option<orm::Text<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<orm::Text<String>>,
     /// The rows every one of the filters finds, beside the other members (D99).
@@ -985,6 +999,9 @@ pub const POSTGRES: &str = r#"{
           "recurrence": [
             "listOccurrences"
           ]
+        },
+        "creates": {
+          "recurrence": "Recurrence"
         }
       },
       "calendar": [
@@ -1050,7 +1067,6 @@ pub const POSTGRES: &str = r#"{
           "field": "date",
           "qualified": "holiday.\"date\"",
           "date": true,
-          "required": true,
           "filter": [
             "eq",
             "ne",
@@ -1061,6 +1077,21 @@ pub const POSTGRES: &str = r#"{
             "between",
             "in",
             "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "weekday",
+          "column": "weekday",
+          "field": "weekday",
+          "qualified": "holiday.weekday",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
             "isNull"
           ],
           "sortable": true
@@ -1083,9 +1114,9 @@ pub const POSTGRES: &str = r#"{
         }
       ],
       "statements": {
-        "columns": "\"id\", \"calendar\", \"date\", \"name\"",
-        "qualifiedColumns": "\"holiday\".\"id\", \"holiday\".\"calendar\", \"holiday\".\"date\", \"holiday\".\"name\"",
-        "getOne": "SELECT \"id\", \"calendar\", \"date\", \"name\" FROM holiday WHERE id = $1",
+        "columns": "\"id\", \"calendar\", \"date\", \"weekday\", \"name\"",
+        "qualifiedColumns": "\"holiday\".\"id\", \"holiday\".\"calendar\", \"holiday\".\"date\", \"holiday\".\"weekday\", \"holiday\".\"name\"",
+        "getOne": "SELECT \"id\", \"calendar\", \"date\", \"weekday\", \"name\" FROM holiday WHERE id = $1",
         "live": "",
         "liveWhere": "",
         "liveCondition": "",
@@ -1104,11 +1135,11 @@ pub const POSTGRES: &str = r#"{
         "insertMany": "INSERT INTO holiday (%s) VALUES %s RETURNING %s",
         "update": "UPDATE holiday SET %s WHERE id = $%d",
         "versionFence": " AND _version = $%d",
-        "returning": " RETURNING \"id\", \"calendar\", \"date\", \"name\"",
+        "returning": " RETURNING \"id\", \"calendar\", \"date\", \"weekday\", \"name\"",
         "updateMany": "UPDATE holiday SET %s%s",
         "updatedAt": "updated_at = statement_timestamp()",
         "updatedBy": "updated_by = $%d",
-        "upsert": "INSERT INTO holiday (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"calendar\", \"date\", \"name\", (xmax = 0) AS _inserted",
+        "upsert": "INSERT INTO holiday (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"calendar\", \"date\", \"weekday\", \"name\", (xmax = 0) AS _inserted",
         "softDelete": "",
         "softDeleteIfVersion": "",
         "delete": "DELETE FROM holiday WHERE id = $1",
@@ -1119,7 +1150,7 @@ pub const POSTGRES: &str = r#"{
         "id": {
           "conflict": "(id)",
           "keep": "id = holiday.id",
-          "rows": "SELECT \"id\", \"calendar\", \"date\", \"name\" FROM holiday WHERE (id) IN (%s)"
+          "rows": "SELECT \"id\", \"calendar\", \"date\", \"weekday\", \"name\" FROM holiday WHERE (id) IN (%s)"
         }
       },
       "behaviors": {
@@ -1701,6 +1732,9 @@ pub const SQLITE: &str = r#"{
           "recurrence": [
             "listOccurrences"
           ]
+        },
+        "creates": {
+          "recurrence": "Recurrence"
         }
       },
       "calendar": [
@@ -1766,7 +1800,6 @@ pub const SQLITE: &str = r#"{
           "field": "date",
           "qualified": "holiday.\"date\"",
           "date": true,
-          "required": true,
           "filter": [
             "eq",
             "ne",
@@ -1777,6 +1810,21 @@ pub const SQLITE: &str = r#"{
             "between",
             "in",
             "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "weekday",
+          "column": "weekday",
+          "field": "weekday",
+          "qualified": "holiday.weekday",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
             "isNull"
           ],
           "sortable": true
@@ -1799,9 +1847,9 @@ pub const SQLITE: &str = r#"{
         }
       ],
       "statements": {
-        "columns": "\"id\", \"calendar\", \"date\", \"name\"",
-        "qualifiedColumns": "\"holiday\".\"id\", \"holiday\".\"calendar\", \"holiday\".\"date\", \"holiday\".\"name\"",
-        "getOne": "SELECT \"id\", \"calendar\", \"date\", \"name\" FROM holiday WHERE id = ?1",
+        "columns": "\"id\", \"calendar\", \"date\", \"weekday\", \"name\"",
+        "qualifiedColumns": "\"holiday\".\"id\", \"holiday\".\"calendar\", \"holiday\".\"date\", \"holiday\".\"weekday\", \"holiday\".\"name\"",
+        "getOne": "SELECT \"id\", \"calendar\", \"date\", \"weekday\", \"name\" FROM holiday WHERE id = ?1",
         "live": "",
         "liveWhere": "",
         "liveCondition": "",
@@ -1820,11 +1868,11 @@ pub const SQLITE: &str = r#"{
         "insertMany": "INSERT INTO holiday (%s) VALUES %s RETURNING %s",
         "update": "UPDATE holiday SET %s WHERE id = ?%d",
         "versionFence": " AND _version = ?%d",
-        "returning": " RETURNING \"id\", \"calendar\", \"date\", \"name\"",
+        "returning": " RETURNING \"id\", \"calendar\", \"date\", \"weekday\", \"name\"",
         "updateMany": "UPDATE holiday SET %s%s",
         "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
         "updatedBy": "updated_by = ?%d",
-        "upsert": "INSERT INTO holiday (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"calendar\", \"date\", \"name\"",
+        "upsert": "INSERT INTO holiday (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"calendar\", \"date\", \"weekday\", \"name\"",
         "softDelete": "",
         "softDeleteIfVersion": "",
         "delete": "DELETE FROM holiday WHERE id = ?1",
@@ -1835,7 +1883,7 @@ pub const SQLITE: &str = r#"{
         "id": {
           "conflict": "(id)",
           "keep": "id = holiday.id",
-          "rows": "SELECT \"id\", \"calendar\", \"date\", \"name\" FROM holiday WHERE (id) IN (VALUES %s)"
+          "rows": "SELECT \"id\", \"calendar\", \"date\", \"weekday\", \"name\" FROM holiday WHERE (id) IN (VALUES %s)"
         }
       },
       "behaviors": {
