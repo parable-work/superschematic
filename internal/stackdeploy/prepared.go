@@ -1,7 +1,6 @@
 package stackdeploy
 
 import (
-	"archive/tar"
 	"bytes"
 	"compress/gzip"
 	"context"
@@ -18,6 +17,8 @@ import (
 	"slices"
 	"strings"
 
+	// The package's tests declare a type named archive.
+	tarball "github.com/parable-work/superschematic/internal/archive"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -347,56 +348,11 @@ func (p *Prepared) extract(a *PreparedArtifact, what, dest string) (*ArtifactFil
 // untar extracts the directories and regular files of a tar stream
 // digestFilesTo wrote into dest, each file executable when its mode says.
 func untar(r io.Reader, dest string) error {
-	if err := os.MkdirAll(dest, 0o755); err != nil {
-		return err
+	err := tarball.ExtractTar(r, dest, tarball.Options{})
+	if entry, ok := errors.AsType[*tarball.EntryError](err); ok && entry.Err == tarball.ErrOutside {
+		return fmt.Errorf("entry %q is not a path in the archive", entry.Name)
 	}
-	tr := tar.NewReader(r)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		name := strings.TrimSuffix(hdr.Name, "/")
-		// A name is slash-separated, relative and clean, holds no
-		// backslash, which Windows reads as a separator and so as a way out
-		// of dest, and is local on this platform (no drive, no reserved
-		// name).
-		if name == "" || path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") ||
-			strings.Contains(name, `\`) || !filepath.IsLocal(filepath.FromSlash(name)) {
-			return fmt.Errorf("entry %q is not a path in the archive", hdr.Name)
-		}
-		target := filepath.Join(dest, filepath.FromSlash(name))
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			mode := fs.FileMode(0o644)
-			if hdr.Mode&0o111 != 0 {
-				mode = 0o755
-			}
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_EXCL, mode)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(out, tr); err != nil {
-				_ = out.Close()
-				return err
-			}
-			if err := out.Close(); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("entry %s is neither a directory nor a file", name)
-		}
-	}
+	return err
 }
 
 // PrepareOptions is one `stack prepare`.

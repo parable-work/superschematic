@@ -1,6 +1,7 @@
 import { ObjectNotFoundError, type Bucket } from './bucket.js';
 import type { AccessCaller } from './caller.js';
 import { sha256Stream } from './sha256.js';
+import { sqlitePlaceholders } from './sql-text.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
 
 /*
@@ -361,7 +362,7 @@ const POSTGRES_SQL: Sql = {
 
 /** SQLite's, which holds a time as its RFC 3339 text to the millisecond, as its schema's defaults write it. */
 const SQLITE_SQL: Sql = {
-  statement: text => text.replace(/\$(\d+)/gu, '?$1'),
+  statement: sqlitePlaceholders,
   text: expr => `CAST(${expr} AS TEXT)`,
   int: expr => `CAST(${expr} AS INTEGER)`,
   now: "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",

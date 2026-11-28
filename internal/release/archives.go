@@ -1,20 +1,18 @@
 package release
 
 import (
-	"archive/tar"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"net/http"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/parable-work/superschematic/internal/archive"
 )
 
 // A release's static archives on the machine that runs superschematic
@@ -160,52 +158,9 @@ func download(ctx context.Context, url string, w io.Writer) (string, error) {
 // --strip-components=1` does. It takes directories and regular files, and
 // refuses any other entry, and a path that would leave dir.
 func unpack(r io.Reader, dir string) error {
-	gz, err := gzip.NewReader(r)
-	if err != nil {
-		return err
+	err := archive.ExtractTar(r, dir, archive.Options{Gzip: true, StripComponents: 1})
+	if entry, ok := errors.AsType[*archive.EntryError](err); ok && entry.Err == archive.ErrOutside {
+		return fmt.Errorf("entry %q lies outside the tarball's directory", entry.Name)
 	}
-	defer func() { _ = gz.Close() }()
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if errors.Is(err, io.EOF) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		clean := path.Clean(strings.TrimPrefix(hdr.Name, "./"))
-		top, rel, ok := strings.Cut(clean, "/")
-		if top == "" || top == ".." || (ok && !fs.ValidPath(rel)) {
-			return fmt.Errorf("entry %q lies outside the tarball's directory", hdr.Name)
-		}
-		if !ok || rel == "" {
-			// The tarball's top directory itself.
-			continue
-		}
-		target := filepath.Join(dir, filepath.FromSlash(rel))
-		switch hdr.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, 0o755); err != nil {
-				return err
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-				return err
-			}
-			f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
-			if err != nil {
-				return err
-			}
-			if _, err := io.Copy(f, tr); err != nil {
-				_ = f.Close()
-				return err
-			}
-			if err := f.Close(); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("entry %q is neither a directory nor a regular file", hdr.Name)
-		}
-	}
+	return err
 }

@@ -560,7 +560,9 @@ function hex(bytes: Uint8Array): string {
  * waits for it and copies into the row it writes. A row that is gone, or
  * soft deleted, has its index row deleted. With embeddings on, a row whose
  * text changed is embedded after the transaction, and its embedding stored
- * only while its text is still what was embedded. Answers what it did.
+ * only while its text is still what was embedded. Answers what it did. It
+ * is indexRows of one key, which reindexSearch runs a page of keys at a
+ * time.
  */
 export async function indexSearch(orm: object, message: SearchIndexing, options: SearchOptions = {}): Promise<'indexed' | 'removed' | 'unknown'> {
   const system = (orm as OrmShape).asSystem();
@@ -570,72 +572,140 @@ export async function indexSearch(orm: object, message: SearchIndexing, options:
     if (options.embeddings) refuseEmbeddings('indexSearch', false);
     return indexOnSQLite(system, definition, message);
   }
-  const d = definition;
-  const where = `source_table = $1 AND source_key = $2`;
+  const indexed = await indexRows(system, message.sourceTable, definition, [message.sourceKey], options);
+  return indexed.has(message.sourceKey) ? 'indexed' : 'removed';
+}
+
+/**
+ * Builds the index rows of keys, rows of the @searchable table table, as
+ * indexSearch does one, in as many statements for a page of keys as for
+ * one: in one transaction, a read of the rows under a share lock, one of
+ * their conversations and one of their files (string_agg, GROUP BY the
+ * row), a delete of the index rows of the rows gone or soft deleted and an
+ * upsert of the others; then, with embeddings on, one model call with the
+ * texts of the rows whose embedding is not of the model, and one update of
+ * their embeddings. Each key is deleted by the text it is given in, and
+ * indexed by its row's key's text. Answers the keys that had a row to
+ * index.
+ */
+async function indexRows(system: OrmShape, table: string, d: SearchableDefinition, keys: readonly string[], options: SearchOptions): Promise<Set<string>> {
+  const given = [...new Set(keys)];
+  const indexed = new Set<string>();
   const written = await system.transaction(async tx => {
     const columns = [`${d.title} AS title`, ...(d.body ?? []).map((c, i) => `${c} AS b${i}`), `${d.key}::text AS key`];
     if (d.scope) columns.push(`${d.scope}::text AS scope`);
     if (d.deletedAt) columns.push(`${d.deletedAt} IS NOT NULL AS deleted`);
-    const row = (await tx.query(`SELECT ${columns.join(', ')} FROM ${d.table} WHERE ${d.key} = $1::${d.keyType} FOR SHARE`, [message.sourceKey])).rows[0];
-    if (!row || row.deleted === true) {
-      await tx.query(`DELETE FROM ${d.index} WHERE ${where}`, [message.sourceTable, message.sourceKey]);
-      return null;
+    // Each key's row, locked in the keys' order, beside the key as given;
+    // a key with no row has none.
+    const { rows } = await tx.query(
+      `SELECT given.key AS given, r.* FROM unnest($1::text[]) WITH ORDINALITY AS given(key, n)
+       CROSS JOIN LATERAL (SELECT ${columns.join(', ')} FROM ${d.table} WHERE ${d.key} = given.key::${d.keyType} FOR SHARE) AS r ORDER BY given.n`,
+      [given]
+    );
+    const live: Values[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      if (row.deleted === true) continue;
+      indexed.add(String(row.given));
+      // Two keys given of one row index it once.
+      const key = String(row.key);
+      if (!seen.has(key)) {
+        seen.add(key);
+        live.push(row);
+      }
     }
-    const title = clean(row.title) ?? '';
-    const body = clean((d.body ?? []).map((_, i) => row[`b${i}`]).filter(v => v !== null && v !== undefined).join('\n'));
-    let comments: string | null = null;
-    if (d.comments) {
-      const c = d.comments;
-      const read = await tx.query(
-        `SELECT string_agg(${c.body}, E'\\n' ORDER BY ${c.order}) AS text FROM ${c.table} WHERE ${c.row} = $1::${d.keyType} AND ${c.state} IN ('posted', 'interrupted') AND ${c.body} <> ''`,
-        [message.sourceKey]
-      );
-      comments = clean(read.rows[0]?.text);
-    }
-    let files: string | null = null;
-    if (d.files) {
-      const f = d.files;
-      const read = await tx.query(`SELECT string_agg(${f.text}, E'\\n' ORDER BY ${f.text}) AS text FROM ${f.table} WHERE ${f.row} = $1::${d.keyType} AND ${f.state} = 'ready' AND ${f.text} IS NOT NULL`, [
-        message.sourceKey,
-      ]);
-      files = clean(read.rows[0]?.text);
-    }
-    const text = [title, body, comments, files].filter((t): t is string => t !== null).join('\n');
-    const hash = hex(sha256(new TextEncoder().encode(text)));
-    const key = String(row.key);
+    const removed = given.filter(k => !indexed.has(k));
+    if (removed.length > 0) await tx.query(`DELETE FROM ${d.index} WHERE source_table = $1 AND source_key = ANY($2::text[])`, [table, removed]);
+    if (live.length === 0) return [];
+    const liveKeys = live.map(row => String(row.key));
+    // The conversations' and the files' text, of every row at once.
+    const aggregate = async (sql: string): Promise<Map<string, unknown>> => new Map((await tx.query(sql, [liveKeys])).rows.map(r => [String(r.key), r.text]));
+    const c = d.comments;
+    const comments = c
+      ? await aggregate(
+          `SELECT ${c.row}::text AS key, string_agg(${c.body}, E'\\n' ORDER BY ${c.order}) AS text FROM ${c.table} WHERE ${c.row} = ANY($1::text[]::${d.keyType}[]) AND ${c.state} IN ('posted', 'interrupted') AND ${c.body} <> '' GROUP BY ${c.row}`
+        )
+      : undefined;
+    const f = d.files;
+    const files = f
+      ? await aggregate(
+          `SELECT ${f.row}::text AS key, string_agg(${f.text}, E'\\n' ORDER BY ${f.text}) AS text FROM ${f.table} WHERE ${f.row} = ANY($1::text[]::${d.keyType}[]) AND ${f.state} = 'ready' AND ${f.text} IS NOT NULL GROUP BY ${f.row}`
+        )
+      : undefined;
+    const writes = live.map((row, i) => {
+      const key = liveKeys[i]!;
+      const title = clean(row.title) ?? '';
+      const body = clean((d.body ?? []).map((_, j) => row[`b${j}`]).filter(v => v !== null && v !== undefined).join('\n'));
+      const comment = comments ? clean(comments.get(key)) : null;
+      const file = files ? clean(files.get(key)) : null;
+      const text = [title, body, comment, file].filter((t): t is string => t !== null).join('\n');
+      const hash = hex(sha256(new TextEncoder().encode(text)));
+      return { key, title, body, comment, file, scope: (row.scope ?? null) as unknown, text, hash, model: undefined as string | null | undefined };
+    });
     // The access columns come from the row itself, which the share lock
     // holds as it is until the index row is written.
     const audience = d.audience ? `s.${d.audience.effective.split('.').pop()}` : 'NULL::uuid[]';
     const agents = d.audience ? `s.${d.audience.agents.split('.').pop()}` : `'followRole'`;
     const stored = await tx.query(
       `INSERT INTO ${d.index} AS i (source_table, source_key, title, body, comments, files, scope, audience, agents, text_hash, indexed_at)
-       SELECT $1::text, $2::text, $3::text, $4::text, $5::text, $6::text, $7::text, ${audience}, ${agents}, $8::text, now() FROM ${d.table} AS s WHERE s.${d.key} = $9::${d.keyType}
+       SELECT $1::text, v.key, v.title, v.body, v.comments, v.files, v.scope, ${audience}, ${agents}, v.hash, now()
+       FROM unnest($2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::text[], $8::text[]) AS v(key, title, body, comments, files, scope, hash), ${d.table} AS s
+       WHERE s.${d.key} = v.key::${d.keyType}
        ON CONFLICT (source_table, source_key) DO UPDATE SET
          title = EXCLUDED.title, body = EXCLUDED.body, comments = EXCLUDED.comments, files = EXCLUDED.files, scope = EXCLUDED.scope,
          audience = EXCLUDED.audience, agents = EXCLUDED.agents, indexed_at = EXCLUDED.indexed_at,
          embedding = CASE WHEN i.text_hash = EXCLUDED.text_hash THEN i.embedding END,
          embedding_model = CASE WHEN i.text_hash = EXCLUDED.text_hash THEN i.embedding_model END,
          text_hash = EXCLUDED.text_hash
-       RETURNING embedding_model`,
-      [message.sourceTable, key, title, body, comments, files, row.scope ?? null, hash, key]
+       RETURNING source_key, embedding_model`,
+      [
+        table,
+        liveKeys,
+        writes.map(w => w.title),
+        writes.map(w => w.body),
+        writes.map(w => w.comment),
+        writes.map(w => w.file),
+        writes.map(w => w.scope),
+        writes.map(w => w.hash),
+      ]
     );
-    return { key, text, hash, model: stored.rows[0]?.embedding_model as string | null | undefined };
+    const byKey = new Map(writes.map(w => [w.key, w]));
+    for (const r of stored.rows) {
+      const w = byKey.get(String(r.source_key));
+      if (w) w.model = r.embedding_model as string | null | undefined;
+    }
+    return writes;
   });
-  if (written === null) return 'removed';
   const embeddings = options.embeddings;
-  if (embeddings && written.model !== embeddings.model) {
-    const [vector] = await embeddings.embed([written.text.slice(0, embeddings.maxChars ?? 8000)]);
-    if (vector && vector.length > 0) {
-      await system.query(`UPDATE ${d.index} SET embedding = $3::float8[], embedding_model = $4 WHERE ${where} AND text_hash = $5`, [
-        message.sourceTable,
-        written.key,
-        unit(vector),
-        embeddings.model,
-        written.hash,
-      ]);
+  if (!embeddings) return indexed;
+  const pending = written.filter(w => w.model !== embeddings.model);
+  if (pending.length === 0) return indexed;
+  const vectors = await embeddings.embed(pending.map(w => w.text.slice(0, embeddings.maxChars ?? 8000)));
+  // Each embedding as an array literal, which unnest keeps whole; a row
+  // the model gave none keeps none, and an embedding that is not finite
+  // stops the rows after it, as one at a time would.
+  const embedded: { key: string; hash: string; literal: string }[] = [];
+  let failed: unknown;
+  for (const [i, w] of pending.entries()) {
+    const vector = vectors[i];
+    if (!vector || vector.length === 0) continue;
+    try {
+      embedded.push({ key: w.key, hash: w.hash, literal: `{${unit(vector).join(',')}}` });
+    } catch (error) {
+      failed = error;
+      break;
     }
   }
-  return 'indexed';
+  if (embedded.length > 0) {
+    await system.query(
+      `UPDATE ${d.index} AS i SET embedding = v.embedding::float8[], embedding_model = $2
+       FROM unnest($3::text[], $4::text[], $5::text[]) AS v(key, hash, embedding)
+       WHERE i.source_table = $1 AND i.source_key = v.key AND i.text_hash = v.hash`,
+      [table, embeddings.model, embedded.map(e => e.key), embedded.map(e => e.hash), embedded.map(e => e.literal)]
+    );
+  }
+  if (failed !== undefined) throw failed;
+  return indexed;
 }
 
 /**
@@ -697,9 +767,10 @@ async function indexOnSQLite(system: OrmShape, d: SearchableDefinition, message:
 
 /**
  * Builds the index row of every row of orm's @searchable tables, or of
- * tables, as indexSearch does one, in key order, batch rows a read: what a
- * table that became @searchable with rows in it needs once, and what a
- * change of embeddings' model needs. Answers how many rows it indexed.
+ * tables, as indexSearch does one, in key order, batch rows a read and an
+ * indexRows: what a table that became @searchable with rows in it needs
+ * once, and what a change of embeddings' model needs. Answers how many
+ * rows it indexed.
  */
 export async function reindexSearch(orm: object, options: SearchOptions & { readonly tables?: readonly string[]; readonly batch?: number } = {}): Promise<number> {
   const system = (orm as OrmShape).asSystem();
@@ -717,9 +788,13 @@ export async function reindexSearch(orm: object, options: SearchOptions & { read
           : `SELECT ${definition.key}::text AS key, ${definition.key} AS k FROM ${definition.table}${after === undefined ? '' : ` WHERE ${definition.key} > $1::${definition.keyType}`} ORDER BY ${definition.key} LIMIT ${batch}`,
         after === undefined ? [] : [after]
       );
-      for (const row of rows) {
-        await indexSearch(orm, { sourceTable: table, sourceKey: String(row.key) }, options);
-        count++;
+      // A page's rows are indexed together: as many statements and one
+      // model call whatever its size.
+      if (rows.length > 0) {
+        // On SQLite each row is indexed by its own statements (indexOnSQLite).
+        if (sqlite) for (const row of rows) await indexSearch(orm, { sourceTable: table, sourceKey: String(row.key) }, options);
+        else await indexRows(system, table, definition, rows.map(row => String(row.key)), options);
+        count += rows.length;
       }
       if (rows.length < batch) break;
       const last = rows[rows.length - 1]!;
