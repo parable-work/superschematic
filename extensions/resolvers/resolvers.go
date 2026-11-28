@@ -58,7 +58,7 @@ func (Extension) Register(r *registry.Registry) error {
 	for _, spec := range []registry.TaskResolverSpec{
 		{Kind: GoModule, Spec: dirSpec, Resolve: resolveGoModule},
 		{Kind: RustCrate, Spec: dirSpec, Resolve: resolveRustCrate},
-		{Kind: JSPackage, Spec: dirSpec, Resolve: resolveJSPackage},
+		{Kind: JSPackage, Spec: jsSpecSchema, Resolve: resolveJSPackage},
 		{Kind: Image, Spec: imageSpec, Resolve: resolveImage},
 	} {
 		spec.Extension = Name

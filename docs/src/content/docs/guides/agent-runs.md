@@ -15,7 +15,8 @@ stop switch ends every run in flight.
 | Built | Not built yet |
 | --- | --- |
 | `@agents("<part>")` on the orchestration's tables, which the build fills, on Postgres, SQLite and D1 | Rust and Go on D1 |
-| run requests on a queue from routes, assignments, schedules, principals and inbound messages | a real container platform's sandbox provider and a model API's provider |
+| run requests on a queue from routes, assignments, schedules, principals and inbound messages | |
+| a local-process sandbox and a model stub, which the examples run on; an app writes the provider of its container runtime and its model API ([set up your own provider](/superschematic/guides/runtime-providers/#set-up-your-own-provider)) | |
 | the run's token as a grant per target row, acting for its principal, its paths narrowed to a party's grant | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
 | autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | |
 | an inbound message's trust: a sender entered by hand asks before every write | |
@@ -71,6 +72,11 @@ Every part is required, and the orchestration runs on Postgres. An API
 over such a database uses the `agents` runtime feature, so an environment
 that sets no sandbox slot or no model slot is refused
 ([runtime providers](/superschematic/guides/runtime-providers/#features-that-need-a-provider)).
+The examples set them to `examples/runtime-providers`' stubs, the
+local-process sandbox and the model stub. An environment that runs real
+agents names a sandbox over a container runtime and a model provider over
+a model API, which the app writes
+([set up your own provider](/superschematic/guides/runtime-providers/#set-up-your-own-provider)).
 
 ## Start a run
 
@@ -237,8 +243,8 @@ The sandbox instance posts each turn's tool results to the agent routes'
 provider over the run's whole transcript: the task, each earlier
 completion as an assistant message with the tool calls it made
 (`toolCalls`), and each tool result after the call it answers. A provider
-that keeps its own record of a turn, such as Claude's thinking blocks and
-their signatures, returns it as the completion's `providerState`. The
+that keeps its own record of a turn, such as a model API's reasoning
+blocks and their signatures, returns it as the completion's `providerState`. The
 dispatcher keeps it with the completion and passes it back on that
 assistant message, unchanged, in every later turn, so the provider can
 rebuild its API's conversation as that API requires. It is the one part of

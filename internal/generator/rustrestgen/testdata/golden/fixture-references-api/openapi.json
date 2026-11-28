@@ -1,0 +1,2271 @@
+{
+  "components": {
+    "schemas": {
+      "ProblemDetails": {
+        "description": "An error response in the Problem Details format (RFC 9457).",
+        "properties": {
+          "code": {
+            "description": "The stable error code, when the problem has one.",
+            "type": "string"
+          },
+          "detail": {
+            "description": "What went wrong with this request.",
+            "type": "string"
+          },
+          "details": {
+            "description": "Structured facts about the refusal, such as the entity or the path it concerns. Only some refusals have it."
+          },
+          "errors": {
+            "description": "The fields or filters that failed validation. Only a validation or filter error has it."
+          },
+          "requestId": {
+            "description": "The ID of the request, when the problem has one.",
+            "type": "string"
+          },
+          "status": {
+            "description": "The HTTP status code.",
+            "example": 400,
+            "type": "integer"
+          },
+          "title": {
+            "description": "A short summary, usually the text of the HTTP status.",
+            "example": "Bad Request",
+            "type": "string"
+          },
+          "type": {
+            "description": "The problem type. It is `about:blank`: the status and `code` identify the problem.",
+            "example": "about:blank",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "ResponseMeta": {
+        "properties": {
+          "requestId": {
+            "description": "Unique identifier for the request",
+            "type": "string"
+          }
+        },
+        "required": [
+          "requestId"
+        ],
+        "type": "object"
+      },
+      "RowAttachment": {
+        "description": "A file of a row, in a bucket.",
+        "properties": {
+          "caption": {
+            "description": "Its caption; absent for none.",
+            "nullable": true,
+            "type": "string"
+          },
+          "contentHash": {
+            "description": "The SHA-256 of its bytes, 64 lowercase hex digits.",
+            "type": "string"
+          },
+          "expiresAt": {
+            "description": "When a pending file's upload URL expires.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
+          "extractedText": {
+            "description": "Its text, once extracted.",
+            "nullable": true,
+            "type": "string"
+          },
+          "extraction": {
+            "$ref": "#/components/schemas/RowProcessingState",
+            "description": "The state of its text's extraction."
+          },
+          "filedFrom": {
+            "description": "The file it was filed from, as table:key:id.",
+            "nullable": true,
+            "type": "string"
+          },
+          "id": {
+            "description": "The file's id.",
+            "type": "string"
+          },
+          "key": {
+            "description": "The key of the row that holds it, in its wire form.",
+            "type": "string"
+          },
+          "mediaType": {
+            "description": "The file's media type.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The file's name.",
+            "type": "string"
+          },
+          "objectKey": {
+            "description": "The bucket's object that holds its bytes, which a file filed elsewhere shares.",
+            "type": "string"
+          },
+          "preview": {
+            "$ref": "#/components/schemas/RowProcessingState",
+            "description": "The state of its preview."
+          },
+          "previewObject": {
+            "description": "The bucket's object that holds its preview, once made.",
+            "nullable": true,
+            "type": "string"
+          },
+          "size": {
+            "description": "The file's size in bytes.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/RowAttachmentState",
+            "description": "Pending while its upload is under way, ready once its bytes were checked."
+          },
+          "table": {
+            "description": "The table of the row that holds it, by its type's name.",
+            "type": "string"
+          },
+          "uploadedAt": {
+            "description": "When its upload began.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "uploadedBy": {
+            "description": "The user who uploaded it; absent for none.",
+            "nullable": true,
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "table",
+          "key",
+          "name",
+          "mediaType",
+          "size",
+          "contentHash",
+          "objectKey",
+          "state",
+          "uploadedAt",
+          "extraction",
+          "preview"
+        ],
+        "type": "object"
+      },
+      "RowAttachmentBeginInput": {
+        "description": "The file an upload begins: its name, media type, size and SHA-256, which its completion holds the bytes to.",
+        "properties": {
+          "caption": {
+            "description": "Its caption; none unless given.",
+            "nullable": true,
+            "type": "string"
+          },
+          "mediaType": {
+            "description": "The file's media type, which the upload's PUT sends.",
+            "type": "string"
+          },
+          "name": {
+            "description": "The file's name.",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "The SHA-256 of the file's bytes, 64 lowercase hex digits.",
+            "type": "string"
+          },
+          "size": {
+            "description": "The file's size in bytes.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name",
+          "mediaType",
+          "size",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "RowAttachmentBegun": {
+        "description": "A pending file and the upload a browser sends its bytes with.",
+        "properties": {
+          "attachment": {
+            "$ref": "#/components/schemas/RowAttachment",
+            "description": "The pending file."
+          },
+          "upload": {
+            "$ref": "#/components/schemas/RowAttachmentUpload",
+            "description": "The upload."
+          }
+        },
+        "required": [
+          "attachment",
+          "upload"
+        ],
+        "type": "object"
+      },
+      "RowAttachmentDownload": {
+        "description": "A URL that downloads a file's bytes until it expires, and the file.",
+        "properties": {
+          "attachment": {
+            "$ref": "#/components/schemas/RowAttachment",
+            "description": "The file."
+          },
+          "expiresAt": {
+            "description": "When the URL expires.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "url": {
+            "description": "The URL that downloads the bytes, straight from the bucket.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "expiresAt",
+          "attachment"
+        ],
+        "type": "object"
+      },
+      "RowAttachmentFileInput": {
+        "description": "The row a file is filed onto, and how.",
+        "properties": {
+          "move": {
+            "description": "Moves the file itself, which leaves its row; a copy unless set.",
+            "nullable": true,
+            "type": "boolean"
+          },
+          "role": {
+            "description": "The role of the reference the row makes to the other: filed unless given.",
+            "nullable": true,
+            "type": "string"
+          },
+          "to": {
+            "$ref": "#/components/schemas/RowRef",
+            "description": "The row the file is filed onto."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "RowAttachmentState": {
+        "description": "A file's state: pending while its upload is under way, ready once its bytes were checked.",
+        "enum": [
+          "pending",
+          "ready"
+        ],
+        "type": "string"
+      },
+      "RowAttachmentUpload": {
+        "description": "What a browser sends an upload with: a PUT of the file's bytes to url, with headers, before expiresAt.",
+        "properties": {
+          "expiresAt": {
+            "description": "When the URL expires.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The headers the PUT sends.",
+            "type": "object"
+          },
+          "method": {
+            "description": "The method that sends them: PUT.",
+            "type": "string"
+          },
+          "url": {
+            "description": "The URL the bytes go to, straight to the bucket.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "method",
+          "headers",
+          "expiresAt"
+        ],
+        "type": "object"
+      },
+      "RowBacklink": {
+        "description": "A row that points at another.",
+        "properties": {
+          "key": {
+            "description": "The row's key in its wire form.",
+            "type": "string"
+          },
+          "message": {
+            "description": "The message, for a ref block.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "role": {
+            "description": "The reference's role, for a reference.",
+            "nullable": true,
+            "type": "string"
+          },
+          "table": {
+            "description": "The row's table, by its type's name.",
+            "type": "string"
+          },
+          "via": {
+            "$ref": "#/components/schemas/RowBacklinkVia",
+            "description": "How it points at the row."
+          }
+        },
+        "required": [
+          "table",
+          "key",
+          "via"
+        ],
+        "type": "object"
+      },
+      "RowBacklinkVia": {
+        "description": "How a row points at another: through a reference it holds, or a ref block of a message of its conversation.",
+        "enum": [
+          "reference",
+          "comment"
+        ],
+        "type": "string"
+      },
+      "RowBacklinks": {
+        "description": "The rows that point at a row, as its reader may see them.",
+        "properties": {
+          "hidden": {
+            "description": "How many rows the caller cannot see point at the row: present only for the owner of a row whose audience is not everyone (D156).",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "nullable": true,
+            "type": "integer"
+          },
+          "items": {
+            "description": "The rows the caller can read, most recent first.",
+            "items": {
+              "$ref": "#/components/schemas/RowBacklink"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "RowProcessingState": {
+        "description": "A file processor's state of a file's text or preview (D159): none asked, asked, made, or failed.",
+        "enum": [
+          "none",
+          "pending",
+          "done",
+          "failed"
+        ],
+        "type": "string"
+      },
+      "RowRef": {
+        "description": "A row of a table, by its type's name and its key in its wire form.",
+        "properties": {
+          "key": {
+            "description": "The row's key in its wire form.",
+            "type": "string"
+          },
+          "table": {
+            "description": "The row's table, by its type's name (Issue).",
+            "type": "string"
+          }
+        },
+        "required": [
+          "table",
+          "key"
+        ],
+        "type": "object"
+      },
+      "RowReference": {
+        "description": "A reference a row holds: the row that holds it, the row it points at and its role.",
+        "properties": {
+          "addedAt": {
+            "description": "When it was added.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "addedBy": {
+            "description": "The user who added it; absent for none.",
+            "nullable": true,
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/RowRef",
+            "description": "The row that holds it."
+          },
+          "id": {
+            "description": "The reference's id.",
+            "type": "string"
+          },
+          "role": {
+            "description": "Its role, empty for none.",
+            "type": "string"
+          },
+          "to": {
+            "$ref": "#/components/schemas/RowRef",
+            "description": "The row it points at."
+          }
+        },
+        "required": [
+          "id",
+          "from",
+          "to",
+          "role",
+          "addedAt"
+        ],
+        "type": "object"
+      },
+      "RowReferenceInput": {
+        "description": "The row a reference points at, and its role.",
+        "properties": {
+          "role": {
+            "description": "The reference's role: none unless given. A remove with none removes the references of every role.",
+            "nullable": true,
+            "type": "string"
+          },
+          "to": {
+            "$ref": "#/components/schemas/RowRef",
+            "description": "The row the reference points at."
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "type": "object"
+      },
+      "RowReferencesRemoved": {
+        "description": "How many references a remove removed.",
+        "properties": {
+          "removed": {
+            "description": "How many references it removed.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": -9007199254740991,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "removed"
+        ],
+        "type": "object"
+      },
+      "Ticket": {
+        "description": "A ticket: a conversation whose messages carry attachment blocks,\nreferences to rows of any table, and files of at most 1 MiB, 4 MiB and\nten files a ticket.",
+        "properties": {
+          "id": {
+            "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+            "pattern": "^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title"
+        ],
+        "type": "object"
+      }
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "JWT",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "REST API generated from the fixture-references-api schema",
+    "title": "Fixture-References-Api API",
+    "version": "__OPENAPI_VERSION__"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/note/{id}/backlinks": {
+      "get": {
+        "description": "Lists the rows that point at the row, across every table, through a reference or a ref block of a message, each one the caller can read, most recent first. Only the owner of a row whose audience is not everyone hears how many rows it cannot see point at it.",
+        "operationId": "NoteBacklinksHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowBacklinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Note: backlinks",
+        "tags": [
+          "note"
+        ],
+        "x-superschematic-docs": {
+          "capability": "note.backlinks",
+          "description": "Lists the rows that point at the row, across every table, through a reference or a ref block of a message, each one the caller can read, most recent first. Only the owner of a row whose audience is not everyone hears how many rows it cannot see point at it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Note: backlinks",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/note/{id}/files": {
+      "get": {
+        "description": "Lists the row's ready files, oldest first.",
+        "operationId": "NoteAttachmentsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/RowAttachment"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Note: attachments",
+        "tags": [
+          "note"
+        ],
+        "x-superschematic-docs": {
+          "capability": "note.attachments",
+          "description": "Lists the row's ready files, oldest first.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Note: attachments",
+          "visibility": "public"
+        }
+      },
+      "post": {
+        "description": "Starts an upload of a file to the row: a pending file, held to the table's bounds with the row's other files and uploads, and the URL the browser puts the file's bytes to, straight to the bucket, before it expires.",
+        "operationId": "NoteBeginUploadHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowAttachmentBeginInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowAttachmentBegun"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Note: begin upload",
+        "tags": [
+          "note"
+        ],
+        "x-superschematic-docs": {
+          "capability": "note.begin-upload",
+          "description": "Starts an upload of a file to the row: a pending file, held to the table's bounds with the row's other files and uploads, and the URL the browser puts the file's bytes to, straight to the bucket, before it expires.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Note: begin upload",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/note/{id}/files/{file}": {
+      "get": {
+        "description": "Signs a URL that downloads one of the row's files until it expires, and answers the file, whose preview this first view asks.",
+        "operationId": "NoteDownloadHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "file parameter",
+            "in": "path",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowAttachmentDownload"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Note: download",
+        "tags": [
+          "note"
+        ],
+        "x-superschematic-docs": {
+          "capability": "note.download",
+          "description": "Signs a URL that downloads one of the row's files until it expires, and answers the file, whose preview this first view asks.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Note: download",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/note/{id}/files/{file}/complete": {
+      "post": {
+        "description": "Checks an upload's bytes in the bucket against the size and SHA-256 its begin declared, and makes the file ready; a file whose bytes differ is removed.",
+        "operationId": "NoteCompleteUploadHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "file parameter",
+            "in": "path",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowAttachment"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Note: complete upload",
+        "tags": [
+          "note"
+        ],
+        "x-superschematic-docs": {
+          "capability": "note.complete-upload",
+          "description": "Checks an upload's bytes in the bucket against the size and SHA-256 its begin declared, and makes the file ready; a file whose bytes differ is removed.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Note: complete upload",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/note/{id}/files/{file}/file": {
+      "post": {
+        "description": "Files one of the row's files onto another row, which may be of another table, with no second upload: a copy that names the same object, or with move the file itself. When the table keeps references that may point at the other row, the row then points at it with the role (filed unless given), so the other row lists it among its backlinks.",
+        "operationId": "NoteFileAttachmentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "file parameter",
+            "in": "path",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowAttachmentFileInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowAttachment"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Note: file attachment",
+        "tags": [
+          "note"
+        ],
+        "x-superschematic-docs": {
+          "capability": "note.file-attachment",
+          "description": "Files one of the row's files onto another row, which may be of another table, with no second upload: a copy that names the same object, or with move the file itself. When the table keeps references that may point at the other row, the row then points at it with the role (filed unless given), so the other row lists it among its backlinks.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Note: file attachment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/note/{id}/references": {
+      "get": {
+        "description": "Lists the references the row holds, oldest first, each to a row the caller can read.",
+        "operationId": "NoteReferencesHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/RowReference"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Note: references",
+        "tags": [
+          "note"
+        ],
+        "x-superschematic-docs": {
+          "capability": "note.references",
+          "description": "Lists the references the row holds, oldest first, each to a row the caller can read.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Note: references",
+          "visibility": "public"
+        }
+      },
+      "post": {
+        "description": "Makes the row point at another row, of any table it may point at, with a role (none unless given), once per target and role; answers the reference, the one there when it was there.",
+        "operationId": "NoteAddReferenceHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowReferenceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowReference"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Note: add reference",
+        "tags": [
+          "note"
+        ],
+        "x-superschematic-docs": {
+          "capability": "note.add-reference",
+          "description": "Makes the row point at another row, of any table it may point at, with a role (none unless given), once per target and role; answers the reference, the one there when it was there.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Note: add reference",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/note/{id}/references/remove": {
+      "post": {
+        "description": "Stops the row pointing at another row with the role, or with any role when none is given; answers how many references it removed.",
+        "operationId": "NoteRemoveReferenceHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowReferenceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowReferencesRemoved"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Note: remove reference",
+        "tags": [
+          "note"
+        ],
+        "x-superschematic-docs": {
+          "capability": "note.remove-reference",
+          "description": "Stops the row pointing at another row with the role, or with any role when none is given; answers how many references it removed.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Note: remove reference",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/backlinks": {
+      "get": {
+        "description": "Lists the rows that point at the row, across every table, through a reference or a ref block of a message, each one the caller can read, most recent first. Only the owner of a row whose audience is not everyone hears how many rows it cannot see point at it.",
+        "operationId": "TicketBacklinksHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowBacklinks"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: backlinks",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.backlinks",
+          "description": "Lists the rows that point at the row, across every table, through a reference or a ref block of a message, each one the caller can read, most recent first. Only the owner of a row whose audience is not everyone hears how many rows it cannot see point at it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Ticket: backlinks",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/files": {
+      "get": {
+        "description": "Lists the row's ready files, oldest first.",
+        "operationId": "TicketAttachmentsHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/RowAttachment"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: attachments",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.attachments",
+          "description": "Lists the row's ready files, oldest first.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Ticket: attachments",
+          "visibility": "public"
+        }
+      },
+      "post": {
+        "description": "Starts an upload of a file to the row: a pending file, held to the table's bounds with the row's other files and uploads, and the URL the browser puts the file's bytes to, straight to the bucket, before it expires.",
+        "operationId": "TicketBeginUploadHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowAttachmentBeginInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowAttachmentBegun"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: begin upload",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.begin-upload",
+          "description": "Starts an upload of a file to the row: a pending file, held to the table's bounds with the row's other files and uploads, and the URL the browser puts the file's bytes to, straight to the bucket, before it expires.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket: begin upload",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/files/{file}": {
+      "delete": {
+        "description": "Removes one of the row's files; its object is released once no file names it.",
+        "operationId": "TicketRemoveAttachmentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "file parameter",
+            "in": "path",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "type": "boolean"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: remove attachment",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.remove-attachment",
+          "description": "Removes one of the row's files; its object is released once no file names it.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket: remove attachment",
+          "visibility": "public"
+        }
+      },
+      "get": {
+        "description": "Signs a URL that downloads one of the row's files until it expires, and answers the file, whose preview this first view asks.",
+        "operationId": "TicketDownloadHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "file parameter",
+            "in": "path",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowAttachmentDownload"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: download",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.download",
+          "description": "Signs a URL that downloads one of the row's files until it expires, and answers the file, whose preview this first view asks.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Ticket: download",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/files/{file}/complete": {
+      "post": {
+        "description": "Checks an upload's bytes in the bucket against the size and SHA-256 its begin declared, and makes the file ready; a file whose bytes differ is removed.",
+        "operationId": "TicketCompleteUploadHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "file parameter",
+            "in": "path",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowAttachment"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: complete upload",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.complete-upload",
+          "description": "Checks an upload's bytes in the bucket against the size and SHA-256 its begin declared, and makes the file ready; a file whose bytes differ is removed.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket: complete upload",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/files/{file}/file": {
+      "post": {
+        "description": "Files one of the row's files onto another row, which may be of another table, with no second upload: a copy that names the same object, or with move the file itself. When the table keeps references that may point at the other row, the row then points at it with the role (filed unless given), so the other row lists it among its backlinks.",
+        "operationId": "TicketFileAttachmentHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          },
+          {
+            "description": "file parameter",
+            "in": "path",
+            "name": "file",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowAttachmentFileInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowAttachment"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: file attachment",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.file-attachment",
+          "description": "Files one of the row's files onto another row, which may be of another table, with no second upload: a copy that names the same object, or with move the file itself. When the table keeps references that may point at the other row, the row then points at it with the role (filed unless given), so the other row lists it among its backlinks.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket: file attachment",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/references": {
+      "get": {
+        "description": "Lists the references the row holds, oldest first, each to a row the caller can read.",
+        "operationId": "TicketReferencesHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "items": {
+                        "$ref": "#/components/schemas/RowReference"
+                      },
+                      "type": "array"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: references",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.references",
+          "description": "Lists the references the row holds, oldest first, each to a row the caller can read.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "replay": {
+            "expectedRevisionPointers": [],
+            "idempotencyKeyPointers": [],
+            "mode": "read_only"
+          },
+          "title": "Ticket: references",
+          "visibility": "public"
+        }
+      },
+      "post": {
+        "description": "Makes the row point at another row, of any table it may point at, with a role (none unless given), once per target and role; answers the reference, the one there when it was there.",
+        "operationId": "TicketAddReferenceHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowReferenceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowReference"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: add reference",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.add-reference",
+          "description": "Makes the row point at another row, of any table it may point at, with a role (none unless given), once per target and role; answers the reference, the one there when it was there.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket: add reference",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/ticket/{id}/references/remove": {
+      "post": {
+        "description": "Stops the row pointing at another row with the role, or with any role when none is given; answers how many references it removed.",
+        "operationId": "TicketRemoveReferenceHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RowReferenceInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/RowReferencesRemoved"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Ticket: remove reference",
+        "tags": [
+          "ticket"
+        ],
+        "x-superschematic-docs": {
+          "capability": "ticket.remove-reference",
+          "description": "Stops the row pointing at another row with the role, or with any role when none is given; answers how many references it removed.",
+          "lifecycle": "active",
+          "mappingStatus": "mapped",
+          "title": "Ticket: remove reference",
+          "visibility": "public"
+        }
+      }
+    },
+    "/api/tickets/{id}": {
+      "get": {
+        "operationId": "TicketGetTicketHandler",
+        "parameters": [
+          {
+            "description": "id parameter",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "UUID v4 with automatic base62 encoding for client-facing APIs",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/Ticket"
+                    },
+                    "meta": {
+                      "$ref": "#/components/schemas/ResponseMeta"
+                    }
+                  },
+                  "required": [
+                    "data",
+                    "meta"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request is not valid. `detail` says why."
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetails"
+                }
+              }
+            },
+            "description": "The request failed on the server."
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "getTicket",
+        "tags": [
+          "ticket"
+        ]
+      }
+    }
+  },
+  "servers": [
+    {
+      "description": "Runtime server",
+      "url": "__OPENAPI_BASE_URL__"
+    }
+  ]
+}

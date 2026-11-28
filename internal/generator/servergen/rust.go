@@ -528,6 +528,14 @@ type RustAPI struct {
 	// which the router's handlers run each through the graph's facade.
 	Graphs bool
 
+	// RowFeatures is true when the API serves a table's references and
+	// files (#723): Implementations::new then takes Database's pool too,
+	// through whose repositories the router's handlers run each, and
+	// AttachmentsBucket, the bucket main.rs opened that holds the files,
+	// when its file operations sign URLs of one.
+	RowFeatures       bool
+	AttachmentsBucket *RustBucket
+
 	// Idempotency is true when the API has @idempotent operations (D140):
 	// Implementations::new then takes Database's pool too, over which it
 	// builds the store of their keys.
@@ -1044,6 +1052,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			}
 			api.Graphs = true
 		}
+		if o.HasRowFeatureOperations() && !background {
+			if api.Database == nil || api.Database.Service != o.RowFeatureDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose row feature operations run on %s (#723), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.RowFeatureDatabase())
+			}
+			api.RowFeatures = true
+		}
 		if o.HasIdempotent() && !background {
 			if api.Database == nil {
 				return nil, fmt.Errorf("stack %s: server %s serves %s, whose @idempotent operations keep their keys in its database (D140), and opens no pool on it", in.Stack, in.Server, o.SchemaName)
@@ -1109,6 +1123,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				s.Buckets = append(s.Buckets, h)
 			}
 			api.Buckets = append(api.Buckets, RustBucketUse{Field: b.Field, Bucket: h, ContentAddressed: b.ContentAddressed, MaxBytes: b.MaxBytes})
+			if b.Field == o.RowFeatureBucketField() {
+				api.AttachmentsBucket = h
+			}
+		}
+		if api.RowFeatures && o.RowFeatureBucket() != "" && api.AttachmentsBucket == nil {
+			return nil, fmt.Errorf("stack %s: %s %s serves %s, whose file operations sign the URLs of bucket %s (#723), and opens no bucket for it", in.Stack, s.Kind, in.Server, o.SchemaName, o.RowFeatureBucket())
 		}
 		for _, m := range o.Deps.MemoryStores {
 			if bare {
@@ -1966,11 +1986,14 @@ func (a *RustAPI) ImplementationsArgs() []string {
 	if a.ServiceAuthenticator != "" {
 		args = append(args, "Arc::new("+a.ServiceAuthenticator+")")
 	}
-	if a.Behaviors || a.Tables || a.Graphs || a.Idempotency {
+	if a.Behaviors || a.Tables || a.Graphs || a.RowFeatures || a.Idempotency {
 		args = append(args, a.Database.Var+".clone()")
 	}
 	if a.FieldKeys {
 		args = append(args, a.Alias+"::tables::field_keys(&"+a.Config+")?")
+	}
+	if a.RowFeatures && a.AttachmentsBucket != nil {
+		args = append(args, "Arc::clone(&"+a.AttachmentsBucket.Var+")")
 	}
 	return args
 }

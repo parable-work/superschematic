@@ -1570,7 +1570,9 @@ The Go and Rust runtimes make the same pass, over the same scenarios
 `ProcessPendingFiles(ctx, deps, wiring)` runs over `Deps.DB` with the
 bucket `Wiring.Files` names, and Rust's
 `orm::file_processing::process_files` over the repositories'
-`attachments()`, on Postgres and on a SQLite file (#603). A pass does
+`attachments()`, which a generated Rust API's
+`files::process_pending_files(&deps, bucket)` runs over `Deps.db`, on
+Postgres and on a SQLite file (#603, #614). A pass does
 not retry a file: a processor that fails on it ends it `failed`. An
 error of the database's is the pass's own, which its job retries.
 
@@ -1645,8 +1647,7 @@ An API serves a table's references, backlinks and files as routes, SDK
 methods and MCP tools with no code of yours, from a
 `@rowFeatureOperations` set
 ([A table's references and files](/superschematic/guides/api-routes/#a-tables-references-and-files)),
-in TypeScript and Go; a Rust server keeps each a method of the
-implementation's trait for now (#723).
+in TypeScript, Go and Rust (#723).
 
 ## State machines
 

@@ -252,7 +252,7 @@ func TestAForgeReusesWorkByKeyAcrossCommits(t *testing.T) {
 
 	f := &forge{t: t}
 	first := planAt(t, repo, "HEAD")
-	if first.KeyVersion != "1:sha1" {
+	if first.KeyVersion != "2:sha1" {
 		t.Fatalf("key version %s", first.KeyVersion)
 	}
 	hermetic := []string{"api-build", "schema-build", "task-file", "vet"}
