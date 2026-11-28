@@ -1764,9 +1764,10 @@ jobs:
         # 115, 158, 77, 88, 58, 161 and 82 for the hand-written
         # core-workflow-principals, core-freezes-and-sign-offs,
         # core-retries-waits, core-periods-and-presence, core-seats,
-        # core-reconcile, core-schedules and core-pool (D104), whose events
-        # each replay reads back from the event queues after every command,
-        # and core-pool's picks commands without a row.
+        # core-reconcile, core-schedules and core-pool (D104), and 88 for
+        # core-recurrence (#601), whose events each replay reads back from
+        # the event queues after every command, and core-pool's picks
+        # commands without a row.
         env:
           GOTOOLCHAIN: go${{ env.GO_VERSION }}
           CGO_ENABLED: "1"
