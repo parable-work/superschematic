@@ -1,7 +1,8 @@
 import { backend } from 'superscalar/backend';
 import { VALID_SCALARS } from 'superscalar/scalars';
-import { parseIdentityDescriptor, quoteIdentifier as quote, type IdentityDescriptor } from './descriptor.js';
+import { parseIdentityDescriptor, type IdentityDescriptor } from './descriptor.js';
 import { compareCodePoints } from './permissions.js';
+import { quoteIdentifier as quote } from '../sql-text.js';
 import { isHyphenatedUUID, uuidFromDb, uuidToDb, uuidValue } from '../uuid.js';
 import {
   IdentityStoreError,
@@ -104,25 +105,6 @@ export async function driveAsync<T>(work: SqlWork<T>, execute: (statement: SqlSt
     next = failure ? work.throw(failure.error) : work.next(result);
   }
   return next.value;
-}
-
-/** Turns a statement written with ? placeholders into Postgres's $n, leaving quoted names and literals alone. */
-export function postgresPlaceholders(sql: string): string {
-  let out = '';
-  let n = 0;
-  let quoteChar = '';
-  for (const c of sql) {
-    if (quoteChar !== '') {
-      if (c === quoteChar) quoteChar = '';
-    } else if (c === '"' || c === "'") {
-      quoteChar = c;
-    } else if (c === '?') {
-      out += `$${++n}`;
-      continue;
-    }
-    out += c;
-  }
-  return out;
 }
 
 // Keys. A key of a scalar whose SQL type is UUID (Identity.UUID and

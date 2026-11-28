@@ -1,5 +1,6 @@
 import type { SqlDatabase, SqlValue } from './d1.js';
 import { HttpProblem } from './problem.js';
+import { postgresPlaceholders, quoteIdentifier as quote } from './sql-text.js';
 
 /*
 Idempotency keys (D140). An operation declared @idempotent answers a
@@ -167,8 +168,6 @@ export interface IdempotencyTable {
 /** One statement's rows and how many rows it changed. Placeholders are ?, in order. */
 export type IdempotencySql = (sql: string, values: readonly SqlValue[]) => Promise<{ readonly rows: readonly Record<string, unknown>[]; readonly changes: number }>;
 
-const quote = (identifier: string): string => `"${identifier.replace(/"/gu, '""')}"`;
-
 /** How often begin starts over when another request changes the row under it. */
 const BEGIN_ATTEMPTS = 5;
 
@@ -237,8 +236,7 @@ export interface IdempotencyPgQueryable {
 /** The store on Postgres, over a pg Pool. */
 export function postgresIdempotencyStore(pool: IdempotencyPgQueryable, names: IdempotencyTable): IdempotencyStore {
   return sqlIdempotencyStore(async (sql, values) => {
-    let index = 0;
-    const result = await pool.query({ text: sql.replace(/\?/gu, () => `$${++index}`), values: [...values] });
+    const result = await pool.query({ text: postgresPlaceholders(sql), values: [...values] });
     return { rows: result.rows, changes: result.rowCount ?? 0 };
   }, names);
 }
