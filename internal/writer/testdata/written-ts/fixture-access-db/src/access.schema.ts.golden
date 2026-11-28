@@ -1,4 +1,4 @@
-import { AutoGenerate, Encrypted, HasMany, Relation, User, UserRole, accessGrants, accessLog, audience, calendarSource, key, searchField, unique } from "@superschematic/db";
+import { AutoGenerate, Encrypted, HasMany, Relation, User, UserRole, accessGrants, accessLog, audience, calendarSource, key, searchField, team, teamMembers, unique } from "@superschematic/db";
 import { Default, Nullable } from "@superschematic/schema";
 import { Contact, Identity, Temporal } from "superscalar";
 
@@ -107,6 +107,20 @@ export abstract class Role implements UserRole {
 
   reaches: Nullable<string[]>;
 }
+
+// A team: a set of accounts, and of other teams, that a row's audience
+// names once for all its members (#735).
+@team()
+export abstract class Team {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  name: string;
+}
+
+// Who is in which team: an account, or another team nested in it (#735).
+@teamMembers()
+export abstract class TeamMember {}
 
 // A unit a contract covers.
 export abstract class Unit {

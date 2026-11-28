@@ -1089,6 +1089,83 @@
         {
           "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
           "name": "id",
+          "origin": "Team.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "Team.name",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "team",
+      "origin": "Team",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "team_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "TeamMember.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "team",
+          "origin": "TeamMember.team",
+          "type": "TEXT"
+        },
+        {
+          "name": "member",
+          "origin": "TeamMember.member",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "TeamMember.createdAt",
+          "type": "TEXT"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "member"
+          ],
+          "method": "BTREE",
+          "name": "idx_team_member_member"
+        },
+        {
+          "columns": [
+            "team",
+            "member"
+          ],
+          "method": "BTREE",
+          "name": "uq_team_member_membership",
+          "unique": true
+        }
+      ],
+      "kind": "entity",
+      "name": "team_member",
+      "origin": "TeamMember",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "team_member_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
           "origin": "Unit.id",
           "type": "TEXT"
         },
