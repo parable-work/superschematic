@@ -82,6 +82,21 @@ func WriteWith(doc *schemafile.Document, format Format, catalog registry.ScalarC
 	return nil, fmt.Errorf("unknown format %q", format)
 }
 
+// WriteFor is WriteWith for a document read with reg: the TypeScript
+// writer takes the scalar catalog from it, and the declarations of the
+// behaviors the document's types use, which say how a use anchored on a
+// field is written (D147).
+func WriteFor(doc *schemafile.Document, format Format, reg *registry.Registry) ([]byte, error) {
+	if format != FormatTS || reg == nil {
+		var catalog registry.ScalarCatalog
+		if reg != nil {
+			catalog = reg.Scalars()
+		}
+		return WriteWith(doc, format, catalog)
+	}
+	return tswriter.WriteContext(doc, &tswriter.Context{Scalars: reg.Scalars(), Registry: reg})
+}
+
 // schemaFileExtensions are the extensions Owner paths carry, longest first
 // so ".schema.yaml" wins over ".yaml".
 var schemaFileExtensions = []string{".schema.ts", ".schema.json", ".schema.yaml", ".schema.yml"}

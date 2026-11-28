@@ -814,6 +814,21 @@ package the linked extension's scalar catalog names for it (`Acme` from
 that superscalar does not have, in a namespace no catalog names a package
 for, fails to convert to `ts`, since the import would not resolve.
 
+A table's feature declarations convert to `ts` as the decorators they are
+read from: `@calendarSource`, `@event`, `@notifier`, `@channelIdentities`,
+`@references`, `@attachments`, `@searchable`, `@audience`,
+`@accessGrants`, `@accessLog`, `@party`, `@conversations`,
+`@runRequests` and `@agents`, an operation's `@autonomy`, an `@envVars`
+class's `@providers` and a field's `@decrypted({ permission })`. The
+fields and tables the build adds for each are left out, and reading the
+file back adds them again. A class a decorator names as a value, such as
+the queue `@attachments` releases on, is written before the class that
+names it. A class whose name is a scalar namespace's, as a `@party` table
+named `Contact` is, makes the writer import that namespace under an alias
+(`Contact as ContactScalars`). A field `Aliased` keeps is written as
+`Aliased<string, C>`, from the behavior's declaration in the binary's
+registry.
+
 ## `behaviors --out <dir>`
 
 Write the declaration of every behavior the binary registers into the

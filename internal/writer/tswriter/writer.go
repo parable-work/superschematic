@@ -55,6 +55,12 @@ type Context struct {
 	// catalog also names the npm package an extension's namespace is
 	// imported from (registry.NpmPackageCatalog). Nil is the core catalog.
 	Scalars registry.ScalarCatalog
+
+	// Registry is the registry the document was read with, whose behaviors'
+	// declarations say how a field-anchored use's field type is written: a
+	// value a create gives takes its type before its config (D147). Nil is
+	// the core registry.
+	Registry *registry.Registry
 }
 
 // Write renders a document as TypeScript schema source.
@@ -131,6 +137,10 @@ var symbolPackages = map[string]string{
 	"searchField": "@superschematic/db", "sourceMustProject": "@superschematic/db", "unique": "@superschematic/db",
 	"versioned": "@superschematic/db", "optimistic": "@superschematic/db", "queue": "@superschematic/db", "enqueueOnChange": "@superschematic/db",
 	"seedRoles": "@superschematic/db", "agents": "@superschematic/db",
+	"calendarSource": "@superschematic/db", "event": "@superschematic/db", "notifier": "@superschematic/db",
+	"channelIdentities": "@superschematic/db", "references": "@superschematic/db", "attachments": "@superschematic/db",
+	"searchable": "@superschematic/db", "audience": "@superschematic/db", "accessGrants": "@superschematic/db",
+	"accessLog": "@superschematic/db", "party": "@superschematic/db", "conversations": "@superschematic/db", "runRequests": "@superschematic/db",
 	"projection": "@superschematic/db", "join": "@superschematic/db", "query": "@superschematic/db", "column": "@superschematic/db", "table": "@superschematic/db",
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",
@@ -151,7 +161,7 @@ var symbolPackages = map[string]string{
 	"job": "@superschematic/api", "worker": "@superschematic/api", "behaviorWorker": "@superschematic/api", "deriver": "@superschematic/api", "app": "@superschematic/api",
 	"paginated": "@superschematic/api", "tableOperation": "@superschematic/api", "autonomy": "@superschematic/api",
 	// @superschematic/schema-config
-	"envVars": "@superschematic/schema-config",
+	"envVars": "@superschematic/schema-config", "providers": "@superschematic/schema-config",
 	// @superschematic/stack
 	"stack": "@superschematic/stack", "server": "@superschematic/stack",
 	"database": "@superschematic/stack", "environment": "@superschematic/stack",
@@ -677,7 +687,8 @@ func equalOptionalInt64(left, right *int64) bool {
 }
 
 // sortedTypes returns type names topologically sorted so heritage, @source,
-// @graphMember, @enqueueOnChange and @versionGraph queue targets, and the classes a Stack
+// @graphMember, @enqueueOnChange and @versionGraph queue targets, the tables and queues
+// @references, @attachments and @searchable name, and the classes a Stack
 // declaration names, are declared before the classes that reference them
 // (decorator arguments and extends clauses are value positions in
 // TypeScript: forward references do not compile). The @environment classes come last, in declaration order
@@ -739,6 +750,13 @@ func (e *emitter) sortedTypes() []string {
 		}
 		// A Stack declaration names a declared deployable by its class.
 		for _, ref := range stackClassRefs(def) {
+			if _, ok := e.doc.Types[ref]; ok && ref != name {
+				d = append(d, ref)
+			}
+		}
+		// A feature declaration names the tables and queues it keeps to
+		// by their classes (D154, D155).
+		for _, ref := range tableFeatureClassRefs(def) {
 			if _, ok := e.doc.Types[ref]; ok && ref != name {
 				d = append(d, ref)
 			}
