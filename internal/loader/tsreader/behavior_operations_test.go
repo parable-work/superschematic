@@ -156,7 +156,7 @@ export class Orders {
   }
 }
 `,
-			want: []string{`a.schema.ts:3:1: Orders: @auth on a class applies only to a @behaviorOperations, @graphOperations or @rowFeatureOperations set; extend Authenticated, or put @auth on each method of Orders`},
+			want: []string{`a.schema.ts:3:1: Orders: @auth on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; extend Authenticated, or put @auth on each method of Orders`},
 		},
 		{
 			name: "a set-level @requirePermission on another set",
@@ -169,7 +169,7 @@ export class Orders {
   }
 }
 `,
-			want: []string{`a.schema.ts:3:1: Orders: @requirePermission on a class applies only to a @behaviorOperations, @graphOperations or @rowFeatureOperations set; put it on each method of Orders`},
+			want: []string{`a.schema.ts:3:1: Orders: @requirePermission on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; put it on each method of Orders`},
 		},
 		{
 			name: "a set-level @publicRoute on a route set",
@@ -178,7 +178,7 @@ export class Orders {
 @publicRoute
 export class Account {}
 `,
-			want: []string{`a.schema.ts:4:1: Account: @publicRoute on a class applies only to a @behaviorOperations, @graphOperations or @rowFeatureOperations set; put it on each method of Account`},
+			want: []string{`a.schema.ts:4:1: Account: @publicRoute on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; put it on each method of Account`},
 		},
 		{
 			name: "a DB schema",

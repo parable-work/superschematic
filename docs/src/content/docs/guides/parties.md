@@ -18,8 +18,9 @@ takes one path, which decides who sent it and what it may reach.
 | `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
 | one inbound path: a user's reply, a granted party's run request, a party's timeline, triage; a generated TypeScript server that builds it into its `Deps` and mounts each relay's inbound route ([below](#take-what-comes-in)) | the same in a generated Go or Rust server |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
-| threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | a triage page in Topcoat |
+| threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | |
 | a held message settled onto a party from triage, its address entered by hand or verified by a code (TypeScript, [below](#settle-a-held-message-onto-a-party)) | the same in Go and Rust |
+| the triage as generated routes, SDK methods and MCP tools (`@triageOperations`, [below](#serve-triage-as-routes)), run by a generated TypeScript server, and a Topcoat console's pages over them | the routes' handlers in a generated Go or Rust server, which keep them the implementation's |
 | a messaging bridge's inbound, with a key that can only relay messages (`examples/runtime-providers`'s `chat-bridge`) | the bridge as a Go or Rust provider module |
 | messages as rows, with their files and the rows they are about | |
 | a lapsed identity, verified again by a code | |
@@ -106,7 +107,10 @@ of the text it answers. A message that names neither party is held in
 triage.
 
 The office reads triage and settles it with `parties.triage`:
-`inbound.triage(principal)` and `inbound.settle(principal, message)`.
+`inbound.triage(principal, { limit?, offset?, channel? })`,
+`inbound.attachmentsOf(principal, message)` and
+`inbound.settle(principal, message)`, or the generated routes
+([below](#serve-triage-as-routes)).
 `inbound.timeline(principal, party)` lists a party's messages on every
 channel.
 
@@ -132,6 +136,49 @@ active grant a run request and triage closed; with none, the party's
 timeline and triage still open. The settler holds `parties.triage` and
 reads the party's row, as a sender does. An address that is a user's is
 refused: a user shares an address with no one.
+
+### Serve triage as routes
+
+An API serves the triage to its staff from a class with no members
+marked `@triageOperations`, naming the `@party` table a held message is
+settled onto (#746). `refersTo` names the API's type its listing
+operation lists the party rows as, so a UI offers them to pick from:
+
+```ts
+@triageOperations(Contact, { refersTo: ContactView })
+@requirePermission(["parties.triage"])
+export abstract class Triage {}
+```
+
+The build adds four operations, an SDK method each, and an MCP tool for
+the two reads:
+
+| Operation | Route (below `/api`) | What it does |
+| --- | --- | --- |
+| `triage` | `GET triage` | The held messages, newest first, 20 a page (at most 100); `channel` keeps one kind of channel (`sms`, `email`, `chat`). |
+| `triageMessage` | `GET triage/{message}` | One message that was held, open or settled: its sender's address, channel, body, files and what became of it. |
+| `settleOnto` | `POST triage/{message}/settle` | `settleOnto` with `{ party, trust }`; answers `run`, `timeline` or `verifying`. |
+| `dismiss` | `POST triage/{message}/dismiss` | Closes the message's triage: it stays on its conversation, settled onto no one. |
+
+Each route needs the class's `@requirePermission`, `parties.triage` when
+it names none, and the inbound path checks its own triage permission
+again; `@publicRoute` on the class is refused. A message never held is
+404, a settle or dismiss of one no longer held is 409, a party the caller
+cannot read is 404, and an address that is a user's is 422. The settle
+and the dismiss are no tools: each decides who a sender is, which is a
+person's call.
+
+A generated TypeScript server runs them through `Deps.inbound`
+(`RouterOptions.inbound`), with no implementation method. A Go or Rust
+server keeps each a method of the implementation, which calls its
+runtime's inbound path.
+
+A [Topcoat console](/superschematic/guides/topcoat/#generated-pages)
+serves them as a resource of its own, the held messages at
+`/console/triage`: the list, paged and filtered by channel; a message's
+page, with its files and the settle and dismiss forms, the settle's party
+a picker of the `refersTo` type's rows and its trust a select. The nav
+offers the list only to a caller who holds the triage permission.
 
 ### A messaging bridge
 

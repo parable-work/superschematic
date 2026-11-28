@@ -31,6 +31,7 @@ var providersGoCases = []string{
 	"each call into a provider runs as its own principal, which the ORM and the routes hold to",
 	"a sandbox, a model and a file processor of Go run through their slots",
 	"the server's Deps hold the database's references and attachments",
+	"the file processor's pass makes an uploaded file's text and preview through the slot PREVIEWS names, and ends a file it fails on failed",
 }
 
 // TestGoProvidersEndToEnd builds fixture-references-db and
