@@ -265,8 +265,7 @@ A General schema's type that composes a behavior with `@behavior`
 (`behaviors` in the data forms) loads, and `--emit-ir` prints it. The
 `types` generator renders it: each language's types write
 `<Type>Behaviors`, the type's behaviors' fields as a read returns them,
-narrowed by the type's config
-([Behavior fields](/superschematic/guides/engine-behaviors/#behavior-fields)).
+narrowed by the type's config.
 A General schema with such a type builds, and development mode serves it
 (D117). A DB schema's type is a table, which composes a behavior by a
 field type or by `implements` (D103), so the load refuses `@behavior` on

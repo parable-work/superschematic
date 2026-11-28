@@ -878,7 +878,7 @@ r.RegisterBehavior(registry.BehaviorSpec{Extension: Name, Declaration: ratingDec
   default, `schema`, an operation on the schema as a whole, or
   `namespace`, one on the behavior's own tables across every schema of a
   namespace that composes it, called by the behavior's name
-  ([namespace operations](/superschematic/guides/engine-behaviors/#namespace-operations)).
+  ([development mode's routes](/superschematic/guides/development-mode/#routes)).
   An instance operation that writes only its
   caller's own state may say `"beside": true, "log": false, "asks":
   "read"`, and the policy is asked `read` for it.

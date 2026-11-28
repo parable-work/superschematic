@@ -828,15 +828,15 @@ type BehaviorRust struct {
 }
 ```
 
-`Package` is optional: the npm package whose implementation runs the
-behavior in an engine, which the `behaviors` command's `--package` keeps
-(below). When set it must be an npm package name. A core behavior that no
-engine implements, which the behaviors' core alone runs on a table (D104:
-`Seats`, `Reconcile`, `Schedules`, `Pool`), names `registry.RulesPackage`,
-`@superschematic/rules`, the npm package that ships the core;
-`registry.EngineImplements` is false for it alone. An extension's
-behavior runs in its engine, so `RegisterBehavior` refuses
-`RulesPackage` on an extension's spec.
+`Package` is optional: the npm package the behavior's registration
+names, which the `behaviors` command's `--package` keeps (below). When set
+it must be an npm package name. A core behavior a General schema composes
+with `@behavior` names the package of the engine that ran it, which D103's
+step 7 deleted (D103, #587). One that only a table composes, which the
+behaviors' core alone runs (D104: `Seats`, `Reconcile`, `Schedules`,
+`Pool`), names `registry.RulesPackage`, `@superschematic/rules`, the npm
+package that ships the core; `registry.EngineImplements` is false for it
+alone. `RegisterBehavior` refuses `RulesPackage` on an extension's spec.
 
 `Rules` is optional too: the Rust crate whose implementation of the
 core's hooks runs an extension's behavior on the behaviors' core (D103's
@@ -898,8 +898,7 @@ and as a tool that takes its parameters and no `id` (D16, amended); or
 namespace that composes it, with no instance and no schema, which an
 engine calls by the behavior's name, at `POST
 /namespaces/{ns}/behaviors/{behavior}/operations/{op}` and as a tool of
-the behavior's (D77; "Namespace operations" under "Behaviors" in
-`runtime/engine/README.md`). A namespace operation sets neither `beside`
+the behavior's (D77). A namespace operation sets neither `beside`
 nor `log`. `RegisterBehavior` refuses any other value, and the engine
 does too. On a table the behaviors' core runs an operation whose scope is
 `schema` as the table's command without a row (D104: Lease's
@@ -913,8 +912,7 @@ An instance operation that writes may say `"beside": true`: it writes
 only its behavior's own tables and columns, so an engine moves no
 sequence of the instance for it, asks no other behavior's guard, and
 appends an operation event of no sequence; with `"log": false` it
-appends none (D77; "Instances and events" under "Behaviors" in
-`runtime/engine/README.md`). `RegisterBehavior` refuses a beside
+appends none (D77). `RegisterBehavior` refuses a beside
 operation that does not write or has scope `schema`, `"log": false` on
 one that is not beside, and a behavior with a beside operation and a
 field that is not volatile, and the engine does too. A beside operation
@@ -981,8 +979,8 @@ is not an object schema, or leaves further keys unchecked (absent or
 `true`), as the engine does and in its words: `behavior <B>
 createParamsSchema must set "additionalProperties": false or a schema,
 so no create parameter goes unchecked`. Neither the loader nor a schema
-document reads it: a create gives the parameters to an engine
-(`runtime/engine/README.md`, "Create parameters"), and the `behaviors`
+document reads it: a create gives the parameters to development mode's
+handler, under `behaviors` in its body (D117, #590), and the `behaviors`
 command copies it with the rest of the declaration.
 
 In the IR a type lists its behaviors in `TypeDef.Behaviors`, a list of
@@ -1147,16 +1145,15 @@ Go tag, a serde rename or a Pydantic alias carries the exact name. A
 config's key that names a member, a deadline's or a gate's, follows the
 same rule.
 
-The core declares the behaviors `@superschematic/engine` implements
-(D16), one file each in `internal/registry/behaviors/`, which `New`
-registers with no extension: `Workflow`, `Comments`, `Revisions`,
+The core declares the behaviors the engine implemented (D16), one file
+each in `internal/registry/behaviors/`, which `New` registers with no
+extension: `Workflow`, `Comments`, `Revisions`,
 `Dependencies`, `Links`, `Rollups`, `Search`, `Reactions`, `Constants`,
 `Variants`, `Branches`, `Timers`, `StateRules`, `Numbering` and
-`Approvals`. It declares the work-queue behaviors the optional
-`@superschematic/engine-workqueue` package implements the same way:
+`Approvals`. It declares the work-queue behaviors the same way:
 `Lease`, `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`,
-and the commerce behaviors the optional `@superschematic/engine-commerce`
-package implements (D70): `Stock`, `Calendar`, `Holds` and `Payments`.
+and the commerce behaviors (D70): `Stock`, `Calendar`, `Holds` and
+`Payments`.
 It declares the four behaviors the behaviors' core alone implements, on a
 table, which no engine registers (D104): `Seats`, `Schedules` and `Pool`,
 which a table implements, and `Reconcile`, the second behavior a field
@@ -1168,7 +1165,7 @@ package (`registry.EnginePackage`, `registry.WorkQueuePackage`,
 `registry.CommercePackage` or `registry.RulesPackage`). Every binary
 therefore accepts a schema that composes them, the schema-file JSON
 Schema lists them, and `BehaviorConfigs` in `@superschematic/schema`
-types the configs of every one an engine implements; it names none of
+types the configs of every one a General schema composes; it names none of
 `Seats`, `Reconcile`, `Schedules` and `Pool`, so a General schema's
 `@behavior("Seats", ...)` does not type-check, and the agent's behaviors
 catalog, which lists what `@behavior` composes, leaves them out. D103
@@ -1198,15 +1195,10 @@ state a transition leaves, a gated state of `Dependencies` that is not a
 state of the type's Workflow, a gate of `Approvals` on a state the
 Workflow lacks, a `Timers` deadline that starts at a field whose values
 are not date-times, or a rollup whose linked schema has no such link,
-say);
-`runtime/engine/README.md`, "Core behaviors", has each engine
-behavior's config, fields and operations, and
-`runtime/engine-workqueue/README.md` each work-queue behavior's. The
-engine registers its implementations when it opens, so a schema that
-composes them runs with no extension linked (D10), its operations served
-over HTTP and as MCP tools like any behavior's. A deployment that runs
-the work-queue behaviors registers the package's implementations with the
-engine; without them the engine refuses a schema that composes one.
+say). The table below has each behavior's config, fields and
+operations. The behaviors' core runs them with no extension linked (D10;
+D103, #587), their operations served by a table's API and by development
+mode, over HTTP and as MCP tools, like any behavior's.
 
 | Behavior | Config | Fields | Operations |
 | --- | --- | --- | --- |
@@ -1225,13 +1217,13 @@ engine; without them the engine refuses a schema that composes one.
 | `Approvals` | `gates` (by state of the type's Workflow: `count`, `permission`, `from`, `excludeCreator`), `resetOnChange`; required; requires `Workflow` | `gates` | `signOff`, `withdrawSignOff`, the read-only `listSignOffs` |
 | `Numbering` | `format`, `scope` (`link`), `reset` (`yearly`); required | `seq`, `label` | `assignNumber` |
 | `Timers` | `deadlines` (by name: `start`, one of `create`, `enters` and `field`, `afterMs`, `then` (`transition`, `from`), `until`, one of `leaves` and `enters`), `sweepMs`, `permission`; required; `Workflow` for `enters`, `then` and `until` | `deadlines` | `fireTimer`, `resetTimer`, `snoozeTimer` |
-| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`revised.link`, `name`, `data`); optional; a `preconditionSchema`, `{ token }`; `@superschematic/engine-workqueue` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
-| `Assignment` | `permission`, optional; `@superschematic/engine-workqueue` | `assignee` | `assign`, `unassign` |
-| `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`, `excludeStale`; required; requires `Workflow` and `Lease`; `@superschematic/engine-workqueue` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
-| `Presence` | `ttlMs`, `principalField`, `onMissed` and `onBeat` (`transition`, `from`), `releaseLeases`, `sweepMs`; required; `@superschematic/engine-workqueue` | `presence` | `beat`, `miss` |
-| `Blueprint` | `schema`, `parentLink`, `keyField`, one of `steps` (by key: `after`, `when`, `data`) and `from` (`link`, `field`), `copyFields`, `copyLinks`; required; `@superschematic/engine-workqueue` | `blueprint` | none |
-| `Budget` | `meters` (by name: `limit` and `limitField`, `reserve` and `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`), `escalate` (`transition`, `from`); required; `@superschematic/engine-workqueue` | `budget` | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
-| `Retries` | `classes` (by name: `attempts` and `hint`, or `terminal`), `totalAttempts`, `limitsField`, `limitsPermission`, `keepBest` (`minDelta`, `neverRegress`), `stuckAfter`, `resultField`, `exhaustedState`, `from`, `permission`; required; requires `Workflow`; `@superschematic/engine-workqueue` | `retries` | `recordAttempt` |
+| `Lease` | `ttlMs`, `heartbeatMs`, `sweepMs`, `maxHoldMs`, `maxHoldField`, `onExpiry` and `escalate` (`transition`, `from`), `maxExpiries`, `exempt`, `requireToken`, `acquirePermission`, `overridePermission`, `directPermission`, `directOn` (`revised.link`, `name`, `data`); optional; a `preconditionSchema`, `{ token }` | `lease` | `acquire`, `heartbeat`, `release`, `expire`, `direct`, `acknowledge`, `resetExpiries`, and `expireHolder`, of scope `schema` |
+| `Assignment` | `permission`, optional | `assignee` | `assign`, `unassign` |
+| `Queue` | `claim` (`from`, `to`), `priorityField`, `match`, `maxCandidates`, `excludeStale`; required; requires `Workflow` and `Lease` | none | `claim`, `refresh`, and `claimNext` and the read-only `countClaimable`, of scope `schema` |
+| `Presence` | `ttlMs`, `principalField`, `onMissed` and `onBeat` (`transition`, `from`), `releaseLeases`, `sweepMs`; required | `presence` | `beat`, `miss` |
+| `Blueprint` | `schema`, `parentLink`, `keyField`, one of `steps` (by key: `after`, `when`, `data`) and `from` (`link`, `field`), `copyFields`, `copyLinks`; required | `blueprint` | none |
+| `Budget` | `meters` (by name: `limit` and `limitField`, `reserve` and `reserveField`, `scope`, `reset`), `limitPermission`, `onExceeded` (`direct`), `escalate` (`transition`, `from`); required | `budget` | `reserve`, the read-only `checkReserve`, `recordUsage`, `settle`, `setLimit`, `reserveFor`, `settleFor`, `recordUsageFor` |
+| `Retries` | `classes` (by name: `attempts` and `hint`, or `terminal`), `totalAttempts`, `limitsField`, `limitsPermission`, `keepBest` (`minDelta`, `neverRegress`), `stuckAfter`, `resultField`, `exhaustedState`, `from`, `permission`; required; requires `Workflow` | `retries` | `recordAttempt` |
 
 `Dependencies`, `Links` and `Rollups` reach other instances (D16,
 amended): a blocker, a link target or the instances a rollup reads are
@@ -1336,21 +1328,13 @@ acme declares `acme.Rating` and types its config in
 `acme.Audited`, which requires it, with a TypeScript fixture and its JSON
 and YAML twins.
 
-The code that runs a behavior is TypeScript: an implementation for
-`@superschematic/engine` (`runtime/engine/README.md`, "Behaviors") that
-carries the same declaration. Some of its members have no part in the
-declaration, since a client never calls them: `reactions`, which the
-engine's runner hands committed events after the commit, as the
-principal the deployment names for it, and `schedules`, named timed work
-with an interval, which a schema's config may turn off and whose runs may
-write the behavior's own tables where no operation's result changes
-(`runtime/engine/README.md`, "Reactions and schedules" and "The
-runner"). The compiler neither sees nor checks them; the engine checks
-them when the implementation registers. Nor does it see what
-`parseConfig` reads of the schema's other types (`ConfigTarget.types`):
-the engine holds each type read there to its document checks and its
-compatibility rule, and a behavior's contexts check a value against one
-with `validate(type, value)` ("Other types" there).
+The code that runs a behavior is Rust on the behaviors' core, which
+carries the same declaration: the core's own crates for the core's
+behaviors, an extension's rules crate for its behavior (its
+registration's `Rules` crate), or none for a declarative behavior, whose
+declaration states its rules in the vocabulary the core interprets (D103,
+#587). The core checks what a declaration cannot state when a layout is
+defined.
 
 `superschematic behaviors --out <dir>` copies the declaration there: one
 canonical `<name>.behavior.json` per behavior the binary registers
@@ -1363,18 +1347,9 @@ declarations are registered only in its own binary: an extension's copy
 comes from it, `acme-schematic behaviors --extension acme` for acme's,
 whose acme.Rating no crate implements, so acme keeps no copy. The core's
 copies come from
-the core binary, each into the Rust crate that implements it (D58): `make
-behaviors` writes the engine's `runtime/engine/rust/behaviors/declarations`
-with `--package @superschematic/engine`, the work queue's
-`runtime/engine-workqueue/rust/declarations` with `--package
-@superschematic/engine-workqueue`, the commerce crate's
-`runtime/engine-commerce/rust/declarations` with `--package
-@superschematic/engine-commerce` and the behaviors' core's
-`runtime/engine/rust/rules-behaviors/declarations` with `--package
-@superschematic/rules` (the behaviors no engine implements, which
-`rules-behaviors` reads in place), so each crate carries only the
-declarations it implements, and `make behaviors-check`, part of `make
-test` and CI's go job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
+the core binary, into the crates of the behaviors' core that embed them
+(`make behaviors`; D103, #587), and `make behaviors-check`, part of `make
+test` and CI's go-lint job, fails on a stale copy in any of them. The copy is canonical, not the source bytes:
 the declaration's keys in `BehaviorDeclaration`'s order, each JSON
 Schema's object keys sorted (`createParamsSchema` and `preconditionSchema`
 included), two-space

@@ -470,10 +470,6 @@ out; the Topcoat extension's display components read its `noun`,
 and its forms a row type's `noun` and `createLabel`, which number a list's
 rows and label its add button
 ([Rows without JavaScript](/superschematic/guides/topcoat/#rows-without-javascript)).
-The engine's describe document carries it
-for the schema's instance type, its `icon` included, with each field's
-title, icon and display
-([Engine behaviors](/superschematic/guides/engine-behaviors/#display)).
 The Topcoat console's nav shows a type's icon beside its link. The OpenAPI
 document and the tool manifests carry no display.
 

@@ -674,9 +674,7 @@ empty has no entries to store, and reads as having no snapshot.
 ### Sweep
 
 `Sweep(options)` is one maintenance pass in one transaction, and nothing
-runs it unless a service does, or, for the graphs the engine's
-[`Branches`](/superschematic/guides/engine-behaviors/#branches) behavior
-keeps, the runner on a schema whose config gives `sweep`. It takes the
+runs it unless a service does. It takes the
 graph's sweep lock: on Postgres a transaction-scoped advisory lock keyed
 by the ref table, and on SQLite the file's write lock, which the pass's
 own transaction holds, so the lock is always free there. While another
