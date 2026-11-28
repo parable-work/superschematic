@@ -86,6 +86,11 @@ type DepsInfo struct {
 	// whose fields are behaviors: the layout of Database's tables and the
 	// paths of the adapter's and the behaviors' crates. Nil otherwise.
 	Behaviors *DepsBehaviors
+
+	// Wiring is the runtime parts of Database the server builds (#620,
+	// #622, #617, #610), which SetDeps reads from its schema: nil for a
+	// database on SQLite or with none of them.
+	Wiring *DepsWiring
 }
 
 // DepsEngine is the engine Deps holds: the engine database's, opened in
@@ -245,6 +250,12 @@ type WorkerInfo struct {
 	// deadlines, then changes, then events.
 	Behavior       *apigen.BehaviorWorkerInfo
 	BehaviorQueues []BehaviorQueue
+
+	// Runtime is the runtime part that handles the worker's queue, one of
+	// RuntimeNotifier, RuntimeAgents, RuntimeRuns and RuntimeSearch, for a
+	// worker of APIOutput.RuntimeWorkers (#620, #622, #617); empty for one
+	// the implementation's Workers handle.
+	Runtime string
 }
 
 // BehaviorQueue is a queue a behavior worker runs (D103), as
@@ -437,7 +448,7 @@ func (o *APIOutput) ManualSignature(endpoint EndpointInfo) string {
 // Handlers, and Jobs, Workers and BoxError for an API with either.
 func (o *APIOutput) DepsExports() string {
 	names := []string{"Deps", "Handlers"}
-	if o.HasTraits() {
+	if o.HasTraits() || o.HasWiring() {
 		names = append(names, "BoxError")
 	}
 	if o.HasJobs() {
@@ -454,7 +465,7 @@ func (o *APIOutput) DepsExports() string {
 // Rust types as database_types: for its workers' messages and queues,
 // a behavior worker's among them (D65, D103).
 func (o *APIOutput) HasDatabaseTypes() bool {
-	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations())
+	return o.Deps != nil && o.Deps.DatabaseTypesCrate != "" && (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || o.HasTableOperations() || o.HasGraphOperations() || o.HasWiring())
 }
 
 // DatabaseTypesDependency is the Cargo.toml dependency on the database's
@@ -481,7 +492,7 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 // calendar and search read the repositories' definition (D188); empty for
 // any other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasTableDerivers() && !o.ReadsAcrossTables) {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasTableDerivers() && !o.ReadsAcrossTables && !o.HasWiring()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
@@ -513,7 +524,10 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[m.Field] = m.Service
 	}
-	if (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0) && deps.DatabaseTypesCrate == "" {
+	if err := o.setWiring(&deps); err != nil {
+		return err
+	}
+	if (len(o.Workers) > 0 || len(o.BehaviorWorkers) > 0 || len(o.RuntimeWorkers) > 0) && deps.DatabaseTypesCrate == "" {
 		return fmt.Errorf("rustrestgen: %s declares workers, whose messages are its database's Rust types, and its Deps names none", o.SchemaName)
 	}
 	if len(o.Derivers) > 0 && (deps.DatabaseTypesCrate == "" || (deps.Engine == nil && !slices.ContainsFunc(o.Derivers, func(d DeriverInfo) bool { return d.Tables }))) {
@@ -614,6 +628,17 @@ func (o *APIOutput) DepsUses() []string {
 	}
 	if o.Deps != nil && len(o.Deps.MemoryStores) > 0 {
 		runtime = append(runtime, "memorystore::MemoryStore")
+	}
+	if w := o.Wiring(); w != nil {
+		if w.Agents() {
+			runtime = append(runtime, "orm::agents::Agents")
+		}
+		if w.Inbound {
+			runtime = append(runtime, "orm::inbound::Inbound")
+		}
+		if w.Notifier() {
+			runtime = append(runtime, "orm::notify::Notifier")
+		}
 	}
 	if o.Providers != nil {
 		runtime = append(runtime, "providers::Providers")
@@ -905,11 +930,14 @@ func (s ImplementationScaffold) APIUse() string {
 			names = append(names, endpoint.ArgsName)
 		}
 	}
-	if s.HasTraits() {
+	if s.HasTraits() || s.HasWiring() {
 		names = append(names, "BoxError")
 	}
 	if s.HasJobs() {
 		names = append(names, "Jobs")
+	}
+	if s.HasWiring() {
+		names = append(names, "Wire", "WiringDeps")
 	}
 	if s.HasWorkers() {
 		names = append(names, "Workers")

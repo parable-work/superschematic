@@ -295,7 +295,16 @@ recipient's read of the record opens the repositories for the recipient
 Postgres, which holds the zone database. A route that names an agent puts
 a run request on the agent dispatcher's queue in the routing transaction,
 once `with_agents` gives the notifier that queue (D193); without it, the
-route's agent is logged and reaches no one. A party's address whose grants
+route's agent is logged and reaches no one. `Notifier::routes` serves the
+in-app inbox and the relays' routes, which hand a reply to `inbound` and a
+delivery status to `statuses`.
+
+A generated Rust server builds the notifier into its `Deps`, with the
+dispatcher's approve and deny and its requests queue, mounts the inbox and
+the relays' routes, and runs a `@worker` of the dispatch queue through
+`handle` (#620); the implementation adds its reply actions in
+`Wire::notifier` ([the generated Rust server's
+wiring](/superschematic/guides/api-routes/#the-generated-rust-servers-wiring)). A party's address whose grants
 have all ended since it was verified is sent nothing. A Rust types crate
 that lists `sqlite` is refused the notifier, which runs on SQLite and D1 in
 TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).

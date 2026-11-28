@@ -260,9 +260,12 @@ async fn run() -> Result<(), Failure> {
 {{- range .APIs }}
 
     // {{ .Service }}: its implementation, built from its Deps, and its routes.
+{{- if .Wiring }}
+{{ .WiringLets }}
+{{- end }}
     let {{ .Deps }} = {{ .Alias }}::Deps {
 {{- if .Providers }}
-        providers: std::sync::Arc::new(configure({{ rustString .Service }}, {{ .Alias }}::providers::from_config(&{{ .Config }}))?),
+        providers: {{ .ProvidersInit }},
 {{- end }}
 {{- if .Config }}
         config: {{ .Config }}.clone(),
@@ -282,6 +285,9 @@ async fn run() -> Result<(), Failure> {
 {{- range .MemoryStores }}
         {{ .Field }}: Arc::clone(&{{ .Store.Var }}),
 {{- end }}
+{{- range .WiredFields }}
+{{ . }}
+{{- end }}
         span: logging::api_span({{ rustString .Service }}),
     };
 {{- if .ManualRoutes }}
@@ -290,6 +296,11 @@ async fn run() -> Result<(), Failure> {
 {{ rustLet .ManualRoutes (printf "%s::create_manual_routes(%s.clone())" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"manual routes of %s: {err}\"))?" .Service) }}
 {{- end }}
 {{ rustLet .Handlers (printf "%s::create(%s)" .ImplAlias .Deps) ".await" (printf "map_err(|err| format!(\"implementation of %s: {err}\"))?" .Service) }}
+{{- if and .Wiring .Wiring.Handlers }}
+    // Its routes establish their callers in the grants' authenticator
+    // around its own, and its access log records each call (#610).
+{{ .WiredHandlersLet }}
+{{- end }}
 {{- if .Identity }}
     // The identity runtime authenticates its callers and serves its user
     // model's routes, with the config its identity config field holds.
@@ -313,6 +324,11 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
 {{- end }}
 {{ .ImplementationsLet }}
+{{- if and .Wiring .Wiring.Routes }}
+    // The routes of its database's runtime parts (#620, #622, #617), beside
+    // its own, whose callers its routes establish.
+{{ .WiredRoutesLet }}
+{{- end }}
 {{- if .Webhooks }}
     // build_router panics without a verifier for each webhook provider.
     {{ .Implementations }}
@@ -392,6 +408,11 @@ async fn run() -> Result<(), Failure> {
 {{- range .Engines }}
 {{- if .API }}
         .merge({{ .Routes }})
+{{- end }}
+{{- end }}
+{{- range .APIs }}
+{{- if and .Wiring .Wiring.Routes }}
+        .merge({{ .Wiring.Routes }})
 {{- end }}
 {{- end }}
 {{- if .Dispatches }}

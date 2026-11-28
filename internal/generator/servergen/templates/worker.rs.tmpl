@@ -9,11 +9,18 @@
 //!
 //! It reads its whole configuration from the environment, as the API's
 //! server does: the API's @envVars settings and the fields its edges derive,
-//! one variable per member (section 3.4). It builds the API's Deps as the
+//! one variable per member (section 3.4).
+{{- if .Worker.Runtime }} It builds the API's Deps and the
+//! runtime parts of {{ $db.Service }} as the server does (#620, #622, #617), and
+//! claims the messages of the queue {{ .Worker.Queue }}, a part's, handling each with
+//! the part in the HTTP runtime's claim loop (`worker::run_worker`), as the
+//! API crate's `Wired::{{ .Worker.RunFunc }}` runs it.
+{{- else }} It builds the API's Deps as the
 //! server does, calls the implementation's `create_workers`, and claims the
 //! messages of the queue {{ .Worker.Queue }} of {{ $db.Service }}, by the descriptor its Rust
 //! types hold, handling each with the worker's method in the HTTP runtime's
-//! claim loop (`worker::run_worker`). WORKER_CONCURRENCY, which the platform
+//! claim loop (`worker::run_worker`).
+{{- end }} WORKER_CONCURRENCY, which the platform
 //! sets, says how many it handles at a time: {{ .Worker.Concurrency }} unless it says otherwise.
 //! It extends each message's claim while the method runs, completes the
 //! message when the method returns `Ok`, fails it when the method returns an
@@ -65,9 +72,11 @@ const CONCURRENCY: usize = {{ .Worker.Concurrency }};
 /// drops them and gives their messages back: its @worker's grace.
 const GRACE: Duration = Duration::from_secs({{ .Worker.GraceSeconds }});
 
+{{ if not .Worker.Runtime -}}
 /// A message of the queue {{ .Worker.Queue }}, as {{ $db.Service }}'s Rust types declare it.
 type Message = {{ .Worker.Message }};
 
+{{ end -}}
 /// Why the worker could not start, or stopped: a message that names what
 /// failed.
 type Failure = Box<dyn std::error::Error + Send + Sync>;
@@ -103,10 +112,18 @@ async fn main() -> ExitCode {
 async fn run() -> Result<(), Failure> {
     let shutdown = Shutdown::on_signals()?;
 {{- template "rs-background-deps" . }}
+{{- if .Worker.Runtime }}
+    // A runtime part of {{ $db.Service }} handles each message of its queue
+    // (#620, #622, #617), with no method of the implementation's: the Deps
+    // the parts were built beside goes unused.
+    drop({{ $api.Deps }});
+    let concurrency = worker::concurrency_from_env(CONCURRENCY)?;
+{{- else }}
 {{ rustLetChain "workers" (printf "%s::create_workers(%s)" $api.ImplAlias $api.Deps) "await" (printf "map_err(|err| format!(\"workers of %s: {err}\"))?" $api.Service) }}
     let concurrency = worker::concurrency_from_env(CONCURRENCY)?;
 {{ rustLetChain "definition" (printf "QueueDefinition::parse(%s)" .Worker.Descriptor) (printf "map_err(|err| format!(\"queue %s of %s: {err}\"))?" .Worker.Queue $db.Service) }}
     let queue = PostgresQueue::<Message>::new({{ $db.Var }}, definition);
+{{- end }}
 {{ rustMacro "tracing::info" (printf "api = %s" (rustString $api.Service)) (printf "class = %s" (rustString .Worker.Name)) (printf "queue = %s" (rustString .Worker.Queue)) "concurrency" (rustString "worker started") }}
     // In drain mode, which the platform sets (WORKER_MODE), the worker
     // takes a slot of its queue and exits once the queue is empty (D145).
@@ -118,12 +135,18 @@ async fn run() -> Result<(), Failure> {
         prune_every: worker::DEFAULT_PRUNE_EVERY,
         drain,
     };
+{{- if .Worker.Runtime }}
+{{ .RuntimeRun }}
+{{- else }}
     let handle = move |message: Message| {
         let workers = Arc::clone(&workers);
         async move { workers.{{ .Worker.Method }}(message).await }
     };
+{{- end }}
 {{- if .Closes }}
+{{- if not .Worker.Runtime }}
     let worked = worker::run_worker(queue, handle, options, shutdown).await;
+{{- end }}
 {{- if .SettlesWakes }}
     // The wakes its handlers' enqueues sent are answered before it ends
     // (D145).
@@ -142,7 +165,7 @@ async fn run() -> Result<(), Failure> {
 {{- end }}
 {{- end }}
     worked?;
-{{- else }}
+{{- else if not .Worker.Runtime }}
     worker::run_worker(queue, handle, options, shutdown).await?;
 {{- end }}
     Ok(())

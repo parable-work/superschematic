@@ -77,6 +77,8 @@
 #[cfg(feature = "postgres")]
 mod dispatcher;
 #[cfg(feature = "postgres")]
+mod queue;
+#[cfg(feature = "postgres")]
 mod routes;
 #[cfg(feature = "postgres")]
 mod tools;
@@ -87,6 +89,8 @@ pub use dispatcher::{
     AgentsError, AskDeadline, AskThread, Clock, FollowUp, GateOutcome, OnReturn, PrincipalRef,
     RunAuthenticator, SandboxExtra, SandboxSpecOf, TranscriptEntry, TranscriptStore,
 };
+#[cfg(feature = "postgres")]
+pub use queue::AgentsQueue;
 #[cfg(feature = "postgres")]
 pub use routes::AgentRoutes;
 

@@ -1936,7 +1936,7 @@ func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 // read its roots and refs through the repositories.
 func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
 	graphs := slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsGraphOperations() })
-	if !r.Schema.HasTableOperations() && !graphs {
+	if !r.Schema.HasTableOperations() && !graphs && !r.rustWires(db) {
 		return nil
 	}
 	if r.Options.DependencyConfig != nil {

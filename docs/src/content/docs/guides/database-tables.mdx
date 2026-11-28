@@ -626,8 +626,10 @@ let found = search_tables(Repositories::new(&client)?.untyped(), Some(&principal
 ```
 
 `search_routes(SearchRoutes::new(tables, authenticator))` serves
-`GET /api/search`, and `search_mcp_tool` with `call_search_tool` the MCP
-tool; an app merges the route into its router. A party's or an agent run's
+`GET /api/search`, and `SearchTool` the MCP tool (`search_mcp_tool`,
+`call_search_tool`). A generated Rust server merges the route, serves the
+tool and runs a `@worker` of a `@searchable` declaration's queue through
+`index_search` itself (#617), with the options `Wire::search` answers. A party's or an agent run's
 search, through `access::GrantAuthenticator`, keeps to the rows its grants
 reach, as in TypeScript.
 
@@ -4055,9 +4057,10 @@ let calendar = read_calendar(Repositories::new(&client)?.untyped(), Some(&princi
 let routes = calendar_routes(CalendarRoutes::new(Tables::new(pool, postgres_definition), authenticator));
 ```
 
-`call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes,
-and `issue_calendar_feed`, `rotate_calendar_feed` and
-`revoke_calendar_feed` are the feed's operations. A Rust server whose
+`call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes
+(`CalendarTool`), and `issue_calendar_feed`, `rotate_calendar_feed` and
+`revoke_calendar_feed` are the feed's operations. A generated Rust server
+merges the calendar's routes and serves its tool itself (#617). A Rust server whose
 database lists `sqlite` first is refused Recurrence and a calendar source.
 
 A Go server serves Recurrence on Postgres as the TypeScript one does

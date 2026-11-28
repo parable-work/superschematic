@@ -132,6 +132,26 @@ pub struct Deps {
     pub engine: {{ .CrateIdent }}::background::Background,
 {{- end }}
 {{- end }}
+{{- with .Wiring }}
+{{- if .Notifier }}
+    /// The notifier of {{ $.Deps.Database }} (D153, D191, #620), which the entrypoint
+    /// builds as the implementation's `create_wiring` shapes it: raise an
+    /// event in the transaction of the change that caused it
+    /// (`notifier.raise(&tx, RaiseInput::of(table, key, kind))`).
+    pub notifier: Notifier,
+{{- end }}
+{{- if .Agents }}
+    /// The agent dispatcher of {{ $.Deps.Database }} (D158, D193, #622), which the
+    /// entrypoint builds as the implementation's `create_wiring` shapes it:
+    /// a run request, its administration and its approvals.
+    pub agents: Agents,
+{{- end }}
+{{- if .Inbound }}
+    /// The inbound path of {{ $.Deps.Database }} (D157, D193): a party's messages and
+    /// the sends to it.
+    pub inbound: Inbound,
+{{- end }}
+{{- end }}
     /// The API's span: the implementation logs inside it, so each event
     /// names the API.
     pub span: tracing::Span,
@@ -244,6 +264,11 @@ impl Implementations {
 /// The error a job's or a worker's method fails with: any error, which
 /// fails the run or the message. It is the HTTP runtime's.
 {{- end }}
+pub use {{ .RuntimeCrateIdent }}::BoxError;
+{{- else if .HasWiring }}
+
+/// The error the wiring of the runtime parts fails with: any error, which
+/// stops the server as it starts. It is the HTTP runtime's.
 pub use {{ .RuntimeCrateIdent }}::BoxError;
 {{- end }}
 {{- if .HasJobs }}

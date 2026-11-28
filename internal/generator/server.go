@@ -722,7 +722,12 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 			}
 			var methods []string
 			queues, events := false, false
+			runtime := r.rustRuntimeQueues(services, api)
 			for _, worker := range implemented[api] {
+				if worker.BehaviorWorker == nil && runtime[worker.Queue] {
+					// A runtime part handles its queue's messages (#620).
+					continue
+				}
 				if worker.BehaviorWorker == nil {
 					queues = true
 					methods = append(methods, fmt.Sprintf("      async fn %s(&self, message: %s::%s) -> Result<(), BoxError> {\n          // handle a message of %s\n      }", rustutil.Identifier(worker.Name, "handle"), rustrestgen.DatabaseTypesModule, worker.Queue, worker.Queue))
@@ -732,6 +737,9 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 					events = true
 					methods = append(methods, fmt.Sprintf("      async fn %s(&self, event: types::%s, run: &EventRun<'_>) -> Result<(), BoxError> {\n          // handle %s\n      }", rustutil.ToSnakeCase(event.Method), event.Event, handles(worker, event)))
 				}
+			}
+			if len(methods) == 0 {
+				continue
 			}
 			names := "Deps, Workers, BoxError and " + rustrestgen.DatabaseTypesModule + ", the Rust types of the database that declares each queue, are %s's"
 			switch {
@@ -1543,6 +1551,9 @@ func (r run) planRust(stackName string, s *ir.ResolvedDeployable, cors map[strin
 				if err := r.checkRustManualRoutes(stackName, output); err != nil {
 					return nil, nil, nil, err
 				}
+			}
+			if err := r.checkRustWiring(stackName, output); err != nil {
+				return nil, nil, nil, err
 			}
 		}
 		impl, err := servergen.ReadRustImplementation(r.Options.Naming, ref.Name, dir)
