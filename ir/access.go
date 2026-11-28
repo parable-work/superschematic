@@ -196,10 +196,20 @@ const (
 	AccessLogKeyCall = "keyCall"
 	// AccessLogGrantCall is a call made with a grant's token.
 	AccessLogGrantCall = "grantCall"
+	// AccessLogOAuthCall is a call made with an OAuth access token (#695),
+	// its credential the OAuth grant's id.
+	AccessLogOAuthCall = "oauthCall"
+	// AccessLogOAuthGrant is an OAuth grant a person gave a client on the
+	// consent page (#695).
+	AccessLogOAuthGrant = "oauthGrant"
+	// AccessLogOAuthRevoke is an OAuth grant revoked (#695): by its user,
+	// an administrator, the client, or a replayed code or refresh token.
+	AccessLogOAuthRevoke = "oauthRevoke"
 )
 
-// AccessLogKinds are the kinds of an access log row, in order.
-var AccessLogKinds = []string{AccessLogReveal, AccessLogAgentRead, AccessLogKeyCall, AccessLogGrantCall}
+// AccessLogKinds are the kinds of an access log row, in order. The OAuth
+// kinds are the TypeScript runtime's alone until Go and Rust serve OAuth.
+var AccessLogKinds = []string{AccessLogReveal, AccessLogAgentRead, AccessLogKeyCall, AccessLogGrantCall, AccessLogOAuthCall, AccessLogOAuthGrant, AccessLogOAuthRevoke}
 
 // The kinds of principal (D156). Every route, MCP tool, reply and search
 // resolves its caller to exactly one, and permissions are checked the same

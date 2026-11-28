@@ -603,7 +603,13 @@ The endpoint authenticates as the API's other routes do: the identity
 service of the user model, or the router's `authenticate`, from a
 `Bearer` session or a cookie. It needs a caller when a route of the API
 does, so without a session it answers 401 with the problem document; an
-API whose routes are all public serves it to anyone. Each caller's list
+API whose routes are all public serves it to anyone. An API that is its
+own OAuth authorization server (`@userSessions({ oauth })`, TypeScript,
+[#695](https://github.com/parable-work/superschematic/issues/695)) also
+takes an OAuth access token, and its 401 carries `WWW-Authenticate:
+Bearer resource_metadata="..."`, so Claude's connectors sign in from the
+endpoint's URL alone
+([OAuth](/superschematic/guides/users-and-sessions/#oauth-connecting-claude-and-other-clients)). Each caller's list
 holds the tools whose routes it may call: a tool whose operation needs a
 permission the caller lacks is not listed, and a call of it is the
 invalid-params error. Each call goes through its route's authenticator,

@@ -2165,6 +2165,1288 @@ func InventoryFromYAMLNonStrict(data []byte) (*Inventory, error) {
 	return decoded, nil
 }
 
+// OAuthClient - An OAuth client: a metadata document's, cached, or one that registered.
+type OAuthClient struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	ClientId string `json:"clientId"`
+
+	Kind string `json:"kind"`
+
+	Name string `json:"name"`
+
+	Uri string `json:"uri,omitempty"`
+
+	RedirectUris []string `json:"redirectUris"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	RefreshedAt *TemporalDateTime `json:"refreshedAt,omitempty"`
+
+	FreshUntil *TemporalDateTime `json:"freshUntil,omitempty"`
+
+	LastUsedAt *TemporalDateTime `json:"lastUsedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of OAuthClient with secret fields cleared.
+func (t *OAuthClient) MaskSecrets() *OAuthClient {
+	if t == nil {
+		return nil
+	}
+
+	masked := &OAuthClient{}
+
+	masked.Id = t.Id
+
+	masked.ClientId = t.ClientId
+
+	masked.Kind = t.Kind
+
+	masked.Name = t.Name
+
+	masked.Uri = t.Uri
+
+	if t.RedirectUris != nil {
+		masked.RedirectUris = make([]string, len(t.RedirectUris))
+
+		copy(masked.RedirectUris, t.RedirectUris)
+
+	}
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.RefreshedAt = t.RefreshedAt
+
+	masked.FreshUntil = t.FreshUntil
+
+	masked.LastUsedAt = t.LastUsedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys OAuthClient's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OAuthClient) JSONFieldNames() []string {
+	return []string{"id", "clientId", "kind", "name", "uri", "redirectUris", "createdAt", "refreshedAt", "freshUntil", "lastUsedAt"}
+}
+
+// Validate validates all fields in OAuthClient
+func (t *OAuthClient) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	{
+		value := t.ClientId
+
+		if utf8.RuneCountInString(string(value)) < 1 {
+			errors.AddFieldError("clientId", "minLength", "must be at least 1 characters")
+		}
+
+	}
+
+	// Validate refreshedAt (optional)
+
+	// Validate optional pointer field
+	if t.RefreshedAt != nil {
+		if valid, fieldErrs := t.RefreshedAt.Validate(); !valid {
+			errors.SetFieldErrors("refreshedAt", fieldErrs)
+		}
+	}
+
+	// Validate freshUntil (optional)
+
+	// Validate optional pointer field
+	if t.FreshUntil != nil {
+		if valid, fieldErrs := t.FreshUntil.Validate(); !valid {
+			errors.SetFieldErrors("freshUntil", fieldErrs)
+		}
+	}
+
+	// Validate lastUsedAt (optional)
+
+	// Validate optional pointer field
+	if t.LastUsedAt != nil {
+		if valid, fieldErrs := t.LastUsedAt.Validate(); !valid {
+			errors.SetFieldErrors("lastUsedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals OAuthClient to JSON
+func (t *OAuthClient) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias OAuthClient
+	return json.Marshal((*Alias)(t))
+}
+
+// listFieldsOfOAuthClient are the list fields of OAuthClient; UnmarshalJSON
+// refuses a null element in them.
+var listFieldsOfOAuthClient = []jsonListField{
+	{name: "redirectUris", depth: 1},
+}
+
+// UnmarshalJSON unmarshals OAuthClient from JSON with validation
+func (t *OAuthClient) UnmarshalJSON(data []byte) error {
+	type Alias OAuthClient
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if err := rejectNullListElements("OAuthClient", data, listFieldsOfOAuthClient); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts OAuthClient into a map representation.
+func (t *OAuthClient) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert OAuthClient to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert OAuthClient to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes OAuthClient from a map using lenient decoding.
+func (t *OAuthClient) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthClient from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode OAuthClient from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes OAuthClient from a map and rejects unknown fields.
+func (t *OAuthClient) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthClient from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode OAuthClient from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes OAuthClient from JSON and rejects unknown fields.
+func (t *OAuthClient) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthClient from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthClient from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthClient from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes OAuthClient from JSON using lenient decoding.
+func (t *OAuthClient) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthClient from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthClient from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthClient from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes OAuthClient from YAML and rejects unknown fields.
+func (t *OAuthClient) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthClient from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthClient from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthClient from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes OAuthClient from YAML using lenient decoding.
+func (t *OAuthClient) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthClient from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthClient from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthClient from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// OAuthClientFromMap builds OAuthClient from a map using lenient decoding.
+func OAuthClientFromMap(value map[string]any) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromMapStrict builds OAuthClient from a map and rejects unknown fields.
+func OAuthClientFromMapStrict(value map[string]any) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromJSON builds OAuthClient from JSON and rejects unknown fields.
+func OAuthClientFromJSON(data []byte) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromJSONNonStrict builds OAuthClient from JSON using lenient decoding.
+func OAuthClientFromJSONNonStrict(data []byte) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromYAML builds OAuthClient from YAML and rejects unknown fields.
+func OAuthClientFromYAML(data []byte) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromYAMLNonStrict builds OAuthClient from YAML using lenient decoding.
+func OAuthClientFromYAMLNonStrict(data []byte) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCode - An OAuth authorization request: pending while its user consents, then the code its client redeems once.
+type OAuthCode struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Client OAuthClient `json:"client"`
+
+	User *User `json:"user,omitempty"`
+
+	Grant *OAuthGrant `json:"grant,omitempty"`
+
+	RedirectUri string `json:"redirectUri"`
+
+	CodeChallenge string `json:"codeChallenge"`
+
+	State string `json:"state,omitempty"`
+
+	Scope string `json:"scope,omitempty"`
+
+	Resource string `json:"resource"`
+
+	Nonce string `json:"nonce"`
+
+	CodeHash *CryptoSHA256 `json:"codeHash,omitempty"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	ExpiresAt TemporalDateTime `json:"expiresAt"`
+
+	UsedAt *TemporalDateTime `json:"usedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of OAuthCode with secret fields cleared.
+func (t *OAuthCode) MaskSecrets() *OAuthCode {
+	if t == nil {
+		return nil
+	}
+
+	masked := &OAuthCode{}
+
+	masked.Id = t.Id
+
+	maskedValueClient := t.Client.MaskSecrets()
+	if maskedValueClient != nil {
+		masked.Client = *maskedValueClient
+	}
+
+	masked.User = t.User.MaskSecrets()
+
+	masked.Grant = t.Grant.MaskSecrets()
+
+	masked.RedirectUri = t.RedirectUri
+
+	masked.CodeChallenge = t.CodeChallenge
+
+	masked.State = t.State
+
+	masked.Scope = t.Scope
+
+	masked.Resource = t.Resource
+
+	masked.Nonce = t.Nonce
+
+	masked.CodeHash = t.CodeHash
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.ExpiresAt = t.ExpiresAt
+
+	masked.UsedAt = t.UsedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys OAuthCode's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OAuthCode) JSONFieldNames() []string {
+	return []string{"id", "client", "user", "grant", "redirectUri", "codeChallenge", "state", "scope", "resource", "nonce", "codeHash", "createdAt", "expiresAt", "usedAt"}
+}
+
+// Validate validates all fields in OAuthCode
+func (t *OAuthCode) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate client (required nested type)
+
+	if fieldErrs := t.Client.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("client", fieldErrs)
+	}
+
+	// Validate user (optional nested type)
+
+	if t.User != nil {
+		if fieldErrs := t.User.Validate(); fieldErrs.HasErrors() {
+			errors.AddNestedError("user", fieldErrs)
+		}
+	}
+
+	// Validate grant (optional nested type)
+
+	if t.Grant != nil {
+		if fieldErrs := t.Grant.Validate(); fieldErrs.HasErrors() {
+			errors.AddNestedError("grant", fieldErrs)
+		}
+	}
+
+	// Validate codeHash (optional)
+
+	// Validate optional pointer field
+	if t.CodeHash != nil {
+		if valid, fieldErrs := validateCryptoSHA256Value(*t.CodeHash, false); !valid {
+			errors.SetFieldErrors("codeHash", fieldErrs)
+		}
+	}
+
+	// Validate expiresAt (required)
+
+	if valid, fieldErrs := t.ExpiresAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("expiresAt", fieldErrs)
+	}
+
+	// Validate usedAt (optional)
+
+	// Validate optional pointer field
+	if t.UsedAt != nil {
+		if valid, fieldErrs := t.UsedAt.Validate(); !valid {
+			errors.SetFieldErrors("usedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals OAuthCode to JSON
+func (t *OAuthCode) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias OAuthCode
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals OAuthCode from JSON with validation
+func (t *OAuthCode) UnmarshalJSON(data []byte) error {
+	type Alias OAuthCode
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts OAuthCode into a map representation.
+func (t *OAuthCode) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert OAuthCode to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert OAuthCode to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes OAuthCode from a map using lenient decoding.
+func (t *OAuthCode) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthCode from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode OAuthCode from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes OAuthCode from a map and rejects unknown fields.
+func (t *OAuthCode) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthCode from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode OAuthCode from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes OAuthCode from JSON and rejects unknown fields.
+func (t *OAuthCode) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthCode from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthCode from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthCode from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes OAuthCode from JSON using lenient decoding.
+func (t *OAuthCode) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthCode from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthCode from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthCode from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes OAuthCode from YAML and rejects unknown fields.
+func (t *OAuthCode) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthCode from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthCode from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthCode from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes OAuthCode from YAML using lenient decoding.
+func (t *OAuthCode) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthCode from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthCode from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthCode from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// OAuthCodeFromMap builds OAuthCode from a map using lenient decoding.
+func OAuthCodeFromMap(value map[string]any) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromMapStrict builds OAuthCode from a map and rejects unknown fields.
+func OAuthCodeFromMapStrict(value map[string]any) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromJSON builds OAuthCode from JSON and rejects unknown fields.
+func OAuthCodeFromJSON(data []byte) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromJSONNonStrict builds OAuthCode from JSON using lenient decoding.
+func OAuthCodeFromJSONNonStrict(data []byte) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromYAML builds OAuthCode from YAML and rejects unknown fields.
+func OAuthCodeFromYAML(data []byte) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromYAMLNonStrict builds OAuthCode from YAML using lenient decoding.
+func OAuthCodeFromYAMLNonStrict(data []byte) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrant - An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.
+type OAuthGrant struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	User User `json:"user"`
+
+	Client OAuthClient `json:"client"`
+
+	Permissions []string `json:"permissions,omitzero"`
+
+	Resource string `json:"resource"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	ExpiresAt TemporalDateTime `json:"expiresAt"`
+
+	LastUsedAt *TemporalDateTime `json:"lastUsedAt,omitempty"`
+
+	RevokedAt *TemporalDateTime `json:"revokedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of OAuthGrant with secret fields cleared.
+func (t *OAuthGrant) MaskSecrets() *OAuthGrant {
+	if t == nil {
+		return nil
+	}
+
+	masked := &OAuthGrant{}
+
+	masked.Id = t.Id
+
+	maskedValueUser := t.User.MaskSecrets()
+	if maskedValueUser != nil {
+		masked.User = *maskedValueUser
+	}
+
+	maskedValueClient := t.Client.MaskSecrets()
+	if maskedValueClient != nil {
+		masked.Client = *maskedValueClient
+	}
+
+	if t.Permissions != nil {
+		masked.Permissions = make([]string, len(t.Permissions))
+
+		copy(masked.Permissions, t.Permissions)
+
+	}
+
+	masked.Resource = t.Resource
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.ExpiresAt = t.ExpiresAt
+
+	masked.LastUsedAt = t.LastUsedAt
+
+	masked.RevokedAt = t.RevokedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys OAuthGrant's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OAuthGrant) JSONFieldNames() []string {
+	return []string{"id", "user", "client", "permissions", "resource", "createdAt", "expiresAt", "lastUsedAt", "revokedAt"}
+}
+
+// Validate validates all fields in OAuthGrant
+func (t *OAuthGrant) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate user (required nested type)
+
+	if fieldErrs := t.User.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("user", fieldErrs)
+	}
+
+	// Validate client (required nested type)
+
+	if fieldErrs := t.Client.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("client", fieldErrs)
+	}
+
+	// Validate expiresAt (required)
+
+	if valid, fieldErrs := t.ExpiresAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("expiresAt", fieldErrs)
+	}
+
+	// Validate lastUsedAt (optional)
+
+	// Validate optional pointer field
+	if t.LastUsedAt != nil {
+		if valid, fieldErrs := t.LastUsedAt.Validate(); !valid {
+			errors.SetFieldErrors("lastUsedAt", fieldErrs)
+		}
+	}
+
+	// Validate revokedAt (optional)
+
+	// Validate optional pointer field
+	if t.RevokedAt != nil {
+		if valid, fieldErrs := t.RevokedAt.Validate(); !valid {
+			errors.SetFieldErrors("revokedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals OAuthGrant to JSON
+func (t *OAuthGrant) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias OAuthGrant
+	return json.Marshal((*Alias)(t))
+}
+
+// listFieldsOfOAuthGrant are the list fields of OAuthGrant; UnmarshalJSON
+// refuses a null element in them.
+var listFieldsOfOAuthGrant = []jsonListField{
+	{name: "permissions", depth: 1},
+}
+
+// UnmarshalJSON unmarshals OAuthGrant from JSON with validation
+func (t *OAuthGrant) UnmarshalJSON(data []byte) error {
+	type Alias OAuthGrant
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if err := rejectNullListElements("OAuthGrant", data, listFieldsOfOAuthGrant); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts OAuthGrant into a map representation.
+func (t *OAuthGrant) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert OAuthGrant to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert OAuthGrant to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes OAuthGrant from a map using lenient decoding.
+func (t *OAuthGrant) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthGrant from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode OAuthGrant from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes OAuthGrant from a map and rejects unknown fields.
+func (t *OAuthGrant) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthGrant from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes OAuthGrant from JSON and rejects unknown fields.
+func (t *OAuthGrant) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthGrant from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes OAuthGrant from JSON using lenient decoding.
+func (t *OAuthGrant) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthGrant from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthGrant from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthGrant from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes OAuthGrant from YAML and rejects unknown fields.
+func (t *OAuthGrant) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthGrant from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes OAuthGrant from YAML using lenient decoding.
+func (t *OAuthGrant) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthGrant from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthGrant from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthGrant from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// OAuthGrantFromMap builds OAuthGrant from a map using lenient decoding.
+func OAuthGrantFromMap(value map[string]any) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromMapStrict builds OAuthGrant from a map and rejects unknown fields.
+func OAuthGrantFromMapStrict(value map[string]any) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromJSON builds OAuthGrant from JSON and rejects unknown fields.
+func OAuthGrantFromJSON(data []byte) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromJSONNonStrict builds OAuthGrant from JSON using lenient decoding.
+func OAuthGrantFromJSONNonStrict(data []byte) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromYAML builds OAuthGrant from YAML and rejects unknown fields.
+func OAuthGrantFromYAML(data []byte) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromYAMLNonStrict builds OAuthGrant from YAML using lenient decoding.
+func OAuthGrantFromYAMLNonStrict(data []byte) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthToken - An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.
+type OAuthToken struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Grant OAuthGrant `json:"grant"`
+
+	Kind string `json:"kind"`
+
+	TokenHash CryptoSHA256 `json:"tokenHash"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	ExpiresAt TemporalDateTime `json:"expiresAt"`
+
+	UsedAt *TemporalDateTime `json:"usedAt,omitempty"`
+
+	RevokedAt *TemporalDateTime `json:"revokedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of OAuthToken with secret fields cleared.
+func (t *OAuthToken) MaskSecrets() *OAuthToken {
+	if t == nil {
+		return nil
+	}
+
+	masked := &OAuthToken{}
+
+	masked.Id = t.Id
+
+	maskedValueGrant := t.Grant.MaskSecrets()
+	if maskedValueGrant != nil {
+		masked.Grant = *maskedValueGrant
+	}
+
+	masked.Kind = t.Kind
+
+	masked.TokenHash = t.TokenHash
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.ExpiresAt = t.ExpiresAt
+
+	masked.UsedAt = t.UsedAt
+
+	masked.RevokedAt = t.RevokedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys OAuthToken's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OAuthToken) JSONFieldNames() []string {
+	return []string{"id", "grant", "kind", "tokenHash", "createdAt", "expiresAt", "usedAt", "revokedAt"}
+}
+
+// Validate validates all fields in OAuthToken
+func (t *OAuthToken) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate grant (required nested type)
+
+	if fieldErrs := t.Grant.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("grant", fieldErrs)
+	}
+
+	// Validate tokenHash (required)
+
+	if valid, fieldErrs := validateCryptoSHA256Value(t.TokenHash, true); !valid {
+		errors.SetFieldErrors("tokenHash", fieldErrs)
+	}
+
+	// Validate expiresAt (required)
+
+	if valid, fieldErrs := t.ExpiresAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("expiresAt", fieldErrs)
+	}
+
+	// Validate usedAt (optional)
+
+	// Validate optional pointer field
+	if t.UsedAt != nil {
+		if valid, fieldErrs := t.UsedAt.Validate(); !valid {
+			errors.SetFieldErrors("usedAt", fieldErrs)
+		}
+	}
+
+	// Validate revokedAt (optional)
+
+	// Validate optional pointer field
+	if t.RevokedAt != nil {
+		if valid, fieldErrs := t.RevokedAt.Validate(); !valid {
+			errors.SetFieldErrors("revokedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals OAuthToken to JSON
+func (t *OAuthToken) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias OAuthToken
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals OAuthToken from JSON with validation
+func (t *OAuthToken) UnmarshalJSON(data []byte) error {
+	type Alias OAuthToken
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts OAuthToken into a map representation.
+func (t *OAuthToken) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert OAuthToken to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert OAuthToken to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes OAuthToken from a map using lenient decoding.
+func (t *OAuthToken) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthToken from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode OAuthToken from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes OAuthToken from a map and rejects unknown fields.
+func (t *OAuthToken) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthToken from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode OAuthToken from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes OAuthToken from JSON and rejects unknown fields.
+func (t *OAuthToken) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthToken from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthToken from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthToken from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes OAuthToken from JSON using lenient decoding.
+func (t *OAuthToken) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthToken from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthToken from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthToken from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes OAuthToken from YAML and rejects unknown fields.
+func (t *OAuthToken) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthToken from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthToken from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthToken from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes OAuthToken from YAML using lenient decoding.
+func (t *OAuthToken) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthToken from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthToken from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthToken from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// OAuthTokenFromMap builds OAuthToken from a map using lenient decoding.
+func OAuthTokenFromMap(value map[string]any) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromMapStrict builds OAuthToken from a map and rejects unknown fields.
+func OAuthTokenFromMapStrict(value map[string]any) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromJSON builds OAuthToken from JSON and rejects unknown fields.
+func OAuthTokenFromJSON(data []byte) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromJSONNonStrict builds OAuthToken from JSON using lenient decoding.
+func OAuthTokenFromJSONNonStrict(data []byte) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromYAML builds OAuthToken from YAML and rejects unknown fields.
+func OAuthTokenFromYAML(data []byte) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromYAMLNonStrict builds OAuthToken from YAML using lenient decoding.
+func OAuthTokenFromYAMLNonStrict(data []byte) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // Order - A shopper's order. Staff look orders up by customer, newest first. An
 // order put back to placed, by staff or by a script in psql, is fulfilled
 // again: the database's trigger enqueues its OrderPlaced, whatever wrote
@@ -2178,7 +3460,7 @@ type Order struct {
 
 	Customer User `json:"customer"`
 
-	Status OrderStatus `json:"status"`
+	Status OrderStatus `json:"status,omitzero"`
 
 	PlacedAt TemporalDateTime `json:"placedAt"`
 
@@ -3684,7 +4966,7 @@ type RestockRequest struct {
 
 	Product Product `json:"product"`
 
-	Status RestockStatus `json:"status"`
+	Status RestockStatus `json:"status,omitzero"`
 
 	Quantity GenericInt64 `json:"quantity"`
 

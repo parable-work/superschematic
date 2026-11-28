@@ -24,6 +24,18 @@ func typeScriptServer(cfg *schemaconfig.SchemaConfig) bool {
 	return enabled && strings.EqualFold(language, registry.APILanguageTypeScript)
 }
 
+// mcpServer reads whether the config's enabled API server serves MCP
+// (verify.Input.MCPServer): outputs.api.mcp.
+func mcpServer(cfg *schemaconfig.SchemaConfig) bool {
+	if cfg == nil || cfg.Kind != ir.SchemaKindAPI {
+		return false
+	}
+	api, _ := cfg.Outputs["api"].(map[string]any)
+	enabled, _ := api["enabled"].(bool)
+	mcp, _ := api["mcp"].(bool)
+	return enabled && mcp
+}
+
 // databaseDialects reads the dialects the config of a TypeScript API's
 // database lists (verify.Input.DatabaseDialects), from the DB service
 // beside the API's, where the build reads a database's config too (its

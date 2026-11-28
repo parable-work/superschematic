@@ -251,7 +251,7 @@ test('the descriptor apiKey member is optional, and when present every name of i
   expect(before.apiKey).toBeUndefined();
   expect('apiKey' in before).toBe(false);
   // The member stays between credential and role, where the DB build writes it.
-  expect(Object.keys(parseIdentityDescriptor(descriptorJSON))).toEqual(['version', 'user', 'session', 'credential', 'apiKey', 'role', 'roleGrant']);
+  expect(Object.keys(parseIdentityDescriptor(descriptorJSON))).toEqual(['version', 'user', 'session', 'credential', 'apiKey', 'oauth', 'role', 'roleGrant']);
   const cases: Record<string, [edit: (d: Record<string, any>) => void, want: string]> = {
     'an empty table': [d => (d.apiKey.table = ''), 'apiKey.table is empty'],
     'an empty column': [d => (d.apiKey.columns.tokenHash = ''), 'apiKey.columns.tokenHash is empty'],
@@ -929,8 +929,8 @@ describe('API key routes', () => {
     expect([keyPaths(identityRoutes(onlyUsers, sets)), onlyUsers.apiKeys, onlyUsers.apiKeyAdministration]).toEqual([USERS, false, true]);
     const both = build(KEYS_ON);
     expect(keyPaths(identityRoutes(both, sets))).toEqual([...OWN, ...USERS]);
-    // Every set with its API keys routes every operation.
-    expect(identityRoutes(both, sets)).toHaveLength(identityOperations.length);
+    // Every set with its API keys routes every operation but OAuth's (#695).
+    expect(identityRoutes(both, sets)).toHaveLength(identityOperations.filter(op => !op.oauth).length);
     // A set the API does not declare has no route, its keys' included.
     expect(keyPaths(identityRoutes(both, { administration: {} }))).toEqual(USERS);
     expect(keyPaths(identityRoutes(both, { sessions: { register: true } }))).toEqual(OWN);
@@ -1022,7 +1022,7 @@ describe('API key routes', () => {
       'DELETE /auth/admin/users/{id}/keys/{keyId} identity.users.write 600',
     ]);
     expect(mounted.find(spec => spec.name === 'revokeUserApiKey')!.pathParams.map(param => param.name)).toEqual(['id', 'keyId']);
-    expect(mounted).toHaveLength(identityOperations.length);
+    expect(mounted).toHaveLength(identityOperations.filter(op => !op.oauth).length);
 
     h.app = app;
     const member = bearer(await h.login('member@example.com', USER_PASSWORD));

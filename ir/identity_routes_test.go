@@ -15,6 +15,8 @@ func TestIdentityOperationErrors(t *testing.T) {
 		IdentityOpSetUserPassword,
 		IdentityOpListRoles, IdentityOpCreateRole, IdentityOpUpdateRole, IdentityOpDeleteRole, IdentityOpGrantRole, IdentityOpRevokeRole,
 		IdentityOpCreateAPIKey, IdentityOpListAPIKeys, IdentityOpRevokeAPIKey, IdentityOpListUserAPIKeys, IdentityOpRevokeUserAPIKey,
+		IdentityOpGetOAuthRequest, IdentityOpApproveOAuthRequest, IdentityOpDenyOAuthRequest, IdentityOpListOAuthGrants,
+		IdentityOpRevokeOAuthGrant, IdentityOpListUserOAuthGrants, IdentityOpRevokeUserOAuthGrant,
 	}
 	if len(identityOperationErrors) != len(ops) {
 		t.Errorf("the table has %d operations, want %d", len(identityOperationErrors), len(ops))
@@ -43,7 +45,12 @@ func TestIdentityOperationErrors(t *testing.T) {
 		t.Errorf("login's last error = %+v, want pending_approval", login[len(login)-1])
 	}
 	// An operation of a caller's own account refuses an API key (D114).
-	for _, op := range []string{IdentityOpLogout, IdentityOpChangePassword, IdentityOpCreateAPIKey, IdentityOpListAPIKeys, IdentityOpRevokeAPIKey} {
+	for _, op := range []string{
+		IdentityOpLogout, IdentityOpChangePassword, IdentityOpCreateAPIKey, IdentityOpListAPIKeys, IdentityOpRevokeAPIKey,
+		// And the consent and connected-app routes an API key or an OAuth
+		// token (#695).
+		IdentityOpGetOAuthRequest, IdentityOpApproveOAuthRequest, IdentityOpDenyOAuthRequest, IdentityOpListOAuthGrants, IdentityOpRevokeOAuthGrant,
+	} {
 		if !hasStatus(IdentityOperationErrors(op), 403) {
 			t.Errorf("%s has no 403 for a caller an API key authenticated", op)
 		}

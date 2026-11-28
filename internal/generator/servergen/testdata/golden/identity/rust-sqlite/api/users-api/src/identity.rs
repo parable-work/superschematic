@@ -89,6 +89,69 @@ pub const IDENTITY_DESCRIPTOR: &str = r#"{
       "revokedAt": "revoked_at"
     }
   },
+  "oauth": {
+    "client": {
+      "table": "oauth_client",
+      "columns": {
+        "id": "id",
+        "clientId": "client_id",
+        "kind": "kind",
+        "name": "name",
+        "uri": "uri",
+        "redirectUris": "redirect_uris",
+        "createdAt": "created_at",
+        "refreshedAt": "refreshed_at",
+        "freshUntil": "fresh_until",
+        "lastUsedAt": "last_used_at"
+      }
+    },
+    "grant": {
+      "table": "oauth_grant",
+      "columns": {
+        "id": "id",
+        "user": "user_id",
+        "client": "client_id",
+        "permissions": "permissions",
+        "resource": "resource",
+        "createdAt": "created_at",
+        "expiresAt": "expires_at",
+        "lastUsedAt": "last_used_at",
+        "revokedAt": "revoked_at"
+      }
+    },
+    "code": {
+      "table": "oauth_code",
+      "columns": {
+        "id": "id",
+        "client": "client_id",
+        "user": "user_id",
+        "grant": "grant_id",
+        "redirectUri": "redirect_uri",
+        "codeChallenge": "code_challenge",
+        "state": "state",
+        "scope": "scope",
+        "resource": "resource",
+        "nonce": "nonce",
+        "codeHash": "code_hash",
+        "createdAt": "created_at",
+        "expiresAt": "expires_at",
+        "usedAt": "used_at"
+      }
+    },
+    "token": {
+      "table": "oauth_token",
+      "columns": {
+        "id": "id",
+        "grant": "grant_id",
+        "kind": "kind",
+        "tokenHash": "token_hash",
+        "createdAt": "created_at",
+        "expiresAt": "expires_at",
+        "usedAt": "used_at",
+        "revokedAt": "revoked_at"
+      }
+    }
+  },
   "role": {
     "type": "Role",
     "table": "role",

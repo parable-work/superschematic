@@ -36,6 +36,10 @@ from .scalars import (
 )
 
 from .types import (
+    OAuthClient,
+    OAuthCode,
+    OAuthGrant,
+    OAuthToken,
     Role,
     Session,
     User,
@@ -58,6 +62,10 @@ __all__ = [
     "TemporalDateTime",
 
     # Types
+    "OAuthClient",
+    "OAuthCode",
+    "OAuthGrant",
+    "OAuthToken",
     "Role",
     "Session",
     "User",

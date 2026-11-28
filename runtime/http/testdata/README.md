@@ -23,6 +23,7 @@ behave alike.
 | `notify_parity.json` | The notifier's pure parts (D153, D191): an address normalised by its kind (`addresses`), a reply's words read and whether its text is shaped as a code (`replies`), the seconds a wall time waits out quiet hours (`quietHours`), a channel's trust over a principal's permissions (`trust`), a code's stored hash (`codeHashes`) and an id in one form (`sameIds`): TypeScript's `normaliseAddress`, `readReply`, `looksLikeCode`, `quietDelaySeconds`, `replyAllows`, `narrowedPermissions`, `codeHash` and `sameId`, and Rust's `orm::notify` twins. Its `comment` states the harness; `runtime/http/typescript` writes it with `NOTIFY_PARITY_WRITE=1 bun test src/notify-parity.test.ts`. |
 | `agents_parity.json` | The agent orchestration's and the inbound path's pure parts (D157, D158, D183, D193): a class's default autonomy (`defaultAutonomy`), a message's trust (`trustOf`), the autonomy a run has over an operation (`effectiveAutonomy`), a party's paths narrowing a run's (`narrowReaches`), an agent's permissions narrowed to whom it acts for (`narrowPermissions`), the hash an approval is bound to (`paramsHash`), the policy row that wins (`bestPolicy`), what a use crosses of a budget (`budgetCrossing`), a transcript entry's redaction (`redactText`) and whether an email's authentication passes (`emailAuthenticated`): TypeScript's `agents.ts` and `inbound.ts` exports, Rust's `orm::agents` and `orm::inbound` twins, and Go's `agents` and `inbound` (D192). Its `comment` states the harness; `runtime/http/typescript` writes it with `AGENTS_PARITY_WRITE=1 bun test src/agents-parity.test.ts`. |
 | `identity_parity.json` | The identity runtime's vectors (D50), described below. |
+| `oauth_parity.json` | The OAuth authorization server's pure parts (#695): the access and refresh tokens' text and hashes (`tokens`), the credential each is on a request (`credentials`), the config's `oauth` member (`config`), PKCE (`verifiers`, `pkce`), redirect matching with the port ignored on loopback (`redirects`, `redirectKinds`), the public base (`publicBases`), the two discovery documents, their paths and the MCP endpoint's challenge (`metadata`), a scope's names (`scopes`), a metadata document's URL (`metadataUrls`), the addresses its fetch refuses (`privateAddresses`) and how long a document is kept (`cacheSeconds`): TypeScript's `identity` exports. Its `comment` states the harness; `runtime/http/typescript` writes it with `OAUTH_PARITY_WRITE=1 bun test src/identity/oauth-parity.test.ts`. Rust and Go have no reader of it yet. |
 | `identity/` | The fixture the identity stores run against: `fixture-user-model-db.json` (its identity descriptor), `create.sql` (its Postgres DDL) and `sqlite/create.sql` (its SQLite DDL). `TestIdentityStoreFixtureIsCurrent` in `internal/generator` fails when they are stale and rewrites them with `-update`. |
 
 ## identity_parity.json
@@ -55,7 +56,8 @@ Otherwise `want` is the config the runtime runs with, every member present:
   "apiKeyMaxTtlSeconds": 31536000,
   "cookie": {"name": "__Host-session", "domain": "", "secure": true, "sameSite": "Lax"},
   "trustedOrigins": [],
-  "password": {"argon2": {"memoryKiB": 19456, "iterations": 2, "parallelism": 1}}
+  "password": {"argon2": {"memoryKiB": 19456, "iterations": 2, "parallelism": 1}},
+  "oauth": {"publicBaseUrl": ""}
 }
 ```
 
