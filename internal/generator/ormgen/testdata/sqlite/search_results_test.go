@@ -21,11 +21,15 @@
 package orm_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,13 +37,19 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/parable-work/superschematic/runtime/http/go/bucket"
+	"github.com/parable-work/superschematic/runtime/http/go/fileprocessing"
+	"github.com/parable-work/superschematic/runtime/http/go/providers"
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
 	"github.com/parable-work/superschematic/runtime/schema/go/crosstable"
+	"github.com/parable-work/superschematic/runtime/schema/go/rowrefs"
 
 	orm "example.com/schemas/orm/fixture-search-db"
 	types "example.com/schemas/types/go/fixture-search-db"
@@ -640,6 +650,71 @@ func searchCases(t *testing.T, f searchFixture) map[string]any {
 		answers["texts"] = got
 	})
 
+	t.Run("an uploaded file's text the file processor extracts is indexed with its row, and a file the processor fails on ends failed", func(t *testing.T) {
+		// A stub processor of plain text, in slot FILES, and one of PDFs
+		// that fails, in slot MORE_FILES (D159, #603).
+		var asked atomic.Int64
+		registry := must(providers.From(providers.Options{
+			Slots:  map[string]providers.Interface{"FILES": providers.Files, "MORE_FILES": providers.Files},
+			Config: map[string]providers.ConfigValue{"FILES": providers.Text("plain-text"), "MORE_FILES": providers.Text("broken-pdf")},
+			Definitions: []providers.Definition{
+				providers.MustDefine(providers.Definition{Name: "plain-text", Implements: providers.Files, Create: func(context.Context, providers.Settings, providers.Context) (any, error) {
+					return stubProcessor{types: []string{"text/plain"}, asked: &asked}, nil
+				}}),
+				providers.MustDefine(providers.Definition{Name: "broken-pdf", Implements: providers.Files, Create: func(context.Context, providers.Settings, providers.Context) (any, error) {
+					return stubProcessor{types: []string{"application/pdf"}, fails: true, asked: &asked}, nil
+				}}),
+			},
+		}))
+		objects := &memBucket{objects: map[string][]byte{}}
+		row := rowrefs.RowRef{Table: "Unit", Key: unitA.Id.String()}
+		files := db.Attachments()
+		// A browser's upload: Begin, the PUT its URL takes, and Complete,
+		// which asks the file's text.
+		upload := func(name, mediaType, text string) rowrefs.Attachment {
+			sum := sha256.Sum256([]byte(text))
+			begun := must(files.Begin(system, rowrefs.BeginInput{To: row, Name: name, MediaType: mediaType, Size: int64(len(text)), SHA256: hex.EncodeToString(sum[:])}, bucket.ForAttachments(objects), 0))
+			must(objects.Put(ctx, begun.Attachment.ObjectKey, strings.NewReader(text), bucket.PutOptions{ContentType: mediaType}))
+			return must(files.Complete(system, rowrefs.FileRef{Table: "Unit", ID: begun.Attachment.ID}, bucket.ForAttachments(objects)))
+		}
+		plan := upload("plan.txt", "text/plain", "Hawthorn rows along the north wall.")
+		survey := upload("survey.pdf", "application/pdf", "Rowan saplings by the shed.")
+		drain(t, none)
+		pass := fileprocessing.Options{Attachments: files, Providers: registry, Bucket: objects}
+		run := must(fileprocessing.Process(ctx, pass))
+		if run != (fileprocessing.Run{Extracted: 1, Failed: 1}) {
+			t.Fatalf("the pass: %+v", run)
+		}
+		if got := must(files.Get(system, rowrefs.FileRef{Table: "Unit", ID: plan.ID})); got.Extraction != rowrefs.ProcessingDone || got.ExtractedText == nil || *got.ExtractedText != "Hawthorn rows along the north wall." {
+			t.Errorf("the plan: %+v", got)
+		}
+		if got := must(files.Get(system, rowrefs.FileRef{Table: "Unit", ID: survey.ID})); got.Extraction != rowrefs.ProcessingFailed || got.ExtractedText != nil {
+			t.Errorf("the survey the processor failed on: %+v", got)
+		}
+		// The write of the text enqueues the row, whose index row then
+		// holds it: a word only in the file finds the unit.
+		drained := drain(t, none)
+		if drained != 1 {
+			t.Errorf("drained %d, want the unit's one message", drained)
+		}
+		result, hits := search(t, user(alice), crosstable.SearchRequest{Q: "hawthorn"}, none)
+		equal(t, "hawthorn", hits, []string{key("Unit", unitA.Id)})
+		if len(result.Items) == 1 && result.Items[0].Matched != "files" {
+			t.Errorf("hawthorn matched in %s, want files", result.Items[0].Matched)
+		}
+		rowan, _ := search(t, user(alice), crosstable.SearchRequest{Q: "rowan"}, none)
+		if rowan.Total != 0 {
+			t.Errorf("the failed file's words are found: %+v", rowan)
+		}
+		// Nothing is pending: the next pass asks no processor anything.
+		before := asked.Load()
+		next := must(fileprocessing.Process(ctx, pass))
+		if next != (fileprocessing.Run{}) || asked.Load() != before {
+			t.Errorf("the next pass: %+v, %d calls", next, asked.Load()-before)
+		}
+		answers["files"] = map[string]any{"run": run, "drained": drained, "hawthorn": hits, "rowan": rowan.Total, "next": next}
+	})
+
 	t.Run("a scope keeps to its rows, and an embedding is refused on SQLite", func(t *testing.T) {
 		chestnuts := keys(t, user(bob), "chestnut")
 		_, p1 := search(t, user(bob), crosstable.SearchRequest{Q: "chestnut", Scope: []string{"p1"}}, none)
@@ -794,3 +869,81 @@ func searchParity(t *testing.T, f searchFixture, host crosstable.Host) {
 }
 
 func idp0(text string) *types.IdentityUUID { v := id(text); return &v }
+
+// memBucket is a bucket in memory, which a browser's PUT through a signed
+// URL writes as Put does.
+type memBucket struct {
+	mu      sync.Mutex
+	objects map[string][]byte
+}
+
+func (b *memBucket) Name() string { return "mem" }
+
+func (b *memBucket) Put(_ context.Context, name string, body io.Reader, opts bucket.PutOptions) (bucket.PutResult, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return bucket.PutResult{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.objects[name] = data
+	return bucket.PutResult{Object: bucket.Object{Name: name, Size: int64(len(data)), ContentType: opts.ContentType}, Created: true}, nil
+}
+
+func (b *memBucket) Head(_ context.Context, name string) (bucket.Object, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	data, ok := b.objects[name]
+	return bucket.Object{Name: name, Size: int64(len(data))}, ok, nil
+}
+
+func (b *memBucket) Get(_ context.Context, name string) (*bucket.Reader, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	data, ok := b.objects[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", bucket.ErrNotFound, name)
+	}
+	return &bucket.Reader{ReadCloser: io.NopCloser(bytes.NewReader(data)), Object: bucket.Object{Name: name, Size: int64(len(data))}}, nil
+}
+
+func (b *memBucket) Delete(_ context.Context, name string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.objects, name)
+	return nil
+}
+
+func (b *memBucket) List(context.Context, bucket.ListOptions) (bucket.Page, error) {
+	return bucket.Page{}, nil
+}
+
+func (b *memBucket) SignedURL(_ context.Context, name string, _ bucket.SignedURLOptions) (string, error) {
+	return "https://mem.example/" + name, nil
+}
+
+// stubProcessor is a file processor of types: a file's text is its bytes,
+// or with fails every call fails. It counts the calls into it.
+type stubProcessor struct {
+	types []string
+	fails bool
+	asked *atomic.Int64
+}
+
+func (p stubProcessor) MediaTypes() []string { return p.types }
+
+func (p stubProcessor) ExtractText(_ context.Context, file providers.FileInput) (*providers.ExtractedText, error) {
+	p.asked.Add(1)
+	if p.fails {
+		return nil, errors.New("the stub cannot read this file")
+	}
+	return &providers.ExtractedText{Text: string(file.Bytes)}, nil
+}
+
+func (p stubProcessor) Preview(context.Context, providers.FileInput, providers.PreviewOptions) (*providers.Preview, error) {
+	p.asked.Add(1)
+	if p.fails {
+		return nil, errors.New("the stub cannot read this file")
+	}
+	return nil, nil
+}
