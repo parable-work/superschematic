@@ -30,7 +30,7 @@ use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{Client, Runner};
 use super::{
     row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
-    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error,
+    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, CreateOptions, Definition, Dialect, Error,
     FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertManyOptions,
     UpsertOptions, Upserted, Values, WriteOptions,
 };
@@ -509,6 +509,17 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
         self.runner().create_one(input).await
     }
 
+    /// Inserts a row as `create_one` does, with each use's create
+    /// parameters, by its member (#729): the behaviors' core checks them
+    /// and each use's initializer runs in the create's command.
+    pub async fn create_one_with(
+        &self,
+        input: &Values,
+        options: &CreateOptions,
+    ) -> Result<Values, Error> {
+        self.runner().create_one_with(input, options).await
+    }
+
     /// Inserts the rows in one statement, DEFAULT for each column a row
     /// leaves unset that another sets.
     pub async fn create_many(&self, inputs: &[Values]) -> Result<Vec<Values>, Error> {
@@ -835,6 +846,15 @@ where
     /// the schema's.
     pub async fn create_one(&self, input: &Create) -> Result<Row, Error> {
         row(self.repository.create_one(&values(input)?).await?)
+    }
+
+    /// Inserts a row as `create_one` does, with each use's create
+    /// parameters, by its member (#729).
+    pub async fn create_one_with(&self, input: &Create, options: &CreateOptions) -> Result<Row, Error> {
+        row(self
+            .repository
+            .create_one_with(&values(input)?, options)
+            .await?)
     }
 
     /// Inserts the rows in one statement.

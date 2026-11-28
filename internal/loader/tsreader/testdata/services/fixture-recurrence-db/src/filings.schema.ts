@@ -4,12 +4,15 @@ import { AutoGenerate, Recurrence, Relation, calendarSource, key } from "@supers
 
 // A day a holiday calendar closes (D152). The app fills these rows; core
 // ships no holidays. A filing's due date moves off the days of the calendar
-// its holidayCalendar names.
+// its holidayCalendar names. A row with a weekday and no date closes that
+// day every week, and a calendar with such rows takes them as its weekend
+// in place of Saturday and Sunday (#729).
 export abstract class Holiday {
   @key
   id: AutoGenerate<Identity.UUID>;
   calendar: string;
-  date: Temporal.Date;
+  date: Nullable<Temporal.Date>;
+  weekday: Nullable<string>;
   name: string;
 }
 
@@ -36,7 +39,7 @@ export abstract class Filing
       timeZone: "Europe/London";
       horizonDays: 400;
       adjust: "after";
-      holidays: { table: "Holiday"; calendarField: "calendar"; dateField: "date"; field: "holidayCalendar" };
+      holidays: { table: "Holiday"; calendarField: "calendar"; dateField: "date"; field: "holidayCalendar"; weekdayField: "weekday" };
       relative: { via: "contract"; type: "Contract"; field: "endsOn" };
       opensBefore: "P14D";
       remindBefore: "P3D";

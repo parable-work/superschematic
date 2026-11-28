@@ -115,6 +115,17 @@ type ORMPrecondition struct {
 	Type     string
 }
 
+// ORMCreateBehavior is the create parameters a use of a table takes
+// (#729), as orm.ts types them in <Type>CreateBehaviors: the use's id, the
+// member a create's behaviors name it by, its behavior, and the TypeScript
+// type of its entry, from the behavior's createParamsSchema.
+type ORMCreateBehavior struct {
+	ID       string
+	Member   string
+	Behavior string
+	Type     string
+}
+
 // ormRules is what orm.ts writes of schema's tables whose fields are
 // behaviors: the layout document, each table's uses by its type, the
 // TypeScript type of each owned field whose declared type its use's
@@ -126,6 +137,9 @@ type ormRules struct {
 	uses          map[string][]ORMUse
 	types         map[string]map[string]string
 	preconditions map[string][]ORMPrecondition
+	// createBehaviors are the create parameters each table's uses take,
+	// by type (#729).
+	createBehaviors map[string][]ORMCreateBehavior
 }
 
 // typeScriptRules builds ormRules for schema, whose behaviors reg declares.
@@ -134,7 +148,7 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 	if err != nil || layout == nil {
 		return nil, err
 	}
-	out := &ormRules{layout: layout, uses: map[string][]ORMUse{}, types: map[string]map[string]string{}, preconditions: map[string][]ORMPrecondition{}}
+	out := &ormRules{layout: layout, uses: map[string][]ORMUse{}, types: map[string]map[string]string{}, preconditions: map[string][]ORMPrecondition{}, createBehaviors: map[string][]ORMCreateBehavior{}}
 	for name, table := range layout.Types {
 		td := schema.Types[name]
 		out.types[name] = map[string]string{}
@@ -195,6 +209,12 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 			// id, as the core's command keys it.
 			if narrowed.Preconditions != nil {
 				out.preconditions[name] = append(out.preconditions[name], ORMPrecondition{ID: use.ID, Behavior: use.Behavior, Type: renderNarrowed(narrowed.Preconditions, aliases, "  ")})
+			}
+			// A use whose behavior takes create parameters (Recurrence's
+			// recurrence) is a member of the table's <Type>CreateBehaviors, by its
+			// member, which the repository maps to its id (#729).
+			if narrowed.CreateParams != nil {
+				out.createBehaviors[name] = append(out.createBehaviors[name], ORMCreateBehavior{ID: use.ID, Member: member, Behavior: use.Behavior, Type: renderNarrowed(narrowed.CreateParams, aliases, "  ")})
 			}
 			ormUse := ORMUse{ID: use.ID, Member: member, Behavior: use.Behavior}
 			for _, op := range use.Operations {

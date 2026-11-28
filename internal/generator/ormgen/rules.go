@@ -46,6 +46,19 @@ type Rules struct {
 	// every command a repository of a table that composes behaviors runs
 	// through the core presents what it names.
 	Preconditions bool
+	// CreateBehaviors is a schema one of whose tables' uses has a behavior
+	// that takes create parameters (#729): rules.go then holds
+	// CreateOptions, which that table's CreateOne takes.
+	CreateBehaviors bool
+}
+
+// RepositoryCreateBehavior is a use whose behavior takes create parameters
+// (#729): its id, the member a create's Behaviors name it by, and the
+// struct of its parameters (FilingRecurrenceCreateParams).
+type RepositoryCreateBehavior struct {
+	ID     string
+	Member string
+	Params string
 }
 
 // RepositoryUse is a use of a behavior on a table, as the repository
@@ -571,7 +584,7 @@ var packageNames = []string{
 	"NoOpDatabase", "NoOpTx", "TxOptions",
 	"IsolationLevel", "UpsertOptions", "UpsertResult", "UpsertStatus", "UpsertInserted", "UpsertUpdated",
 	"UpsertUnchanged", "ErrNotFound", "ErrVersionConflict", "ErrNoUserInContext", "RulesLayout",
-	"WithBehaviorCaller", "WithPreconditions", "WithUserID", "GetUserID", "HasUserID", "WithCaller", "ParseUserID",
+	"WithBehaviorCaller", "WithPreconditions", "CreateOptions", "WithUserID", "GetUserID", "HasUserID", "WithCaller", "ParseUserID",
 	"Connect", "ConnectWithPool", "ConnectWithPools",
 }
 
@@ -653,7 +666,11 @@ func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Reg
 	if strings.Contains(string(encoded), "`") {
 		return nil, fmt.Errorf("ormgen: the behaviors' layout holds a backquote, which rules.go's raw string cannot: %s", encoded)
 	}
-	return &Rules{LayoutJSON: string(encoded), Preconditions: preconditions}, nil
+	creates := false
+	for _, repo := range repositories {
+		creates = creates || len(repo.CreateBehaviors) > 0
+	}
+	return &Rules{LayoutJSON: string(encoded), Preconditions: preconditions, CreateBehaviors: creates}, nil
 }
 
 // attachTableRules gives repo, a table that composes behaviors as a table,
@@ -817,6 +834,18 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			// An operation of the table as a whole takes no key (D104).
 			ru.Doc = fmt.Sprintf("%sOperations are the operations of %s's %s, %s (D103), each run through the behaviors' core in a transaction: on the row whose key it takes, or on the table as a whole, as a command without a row (D104).",
 				base, repo.TypeName, member, behaviortypes.An(use.Behavior))
+		}
+		if narrowed.CreateParams != nil {
+			// The use's create parameters (#729): a struct of the behavior's
+			// createParamsSchema, which a create names by the use's member in
+			// its CreateOptions' Behaviors.
+			name := base + "CreateParams"
+			if _, isStruct, err := b.typeOf(narrowed.CreateParams, name,
+				fmt.Sprintf("%s are the create parameters %s's %s takes (#729): CreateOptions{Behaviors: map[string]any{%q: %s{...}}}.", name, repo.TypeName, member, member, name)); err != nil {
+				return fmt.Errorf("ormgen: table %s: use %s: its create parameters: %w", repo.TypeName, use.ID, err)
+			} else if isStruct {
+				repo.CreateBehaviors = append(repo.CreateBehaviors, RepositoryCreateBehavior{ID: use.ID, Member: member, Params: name})
+			}
 		}
 		if narrowed.Preconditions != nil {
 			// The use's entry of a command's preconditions, by its use id

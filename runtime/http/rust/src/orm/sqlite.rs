@@ -39,7 +39,7 @@ use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{finish, Client, Runner};
 use super::{
     row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
-    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error,
+    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, CreateOptions, Definition, Dialect, Error,
     FieldKeys, FindOptions, Found, Marks, PageOptions, RowPage, Session, Table, UpsertManyOptions,
     UpsertOptions, Upserted, Values, WriteOptions,
 };
@@ -451,6 +451,12 @@ where
         row(self.repository.create_one(&values(input)?)?)
     }
 
+    /// Inserts a row as `create_one` does, with each use's create
+    /// parameters, by its member (#729).
+    pub fn create_one_with(&self, input: &Create, options: &CreateOptions) -> Result<Row, Error> {
+        row(self.repository.create_one_with(&values(input)?, options)?)
+    }
+
     /// Inserts the rows, in order.
     pub fn create_many(&self, inputs: &[Create]) -> Result<Vec<Row>, Error> {
         let inputs = inputs.iter().map(values).collect::<Result<Vec<_>, _>>()?;
@@ -652,6 +658,13 @@ impl Repository<'_> {
     /// the schema's.
     pub fn create_one(&self, input: &Values) -> Result<Values, Error> {
         finish(self.runner().create_one(input))
+    }
+
+    /// Inserts a row as `create_one` does, with each use's create
+    /// parameters, by its member (#729): the behaviors' core checks them
+    /// and each use's initializer runs in the create's command.
+    pub fn create_one_with(&self, input: &Values, options: &CreateOptions) -> Result<Values, Error> {
+        finish(self.runner().create_one_with(input, options))
     }
 
     /// Inserts the rows, in order, a statement a row: a VALUES list on

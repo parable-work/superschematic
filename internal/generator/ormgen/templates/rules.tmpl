@@ -77,6 +77,19 @@ func behaviorCaller(ctx context.Context) rules.Caller {
 	}
 	return rules.Caller{}
 }
+{{- if .Rules.CreateBehaviors }}
+
+// CreateOptions is what a create of a row takes beside its fields, on a
+// table one of whose uses' behaviors takes create parameters (#729):
+// Behaviors, each such use's parameters by its member, as the repository's
+// <Type><Member>CreateParams types them, which the behaviors' core checks
+// and each use's initializer runs in the create's command, so the row is
+// inserted with what they set in one transaction. A member the table has
+// no use under is refused.
+type CreateOptions struct {
+	Behaviors map[string]any
+}
+{{- end }}
 {{- if .Rules.Preconditions }}
 
 // behaviorPreconditionsKey is the context key WithPreconditions stores

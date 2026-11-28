@@ -181,6 +181,18 @@ CREATE INDEX {{ quote (searchIndexName $table.Name) }} ON {{ $table.QuotedName }
 {{ $change.Trigger.SQL }};
 {{- end }}
 {{- end }}
+{{- if .TargetChangeTriggers }}
+
+-- Create the functions and triggers that write a recurring table's change
+-- queue when the date its relative recurrence reads, on another table's
+-- row, moves (#626)
+{{- range $target := .TargetChangeTriggers }}
+
+{{ $target.FunctionSQL }};
+
+{{ $target.Trigger.SQL }};
+{{- end }}
+{{- end }}
 {{- if .StateGuards }}
 
 -- Create the functions and triggers that guard a @stateMachine's column:

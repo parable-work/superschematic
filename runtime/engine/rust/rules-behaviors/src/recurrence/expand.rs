@@ -29,7 +29,11 @@
 //! holiday to the business day `before` or `after` it, keeping the wall
 //! time; `none` leaves it. The key of an occurrence is its nominal wall
 //! date-time (`2026-10-31T09:00`), before the adjustment, so an adjustment
-//! that changes, a holiday added say, moves the same occurrence.
+//! that changes, a holiday added say, moves the same occurrence. A holiday
+//! is a date (`2026-12-25`) or a weekday's name (`friday`), as a row of a
+//! holiday calendar gives one (#729): a weekday closes that day every
+//! week, and a list with one or more takes its weekdays as the weekend in
+//! place of `weekendDays`, so each calendar has the weekend its rows say.
 //!
 //! Lead times are spans before or after the adjusted due, in the zone's
 //! calendar: `opensBefore` (the window's opening), `remindBefore` and
@@ -319,17 +323,27 @@ struct Plan {
 pub fn expand(input: &ExpandInput) -> Result<Expansion, String> {
     let tz = zone_of(input.time_zone.as_deref())?;
     let adjust = Adjust::named(input.adjust.as_deref().unwrap_or("none"))?;
+    let mut holidays = std::collections::BTreeSet::new();
+    let mut closed: Vec<Weekday> = Vec::new();
+    for text in &input.holidays {
+        if let Ok(date) = text.parse::<Date>() {
+            holidays.insert(date);
+            continue;
+        }
+        let day = weekdays(std::slice::from_ref(text))
+            .map_err(|_| format!("holiday \"{text}\" is no date (2026-12-25) and no weekday (friday)"))?;
+        for day in day {
+            if !closed.contains(&day) {
+                closed.push(day);
+            }
+        }
+    }
+    // A calendar's weekday rows are its weekend, in place of the config's.
     let weekend = match &input.weekend_days {
+        _ if !closed.is_empty() => closed,
         Some(names) => weekdays(names)?,
         None => vec![Weekday::Saturday, Weekday::Sunday],
     };
-    let mut holidays = std::collections::BTreeSet::new();
-    for text in &input.holidays {
-        let date = text
-            .parse::<Date>()
-            .map_err(|_| format!("holiday \"{text}\" is no date (2026-12-25)"))?;
-        holidays.insert(date);
-    }
     let lead =
         |text: &Option<String>, what: &str| text.as_deref().map(|t| span(t, what)).transpose();
     let limit = input.limit.unwrap_or(DEFAULT_LIMIT);
@@ -739,6 +753,21 @@ mod tests {
         assert_eq!(out["occurrences"][0]["due"], json!("2026-10-29T00:00"));
         assert_eq!(out["occurrences"][0]["shifted"], json!("weekend"));
         assert_eq!(out["occurrences"][0]["key"], json!("2026-10-31T00:00"));
+    }
+
+    #[test]
+    fn a_calendars_weekday_holidays_are_its_weekend() {
+        // 2026-10-31 is a Saturday and 2026-11-01 a Sunday; the calendar
+        // closes on Friday and Saturday, in place of weekendDays.
+        let calendar = json!({"anchor": "relative", "date": "2026-10-31", "timeZone": "UTC", "adjust": "before", "weekendDays": ["sunday"], "holidays": ["friday", "Saturday", "2026-10-29"]});
+        let out = run(calendar.clone());
+        assert_eq!(out["occurrences"][0]["due"], json!("2026-10-28T00:00"));
+        assert_eq!(out["occurrences"][0]["shifted"], json!("weekend"));
+        let mut sunday = calendar;
+        sunday["date"] = json!("2026-11-01");
+        assert!(run(sunday)["occurrences"][0].get("shifted").is_none());
+        let error = expand_json(&json!({"anchor": "relative", "date": "2026-10-31", "holidays": ["someday"]})).unwrap_err();
+        assert!(error.contains("no weekday"), "{error}");
     }
 
     #[test]

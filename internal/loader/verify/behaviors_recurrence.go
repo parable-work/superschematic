@@ -23,6 +23,7 @@ type recurrenceConfig struct {
 		CalendarField string `json:"calendarField"`
 		DateField     string `json:"dateField"`
 		Field         string `json:"field"`
+		WeekdayField  string `json:"weekdayField"`
 	} `json:"holidays"`
 	Relative *struct {
 		Via   string `json:"via"`
@@ -78,6 +79,9 @@ func recurrenceProblem(schema *ir.Schema, td *ir.TypeDef, config recurrenceConfi
 		if sqlutil.FieldNamed(td, h.Field) == nil {
 			return fmt.Sprintf("holidays.field %q is not a field of %s", h.Field, td.Name)
 		}
+		if why := weekdayFieldProblem(table, h.WeekdayField, h.DateField); why != "" {
+			return why
+		}
 	}
 	if rel := config.Relative; rel != nil {
 		var names []string
@@ -101,6 +105,26 @@ func recurrenceProblem(schema *ir.Schema, td *ir.TypeDef, config recurrenceConfi
 		if why := dateFieldProblem(schema.Types[rel.Type], rel.Field, "relative.field"); why != "" {
 			return why
 		}
+	}
+	return ""
+}
+
+// weekdayFieldProblem holds a holiday table's weekdayField (#729): a string
+// field of the table, whose rows with a weekday and no date close that day
+// every week, so the table's date field is nullable. "" with none given.
+func weekdayFieldProblem(table *ir.TypeDef, name, dateField string) string {
+	if name == "" {
+		return ""
+	}
+	fd := sqlutil.FieldNamed(table, name)
+	if fd == nil {
+		return fmt.Sprintf("holidays.weekdayField %q is not a field of %s", name, table.Name)
+	}
+	if fd.TypeRef.IsArray || fd.TypeRef.Name != "string" {
+		return fmt.Sprintf("holidays.weekdayField %q is a %s, and a weekday is a string (friday)", name, fd.TypeRef.Name)
+	}
+	if date := sqlutil.FieldNamed(table, dateField); date != nil && date.Required {
+		return fmt.Sprintf("holidays.dateField %q of %s is not nullable, and a row that names a weekday has no date; make it Nullable", dateField, table.Name)
 	}
 	return ""
 }

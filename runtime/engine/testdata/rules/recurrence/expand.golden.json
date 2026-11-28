@@ -752,6 +752,78 @@
       }
     },
     {
+      "name": "a holiday calendar whose weekend is Friday and Saturday (#729): its rows name the two weekdays and a date, and the weekdays close in place of weekendDays; the 15th of each month in Dubai moved after, so January's Friday and May's Saturday move to the Sunday after, and August's Sunday, a holiday, to the Monday",
+      "input": {
+        "anchor": "calendar",
+        "rule": "FREQ=MONTHLY;BYMONTHDAY=15",
+        "start": "2027-01-15T09:00",
+        "timeZone": "Asia/Dubai",
+        "adjust": "after",
+        "holidays": [
+          "friday",
+          "saturday",
+          "2027-08-15"
+        ],
+        "limit": 8
+      },
+      "output": {
+        "occurrences": [
+          {
+            "key": "2027-01-15T09:00",
+            "due": "2027-01-17T09:00",
+            "dueAt": 1800162000000,
+            "overdueAt": 1800162000000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-02-15T09:00",
+            "due": "2027-02-15T09:00",
+            "dueAt": 1802667600000,
+            "overdueAt": 1802667600000
+          },
+          {
+            "key": "2027-03-15T09:00",
+            "due": "2027-03-15T09:00",
+            "dueAt": 1805086800000,
+            "overdueAt": 1805086800000
+          },
+          {
+            "key": "2027-04-15T09:00",
+            "due": "2027-04-15T09:00",
+            "dueAt": 1807765200000,
+            "overdueAt": 1807765200000
+          },
+          {
+            "key": "2027-05-15T09:00",
+            "due": "2027-05-16T09:00",
+            "dueAt": 1810443600000,
+            "overdueAt": 1810443600000,
+            "shifted": "weekend"
+          },
+          {
+            "key": "2027-06-15T09:00",
+            "due": "2027-06-15T09:00",
+            "dueAt": 1813035600000,
+            "overdueAt": 1813035600000
+          },
+          {
+            "key": "2027-07-15T09:00",
+            "due": "2027-07-15T09:00",
+            "dueAt": 1815627600000,
+            "overdueAt": 1815627600000
+          },
+          {
+            "key": "2027-08-15T09:00",
+            "due": "2027-08-16T09:00",
+            "dueAt": 1818392400000,
+            "overdueAt": 1818392400000,
+            "shifted": "holiday"
+          }
+        ],
+        "more": true
+      }
+    },
+    {
       "name": "the limit, and more past it",
       "input": {
         "anchor": "calendar",

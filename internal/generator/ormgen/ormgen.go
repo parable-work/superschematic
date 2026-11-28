@@ -466,6 +466,12 @@ type Repository struct {
 	// the preconditions WithPreconditions names. False for any other table.
 	Preconditions bool
 
+	// CreateBehaviors are the uses of a table that composes behaviors whose
+	// behavior takes create parameters (#729), in the uses' order: its
+	// CreateOne takes CreateOptions, whose Behaviors name each by its
+	// member. None for any other table.
+	CreateBehaviors []RepositoryCreateBehavior
+
 	// DeadlineQueue is the deadline queue of a table whose behaviors arm
 	// deadlines (D103), its message's type (TicketDeadline), whose
 	// RunDeadline runs one; "" for any other table. NoUpsert is a table

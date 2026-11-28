@@ -775,8 +775,8 @@ export interface RecurrenceOn<T> {
   readonly adjust?: "none" | "before" | "after";
   /** The days a due date moves off; saturday and sunday when absent. */
   readonly weekendDays?: readonly RecurrenceWeekday[];
-  /** The holiday table (rows the app fills, each a date of a calendar) and this table's field that names a row's calendar. */
-  readonly holidays?: { readonly table: string; readonly calendarField: string; readonly dateField: string; readonly field: Extract<keyof T, string> };
+  /** The holiday table (rows the app fills, each a date of a calendar, or with weekdayField a weekday a row with no date closes every week, in place of weekendDays, #729) and this table's field that names a row's calendar. */
+  readonly holidays?: { readonly table: string; readonly calendarField: string; readonly dateField: string; readonly field: Extract<keyof T, string>; readonly weekdayField?: string };
   /** The relative anchor's date: this table's to-one relation, the type it points at, and that type's date field. */
   readonly relative?: { readonly via: Extract<keyof T, string>; readonly type: string; readonly field: string };
   /** How long before its due an occurrence opens (ISO 8601, P14D); with none it opens when the one before it falls due. */

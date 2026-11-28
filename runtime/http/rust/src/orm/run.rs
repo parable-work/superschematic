@@ -14,7 +14,8 @@ use serde_json::Value;
 
 use super::plan::{row_key_text, DeletePlan, Plan, Statement};
 use super::{
-    Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Dialect, Error,
+    Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, CreateOptions,
+    Dialect, Error,
     FindOptions, Found, MergeResult, PageOptions, RowPage, Table, UpsertManyOptions, UpsertOptions,
     UpsertStatus, Upserted, Values, WriteOptions,
 };
@@ -268,13 +269,38 @@ impl<C: Client> Runner<'_, C> {
     }
 
     pub(crate) async fn create_one(&self, input: &Values) -> Result<Values, Error> {
-        let created = if self.table.behaviors.is_some() {
-            let key = self
-                .client
-                .core_create(self.plan.core_create(input)?)
-                .await?;
+        self.create_one_with(input, &CreateOptions::default()).await
+    }
+
+    // create_one_with is create_one with each use's create parameters, by
+    // its member, which the core's command takes by use id (#729).
+    pub(crate) async fn create_one_with(
+        &self,
+        input: &Values,
+        options: &CreateOptions,
+    ) -> Result<Values, Error> {
+        let created = if let Some(behaviors) = &self.table.behaviors {
+            let mut create = self.plan.core_create(input)?;
+            for (member, entry) in &options.behaviors {
+                let Some(id) = behaviors.creates.get(member) else {
+                    return Err(Error::Invalid(format!(
+                        "create {}: behaviors.{member}: no behavior of {} takes create parameters under {member} (its members: {})",
+                        self.table.name,
+                        self.table.name,
+                        behaviors.creates.keys().cloned().collect::<Vec<_>>().join(", ")
+                    )));
+                };
+                create.params.insert(id.clone(), entry.clone());
+            }
+            let key = self.client.core_create(create).await?;
             self.read_back(&Value::String(key)).await?
         } else {
+            if !options.behaviors.is_empty() {
+                return Err(Error::Invalid(format!(
+                    "create {}: behaviors are a behavior table's create parameters (#729), and {} composes none",
+                    self.table.name, self.table.name
+                )));
+            }
             let statement = self.plan.create_one(input)?;
             self.query(&statement)
                 .await?

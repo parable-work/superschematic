@@ -2389,6 +2389,7 @@ impl<'a> Plan<'a> {
             fields: self.core_fields(&sealed),
             columns,
             caller: self.session.caller(),
+            params: Values::new(),
         })
     }
 

@@ -136,6 +136,11 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 			m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
 		}
 	}
+	// A relative recurrence's target trigger (#626): one update trigger.
+	for _, c := range out.TargetChangeTriggers {
+		t := c.SQLiteTrigger(qs)
+		m.Triggers = append(m.Triggers, &Trigger{Name: t.Name, Table: t.Table, Definition: t.Definition, Origin: c.Origin})
+	}
 	// A @stateMachine's guard (D118): one trigger, which holds the rule and
 	// refuses a move the machine does not list.
 	for _, g := range out.StateGuards {

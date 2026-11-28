@@ -85,12 +85,17 @@
             "minLength": 1
           },
           "dateField": {
-            "description": "The holiday table's date field: a Temporal.Date, or a string of a wall date.",
+            "description": "The holiday table's date field: a Temporal.Date, or a string of a wall date; nullable when weekdayField is given.",
             "type": "string",
             "minLength": 1
           },
           "field": {
             "description": "This table's field that names the calendar a row's due dates move off; a row with none moves off weekend days alone.",
+            "type": "string",
+            "minLength": 1
+          },
+          "weekdayField": {
+            "description": "The holiday table's string field that names a weekday (friday) on a row whose date is null: that day closes every week in the row's calendar. A calendar with one such row or more takes its weekday rows as its weekend, in place of weekendDays (#729).",
             "type": "string",
             "minLength": 1
           }
@@ -156,6 +161,67 @@
         "description": "The permission setRecurrence, skip and moveOne need; permission when absent.",
         "type": "string",
         "minLength": 1
+      }
+    }
+  },
+  "createParamsSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "recurrence": {
+        "description": "The row's recurrence from its create, held to setRecurrence's checks and permission and planned in the create's command (#729).",
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "anchor"
+        ],
+        "properties": {
+          "anchor": {
+            "description": "calendar, afterDone or relative.",
+            "enum": [
+              "calendar",
+              "afterDone",
+              "relative"
+            ]
+          },
+          "rule": {
+            "description": "The RFC 5545 RRULE of a calendar recurrence: FREQ=YEARLY;BYMONTH=10;BYMONTHDAY=31.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "start": {
+            "description": "A wall date or date-time: a calendar rule's start, or an afterDone recurrence's first due when nothing is done and its time of day.",
+            "type": "string",
+            "minLength": 10,
+            "maxLength": 19
+          },
+          "every": {
+            "description": "An ISO 8601 duration: an afterDone recurrence's interval after the last completion, or a relative one's between anniversaries of its date.",
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 32
+          },
+          "offset": {
+            "description": "An ISO 8601 duration, negative before: a relative recurrence's offset from its date (-P60D).",
+            "type": "string",
+            "minLength": 2,
+            "maxLength": 32
+          },
+          "timeZone": {
+            "description": "The IANA time zone it is read in; the config's, else UTC, when absent.",
+            "type": "string",
+            "minLength": 1
+          },
+          "adjust": {
+            "description": "How a due date on a weekend day or a holiday moves; the config's when absent.",
+            "enum": [
+              "none",
+              "before",
+              "after"
+            ]
+          }
+        }
       }
     }
   },

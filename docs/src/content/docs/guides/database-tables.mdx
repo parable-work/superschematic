@@ -4174,7 +4174,7 @@ export abstract class Filing
       timeZone: "Europe/London";
       horizonDays: 400;
       adjust: "after";
-      holidays: { table: "Holiday"; calendarField: "calendar"; dateField: "date"; field: "holidayCalendar" };
+      holidays: { table: "Holiday"; calendarField: "calendar"; dateField: "date"; field: "holidayCalendar"; weekdayField: "weekday" };
       relative: { via: "contract"; type: "Contract"; field: "endsOn" };
       opensBefore: "P14D";
       remindBefore: "P3D";
@@ -4204,8 +4204,8 @@ moves to the next business day.
 | `horizonDays` | how many days ahead the occurrences are kept; 400 when absent |
 | `historyDays` | how many days a finished occurrence stays after its due; 1100 when absent |
 | `adjust` | how a due date on a weekend day or a holiday moves: `before`, `after` or `none`; none when absent |
-| `weekendDays` | the days a due date moves off; `saturday` and `sunday` when absent |
-| `holidays` | `{ table, calendarField, dateField, field }`: the holiday table your app fills, and this table's field that names a row's calendar |
+| `weekendDays` | the days a due date moves off; `saturday` and `sunday` when absent, and a calendar's weekday rows in its place |
+| `holidays` | `{ table, calendarField, dateField, field, weekdayField? }`: the holiday table your app fills, this table's field that names a row's calendar, and the holiday table's string field that names a weekday on a row with no date (#729) |
 | `relative` | `{ via, type, field }`: the to-one relation, the table it points at, and that table's date field |
 | `opensBefore` | how long before its due an occurrence opens, a `Temporal.Period` (ISO 8601, `P14D`); with none it opens when the one before it falls due |
 | `remindBefore` | how long before its due an occurrence reminds, a `Temporal.Period` |
@@ -4238,18 +4238,32 @@ the read-only `listOccurrences({ from?, to?, states? })`.
   have not opened. Open and finished ones stay as they are; `kept` names
   the open ones.
 - **A relative date that moves.** A `relative` recurrence reads its date
-  from another table's row, and a write of that row is not one the
-  recurrence hears. It plans again at its next deadline, or at once when
-  you call `setRecurrence` with the rule the row already holds: after you
-  change a contract's `endsOn`, set each of its filings' recurrence again.
-  The call answers `unchanged: true` when the date is where the plan
-  last read it.
+  from another table's row. The build gives that table a trigger on the
+  date field (#626): an update that moves `endsOn`, whoever makes it,
+  writes a change of each filing whose `contract` names the row on the
+  filing's change queue, and the behavior worker plans the filing again,
+  as `setRecurrence` with the rule it holds does. The recurrence stays as
+  it was set, an open occurrence stays, and a moved one keeps its date.
+  `setRecurrence` with the same rule still plans again at once, and
+  answers `unchanged: true` when the date is where the plan last read it.
+- **A recurrence at create.** A create may give the row its recurrence
+  (#729): `orm.filing.createOne({ title }, { behaviors: { recurrence: {
+  recurrence: { anchor: "calendar", rule: "FREQ=MONTHLY", start } } } })`
+  in TypeScript, `CreateOne(ctx, &in, orm.CreateOptions{Behaviors:
+  map[string]any{"recurrence": orm.FilingRecurrenceCreateParams{...}}})`
+  in Go, and `create_one_with(&input, &CreateOptions { behaviors })` in
+  Rust. It is held to `setRecurrence`'s checks and `managePermission`,
+  and the row is inserted with its occurrences and its deadlines armed in
+  one command. A create route does not take it yet.
 - **What completed it.** `completedBy` is `{ table, key }`, any row as a
   reference names one; the principal that completed it is recorded too.
   An `afterDone` recurrence dates its next occurrence from the completion.
 - **Holidays.** Your app fills the holiday table. Core ships no holidays:
   which days close is data, and which calendar applies is a field of the
-  row.
+  row. A row with a `weekdayField` (`friday`) and no date closes that day
+  every week, and a calendar with one such row or more takes its weekday
+  rows as its weekend in place of `weekendDays`: a calendar closed on
+  Friday and Saturday moves a Saturday due date after to the Sunday.
 - **Dates in every language.** The core expands each rule. TypeScript
   (`RulesCore.expand`), Go (`rules.Expand`) and Rust
   (`recurrence::expand`) read one golden file of expansions, so they return

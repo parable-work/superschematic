@@ -205,6 +205,17 @@ export interface {{.Type}}Preconditions {
 }
 {{- end}}
 
+{{- if .CreateBehaviors}}
+
+/** What a create of {{.Type}} gives its behaviors (#729): each use's create parameters by its member, which the behaviors' core checks and each use's initializer runs in the create's command. createOne takes it in its options ({ behaviors }). */
+export interface {{.Type}}CreateBehaviors {
+{{- range .CreateBehaviors}}
+  /** The create parameters of {{if eq .Member .ID}}{{.ID}}, a {{.Behavior}}{{else}}the {{.Behavior}} {{$t.Type}} implements{{end}}. */
+  readonly {{.Member}}?: {{.Type}};
+{{- end}}
+}
+{{- end}}
+
 {{- if .Uses}}
 
 /** The behaviors of {{.Type}} (D103): each use's operations, under its member, each run through the behaviors' core on the row whose key it takes{{if .TableOperations}}, or on the table as a whole for one that takes none (D104){{end}}. */
@@ -253,8 +264,9 @@ export type {{.Type}}Repository = {{if .NoUpserts}}WithoutUpserts<{{end}}{{if .S
   {{.Type}}UniqueKey,
   {{.KeyType}},
   {{.Type}}PageKey,
-  {{.Type}}Relations{{if .Preconditions}},
-  {{.Type}}Preconditions{{end}}
+  {{.Type}}Relations{{if or .Preconditions .CreateBehaviors}},
+  {{if .Preconditions}}{{.Type}}Preconditions{{else}}Readonly<Record<string, unknown>>{{end}}{{end}}{{if .CreateBehaviors}},
+  {{.Type}}CreateBehaviors{{end}}
 >{{if .NoUpserts}}>{{end}}{{if .Encrypted}} & EncryptedRepository{{end}}{{if .VectorFields}} &
   VectorRepository<{{.Type}}Row, {{.Type}}Filter, {{.Type}}VectorField, {{.KeyType}}>{{end}}{{if .Merge}} & MergeableRepository<{{.KeyType}}>{{end}}{{if .Uses}} & {{.Type}}Uses{{end}}{{if .Deadlines}} & BehaviorDeadlines<{{.KeyType}}>{{end}}{{if .Changes}} & BehaviorChanges<{{.KeyType}}>{{end}}{{if .Events}} & BehaviorEvents<{{.KeyType}}>{{end}};
 {{- end}}

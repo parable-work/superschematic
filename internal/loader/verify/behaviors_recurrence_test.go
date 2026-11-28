@@ -13,7 +13,7 @@ import (
 // config, its calendar sources as given.
 func recurrenceSchema(config string, sources ...ir.CalendarSourceDef) (*ir.Schema, *ir.TypeDef) {
 	field := func(name, typ string) *ir.FieldDef { return &ir.FieldDef{Name: name, TypeRef: ir.TypeRef{Name: typ}} }
-	holiday := &ir.TypeDef{Name: "Holiday", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{field("id", "Identity.UUID"), field("calendar", "string"), field("date", "Temporal.Date")}}
+	holiday := &ir.TypeDef{Name: "Holiday", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{field("id", "Identity.UUID"), field("calendar", "string"), field("date", "Temporal.Date"), field("weekday", "string"), {Name: "observed", TypeRef: ir.TypeRef{Name: "Temporal.Date"}, Required: true}}}
 	agreement := &ir.TypeDef{Name: "Agreement", Role: ir.RoleDBTable, Fields: []*ir.FieldDef{field("id", "Identity.UUID"), field("endsOn", "Temporal.Date"), field("name", "string")}}
 	duty := &ir.TypeDef{
 		Name: "Duty", Role: ir.RoleDBTable,
@@ -43,6 +43,10 @@ func TestRecurrenceConfigProblems(t *testing.T) {
 	if why := recurrenceProblemOf(`{"anchors": ["calendar", "relative"], ` + holidays + `, ` + relative + `}`); why != "" {
 		t.Fatalf("a config the schema takes: %s", why)
 	}
+	// A calendar's weekday rows (#729): a string field, and a nullable date.
+	if why := recurrenceProblemOf(`{"anchors": ["calendar"], "holidays": {"table": "Holiday", "calendarField": "calendar", "dateField": "date", "field": "holidayCalendar", "weekdayField": "weekday"}}`); why != "" {
+		t.Fatalf("a config with weekday rows the schema takes: %s", why)
+	}
 	for _, tc := range []struct{ config, want string }{
 		{`{"anchors": ["relative"]}`, "the relative anchor needs relative"},
 		{`{"anchors": ["calendar"], ` + relative + `}`, "anchors does not list relative"},
@@ -53,6 +57,9 @@ func TestRecurrenceConfigProblems(t *testing.T) {
 		{`{"anchors": ["relative"], "relative": {"via": "title", "type": "Agreement", "field": "endsOn"}}`, `relative.via "title" is not a to-one relation of Duty`},
 		{`{"anchors": ["relative"], "relative": {"via": "agreement", "type": "Contract", "field": "endsOn"}}`, `points at Agreement, and relative.type is Contract`},
 		{`{"anchors": ["relative"], "relative": {"via": "agreement", "type": "Agreement", "field": "id"}}`, `relative.field "id" is a Identity.UUID`},
+		{`{"anchors": ["calendar"], "holidays": {"table": "Holiday", "calendarField": "calendar", "dateField": "date", "field": "holidayCalendar", "weekdayField": "dayOfWeek"}}`, `holidays.weekdayField "dayOfWeek" is not a field of Holiday`},
+		{`{"anchors": ["calendar"], "holidays": {"table": "Holiday", "calendarField": "calendar", "dateField": "date", "field": "holidayCalendar", "weekdayField": "observed"}}`, `holidays.weekdayField "observed" is a Temporal.Date, and a weekday is a string`},
+		{`{"anchors": ["calendar"], "holidays": {"table": "Holiday", "calendarField": "calendar", "dateField": "observed", "field": "holidayCalendar", "weekdayField": "weekday"}}`, `holidays.dateField "observed" of Holiday is not nullable`},
 	} {
 		if why := recurrenceProblemOf(tc.config); !strings.Contains(why, tc.want) {
 			t.Errorf("%s: %q, want one with %q", tc.config, why, tc.want)

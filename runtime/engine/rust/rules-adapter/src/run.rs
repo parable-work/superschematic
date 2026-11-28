@@ -1808,7 +1808,7 @@ fn fences_of<S: Store>(
                 };
                 let mut values = vec![key_value(table, key)?];
                 let at = match row {
-                    Some(row) => {
+                    Some(row) if !table.version.is_empty() => {
                         values.push(Bind::Int(row.version));
                         format!(
                             " AND {} = {}",
@@ -1816,7 +1816,7 @@ fn fences_of<S: Store>(
                             placeholder(dialect, 2)
                         )
                     }
-                    None => String::new(),
+                    _ => String::new(),
                 };
                 let found = format!(
                     "SELECT 1 FROM {} WHERE {} = {}{at}{}",
@@ -1959,7 +1959,7 @@ async fn statements_of<S: Store>(
                 }
                 // The version moves on with every write, the core's own:
                 // on Postgres @optimistic's trigger sets it to the same value.
-                sets.push(next_version(table));
+                sets.extend(next_version(table));
                 held_write(
                     &mut binder,
                     table,
@@ -1982,7 +1982,7 @@ async fn statements_of<S: Store>(
                             format!("{} = {}", quote(column), binder.bind(Bind::of_json(value)))
                         })
                         .collect();
-                    sets.push(next_version(table));
+                    sets.extend(next_version(table));
                     held_write(
                         &mut binder,
                         table,
@@ -2754,19 +2754,31 @@ fn held_write(
     head: &str,
 ) -> Result<Statement, Error> {
     let at_key = binder.bind(key_value(table, key)?);
-    let at_version = binder.bind(Bind::Int(expected));
+    // A table the layout holds read-only (D152) has no version column:
+    // its row is held by its key alone.
+    let at_version = if table.version.is_empty() {
+        String::new()
+    } else {
+        format!(" AND {} = {}", quote(&table.version), binder.bind(Bind::Int(expected)))
+    };
     let text = format!(
-        "{head} WHERE {} = {at_key} AND {} = {at_version}{}",
+        "{head} WHERE {} = {at_key}{at_version}{}",
         quote(&table.key.column),
-        quote(&table.version),
         live_and(table)
     );
     Ok(Statement::write(text, std::mem::take(&mut binder.values)))
 }
 
-fn next_version(table: &Table) -> String {
+// next_version is the set that moves a row's version on with a write; none
+// for a table the layout holds read-only (D152), which composes no behavior
+// and has no version column, whose repository's write runs through the
+// core all the same.
+fn next_version(table: &Table) -> Option<String> {
+    if table.version.is_empty() {
+        return None;
+    }
     let version = quote(&table.version);
-    format!("{version} = {version} + 1")
+    Some(format!("{version} = {version} + 1"))
 }
 
 /// The own columns a write sets: the caller's encoded columns for the

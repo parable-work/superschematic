@@ -624,6 +624,7 @@ export type {
   VectorMetric,
   VectorRepository,
   WriteOptions,
+  CreateOptions,
 } from './orm.js';
 // The system actor an ORM's asSystem() acts as, for a job's or a worker's
 // writes (D87).

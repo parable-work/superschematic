@@ -33,6 +33,9 @@ var recurrenceRustCases = []string{
 	"without filings.manage setRecurrence is 403 and a rule that is no RRULE is 400",
 	"the calendar merges a contract end date and a filing occurrences, each dated as its source says",
 	"a raw SQL write of a filing holiday calendar is heard by the worker, which plans again",
+	"a recurrence given at create is set in the create, its occurrences planned and its deadlines armed, and held to filings.manage",
+	"a holiday calendar whose weekend is Friday and Saturday moves a due date off Saturday to the Sunday",
+	"a write of a contract end date replans the relative recurrence of its filings with no call of the app",
 }
 
 // TestRustRecurrenceEndToEnd builds fixture-recurrence-db's Rust types and

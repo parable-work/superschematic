@@ -2921,7 +2921,7 @@
                         "type": "string"
                       },
                       "dateField": {
-                        "description": "The holiday table's date field: a Temporal.Date, or a string of a wall date.",
+                        "description": "The holiday table's date field: a Temporal.Date, or a string of a wall date; nullable when weekdayField is given.",
                         "minLength": 1,
                         "type": "string"
                       },
@@ -2932,6 +2932,11 @@
                       },
                       "table": {
                         "description": "The holiday table's type.",
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "weekdayField": {
+                        "description": "The holiday table's string field that names a weekday (friday) on a row whose date is null: that day closes every week in the row's calendar. A calendar with one such row or more takes its weekday rows as its weekend, in place of weekendDays (#729).",
                         "minLength": 1,
                         "type": "string"
                       }

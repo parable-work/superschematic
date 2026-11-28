@@ -49,7 +49,7 @@ interface RecurrenceConfig {
     calendarField: Named;
     /**
      * The holiday table's date field: a Temporal.Date, or a string of a wall
-     * date.
+     * date; nullable when weekdayField is given.
      */
     dateField: Named;
     /**
@@ -57,6 +57,13 @@ interface RecurrenceConfig {
      * a row with none moves off weekend days alone.
      */
     field: Named;
+    /**
+     * The holiday table's string field that names a weekday (friday) on a
+     * row whose date is null: that day closes every week in the row's
+     * calendar. A calendar with one such row or more takes its weekday rows
+     * as its weekend, in place of weekendDays (#729).
+     */
+    weekdayField?: Named;
   };
   /**
    * Where the relative anchor's date is: a to-one relation of this table and
@@ -129,6 +136,14 @@ interface SetRecurrenceParams {
    * absent.
    */
   adjust?: "none" | "before" | "after";
+}
+
+interface RecurrenceCreateParams {
+  /**
+   * The row's recurrence from its create, held to setRecurrence's checks and
+   * permission and planned in the create's command (#729).
+   */
+  recurrence?: SetRecurrenceParams;
 }
 
 interface SetRecurrenceResult {
@@ -497,6 +512,14 @@ export abstract class Recurrence<C extends RecurrenceConfig> {
    * every state, at most 500; with states, only those.
    */
   abstract listOccurrences(params: ListOccurrencesParams): ListOccurrencesResult;
+
+  /**
+   * What a create gives the behavior: the row's recurrence, set as
+   * setRecurrence sets it, with its checks and its permission, so the row is
+   * inserted with its occurrences planned and its deadlines armed, in one
+   * command and one version (#729).
+   */
+  abstract create(params: RecurrenceCreateParams): void;
 
   /**
    * An occurrence opened: it is due to be done from now on, and the notifier
