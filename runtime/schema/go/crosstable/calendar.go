@@ -174,9 +174,14 @@ func heldConditions(ctx context.Context, h Host, typeName string, table Calendar
 		if source.OwnerUUID {
 			subject = rowrefs.UUIDToDB(subject)
 		}
-		if subject == "" {
+		switch {
+		case subject == "":
 			out = append(out, "FALSE")
-		} else {
+		case onSQLite(h):
+			// On SQLite a UUID is its hyphenated text (D182).
+			*args = append(*args, subject)
+			out = append(out, fmt.Sprintf("%s = ?%d", source.Owner, len(*args)))
+		default:
 			*args = append(*args, subject)
 			cast := ""
 			if source.OwnerUUID {
@@ -186,6 +191,14 @@ func heldConditions(ctx context.Context, h Host, typeName string, table Calendar
 		}
 	}
 	return append(out, h.Conditions(ctx, typeName, args, len(*args))...)
+}
+
+// asText is expr as text, in Postgres's words or SQLite's.
+func asText(sqlite bool, expr string) string {
+	if sqlite {
+		return "CAST(" + expr + " AS TEXT)"
+	}
+	return expr + "::text"
 }
 
 func where(conditions []string) string {
@@ -225,24 +238,34 @@ func rowsOf(ctx context.Context, h Host, typeName string, table CalendarTable, s
 	if source.Field == "" {
 		return nil, false, fmt.Errorf("crosstable: %s's calendar source %s dates neither a field nor occurrences", typeName, source.Name)
 	}
+	sqlite := onSQLite(h)
 	var args []any
-	if source.Timestamp {
-		args = append(args, from, to)
-	} else {
+	switch {
+	case !source.Timestamp:
 		args = append(args, from.UTC().Format("2006-01-02"), to.UTC().Format("2006-01-02"))
+	case sqlite:
+		// On SQLite a time is its RFC 3339 text, which compares in order
+		// (D182), and a date its ISO text.
+		args = append(args, sqliteTime(from), sqliteTime(to))
+	default:
+		args = append(args, from, to)
 	}
-	cast := ""
-	if !source.Timestamp {
-		cast = "::date"
+	var conditions []string
+	switch {
+	case sqlite:
+		conditions = []string{source.Field + " >= ?1", source.Field + " < ?2"}
+	case source.Timestamp:
+		conditions = []string{source.Field + " >= $1", source.Field + " < $2"}
+	default:
+		conditions = []string{source.Field + " >= $1::date", source.Field + " < $2::date"}
 	}
-	conditions := []string{fmt.Sprintf("%s >= $1%s", source.Field, cast), fmt.Sprintf("%s < $2%s", source.Field, cast)}
 	conditions = append(conditions, heldConditions(ctx, h, typeName, table, source, mine, caller, &args)...)
 	end := "NULL"
 	if source.End != "" {
 		end = source.End
 	}
-	sql := fmt.Sprintf("SELECT %s::text AS key, %s::text AS title, %s AS start, %s AS finish FROM %s%s ORDER BY %s, %s LIMIT %d",
-		table.Key, source.Title, source.Field, end, table.Table, where(conditions), source.Field, table.Key, limit+1)
+	sql := fmt.Sprintf("SELECT %s AS key, %s AS title, %s AS start, %s AS finish FROM %s%s ORDER BY %s, %s LIMIT %d",
+		asText(sqlite, table.Key), asText(sqlite, source.Title), source.Field, end, table.Table, where(conditions), source.Field, table.Key, limit+1)
 	rows, err := h.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, false, err
@@ -268,12 +291,21 @@ func rowsOf(ctx context.Context, h Host, typeName string, table CalendarTable, s
 // of the rows it read.
 func occurrencesOf(ctx context.Context, h Host, typeName string, table CalendarTable, source CalendarSource, from, to time.Time, limit int, mine bool, caller Caller) ([]CalendarEntry, bool, error) {
 	occ := source.Occurrences
-	due := "NULL::text"
+	sqlite := onSQLite(h)
+	due := "NULL"
 	if occ.Due != "" {
-		due = occ.Due + "::text"
+		due = occ.Due
 	}
-	rows, err := h.Query(h.System(ctx), fmt.Sprintf("SELECT %s::text AS row, %s::text AS key, %s AS due, %s AS due_at, %s::text AS state FROM %s WHERE %s >= $1 AND %s < $2 ORDER BY %s, %s LIMIT %d",
-		occ.Row, occ.Key, due, occ.DueAt, occ.State, occ.Table, occ.DueAt, occ.DueAt, occ.DueAt, occ.Key, limit+1), from, to)
+	window := []any{from, to}
+	p1, p2 := "$1", "$2"
+	if sqlite {
+		// On SQLite a time is its RFC 3339 text, which compares in order
+		// (D182), as the TypeScript calendar binds it.
+		window = []any{sqliteTime(from), sqliteTime(to)}
+		p1, p2 = "?1", "?2"
+	}
+	rows, err := h.Query(h.System(ctx), fmt.Sprintf("SELECT %s AS row, %s AS key, %s AS due, %s AS due_at, %s AS state FROM %s WHERE %s >= %s AND %s < %s ORDER BY %s, %s LIMIT %d",
+		asText(sqlite, occ.Row), asText(sqlite, occ.Key), asText(sqlite, due), occ.DueAt, asText(sqlite, occ.State), occ.Table, occ.DueAt, p1, occ.DueAt, p2, occ.DueAt, occ.Key, limit+1), window...)
 	if err != nil {
 		return nil, false, err
 	}
@@ -287,10 +319,22 @@ func occurrencesOf(ctx context.Context, h Host, typeName string, table CalendarT
 	}
 	titles := map[string]string{}
 	if len(keys) > 0 {
-		args := []any{keys}
-		conditions := []string{fmt.Sprintf("%s = ANY($1::%s[])", table.Key, table.KeyType)}
+		var args []any
+		var conditions []string
+		if sqlite {
+			// One parameter a key, as SQLite has no arrays.
+			placeholders := make([]string, len(keys))
+			for i, key := range keys {
+				args = append(args, key)
+				placeholders[i] = fmt.Sprintf("?%d", i+1)
+			}
+			conditions = []string{fmt.Sprintf("%s IN (%s)", table.Key, strings.Join(placeholders, ", "))}
+		} else {
+			args = []any{keys}
+			conditions = []string{fmt.Sprintf("%s = ANY($1::%s[])", table.Key, table.KeyType)}
+		}
 		conditions = append(conditions, heldConditions(ctx, h, typeName, table, source, mine, caller, &args)...)
-		parents, err := h.Query(ctx, fmt.Sprintf("SELECT %s::text AS key, %s::text AS title FROM %s%s", table.Key, source.Title, table.Table, where(conditions)), args...)
+		parents, err := h.Query(ctx, fmt.Sprintf("SELECT %s AS key, %s AS title FROM %s%s", asText(sqlite, table.Key), asText(sqlite, source.Title), table.Table, where(conditions)), args...)
 		if err != nil {
 			return nil, false, err
 		}

@@ -65,6 +65,11 @@ func (h notifierHost) orchestrationRepositories() orchestrationRepositories {
 	if h.tx != nil {
 		return h.tx
 	}
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.lite
+	}
+{{- end }}
 	return h.db
 }
 
@@ -98,6 +103,11 @@ func (h notifierHost) Operation(ctx context.Context, typeName, key, use, operati
 	if len(params) == 0 {
 		given = nil
 	}
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.sqliteOperation(ctx, typeName, key, use, operation, given)
+	}
+{{- end }}
 	repositories := h.orchestrationRepositories()
 	switch typeName {
 {{- range .Orchestration.Tables }}
@@ -163,6 +173,11 @@ func (h notifierHost) orchestrationGrants() grantRepositories {
 	if h.tx != nil {
 		return h.tx
 	}
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.lite
+	}
+{{- end }}
 	return h.db
 }
 
@@ -225,6 +240,11 @@ func (h notifierHost) Role(ctx context.Context, name string) (orchestration.Role
 }
 
 func (h notifierHost) AuthenticateGrant(ctx context.Context, token string, now time.Time) (access.GrantAuthentication, error) {
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.lite.AuthenticateGrant(ctx, token, now)
+	}
+{{- end }}
 	return h.db.AuthenticateGrant(ctx, token, now)
 }
 {{- else }}
@@ -261,6 +281,11 @@ func (h notifierHost) References() *rowrefs.References {
 	if h.tx != nil {
 		return h.tx.References()
 	}
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.lite.References()
+	}
+{{- end }}
 	return h.db.References()
 {{- else }}
 	return nil
@@ -272,6 +297,11 @@ func (h notifierHost) Attachments() *rowrefs.Attachments {
 	if h.tx != nil {
 		return h.tx.Attachments()
 	}
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.lite.Attachments()
+	}
+{{- end }}
 	return h.db.Attachments()
 {{- else }}
 	return nil
@@ -280,6 +310,11 @@ func (h notifierHost) Attachments() *rowrefs.Attachments {
 
 func (h notifierHost) CrossTables() crosstable.Host {
 {{- if .Orchestration.CrossTables }}
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.lite.CrossTables()
+	}
+{{- end }}
 	return h.db.CrossTables()
 {{- else }}
 	return nil
@@ -287,6 +322,11 @@ func (h notifierHost) CrossTables() crosstable.Host {
 }
 
 func (h notifierHost) EnqueueOn(ctx context.Context, queue string, message json.RawMessage, delay time.Duration) error {
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.sqliteEnqueueOn(ctx, queue, message, delay)
+	}
+{{- end }}
 	switch queue {
 {{- with .Orchestration.RunRequests }}
 	case orchestration.RunRequests:
@@ -315,6 +355,11 @@ func (h notifierHost) EnqueueOn(ctx context.Context, queue string, message json.
 }
 
 func (h notifierHost) QueueOf(queue string) orchestration.Queue {
+{{- if .SQLite }}
+	if h.lite != nil {
+		return h.sqliteQueueOf(queue)
+	}
+{{- end }}
 	switch queue {
 {{- with .Orchestration.RunRequests }}
 	case orchestration.RunRequests:
@@ -328,24 +373,12 @@ func (h notifierHost) QueueOf(queue string) orchestration.Queue {
 	return nil
 }
 
-// orchestrationClaims is a generated queue as the orchestration claims it.
-type orchestrationClaims[C any] interface {
-	Claim(ctx context.Context, n int, lease time.Duration) ([]C, error)
-	Complete(ctx context.Context, id, token string) error
-	Fail(ctx context.Context, id, token, cause string) (bool, error)
-	Extend(ctx context.Context, id, token string, lease time.Duration) error
-	Release(ctx context.Context, id, token string) error
-	Prune(ctx context.Context, limit int) (int, error)
-	Slot(ctx context.Context, slots int) (release func(), ok bool, err error)
-	NextDue(ctx context.Context) (time.Duration, bool, error)
-}
-
 // orchestrationQueue is a queue of messages of type M, claimed as C, with
 // each message as its JSON.
 type orchestrationQueue[M any, C any] struct {
 	name    string
 	lease   time.Duration
-	queue   orchestrationClaims[C]
+	queue   notifierClaims[C]
 	message func(C) (string, string, int, M)
 }
 

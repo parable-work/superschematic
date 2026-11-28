@@ -14,9 +14,9 @@ person who sent it.
 
 | Built | Not built yet |
 | --- | --- |
-| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
+| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
 | the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
-| the same notifier in the Go runtime, on Postgres, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | |
+| the same notifier in the Go runtime, on Postgres and SQLite, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | the same generated over a database that lists `sqlite` first (#717) |
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties; a generated TypeScript server that builds the notifier into its `Deps`, mounts the relays' callbacks and the inbox, and drains the dispatch queue ([the generated server](#what-the-generated-server-wires)) | the same in a generated Go or Rust server |
 | the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
@@ -399,3 +399,16 @@ and `/status`, outside it, `/webhooks/sms` for slot `SMS`. A `@worker` of
 the dispatch queue is the notifier's, and the implementation has no
 method for it. [The generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)
 lists the whole wiring.
+
+On SQLite the Go runtime runs the same notifier (#618), as the TypeScript one
+does (D189). `(*SQLiteDatabase).Notifications()` is its host over the SQLite file,
+and the runtime writes its statements over its own tables in SQLite's
+words: a parameter `?n`, a list read through `json_each`, a time as RFC
+3339 text, each cell read back as the Postgres driver reads its column
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). Its
+`Raise` enqueues in the caller's `*SQLiteTx`, so an event commits with
+the change, and `WorkerQueue()` claims the dispatch queue on SQLite, which
+has no slots and no next due time (D145). The wall time of quiet hours
+and digests is read from Go's zone database there, which the runtime
+carries. The generated server does not wire it over a database that lists
+`sqlite` first yet (#717): the implementation builds it over `Deps.DB`.

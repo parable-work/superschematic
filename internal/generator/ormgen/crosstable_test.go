@@ -13,8 +13,13 @@ import (
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
+// crossTablesOnSQLite are the fixtures whose DB service lists the sqlite
+// dialect, whose ORM holds the reads across tables on SQLite too (#615),
+// and the notifier, the parties and the agents (#618).
+var crossTablesOnSQLite = map[string]bool{"fixture-recurrence-db": true, "fixture-search-db": true, "fixture-notifications-db": true, "fixture-parties-db": true, "fixture-agent-runs-db": true}
+
 // crossTablesOutput is the ORM of svc, written, and the directory it is
-// in.
+// in; on SQLite too for a fixture of crossTablesOnSQLite.
 func crossTablesOutput(t *testing.T, svc string) (*ORMOutput, string) {
 	t.Helper()
 	reg := registry.New(naming.Default())
@@ -28,6 +33,7 @@ func crossTablesOutput(t *testing.T, svc string) (*ORMOutput, string) {
 		TypesModule: "example.com/schemas/types/go/" + svc,
 		Registry:    reg,
 		Clock:       codegen.FixedClock(time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)),
+		SQLite:      crossTablesOnSQLite[svc],
 	})
 	if err != nil {
 		t.Fatalf("generate %s: %v", svc, err)
@@ -43,7 +49,9 @@ func crossTablesOutput(t *testing.T, svc string) (*ORMOutput, string) {
 // calendar sources of fixture-recurrence-db (a contract's end date and a
 // filing's occurrences) and fixture-access-go-db (a document's day, held
 // to its audience, with the grants a feed is), and fixture-search-db's
-// search index, its definitions tsgen's, member for member. A database
+// search index, its definitions tsgen's, member for member; the two that
+// list sqlite hold the SQLite database's CrossTables too, its search
+// definition tsgen's on SQLite (#615). A database
 // with neither writes no crosstable.go, and requires the schema runtime
 // for nothing else. Regenerate with
 // go test ./internal/generator/ormgen -run TestWriteORMGoldenCrossTables -update

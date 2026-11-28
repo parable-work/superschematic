@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
@@ -104,6 +103,7 @@ func orchestrationOf(schema *ir.Schema, tables []sqlutil.TableModel, repositorie
 	for i := range tables {
 		byType[tables[i].Type] = &tables[i]
 	}
+	sqlite := output.SQLite
 	defs := orchestrationDefinitions{Parts: map[string]notifierPartDef{}, Parties: map[string]orchestrationPartyDef{}, Tables: map[string]orchestrationTableDef{}}
 	model := &OrchestrationModel{
 		Grants:      output.Access != nil && output.Access.Grants != "",
@@ -156,7 +156,7 @@ func orchestrationOf(schema *ir.Schema, tables []sqlutil.TableModel, repositorie
 				if c.Field == "" {
 					continue
 				}
-				columns[c.Field] = notifierColumnDef{Name: c.Quoted, UUID: strings.EqualFold(c.Type, "uuid")}
+				columns[c.Field] = notifierColumnOf(c, sqlite)
 			}
 			if len(columns) == 0 {
 				return nil, fmt.Errorf("ormgen: the %s part on %s: its table has no columns", part, td.Name)

@@ -1062,7 +1062,12 @@ func (r *NoteRepository) CreateOne(ctx context.Context, input *types.Note) (*typ
 	fields = append(fields, `audience`)
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.Audience)
+	// An unset enum takes its schema default; "" is never a member.
+	if input.Audience == "" {
+		values = append(values, string("everyone"))
+	} else {
+		values = append(values, input.Audience)
+	}
 	// Optional field: audienceNamed - only add if set
 	{
 		if !reflect.ValueOf(input.AudienceNamed).IsZero() {
@@ -1076,7 +1081,12 @@ func (r *NoteRepository) CreateOne(ctx context.Context, input *types.Note) (*typ
 	fields = append(fields, `agent_access`)
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.AgentAccess)
+	// An unset enum takes its schema default; "" is never a member.
+	if input.AgentAccess == "" {
+		values = append(values, string("followRole"))
+	} else {
+		values = append(values, input.AgentAccess)
+	}
 	// Optional field: effectiveAudience - only add if set
 	{
 		if !reflect.ValueOf(input.EffectiveAudience).IsZero() {
@@ -1090,7 +1100,12 @@ func (r *NoteRepository) CreateOne(ctx context.Context, input *types.Note) (*typ
 	fields = append(fields, `effective_agents`)
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.EffectiveAgents)
+	// An unset enum takes its schema default; "" is never a member.
+	if input.EffectiveAgents == "" {
+		values = append(values, string("followRole"))
+	} else {
+		values = append(values, input.EffectiveAgents)
+	}
 
 	// Handle relationship foreign key columns
 
@@ -1345,7 +1360,12 @@ func (r *NoteRepository) upsertRow(ctx context.Context, input *types.Note, on No
 	fields = append(fields, `audience`)
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.Audience)
+	// An unset enum takes its schema default; "" is never a member.
+	if input.Audience == "" {
+		values = append(values, string("everyone"))
+	} else {
+		values = append(values, input.Audience)
+	}
 	// Optional field: audienceNamed - only add if set
 	{
 		if !reflect.ValueOf(input.AudienceNamed).IsZero() {
@@ -1359,7 +1379,12 @@ func (r *NoteRepository) upsertRow(ctx context.Context, input *types.Note, on No
 	fields = append(fields, `agent_access`)
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.AgentAccess)
+	// An unset enum takes its schema default; "" is never a member.
+	if input.AgentAccess == "" {
+		values = append(values, string("followRole"))
+	} else {
+		values = append(values, input.AgentAccess)
+	}
 	// Optional field: effectiveAudience - only add if set
 	{
 		if !reflect.ValueOf(input.EffectiveAudience).IsZero() {
@@ -1373,7 +1398,12 @@ func (r *NoteRepository) upsertRow(ctx context.Context, input *types.Note, on No
 	fields = append(fields, `effective_agents`)
 	paramNum++
 	placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
-	values = append(values, input.EffectiveAgents)
+	// An unset enum takes its schema default; "" is never a member.
+	if input.EffectiveAgents == "" {
+		values = append(values, string("followRole"))
+	} else {
+		values = append(values, input.EffectiveAgents)
+	}
 
 	// Handle relationship foreign key columns
 
@@ -1636,7 +1666,11 @@ func (r *NoteRepository) upsertBatches(ctx context.Context, inputs []*types.Note
 			// Required field: audience
 			{
 				cell := batchInsertCell{column: `audience`, set: true}
+				// An unset enum takes its schema default; "" is never a member.
 				cell.value = input.Audience
+				if input.Audience == "" {
+					cell.value = string("everyone")
+				}
 				row = append(row, cell)
 			}
 			// Optional field: audienceNamed
@@ -1651,7 +1685,11 @@ func (r *NoteRepository) upsertBatches(ctx context.Context, inputs []*types.Note
 			// Required field: agentAccess
 			{
 				cell := batchInsertCell{column: `agent_access`, set: true}
+				// An unset enum takes its schema default; "" is never a member.
 				cell.value = input.AgentAccess
+				if input.AgentAccess == "" {
+					cell.value = string("followRole")
+				}
 				row = append(row, cell)
 			}
 			// Optional field: effectiveAudience
@@ -1666,7 +1704,11 @@ func (r *NoteRepository) upsertBatches(ctx context.Context, inputs []*types.Note
 			// Required field: effectiveAgents
 			{
 				cell := batchInsertCell{column: `effective_agents`, set: true}
+				// An unset enum takes its schema default; "" is never a member.
 				cell.value = input.EffectiveAgents
+				if input.EffectiveAgents == "" {
+					cell.value = string("followRole")
+				}
 				row = append(row, cell)
 			}
 
@@ -1904,7 +1946,11 @@ func (r *NoteRepository) CreateMany(ctx context.Context, inputs []*types.Note) (
 		// Required field: audience
 		{
 			cell := batchInsertCell{column: `audience`, set: true}
+			// An unset enum takes its schema default; "" is never a member.
 			cell.value = input.Audience
+			if input.Audience == "" {
+				cell.value = string("everyone")
+			}
 			row = append(row, cell)
 		}
 		// Optional field: audienceNamed
@@ -1919,7 +1965,11 @@ func (r *NoteRepository) CreateMany(ctx context.Context, inputs []*types.Note) (
 		// Required field: agentAccess
 		{
 			cell := batchInsertCell{column: `agent_access`, set: true}
+			// An unset enum takes its schema default; "" is never a member.
 			cell.value = input.AgentAccess
+			if input.AgentAccess == "" {
+				cell.value = string("followRole")
+			}
 			row = append(row, cell)
 		}
 		// Optional field: effectiveAudience
@@ -1934,7 +1984,11 @@ func (r *NoteRepository) CreateMany(ctx context.Context, inputs []*types.Note) (
 		// Required field: effectiveAgents
 		{
 			cell := batchInsertCell{column: `effective_agents`, set: true}
+			// An unset enum takes its schema default; "" is never a member.
 			cell.value = input.EffectiveAgents
+			if input.EffectiveAgents == "" {
+				cell.value = string("followRole")
+			}
 			row = append(row, cell)
 		}
 
