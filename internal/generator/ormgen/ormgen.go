@@ -495,12 +495,10 @@ type Repository struct {
 
 	// SQLite is the table on SQLite, for a database whose DB service lists
 	// the sqlite dialect (D116); nil for any other. sqliteTargets are the
-	// tables of the database by type, whose keys a relation's column holds,
-	// and sqliteAccess why per-record access refuses the table there
-	// (sqliteAccessRefusal), or "".
+	// tables of the database by type, whose keys a relation's column
+	// holds.
 	SQLite        *SQLiteTable
 	sqliteTargets map[string]sqliteTarget
-	sqliteAccess  string
 
 	// Import requirements computed from the field/relationship shapes so the
 	// repository template emits exactly the imports it uses.
@@ -1390,7 +1388,6 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 		for i := range output.Repositories {
 			repo := &output.Repositories[i]
 			repo.sqliteTargets = targets
-			repo.sqliteAccess = sqliteAccessRefusal(access, repo.TypeName)
 			if repo.SQLite, err = sqliteTableOf(repo); err != nil {
 				return nil, err
 			}

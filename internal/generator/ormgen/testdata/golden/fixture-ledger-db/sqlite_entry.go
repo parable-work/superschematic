@@ -957,13 +957,15 @@ func (r *EntrySQLiteRepository) GetManyByIDs(ctx context.Context, ids []types.Id
 		keys = append(keys, key)
 	}
 	var records []sqliteRecord
-	for start := 0; start < len(keys); start += 32766 {
-		args := keys[start:min(start+32766, len(keys))]
+	most := 32766
+	for start := 0; start < len(keys); start += most {
+		args := keys[start:min(start+most, len(keys))]
 		placeholders := make([]string, len(args))
 		for i := range args {
 			placeholders[i] = fmt.Sprintf("?%d", i+1)
 		}
-		read, err := entrySQLite.query(ctx, r.q(), fmt.Sprintf(entrySQLite.st.getMany, strings.Join(placeholders, ", "))+entrySQLite.st.live, args...)
+		query := fmt.Sprintf(entrySQLite.st.getMany, strings.Join(placeholders, ", ")) + entrySQLite.st.live
+		read, err := entrySQLite.query(ctx, r.q(), query, args...)
 		if err != nil {
 			return nil, err
 		}

@@ -235,24 +235,17 @@ func (o *ORMOutput) HeldByAccess() bool {
 	return o.Access != nil && o.Access.Held
 }
 
-// sqliteAccessRefusal is why the repository of typeName refuses every
-// call on SQLite under the database's per-record access (D156), or "": the
-// Go repositories on SQLite (D116) keep to no audience and no grant's
-// reach, so in a database whose reads keep to a caller (Held) every table's
-// would read rows a held caller may not, and the server records its calls
-// in the access log on Postgres alone. The loader refuses such a service's
-// Go types on sqlite by decorator and table (verify/sqlite_features.go,
-// D182); this holds a generation that did not read the service's config,
-// whose Go ORM the DB kind writes always, to repositories that refuse,
-// naming why, as a table SQLite does not hold has.
-func sqliteAccessRefusal(access *AccessModel, typeName string) string {
-	switch {
-	case access == nil:
-		return ""
-	case access.Held:
-		return "its database keeps its rows to per-record access (D156), an audience or grants, which the Go repositories on SQLite do not hold yet (D180, D182)"
-	case access.Log == typeName:
-		return "it is the @accessLog table, which the Go server records its calls in on Postgres alone (D180)"
-	}
-	return ""
+// HasSQLiteAccess reports whether access_sqlite.go is written: a database
+// whose repositories keep to a caller (HeldByAccess) and that lists the
+// sqlite dialect, whose repositories on SQLite keep to the caller in
+// SQLite's words (D182, #611).
+func (o *ORMOutput) HasSQLiteAccess() bool {
+	return o.HeldByAccess() && o.HasSQLiteRepositories()
 }
+
+// SQLiteAudienceContains and SQLiteAudiencePlaceholder are how a read on
+// SQLite asks whether an effective audience holds one of a caller's ids,
+// and a parameter of one (sqlutil, D182): the TypeScript repositories' and
+// the Go ones' on SQLite alike.
+func (o *ORMOutput) SQLiteAudienceContains() string    { return sqlutil.SQLiteAudienceContains }
+func (o *ORMOutput) SQLiteAudiencePlaceholder() string { return sqlutil.SQLiteAudiencePlaceholder }
