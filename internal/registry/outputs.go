@@ -139,6 +139,17 @@ type SQLOutputConfig struct {
 	// (D87): the ORMs refuse one without a user where they would leave a
 	// nullable updatedBy as it was.
 	RequireUpdatedBy bool `json:"requireUpdatedBy,omitempty"`
+
+	// Search is the database's search index (#740).
+	Search *SQLSearchConfig `json:"search,omitempty"`
+}
+
+// SQLSearchConfig is outputs.sql.search (#740).
+type SQLSearchConfig struct {
+	// FoldDiacritics folds the index's words and a search's query, so a
+	// word finds its accented forms: on Postgres through unaccent, on
+	// SQLite through FTS5's remove_diacritics.
+	FoldDiacritics bool `json:"foldDiacritics,omitempty"`
 }
 
 // SQLSystemActorConfig is outputs.sql.systemActor (D87): the user ID the

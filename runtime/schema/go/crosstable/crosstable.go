@@ -197,6 +197,10 @@ type Searchable struct {
 	// there (D186).
 	FTS           string               `json:"fts,omitempty"`
 	IndexAudience *SearchIndexAudience `json:"indexAudience,omitempty"`
+	// Config is the text search configuration the index's words are in on
+	// Postgres, simple when empty; search_unaccent folds diacritics
+	// (#740).
+	Config string `json:"config,omitempty"`
 }
 
 // Definitions are what the generated ORM is generated with: its tables'

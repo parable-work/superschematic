@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -45,6 +46,26 @@ var searchCases = []string{
 	"embeddings re-rank the first hits, are kept while the text holds, and can be switched off",
 }
 
+// searchParityCase is the case search.test.ts and search_sqlite.test.ts
+// run of the parity file's searches (#740), through search_parity.ts.
+const searchParityCase = "the parity file's searches answer the same titles in every runtime (#740)"
+
+// searchParityFiles are the files the parity case reads beside the
+// tests: search_parity.ts, and the parity file the Go and Rust runtimes'
+// search tests read too.
+func searchParityFiles(t *testing.T) map[string]string {
+	t.Helper()
+	source, err := ormTests.ReadFile("testdata/orm/search_parity.ts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	parity, err := os.ReadFile(filepath.Join("..", "..", "..", "runtime", "http", "testdata", "search_tables_parity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return map[string]string{"search_parity.ts": string(source), "search_tables_parity.json": string(parity)}
+}
+
 // TestSearchTablesEndToEnd generates fixture-search-db's TypeScript
 // package, type-checks it against searchCheck, and runs
 // testdata/orm/search.test.ts in it with bun over the generated create.sql
@@ -62,7 +83,8 @@ func TestSearchTablesEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load %s: %v", searchFixture, err)
 	}
-	files := map[string]string{"create.sql": createSQLOf(t, schema, searchFixture)}
+	files := searchParityFiles(t)
+	files["create.sql"] = createSQLOf(t, schema, searchFixture)
 	for _, name := range []string{"harness.ts", "search.test.ts"} {
 		source, err := ormTests.ReadFile("testdata/orm/" + name)
 		if err != nil {
@@ -97,7 +119,8 @@ func TestSearchTablesEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse bun's report: %v\n%s", err, junit)
 	}
-	for _, name := range searchCases {
+	want := append(slices.Clone(searchCases), searchParityCase)
+	for _, name := range want {
 		tc, ok := cases[name]
 		switch {
 		case !ok:
@@ -106,8 +129,8 @@ func TestSearchTablesEndToEnd(t *testing.T) {
 			t.Errorf("%q did not pass:\n%s", name, junit)
 		}
 	}
-	if len(cases) != len(searchCases) {
-		t.Errorf("bun ran %d cases, and searchCases names %d:\n%s", len(cases), len(searchCases), junit)
+	if len(cases) != len(want) {
+		t.Errorf("bun ran %d cases, and searchCases names %d:\n%s", len(cases), len(want), junit)
 	}
 	t.Logf("bun ran the end-to-end test:\n%s", out)
 }

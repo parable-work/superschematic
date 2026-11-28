@@ -42,7 +42,11 @@ func TestSearchableDDL(t *testing.T) {
 	for _, want := range []string{
 		"CREATE TABLE search_index (",
 		"CREATE UNIQUE INDEX uq_search_index_source ON search_index USING BTREE (source_table, source_key);",
-		"CREATE INDEX idx_search_index_words ON search_index USING GIN (((setweight(to_tsvector('simple'::regconfig, COALESCE(title, '')), 'A') || setweight(to_tsvector('simple'::regconfig, COALESCE(body, '')), 'B') || setweight(to_tsvector('simple'::regconfig, COALESCE(comments, '')), 'C') || setweight(to_tsvector('simple'::regconfig, COALESCE(files, '')), 'D'))));",
+		// The fixture's index folds diacritics (#740): its words are in
+		// search_unaccent, which a piece of raw SQL makes after the tables.
+		"CREATE INDEX idx_search_index_words ON search_index USING GIN (((setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(title, '')), 'A') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(body, '')), 'B') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(comments, '')), 'C') || setweight(to_tsvector('search_unaccent'::regconfig, COALESCE(files, '')), 'D'))));",
+		"CREATE EXTENSION IF NOT EXISTS unaccent WITH SCHEMA superschematic_extensions;",
+		"CREATE TEXT SEARCH CONFIGURATION search_unaccent (COPY = pg_catalog.simple);",
 		"CREATE INDEX idx_search_index_audience ON search_index USING GIN (audience);",
 		"CREATE OR REPLACE FUNCTION document_search()",
 		"CREATE TRIGGER trg_document_search\n  AFTER INSERT OR UPDATE OR DELETE ON document\n  FOR EACH ROW",
@@ -60,6 +64,9 @@ func TestSearchableDDL(t *testing.T) {
 	}
 	if strings.Contains(create, "terms") && strings.Contains(create, "OLD.terms") {
 		t.Errorf("a trigger watches the encrypted terms")
+	}
+	if strings.Index(create, "CREATE TEXT SEARCH CONFIGURATION") > strings.Index(create, "CREATE INDEX idx_search_index_words") {
+		t.Errorf("create.sql builds the index before the configuration it is in")
 	}
 	for _, want := range []string{
 		"DROP TRIGGER IF EXISTS trg_document_search ON document;",

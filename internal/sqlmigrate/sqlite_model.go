@@ -194,7 +194,7 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	}
 	m.RawSQL = modelRawSQL(pieces)
 	if searchIndex != "" {
-		m.RawSQL = append(m.RawSQL, searchFTSPiece(searchIndex))
+		m.RawSQL = append(m.RawSQL, searchFTSPiece(searchIndex, schema.SearchConfig() == ir.SearchFoldedConfig))
 	}
 	for _, s := range out.RoleSeeds {
 		m.Roles = append(m.Roles, modelRole(s, s.SQLiteInsertSQL(qs), s.SQLiteUpdateSQL(qs)))
@@ -216,9 +216,9 @@ const SearchFTSPiece = "search_index_fts"
 // no form of a virtual table: a file that holds them reads back as having
 // run it, and a plan to a schema that adds the index runs it. Its down
 // drops them. A table made @searchable with rows needs reindexSearch once,
-// as on Postgres.
-func searchFTSPiece(index string) *RawSQL {
-	up, down := sqlgen.SearchFTS(index, qs)
+// as on Postgres. fold removes diacritics (#740).
+func searchFTSPiece(index string, fold bool) *RawSQL {
+	up, down := sqlgen.SearchFTS(index, qs, fold)
 	return &RawSQL{ID: SearchFTSPiece, Origin: ir.SearchIndexTypeName, Position: ir.RawSQLAfterIndexes, Statements: up, Down: down, Checksum: sqlutil.StatementsChecksum(up)}
 }
 

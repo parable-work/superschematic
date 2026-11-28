@@ -63,6 +63,7 @@ var sqliteCrossTablesCases = []sqliteCrossTablesCase{
 			"a conversation's messages and a file's extracted text are indexed with their row",
 			"a scope keeps to its rows, and an embedding is refused on SQLite",
 			"reindexSearch indexes every row of a table that became searchable",
+			"the parity file's searches answer the same titles in every runtime (#740)",
 		},
 	},
 }

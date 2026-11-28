@@ -128,6 +128,14 @@ func runSQLiteTestIn(t *testing.T, ormDir string, schema *ir.Schema, fixture, so
 	if err := os.WriteFile(filepath.Join(ormDir, "sqlite_results_test.go"), []byte(source), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	// The searches every runtime runs (#740), which search's script reads.
+	parity, err := os.ReadFile(filepath.Join("..", "..", "..", "runtime", "http", "testdata", "search_tables_parity.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ormDir, "testdata", "search_tables_parity.json"), parity, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	require := exec.Command("go", "mod", "edit", "-require=modernc.org/sqlite@"+sqliteDriverVersion)
 	require.Dir = ormDir
 	if out, err := require.CombinedOutput(); err != nil {
