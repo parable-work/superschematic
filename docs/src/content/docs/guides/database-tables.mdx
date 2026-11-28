@@ -1137,7 +1137,9 @@ behavior's operation on a row: a transition or a Comments post the caller
 may not make is the 404 of a row that is not there. A job, a worker and
 `orm.asSystem()` read every row, and an upsert of an `@audience` table in
 an operation is refused. The TypeScript, Go and Rust repositories apply
-the audience on Postgres. On SQLite and D1 only the TypeScript ones do
+the audience on Postgres. On SQLite the TypeScript and Go ones do, a
+behavior's operation on a row among their reads and writes (D201), and
+TypeScript's on D1
 ([On SQLite and D1](/superschematic/guides/api-routes/#on-sqlite-and-d1)).
 [Per-record access](/superschematic/guides/api-routes/#per-record-access)
 covers the options, the grants a party or an agent run reaches rows

@@ -4,6 +4,7 @@ package orm
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -653,4 +654,17 @@ func behaviorNotFound(err error, typeName string, id any) error {
 		return fmt.Errorf("%w: %s %v: %w", ErrNotFound, typeName, id, err)
 	}
 	return err
+}
+
+// behaviorOutOfReach is err, the reach check's of a behavior operation on
+// the row id names (D156, D180), as the repository returns it: ErrNotFound
+// of a row the caller may not reach is the not found of a row no live row
+// holds, the core's not_found of key, the row's wire key, in the core's
+// words, wrapping ErrNotFound, so a route answers both alike. Any other
+// error is err.
+func behaviorOutOfReach(err error, typeName, key string, id any) error {
+	if !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	return behaviorNotFound(&rules.Refusal{Code: rules.CodeNotFound, Status: 404, Class: "EngineError", Message: typeName + " " + key + " does not exist"}, typeName, id)
 }
