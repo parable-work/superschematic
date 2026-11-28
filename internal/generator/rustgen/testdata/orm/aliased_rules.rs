@@ -1,7 +1,7 @@
 //! The repositories of fixture-aliased-db's Company over the behaviors'
 //! core (D147, D116): a create gives the name, and one another company
-//! holds, as a name or an alias, with its case ignored, is refused with
-//! that company's key; a rename keeps the old name as an alias, which
+//! holds, as a name or an alias, with its case ignored, is refused, naming
+//! nothing of that company; a rename keeps the old name as an alias, which
 //! resolve, on the table, finds; a removed alias and a deleted company's
 //! names are freed for another; and merge_into folds one company into
 //! another, moving its aliases, its name among them, its names and its
@@ -39,15 +39,28 @@ fn values(value: Value) -> Values {
     }
 }
 
-/// The veto a result holds and the key of the row that holds the name.
-fn taken<T: std::fmt::Debug>(what: &str, result: Result<T, Error>) -> (String, Value) {
+/// The veto a result holds, its details, and the refusal's text, its
+/// message and its details together.
+fn taken<T: std::fmt::Debug>(what: &str, result: Result<T, Error>) -> (String, Value, String) {
     match result {
         Err(Error::Refused(refusal)) => (
             refusal.details["vetoCode"].as_str().unwrap_or_default().to_owned(),
-            refusal.details["vetoDetails"]["holder"].clone(),
+            refusal.details["vetoDetails"].clone(),
+            format!("{} {}", refusal.message, refusal.details),
         ),
         other => panic!("{what} answered {other:?}, not the core's refusal"),
     }
+}
+
+/// Holds a refusal of `name` to name_taken naming nothing of the row whose
+/// key is `holder` (D156): its details are the name and its normalized
+/// form, and its text holds no key of the row.
+fn names_nothing_of(refused: (String, Value, String), name: &str, normalized: &str, holder: &Value) {
+    let (code, details, text) = refused;
+    assert_eq!(code, "name_taken", "{text}");
+    assert_eq!(details, json!({"name": name, "normalized": normalized}), "{text}");
+    let key = holder.as_str().unwrap();
+    assert!(!text.contains(key), "the refusal names the row that holds {name}: {text}");
 }
 
 /// The cases every dialect's repositories are held to, over `$orm`.
@@ -58,15 +71,19 @@ macro_rules! cases {
         let company = |name: &str| values(json!({"name": name, "city": "Oslo"}));
         let none = WriteOptions::default();
 
-        // A name another company holds is refused with its key.
+        // A name another company holds is refused, naming nothing of it.
         let acme = $run!(companies.untyped().create_one(&company("Acme")))
             .expect("create Acme");
         assert_eq!(acme["name"], json!("Acme"), "{acme:?}");
         $run!(companies.untyped().operation("name", "addAlias", &acme["id"], &json!({"alias": "Acme Corp"}), &none))
             .expect("add an alias");
-        let (code, holder) = taken("a create of ACME", $run!(companies.untyped().create_one(&company("ACME"))));
-        assert_eq!((code.as_str(), &holder), ("name_taken", &acme["id"]));
-        let (code, _) = taken("a create of acme corp", $run!(companies.untyped().create_one(&company("  acme   corp"))));
+        names_nothing_of(
+            taken("a create of ACME", $run!(companies.untyped().create_one(&company("ACME")))),
+            "ACME",
+            "acme",
+            &acme["id"],
+        );
+        let (code, _, _) = taken("a create of acme corp", $run!(companies.untyped().create_one(&company("  acme   corp"))));
         assert_eq!(code, "name_taken");
 
         // A rename keeps the old name as an alias, which resolve finds.
@@ -125,8 +142,12 @@ macro_rules! cases {
         assert_eq!(moved["companyId"], into["id"], "{moved:?}");
         let gone = $run!(companies.untyped().get_one(&from["id"]));
         assert!(matches!(gone, Err(Error::NotFound(_))), "{gone:?}");
-        let (code, holder) = taken("a create of Hooli after the merge", $run!(companies.untyped().create_one(&company("Hooli"))));
-        assert_eq!((code.as_str(), &holder), ("name_taken", &into["id"]));
+        names_nothing_of(
+            taken("a create of Hooli after the merge", $run!(companies.untyped().create_one(&company("Hooli")))),
+            "Hooli",
+            "hooli",
+            &into["id"],
+        );
         let again = $run!(companies.merge_into(&from_key, &into_key));
         assert!(matches!(again, Err(Error::NotFound(_))), "{again:?}");
     }};

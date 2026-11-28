@@ -775,6 +775,13 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 		if scaffolding[api] || w.Language != APILanguageGo {
 			continue
 		}
+		// The runtime handles the notifier's, the dispatcher's, the run
+		// requests' and a @searchable declaration's queue (D190, D192,
+		// D187): an API whose workers are all of them needs no NewWorkers.
+		goWorkers := goImplementedWorkers(implemented[api], r.goRuntimeQueues(services, api))
+		if len(goWorkers) == 0 {
+			continue
+		}
 		impl, _, err := r.implementation(api)
 		if err != nil {
 			return err
@@ -803,7 +810,7 @@ func (r run) checkWorkers(stackName string, workers []*ir.ResolvedDeployable, se
 			}
 		}
 		events := false
-		for _, worker := range implemented[api] {
+		for _, worker := range goWorkers {
 			if worker.BehaviorWorker == nil {
 				methods = append(methods, fmt.Sprintf("\t%s(ctx context.Context, msg %s.%s) error", goutil.GoPublicIdentifier(worker.Name), toGoPackageName(db), worker.Queue))
 				continue
@@ -1268,8 +1275,15 @@ func (r run) planEntrypoint(stackName string, s *ir.ResolvedDeployable, cloudSQL
 		}
 		if !exists {
 			scaffolds = append(scaffolds, scaffold{output: output, impl: impl, newModule: newModule, modules: apiModules})
-		} else if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
-			if err := r.checkGoManualRoutes(stackName, output, impl.Dir); err != nil {
+		} else {
+			if s.Kind == ir.DeployableServer && output.HasManualRoutes() {
+				if err := r.checkGoManualRoutes(stackName, output, impl.Dir); err != nil {
+					return nil, nil, err
+				}
+			}
+			// Every entrypoint of an API whose database has the runtime's
+			// wiring builds it with NewWiring (D190, D192, D187).
+			if err := r.checkGoWiring(stackName, output, impl.Dir); err != nil {
 				return nil, nil, err
 			}
 		}

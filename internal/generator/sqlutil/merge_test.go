@@ -168,6 +168,71 @@ func TestMergePlanOfEnumeratesRelationsAndKeys(t *testing.T) {
 	}
 }
 
+// TestMergePlanOfReach holds the rows each step of a merge writes as
+// per-record access holds them (D156), which an ORM reads with the
+// conditions of its caller's write added before a statement writes: the
+// referencing rows of a relation's table, of a relation of the table to
+// itself, and of the table a @hasMany adds its column to, by the column
+// that references `from`; for a @manyToMany's join table, the rows of the
+// declaring type whose pairs name `from`, since a pair is its declaring
+// row's; and none for the pairs the merged table declares, which are
+// `from`'s own, nor for an Aliased use's aliases and names. On SQLite the
+// read takes ?1.
+func TestMergePlanOfReach(t *testing.T) {
+	reach := func(plan *MergePlan) map[string]*MergeReach {
+		out := map[string]*MergeReach{}
+		for _, step := range plan.Steps {
+			out[step.Source+"."+step.Field] = step.Reach
+		}
+		return out
+	}
+	labels := reach(mergePlan(t, "fixture-merge-db", "Label", false))
+	for step, want := range map[string]MergeReach{
+		"DocumentLabel.label":   {Type: "DocumentLabel", Rows: "SELECT 1 FROM document_label WHERE document_label.label_id = $1"},
+		"Label.parent":          {Type: "Label", Rows: "SELECT 1 FROM label WHERE label.parent_id = $1"},
+		"LabelPair.second":      {Type: "LabelPair", Rows: "SELECT 1 FROM label_pair WHERE label_pair.second_id = $1"},
+		"Board.labels.label_id": {Type: "Board", Rows: "SELECT 1 FROM board WHERE board.id IN (SELECT board_id FROM board_label WHERE label_id = $1)"},
+	} {
+		if got := labels[step]; got == nil || *got != want {
+			t.Errorf("%s's reach = %+v, want %+v", step, got, want)
+		}
+	}
+	customers := reach(mergePlan(t, "fixture-merge-db", "Customer", false))
+	if got, want := customers["Address.customer_id"], (MergeReach{Type: "Address", Rows: "SELECT 1 FROM address WHERE address.customer_id = $1"}); got == nil || *got != want {
+		t.Errorf("Customer.addresses' reach = %+v, want %+v", got, want)
+	}
+	boards := reach(mergePlan(t, "fixture-merge-db", "Board", true))
+	if got, ok := boards["Board.labels.board_id"]; !ok || got != nil {
+		t.Errorf("Board.labels' reach from the board merged away = %+v (%t), want none: the pairs are its own", got, ok)
+	}
+	companies := mergePlan(t, "fixture-aliased-db", "Company", false)
+	for _, step := range companies.Steps {
+		if step.Source == "CompanyNameAliases" || step.Source == "CompanyNameNames" {
+			if step.Reach != nil {
+				t.Errorf("%s.%s's reach = %+v, want none: an Aliased use's rows are the merged rows' own", step.Source, step.Field, step.Reach)
+			}
+		} else if step.Reach == nil {
+			t.Errorf("%s.%s has no reach", step.Source, step.Field)
+		}
+	}
+
+	schema, err := loader.LoadService(filepath.Join(fixturesDir, "fixture-merge-sqlite-db"), loader.WithRegistry(registry.New(naming.Default())))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tables, err := TablesOf(schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlite, err := SQLiteMergePlanOf(schema, tables, "Label")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := reach(sqlite)["DocumentLabel.label"]; got == nil || got.Rows != "SELECT 1 FROM document_label WHERE document_label.label_id = ?1" {
+		t.Errorf("DocumentLabel.label's reach on SQLite = %+v, want its read taking ?1", got)
+	}
+}
+
 // TestMergePlanOfLeavesBehaviorSubTablesOut: a behavior's sub-table
 // references its row, and a merge does not repoint it: its rows are the
 // behavior's state of the row merged away (D147). fixture-comments-db's

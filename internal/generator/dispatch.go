@@ -1296,9 +1296,6 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 	}
 	// Deps.go declares the derivers of tables, typed by the database's Go
 	// types (D146).
-	if err := refuseGoHeldDerivers(r.Schema, output.TableDerivers); err != nil {
-		return nil, err
-	}
 	if len(output.TableDerivers) > 0 {
 		fieldTypes := func(table string) (map[string]string, error) {
 			db, err := r.LoadDependency(deps.Database)
@@ -1384,9 +1381,6 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		if err := verify.GoServerDatabaseErr(r.Schema, schema); err != nil {
 			return deps, nil, err
 		}
-		if err := r.goServerSQLiteErr(db, schema); err != nil {
-			return deps, nil, err
-		}
 		// A Go API's Deps.DB is the ORM of its database's first dialect
 		// (D116): over a pool, or over the SQLite file.
 		if r.Options.DependencyConfig != nil {
@@ -1398,6 +1392,10 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 				deps.SQLite = outputs.SQLDialects()[0] == registry.SQLDialectSQLite
 			}
 		}
+		// The runtime the generated server wires over the database: its
+		// notifier, dispatcher and inbound path, its calendar and search,
+		// and its grants (D190, D192, D187, D180).
+		deps.Wiring = apigen.WiringOf(schema, deps.SQLite)
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)
@@ -1940,10 +1938,21 @@ func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 // repositories, which the types crate's src/orm.rs holds. The Rust types
 // of db must be generated. An API with a @graphOperations set needs them
 // too (D138): its operations run through each graph's facade there, and
-// read its roots and refs through the repositories.
+// read its roots and refs through the repositories. So does an API with a
+// @behaviorOperations set over a database whose rows keep to a caller, an
+// @audience table or grants (D156, D181): each operation checks the
+// caller's reach of its row through the repositories before the core runs.
 func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
 	graphs := slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsGraphOperations() })
-	if !r.Schema.HasTableOperations() && !graphs {
+	held := false
+	if slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsBehaviorOperations() }) {
+		schema, err := r.LoadDependency(db)
+		if err != nil {
+			return fmt.Errorf("generator: load %s, the database of %s, whose behavior operations keep to their caller's reach: %w", db, r.Config.Name, err)
+		}
+		held = schema != nil && (len(schema.AudienceTables()) > 0 || schema.AccessGrantsTable() != nil)
+	}
+	if !r.Schema.HasTableOperations() && !graphs && !held {
 		return nil
 	}
 	if r.Options.DependencyConfig != nil {
@@ -1951,6 +1960,9 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 			outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry)
 			if err != nil {
 				return fmt.Errorf("generator: schema config for %s: %w", db, err)
+			}
+			if !outputs.TypesEnabled(LangRust) && !r.Schema.HasTableOperations() && !graphs {
+				return fmt.Errorf("generator: the Rust server of %s checks the caller's reach of the rows its behavior operations run on through the repositories of %s, whose rows keep to a caller and which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D156, D181)", r.Config.Name, db, db, LangRust, db)
 			}
 			if !outputs.TypesEnabled(LangRust) && !r.Schema.HasTableOperations() {
 				return fmt.Errorf("generator: the Rust server of %s serves the operations of a version graph of %s through its facade, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D138)", r.Config.Name, db, db, LangRust, db)

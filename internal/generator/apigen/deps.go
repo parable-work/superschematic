@@ -89,6 +89,12 @@ type DepsInfo struct {
 	// (D159, D184), which Deps.Providers holds; nil for an API whose
 	// config names no slot.
 	Providers *DepsProviders
+
+	// Wiring is the runtime wiring of Database (D190, D192, D187, D180):
+	// its notifier, inbound path and agent dispatcher, which Deps holds,
+	// its calendar and search, and its grants; nil for a database with
+	// none of them (WiringOf).
+	Wiring *DepsWiring
 }
 
 // DepsMemoryStore is a memory store in Deps: the HTTP runtime's
@@ -199,6 +205,13 @@ type WorkerInfo struct {
 	// the generator writes, which the Workers interface has no method for.
 	// Method is empty then.
 	Behavior *BehaviorWorkerInfo
+
+	// Runtime is the runtime's handler of a @worker's queue (D190, D192,
+	// D187): RuntimeNotifier, RuntimeAgents, RuntimeRunRequests or
+	// RuntimeSearch, whose queue wiring.go builds, so the Workers interface
+	// has no method for it; empty for one the implementation handles.
+	// SetDeps sets it.
+	Runtime string
 }
 
 // BehaviorWorkerInfo is what a @behaviorWorker runs (D103): a table's
@@ -517,11 +530,12 @@ func (o *APIOutput) HasWorkerEvents() bool { return len(o.WorkerEvents()) > 0 }
 func (o *APIOutput) HasOrdinaryWorkers() bool { return len(o.OrdinaryWorkers()) > 0 }
 
 // OrdinaryWorkers are the API's @worker workers, each a method of the
-// generated Workers interface; a behavior worker is none (D103).
+// generated Workers interface; a behavior worker is none (D103), and
+// neither is one whose handler is the runtime's (Runtime).
 func (o *APIOutput) OrdinaryWorkers() []WorkerInfo {
 	var out []WorkerInfo
 	for _, w := range o.Workers {
-		if w.Behavior == nil {
+		if w.Behavior == nil && w.Runtime == "" {
 			out = append(out, w)
 		}
 	}
@@ -582,7 +596,17 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[m.Field] = m.Service
 	}
+	if deps.Wiring.Builds() {
+		// Deps holds the notifier, the dispatcher and the inbound path
+		// beside them (D190, D192).
+		for _, name := range []string{"Notifier", "Agents", "Inbound"} {
+			if prev, clash := seen[name]; clash {
+				return fmt.Errorf("apigen: %s's Deps holds the runtime's %s, whose field Deps.%s is the field of %s", o.SchemaName, name, name, prev)
+			}
+		}
+	}
 	o.Deps = deps
+	o.setWorkerRuntimes()
 	// tables.go reads and writes the rows of the database's tables (D106).
 	o.setTableDeps()
 	return nil

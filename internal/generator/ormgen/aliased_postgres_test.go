@@ -13,7 +13,7 @@ import (
 // aliasedORMCases are the cases the generated module's test runs over
 // fixture-aliased-db, by name (D147).
 var aliasedORMCases = []string{
-	"a name another row holds is refused with its key",
+	"a name another row holds is refused naming nothing of that row",
 	"rename keeps the old name as an alias and resolve finds it",
 	"a removed alias and a deleted row's names are freed",
 	"creates of one name at once: one takes it, the rest are refused",
@@ -23,7 +23,8 @@ var aliasedORMCases = []string{
 // TestAliasedTablesOnPostgres holds the generated Go ORM of a database
 // whose Company and Tag carry Aliased on fields to the rules module's
 // adapter on Postgres (D147): a create gives the name, and one another row
-// holds, as a name or an alias, is refused with that row's key; a rename
+// holds, as a name or an alias, is refused, naming neither that row's key
+// nor its fields (D156); a rename
 // keeps the old name as an alias, which Resolve finds; a removed alias and
 // a deleted row's names are freed for another row; creates of one name at
 // once leave it one row's; and MergeInto moves the aliases of the row
@@ -75,6 +76,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -84,21 +87,33 @@ import (
 	rules "github.com/parable-work/superschematic/runtime/rules/go"
 )
 
-// taken is the veto a refusal carries and the key of the row that holds
-// the name, or "" when err is no veto.
-func taken(err error) (string, string) {
+// taken is the veto a refusal carries and the members of its details,
+// which name the name alone and nothing of the row that holds it (D156),
+// or "" and nil when err is no veto.
+func taken(err error) (string, []string) {
 	refusal, ok := rules.AsRefusal(err)
 	if !ok {
-		return "", ""
+		return "", nil
 	}
 	var details struct {
-		VetoCode    string ` + "`" + `json:"vetoCode"` + "`" + `
-		VetoDetails struct {
-			Holder string ` + "`" + `json:"holder"` + "`" + `
-		} ` + "`" + `json:"vetoDetails"` + "`" + `
+		VetoCode    string                     ` + "`" + `json:"vetoCode"` + "`" + `
+		VetoDetails map[string]json.RawMessage ` + "`" + `json:"vetoDetails"` + "`" + `
 	}
 	_ = json.Unmarshal(refusal.Details, &details)
-	return details.VetoCode, details.VetoDetails.Holder
+	var members []string
+	for member := range details.VetoDetails {
+		members = append(members, member)
+	}
+	sort.Strings(members)
+	return details.VetoCode, members
+}
+
+// nameOnly reports whether a refusal of name_taken, err, whose details
+// hold members, tells nothing of the row of key that holds the name: its
+// details are the name and its normalized form, and neither they nor its
+// message hold the key.
+func nameOnly(err error, members []string, key string) bool {
+	return fmt.Sprint(members) == "[name normalized]" && !strings.Contains(err.Error(), key)
 }
 
 func TestAliasedTablesOnPostgres(t *testing.T) {
@@ -178,19 +193,19 @@ func TestAliasedTablesOnPostgres(t *testing.T) {
 		return out
 	}
 
-	t.Run("a name another row holds is refused with its key", func(t *testing.T) {
+	t.Run("a name another row holds is refused naming nothing of that row", func(t *testing.T) {
 		acme := company(t, "Acme")
 		if _, err := db.Company.Name().AddAlias(ctx, *acme.Id, CompanyNameAddAliasParams{Alias: "Acme Corp"}); err != nil {
 			t.Fatal(err)
 		}
 		_, err := db.Company.CreateOne(ctx, &CompanyCreate{Name: "ACME", City: "Bergen"})
-		if code, holder := taken(err); code != "name_taken" || holder != acme.Id.String() {
-			t.Fatalf("a create of ACME = %v (%s, %s), want name_taken held by %s", err, code, holder, acme.Id.String())
+		if code, members := taken(err); code != "name_taken" || !nameOnly(err, members, acme.Id.String()) {
+			t.Fatalf("a create of ACME = %v (%s, %v), want name_taken naming nothing of %s", err, code, members, acme.Id.String())
 		}
 		globex := company(t, "Globex")
 		_, err = db.Company.Name().Rename(ctx, *globex.Id, CompanyNameRenameParams{Name: "  acme   corp"})
-		if code, holder := taken(err); code != "name_taken" || holder != acme.Id.String() {
-			t.Fatalf("a rename to acme corp = %v (%s, %s), want name_taken", err, code, holder)
+		if code, members := taken(err); code != "name_taken" || !nameOnly(err, members, acme.Id.String()) {
+			t.Fatalf("a rename to acme corp = %v (%s, %v), want name_taken naming nothing of %s", err, code, members, acme.Id.String())
 		}
 		if _, err := db.Tag.CreateOne(ctx, &TagCreate{Label: "Q3 Plan"}); err != nil {
 			t.Fatal(err)
@@ -302,8 +317,8 @@ func TestAliasedTablesOnPostgres(t *testing.T) {
 			t.Fatalf("the contact = %+v, %v, want the row that stays", moved, err)
 		}
 		_, err = db.Company.CreateOne(ctx, &CompanyCreate{Name: "Hooli", City: "Elsewhere"})
-		if code, holder := taken(err); code != "name_taken" || holder != into.Id.String() {
-			t.Fatalf("a create of Hooli after the merge = %v (%s, %s)", err, code, holder)
+		if code, members := taken(err); code != "name_taken" || !nameOnly(err, members, into.Id.String()) {
+			t.Fatalf("a create of Hooli after the merge = %v (%s, %v)", err, code, members)
 		}
 	})
 }

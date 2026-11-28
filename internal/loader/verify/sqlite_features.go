@@ -9,20 +9,12 @@ import (
 )
 
 // The features whose tables only some languages read on SQLite (D182). On
-// SQLite an @audience table's rows keep to an audience the TypeScript
-// repositories alone compare their callers with, only they read and write
-// references and attachments, and only they keep a party's or an agent
-// run's reads to its grants (D156); the Go ORM serves these and the access
-// log on Postgres alone (D180, D184).
-//
-// A DB service that lists sqlite and declares one of them builds with Go's
-// types: the DB kind writes the Go ORM always, which imports them
-// (refuseORMWithoutGoTypes), so refusing them would leave such a database
-// no build at all. The Go repositories on SQLite refuse each call those
-// features touch at run time instead, naming why with ErrSQLiteUnsupported:
-// every table's repository of a database whose reads keep to a caller, the
-// access log's, and the SQLite database's References and Attachments
-// (ormgen's sqliteAccessRefusal and sqliteRowFeaturesHost).
+// SQLite an @audience table's rows keep to an audience the TypeScript and
+// the Go repositories compare their callers with, they read and write
+// references and attachments, and they keep a party's or an agent run's
+// reads to its grants (D156); the Go ORM serves these and the access log on
+// SQLite as on Postgres (D180, D184, #611: ormgen's access_sqlite.go and
+// sqliteRowFeaturesHost).
 //
 // Rust's types are opt-in, and its repositories would read the rows
 // without them: they serve an audience (D181) and references and
@@ -31,9 +23,9 @@ import (
 // sqlite, declares one of the five and enables Rust's types is refused.
 
 // sqliteReaders are the languages each feature is not refused for here on
-// SQLite: TypeScript, whose repositories serve it there, and Go, whose
-// repositories refuse its calls there at run time, or, for @searchable,
-// whose writes the index's triggers keep (D186).
+// SQLite: TypeScript and Go, whose repositories serve it there (D182,
+// #611), or, for Go's @searchable, whose writes the index's triggers keep
+// (D186).
 var sqliteReaders = map[string][]string{
 	"@audience":     {registry.LangTypeScript, registry.LangGo},
 	"@references":   {registry.LangTypeScript, registry.LangGo},
@@ -41,11 +33,9 @@ var sqliteReaders = map[string][]string{
 	"@accessGrants": {registry.LangTypeScript, registry.LangGo},
 	"@accessLog":    {registry.LangTypeScript, registry.LangGo},
 	// The search index on SQLite (D186): its triggers keep a row's index
-	// row whichever ORM writes it, and the TypeScript runtime searches it.
-	// Rust's search runs on Postgres alone (D188), and a Go server is
-	// refused search over a SQLite database (go_features.go's
-	// GoServerSQLiteErr), so Go's types, which the DB kind builds always,
-	// are served beside it.
+	// row whichever ORM writes it, and the TypeScript runtime and the Go
+	// schema runtime's crosstable search it (#615). Rust's search runs on
+	// Postgres alone (D188).
 	"@searchable": {registry.LangTypeScript, registry.LangGo},
 }
 
@@ -72,10 +62,11 @@ func refuseSQLiteReaders(schema *ir.Schema, in Input, td *ir.TypeDef, decorator 
 }
 
 // checkSQLiteVersioned refuses a @versioned table in a DB service that
-// lists the sqlite dialect and enables the Go or the Rust types (D189). On
-// SQLite a @versioned table's history is a table its row triggers keep
+// lists the sqlite dialect and enables the Rust types (D189). On SQLite a
+// @versioned table's history is a table its row triggers keep
 // (sqlmigrate's sqlite_history.go), whichever ORM writes the row, and the
-// TypeScript repositories read the row's version; the Go and Rust
+// TypeScript and the Go repositories read the row's version and no history
+// (#618: the Go repository on SQLite refuses its history reads); the Rust
 // repositories read a history with Postgres's statements alone. A service
 // whose config the loader did not read is left unchecked.
 func checkSQLiteVersioned(schema *ir.Schema, in Input, r *Result) {
@@ -84,7 +75,7 @@ func checkSQLiteVersioned(schema *ir.Schema, in Input, r *Result) {
 	}
 	var others []string
 	for _, lang := range in.TypesLanguages {
-		if lang != registry.LangTypeScript {
+		if lang != registry.LangTypeScript && lang != registry.LangGo {
 			others = append(others, registry.LanguageName(lang))
 		}
 	}
@@ -96,7 +87,7 @@ func checkSQLiteVersioned(schema *ir.Schema, in Input, r *Result) {
 		if td == nil || !td.Versioned || td.Role != ir.RoleDBTable {
 			continue
 		}
-		r.errorf(td.Owner, "@versioned on %s: %s lists the sqlite dialect and enables the %s types, whose repositories read a history with Postgres's statements alone; on SQLite only the TypeScript repositories serve a @versioned table so far (D189). Build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]), or leave its %s types out",
+		r.errorf(td.Owner, "@versioned on %s: %s lists the sqlite dialect and enables the %s types, whose repositories read a history with Postgres's statements alone; on SQLite only the TypeScript and the Go repositories serve a @versioned table so far (D189, #618). Build %s for postgres alone (outputs.sql.dialects: [\"postgres\"]), or leave its %s types out",
 			td.Name, schema.Name, strings.Join(others, " and "), schema.Name, strings.Join(others, " and "))
 	}
 }

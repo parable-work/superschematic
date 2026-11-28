@@ -84,7 +84,7 @@ func NewReferences(host Host, def *ReferencesDefinition) *References {
 	if host == nil || def == nil {
 		return nil
 	}
-	return &References{host: host, def: def}
+	return &References{host: inDialect(host), def: def}
 }
 
 func (r *References) holderOf(table string) (ReferencesHolder, error) {
@@ -103,7 +103,11 @@ func (r *References) targetOf(table string) (ReferenceTarget, error) {
 	return target, nil
 }
 
-const referenceColumns = `id::text AS id, "target_table", "target_key", "role", added_by::text AS added_by, "added_at"`
+// referenceColumns are the columns a read of a reference lists, in w's
+// words.
+func referenceColumns(w sqlWords) string {
+	return w.text("id") + ` AS id, "target_table", "target_key", "role", ` + w.text("added_by") + ` AS added_by, "added_at"`
+}
 
 func (r *References) reference(from RowRef, row Row) Reference {
 	table := text(row, "target_table")
@@ -123,7 +127,7 @@ func (r *References) reference(from RowRef, row Row) Reference {
 
 // keyText is the target's key as its column's text, or not found.
 func keyText(ctx context.Context, h Host, target ReferenceTarget, key string, row RowRef) (string, error) {
-	rows, err := h.Query(ctx, fmt.Sprintf(`SELECT %s::text AS key FROM %s WHERE %s = $1`, target.Key, target.Table, target.Key), key)
+	rows, err := h.Query(ctx, fmt.Sprintf(`SELECT %s AS key FROM %s WHERE %s = $1`, wordsOf(h).text(target.Key), target.Table, target.Key), key)
 	if err != nil {
 		return "", err
 	}
@@ -187,7 +191,8 @@ func (r *References) Add(ctx context.Context, in AddInput) (Reference, error) {
 		if err != nil {
 			return err
 		}
-		held, err := h.Query(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE %s = $1 AND "target_table" = $2 AND "target_key" = $3 AND "role" = $4`, referenceColumns, holder.Table, holder.Row), fromKey, in.To.Table, key, in.Role)
+		w := wordsOf(h)
+		held, err := h.Query(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE %s = $1 AND "target_table" = $2 AND "target_key" = $3 AND "role" = $4`, referenceColumns(w), holder.Table, holder.Row), fromKey, in.To.Table, key, in.Role)
 		if err != nil {
 			return err
 		}
@@ -195,14 +200,14 @@ func (r *References) Add(ctx context.Context, in AddInput) (Reference, error) {
 			out = r.reference(in.From, held[0])
 			return nil
 		}
-		counted, err := h.Query(ctx, fmt.Sprintf(`SELECT count(*)::int AS n FROM %s WHERE %s = $1`, holder.Table, holder.Row), fromKey)
+		counted, err := h.Query(ctx, fmt.Sprintf(`SELECT %s AS n FROM %s WHERE %s = $1`, w.int("count(*)"), holder.Table, holder.Row), fromKey)
 		if err != nil {
 			return err
 		}
 		if n := integer(counted[0], "n"); n >= int64(holder.MaxPerRow) {
 			return refuse(CodeTooMany, map[string]any{"max": holder.MaxPerRow}, "%s %s holds %d references, the most it may", in.From.Table, in.From.Key, n)
 		}
-		inserted, err := h.Query(ctx, fmt.Sprintf(`INSERT INTO %s (%s, "target_table", "target_key", "role", "added_by") VALUES ($1, $2, $3, $4, $5) RETURNING %s`, holder.Table, holder.Row, referenceColumns), fromKey, in.To.Table, key, in.Role, userArg(ctx, h))
+		inserted, err := h.Query(ctx, fmt.Sprintf(`INSERT INTO %s (%s, "target_table", "target_key", "role", "added_by") VALUES ($1, $2, $3, $4, $5) RETURNING %s`, holder.Table, holder.Row, referenceColumns(w)), fromKey, in.To.Table, key, in.Role, userArg(ctx, h))
 		if err != nil {
 			return err
 		}
@@ -246,7 +251,7 @@ func (r *References) Remove(ctx context.Context, in RemoveInput) (int64, error) 
 			role = ` AND "role" = $4`
 		}
 		var err error
-		removed, err = h.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE %s = $1 AND "target_table" = $2 AND "target_key" = $3::text%s`, holder.Table, holder.Row, role), args...)
+		removed, err = h.Exec(ctx, fmt.Sprintf(`DELETE FROM %s WHERE %s = $1 AND "target_table" = $2 AND "target_key" = %s%s`, holder.Table, holder.Row, wordsOf(h).text("$3"), role), args...)
 		return err
 	})
 	return removed, err
@@ -270,7 +275,7 @@ func (r *References) Of(ctx context.Context, row RowRef) ([]Reference, error) {
 	if err := mustSee(ctx, r.host, row); err != nil {
 		return nil, err
 	}
-	rows, err := r.host.Query(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE %s = $1 ORDER BY "added_at", id`, referenceColumns, holder.Table, holder.Row), fromKey)
+	rows, err := r.host.Query(ctx, fmt.Sprintf(`SELECT %s FROM %s WHERE %s = $1 ORDER BY "added_at", id`, referenceColumns(wordsOf(r.host)), holder.Table, holder.Row), fromKey)
 	if err != nil {
 		return nil, err
 	}
@@ -328,6 +333,7 @@ func (r *References) ReferencedBy(ctx context.Context, row RowRef, opts Referenc
 	if err != nil {
 		return Backlinks{}, err
 	}
+	w := wordsOf(r.host)
 	type found struct {
 		table, key, via string
 		role            *string
@@ -340,7 +346,7 @@ func (r *References) ReferencedBy(ctx context.Context, row RowRef, opts Referenc
 		if len(holder.Tables) > 0 && !slices.Contains(holder.Tables, row.Table) {
 			continue
 		}
-		rows, err := r.host.Query(ctx, fmt.Sprintf(`SELECT %s::text AS holder, "role", "added_at" FROM %s WHERE "target_table" = $1 AND "target_key" = $2 ORDER BY "added_at" DESC LIMIT %d`, holder.Row, holder.Table, maxScan), row.Table, keyText)
+		rows, err := r.host.Query(ctx, fmt.Sprintf(`SELECT %s AS holder, "role", "added_at" FROM %s WHERE "target_table" = $1 AND "target_key" = $2 ORDER BY "added_at" DESC LIMIT %d`, w.text(holder.Row), holder.Table, maxScan), row.Table, keyText)
 		if err != nil {
 			return Backlinks{}, err
 		}
@@ -355,14 +361,26 @@ func (r *References) ReferencedBy(ctx context.Context, row RowRef, opts Referenc
 	}
 	for _, table := range sortedKeys(r.def.Comments) {
 		source := r.def.Comments[table]
-		probes := make([]any, len(ids))
-		conditions := make([]string, len(ids))
-		for i, id := range ids {
-			probe, _ := json.Marshal([]map[string]string{{"kind": "ref", "schema": row.Table, "id": id}})
-			probes[i] = string(probe)
-			conditions[i] = fmt.Sprintf(`%s @> $%d::jsonb`, source.Blocks, i+1)
+		var probes []any
+		var conditions []string
+		if w.sqlite {
+			// SQLite holds the blocks as JSON text, whose ref block
+			// json_each finds, as the TypeScript runtime's does.
+			probes = append(probes, row.Table)
+			marks := make([]string, len(ids))
+			for i, id := range ids {
+				probes = append(probes, id)
+				marks[i] = fmt.Sprintf("$%d", i+2)
+			}
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM json_each(%s) AS block WHERE json_extract(block.value, '$.kind') = 'ref' AND json_extract(block.value, '$.schema') = $1 AND json_extract(block.value, '$.id') IN (%s))`, source.Blocks, strings.Join(marks, ", ")))
+		} else {
+			for i, id := range ids {
+				probe, _ := json.Marshal([]map[string]string{{"kind": "ref", "schema": row.Table, "id": id}})
+				probes = append(probes, string(probe))
+				conditions = append(conditions, fmt.Sprintf(`%s @> $%d::jsonb`, source.Blocks, i+1))
+			}
 		}
-		rows, err := r.host.Query(ctx, fmt.Sprintf(`SELECT %s::text AS holder, %s::bigint AS message FROM %s WHERE (%s) AND %s IN ('posted', 'interrupted') ORDER BY %s DESC LIMIT %d`, source.Row, source.ID, source.Table, strings.Join(conditions, " OR "), source.State, source.ID, maxScan), probes...)
+		rows, err := r.host.Query(ctx, fmt.Sprintf(`SELECT %s AS holder, %s AS message FROM %s WHERE (%s) AND %s IN ('posted', 'interrupted') ORDER BY %s DESC LIMIT %d`, w.text(source.Row), w.bigint(source.ID), source.Table, strings.Join(conditions, " OR "), source.State, source.ID, maxScan), probes...)
 		if err != nil {
 			return Backlinks{}, err
 		}
@@ -407,7 +425,7 @@ func (r *References) ReferencedBy(ctx context.Context, row RowRef, opts Referenc
 	}
 	caller, held := r.host.Caller(ctx)
 	if held && target.Owner != "" && target.Restricted != "" && holders > shown {
-		own, err := r.host.Query(ctx, fmt.Sprintf(`SELECT %s::text AS owner, %s IS NOT NULL AS restricted FROM %s WHERE %s = $1`, target.Owner, target.Restricted, target.Table, target.Key), key)
+		own, err := r.host.Query(ctx, fmt.Sprintf(`SELECT %s AS owner, %s IS NOT NULL AS restricted FROM %s WHERE %s = $1`, w.text(target.Owner), target.Restricted, target.Table, target.Key), key)
 		if err != nil {
 			return Backlinks{}, err
 		}

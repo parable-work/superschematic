@@ -16,6 +16,16 @@
 //! An operation of a table as a whole (D104), routed with no key, calls
 //! `run_table_operation`, which the core runs as a command without a row.
 {{- end }}
+{{- if .BehaviorsHeld }}
+//! The rows of {{ .BehaviorDatabase }} keep to a caller (D156, D181): an
+//! operation runs on a row only for a caller who may write it, or for one
+//! that writes nothing a caller who sees it, as its repositories hold an
+//! update and a read, and any other row is the core's not_found of a row no
+//! live row holds (`reach`).
+{{- if .HasTableBehaviorOperations }} The row an operation of the table as a
+//! whole answers is null for a caller who does not see it (`keep_answer`).
+{{- end }}
+{{- end }}
 {{- end }}
 {{- range $i, $w := .BehaviorWorkers }}
 {{- if or $i $.HasBehaviorOperations }}
@@ -135,7 +145,8 @@ fn caller(ctx: &RequestContext) -> Caller {
 /// Runs `operation` of the use `use_id` on the row of `type_name` whose key
 /// is `key`, with `params`, in a transaction of the pool, as the request's
 /// caller, and returns its result once the transaction commits. The key
-/// goes to the core in its wire form, its JSON string. A refusal of the
+/// goes to the core in its wire form, its JSON string.{{ if .BehaviorsHeld }} A row the caller
+/// may not reach is not found before the core runs (`reach`).{{ end }} A refusal of the
 /// core or the adapter rolls the transaction back and is the problem of its
 /// status, code, message and details; a refusal of status 500 or of no
 /// error status, a failure of the database, the pool's included, and a
@@ -162,6 +173,9 @@ where
     let params = serde_json::to_value(params).map_err(internal)?;
     let mut client = behaviors.pool.get().await.map_err(internal)?;
     let tx = client.transaction().await.map_err(internal)?;
+    {{- if .BehaviorsHeld }}
+    reach(&tx, ctx, type_name, &key, use_id, operation).await?;
+    {{- end }}
     let host = host();
     let ran = postgres::run_operation(
         &host,
@@ -191,7 +205,8 @@ where
 /// the pool, as the request's caller, and returns its result once the
 /// transaction commits: the core writes each row it reaches through a call
 /// on that row, each held to its version, and a read-only one writes
-/// nothing. Its refusals and failures are answered as `run_operation`'s.
+/// nothing.{{ if .BehaviorsHeld }} The row an answer names (Aliased's resolve, Pool's pick) is null
+/// for a caller who does not see it (`keep_answer`).{{ end }} Its refusals and failures are answered as `run_operation`'s.
 pub(crate) async fn run_table_operation<P, R>(
     behaviors: &Behaviors,
     ctx: &RequestContext,
@@ -220,7 +235,12 @@ where
     )
     .await;
     match ran {
+        {{- if .BehaviorsHeld }}
+        Ok(mut result) => {
+            keep_answer(&tx, ctx, type_name, use_id, operation, &mut result).await?;
+        {{- else }}
         Ok(result) => {
+        {{- end }}
             tx.commit().await.map_err(internal)?;
             serde_json::from_value(result).map_err(internal)
         }
@@ -229,6 +249,43 @@ where
         Err(err) => Err(internal(err)),
     }
 }
+{{- if .BehaviorsHeld }}
+
+/// Holds the answer of `operation` of the use `use_id` on the table of
+/// `type_name` as a whole to the request's caller (D156, D181): the core
+/// reads every row, so the repositories of {{ .BehaviorDatabase }}'s Rust types, opened
+/// on `tx` for the caller, the anonymous one for a request with none, answer
+/// null for the row it names (Aliased's resolve, Pool's pick) when the
+/// caller does not see it, as their own table operation does. Any other
+/// answer is left as it is; a failure of the check is the server's internal
+/// error.
+async fn keep_answer(
+    tx: &deadpool_postgres::Transaction<'_>,
+    ctx: &RequestContext,
+    type_name: &str,
+    use_id: &str,
+    operation: &str,
+    answer: &mut Value,
+) -> Result<(), ApiError> {
+    let Some(member) = layout()
+        .table(type_name)
+        .and_then(|table| table.uses.iter().find(|used| used.id == use_id))
+        .map(|used| used.member().to_owned())
+    else {
+        return Ok(());
+    };
+    let definition = crate::database_types::orm::postgres_definition().map_err(internal)?;
+    let repositories = orm::postgres::Repositories::new(tx, definition)
+        .map_err(internal)?
+        .with_access(orm::AccessCaller::of(ctx.principal.as_ref()));
+    repositories
+        .table(type_name)
+        .map_err(internal)?
+        .keep_answer(&member, operation, answer)
+        .await
+        .map_err(internal)
+}
+{{- end }}
 {{- end }}
 {{- if .HasBehaviorPreconditions }}
 
@@ -263,6 +320,9 @@ where
     };
     let mut client = behaviors.pool.get().await.map_err(internal)?;
     let tx = client.transaction().await.map_err(internal)?;
+    {{- if .BehaviorsHeld }}
+    reach(&tx, ctx, type_name, &key, use_id, operation).await?;
+    {{- end }}
     let host = host();
     let ran = postgres::run_operation_with(
         &host,
@@ -301,6 +361,51 @@ fn presented(input: &mut Value) -> Map<String, Value> {
             .filter(|(_, entry)| !entry.is_null())
             .collect(),
         _ => Map::new(),
+    }
+}
+{{- end }}
+
+{{- if .BehaviorsHeld }}
+
+/// Refuses an operation on the row of `type_name` whose key is `key`, in
+/// its wire form, that the request's caller may not write, or for one that
+/// writes nothing, as RULES_LAYOUT declares it, does not see (D156, D181):
+/// the repositories of {{ .BehaviorDatabase }}'s Rust types, opened on `tx` for the
+/// caller, the anonymous one for a request with none, check the row as
+/// their update and their operation do. A row out of reach is the core's
+/// not_found of a row no live row holds, in its words, so its 404 is a
+/// missing row's; a failure of the check is the server's internal error.
+async fn reach(
+    tx: &deadpool_postgres::Transaction<'_>,
+    ctx: &RequestContext,
+    type_name: &str,
+    key: &str,
+    use_id: &str,
+    operation: &str,
+) -> Result<(), ApiError> {
+    let writes = layout()
+        .table(type_name)
+        .and_then(|table| table.uses.iter().find(|used| used.id == use_id))
+        .and_then(|used| {
+            used.operations
+                .iter()
+                .find(|declared| declared.name == operation)
+        })
+        .is_none_or(|declared| declared.writes);
+    let definition = crate::database_types::orm::postgres_definition().map_err(internal)?;
+    let repositories = orm::postgres::Repositories::new(tx, definition)
+        .map_err(internal)?
+        .with_access(orm::AccessCaller::of(ctx.principal.as_ref()));
+    let repository = repositories.table(type_name).map_err(internal)?;
+    match repository
+        .reach(&Value::String(key.to_owned()), writes)
+        .await
+    {
+        Ok(()) => Ok(()),
+        Err(orm::Error::NotFound(_)) => Err(problem(Refusal::not_found(format!(
+            "{type_name} {key} does not exist"
+        )))),
+        Err(err) => Err(internal(err)),
     }
 }
 {{- end }}
