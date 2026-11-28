@@ -265,8 +265,7 @@ A General schema's type that composes a behavior with `@behavior`
 (`behaviors` in the data forms) loads, and `--emit-ir` prints it. The
 `types` generator renders it: each language's types write
 `<Type>Behaviors`, the type's behaviors' fields as a read returns them,
-narrowed by the type's config
-([Behavior fields](/superschematic/guides/engine-behaviors/#behavior-fields)).
+narrowed by the type's config.
 A General schema with such a type builds, and development mode serves it
 (D117). A DB schema's type is a table, which composes a behavior by a
 field type or by `implements` (D103), so the load refuses `@behavior` on
@@ -857,13 +856,13 @@ registry.
 ## `behaviors --out <dir>`
 
 Write the declaration of every behavior the binary registers into the
-crate that implements it for the engine: one `<name>.behavior.json` per
-behavior, the same declaration the Go package embeds and registers. The
-Rust implementation embeds that copy (`include_str!`), so the engine and
+crate that implements it on the behaviors' core: one `<name>.behavior.json`
+per behavior, the same declaration the Go package embeds and registers.
+The Rust implementation embeds that copy (`include_str!`), so the core and
 the compiler read one declaration. Other `*.behavior.json` files in the
 directory are removed. `--package` and `--extension` narrow what is
-written to the behaviors one npm package ships and the ones one
-extension registered.
+written to the behaviors whose registration names one npm package and
+the ones one extension registered.
 
 A copy is canonical rather than the source bytes: the declaration's keys
 in `BehaviorDeclaration`'s order, each JSON Schema's object keys sorted
@@ -881,7 +880,7 @@ my-schematic behaviors --extension my --out crates/my-rules/declarations --check
 | --- | --- | --- |
 | `--out` | (required) | the directory the copies go in |
 | `--check` | false | write nothing; fail, naming each file, when a copy differs, is missing, or is no registered behavior's |
-| `--package` | every behavior | only the behaviors this npm package ships, as their registration names it; fails, naming the packages there are, when it ships none |
+| `--package` | every behavior | only the behaviors whose registration names this npm package; fails, naming the packages there are, when none does |
 | `--extension` | every behavior | only the behaviors this extension (its `Name()`) registered; fails when it registers none |
 | `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
 

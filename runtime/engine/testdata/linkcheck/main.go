@@ -3,8 +3,7 @@
 // behaviors' core's (D103), and calls each: a binary that defined a symbol
 // twice, or linked archives two Rust releases built, would not link or
 // would fail here. The engine's archive (D58) was a fourth until the engine
-// went (D103, #587). scripts/engine-link-check.sh builds the archives and
-// runs it.
+// went (D103, #587). scripts/link-check.sh builds the archives and runs it.
 package main
 
 import (

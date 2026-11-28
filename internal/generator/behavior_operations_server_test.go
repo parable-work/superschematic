@@ -179,13 +179,13 @@ func TestBehaviorCaller(t *testing.T) {
 `
 
 // archiveLDFlags is CGO_LDFLAGS for a Go binary that links the
-// checkout's four static archives, superscalar's, the version graph's, the
-// engine's and the behaviors' core's: each staging script's --print.
+// checkout's three static archives, superscalar's, the version graph's and
+// the behaviors' core's: each staging script's --print.
 func archiveLDFlags(t *testing.T) string {
 	t.Helper()
 	root := testpaths.RepoRoot(t)
 	var flags []string
-	for _, script := range []string{"superscalar-dep.sh", "versiongraph-archive.sh", "engine-archive.sh", "rules-archive.sh"} {
+	for _, script := range []string{"superscalar-dep.sh", "versiongraph-archive.sh", "rules-archive.sh"} {
 		out, err := exec.Command(filepath.Join(root, "scripts", script), "--print").Output()
 		if err != nil {
 			t.Fatalf("scripts/%s --print: %v", script, err)

@@ -455,8 +455,7 @@ function escapePointer(key: string): string {
 // issuesOf turns ajv's errors into issues in a defined order rather than
 // ajv's, which follows its compiled code: by instance path, then by
 // keyword, then by message, each compared by Unicode code point, as the
-// engine orders the issues it checks with ajv (runtime/engine/README.md,
-// "Errors").
+// engine ordered the issues it checked with ajv.
 function issuesOf(errors: ErrorObject[]): SchemaFileIssue[] {
   return errors
     .map((error) => ({ keyword: error.keyword, issue: toIssue(error) }))

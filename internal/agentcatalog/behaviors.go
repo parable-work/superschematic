@@ -92,7 +92,9 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 		if len(beh.Conflicts) > 0 {
 			fmt.Fprintf(&b, "- Cannot be composed with %s.\n", codeList(beh.Conflicts))
 		}
-		if beh.Package != "" {
+		// A core behavior's package names the engine's, which D103's
+		// step 7 deleted: the behaviors' core implements it.
+		if beh.Extension != "" && beh.Package != "" {
 			fmt.Fprintf(&b, "- Implemented by `%s`.\n", beh.Package)
 		}
 		if len(beh.Fields) > 0 {

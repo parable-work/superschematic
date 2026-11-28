@@ -184,19 +184,19 @@ The core's runtime for these is TypeScript, over Postgres.
 ## A backend with no generated code
 
 When the data changes shape at run time, or you want workflow, comments,
-revisions, links, rollups, search and work queues without writing a
-server, publish a schema to the engine instead. Its types compose
-behaviors with `@behavior(name, config)`, and the engine serves their
-instances over HTTP, an event stream and MCP.
+revisions, rollups and work queues without writing a server, publish a
+schema to a server that runs it with nothing generated. Its types compose
+behaviors with `@behavior(name, config)`, and the server serves their
+rows over HTTP, an event stream and MCP (D117, #590).
 
 | You need | Declare | Guide |
 | --- | --- | --- |
-| Instances, an event log, access control, over HTTP and MCP | a schema published to `@superschematic/engine` | [The engine](/superschematic/guides/engine/) |
-| States and transitions, comments, revisions, links, rollups, approvals, timers, numbering | `@behavior("Workflow", { ... })` and the others on a type | [Engine behaviors](/superschematic/guides/engine-behaviors/) |
-| Claimable work: leases, assignment, priorities, retries | the `@superschematic/engine-workqueue` behaviors | [Work queues](/superschematic/guides/work-queues/) |
-| Selling counted stock and booking time, with holds, payments and refunds | the `@superschematic/engine-commerce` behaviors: `Stock`, `Calendar`, `Holds`, `Payments` | [Selling and booking](/superschematic/guides/commerce/) |
+| Rows, an event stream, access control, over HTTP and MCP | a schema published to development mode, `@superschematic/rules-handler` in your server or `superschematic-dev` | [A server with no build](/superschematic/guides/engine/) |
+| States and transitions, comments, revisions, rollups, approvals, timers, numbering | `@behavior("Workflow", { ... })` and the others on a type | [Beyond plain tables](/superschematic/guides/database-tables/#beyond-plain-tables) |
+| Claimable work: leases, worker heartbeats, stamped children, budgets, retries | the work-queue behaviors: `Lease`, `Presence`, `Blueprint`, `Budget`, `Retries` | [Work queues](/superschematic/guides/work-queues/) |
+| Selling counted stock and booking time, with holds, payments and refunds | the commerce behaviors: `Stock`, `Calendar`, `Holds`, `Payments` | [Selling and booking](/superschematic/guides/commerce/) |
 
-The same schemas also run with nothing generated in two more modes. In
+The same schemas run in two modes. In
 [development mode](/superschematic/guides/development-mode/) a project's
 rows are JSON in fixed tables, in a SQLite file or in memory, so a
 publish takes effect at once and may rename, retype or remove. In

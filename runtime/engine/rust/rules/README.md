@@ -1467,7 +1467,7 @@ Go's binding and adapter:
 ```
 make rules-archive
 cd runtime/rules/go && go vet ./... && go test -race -count=1 ./...
-scripts/engine-link-check.sh
+scripts/link-check.sh
 ```
 
 The first stages the archive (`scripts/rules-archive.sh`, cargo's release

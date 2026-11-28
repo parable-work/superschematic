@@ -29,15 +29,6 @@ Version sites (relative to the repository root):
                                       version
   runtime/rules/typescript/package.json
                                       version
-  runtime/engine/typescript/package.json
-                                      version
-  runtime/engine/typescript/npm/{darwin-arm64,darwin-x64,linux-x64-gnu,linux-arm64-gnu}/package.json
-                                      version: the prebuilt addons'
-                                      packages, @superschematic/engine-<target>
-  runtime/engine-workqueue/typescript/package.json
-                                      version
-  runtime/engine-commerce/typescript/package.json
-                                      version
   runtime/schema/python/pyproject.toml
                                       [project] version, in PEP 440 form
   runtime/schema/python/uv.lock       the superschematic-schema-runtime package,
@@ -146,11 +137,6 @@ GO_MODULE = "github.com/parable-work/superschematic"
 
 NPM_WORKSPACE_PACKAGES = ["api", "db", "memory-store", "schema", "schema-config", "stack", "tasks"]
 
-# The targets of the engine's prebuilt Node-API addon, one npm package each
-# (@superschematic/engine-<target>, runtime/engine/typescript/npm/<target>),
-# which the release builds on the runner of each (release.yml, build-archives).
-ENGINE_ADDON_TARGETS = ["darwin-arm64", "darwin-x64", "linux-x64-gnu", "linux-arm64-gnu"]
-
 # Directory of every Go module, in dependency order. The tag for a module in a
 # subdirectory is the directory followed by /vX.Y.Z; the root module's is
 # vX.Y.Z. cmd/superschematic, the installed binary, links the core and the
@@ -162,7 +148,6 @@ GO_MODULES = [
     "runtime/schema/go",
     "runtime/http/go",
     "runtime/versiongraph/go",
-    "runtime/engine/go",
     "runtime/rules/go",
     "runtime/migrate/go",
     "",
@@ -284,29 +269,6 @@ def sites():
             "semver",
         )
     )
-    out.append(
-        (
-            ROOT / "runtime" / "engine" / "typescript" / "package.json",
-            [(r'(\n  "version": ")' + V + r'(",)', 1)],
-            "semver",
-        )
-    )
-    for target in ENGINE_ADDON_TARGETS:
-        out.append(
-            (
-                ROOT / "runtime" / "engine" / "typescript" / "npm" / target / "package.json",
-                [(r'(\n  "version": ")' + V + r'(",)', 1)],
-                "semver",
-            )
-        )
-    for package in ("engine-workqueue", "engine-commerce"):
-        out.append(
-            (
-                ROOT / "runtime" / package / "typescript" / "package.json",
-                [(r'(\n  "version": ")' + V + r'(",)', 1)],
-                "semver",
-            )
-        )
     out.append(
         (
             ROOT / "runtime" / "schema" / "python" / "pyproject.toml",

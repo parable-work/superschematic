@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
-# The link check (D58, D103): builds the four static archives a generated Go
-# server can link, superscalar's, the version graph's, the engine's and the
-# behaviors' core's (the rules archive), with tools.env's Rust, checks that
-# each defines its own C functions and none of the others' (the version
-# graph's vg_* behind its ffi feature, which the engine leaves off,
-# superscalar's scalar_* in its ffi crate, which the engine does not link,
-# and the rules archive's rules_* in superschematic-rules-wasm alone), then
-# builds one Go binary that imports all four bindings
+# The link check (D103): builds the three static archives a generated Go
+# server can link, superscalar's, the version graph's and the behaviors'
+# core's (the rules archive), with tools.env's Rust, checks that each
+# defines its own C functions and none of the others' (the version graph's
+# vg_* behind its ffi feature, superscalar's scalar_* in its ffi crate, and
+# the rules archive's rules_* in superschematic-rules-wasm alone), then
+# builds one Go binary that imports all three bindings
 # (runtime/engine/testdata/linkcheck) and runs it.
 #
 # Usage:
-#   scripts/engine-link-check.sh
+#   scripts/link-check.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -21,11 +20,9 @@ goarch="$(go env GOARCH)"
 # own lines to standard output), then each script's -L flag alone.
 "$ROOT/scripts/superscalar-dep.sh" --archive >/dev/null
 "$ROOT/scripts/versiongraph-archive.sh" >/dev/null
-"$ROOT/scripts/engine-archive.sh" >/dev/null
 "$ROOT/scripts/rules-archive.sh" >/dev/null
 superscalar="$("$ROOT/scripts/superscalar-dep.sh" --print)"
 versiongraph="$("$ROOT/scripts/versiongraph-archive.sh" --print)"
-engine="$("$ROOT/scripts/engine-archive.sh" --print)"
 rules="$("$ROOT/scripts/rules-archive.sh" --print)"
 
 # exported prints the functions an archive defines, without the leading
@@ -53,19 +50,9 @@ check() {
   echo "link check: $(basename "$archive") defines ${own}_* and nothing of ${others//|/, }" >&2
 }
 
-check "$ROOT/third_party/superscalar/go/lib/${goos}_${goarch}/libsuperscalar_ffi.a" scalar "eng|vg|rules"
-check "$ROOT/runtime/versiongraph/go/lib/${goos}_${goarch}/libsuperschematic_versiongraph.a" vg "eng|scalar|rules"
-check "$ROOT/runtime/engine/go/lib/${goos}_${goarch}/libsuperschematic_engine.a" eng "vg|scalar|rules"
-check "$ROOT/runtime/rules/go/lib/${goos}_${goarch}/libsuperschematic_rules.a" rules "eng|vg|scalar"
-
-engine_exports="$(exported "$ROOT/runtime/engine/go/lib/${goos}_${goarch}/libsuperschematic_engine.a")"
-for name in eng_abi_version eng_open eng_close eng_call eng_http eng_stream_poll \
-  eng_stream_close eng_wait eng_runner eng_free; do
-  if ! grep -qx "$name" <<<"$engine_exports"; then
-    echo "link check: the engine's archive does not define $name" >&2
-    exit 1
-  fi
-done
+check "$ROOT/third_party/superscalar/go/lib/${goos}_${goarch}/libsuperscalar_ffi.a" scalar "vg|rules"
+check "$ROOT/runtime/versiongraph/go/lib/${goos}_${goarch}/libsuperschematic_versiongraph.a" vg "scalar|rules"
+check "$ROOT/runtime/rules/go/lib/${goos}_${goarch}/libsuperschematic_rules.a" rules "vg|scalar"
 
 rules_exports="$(exported "$ROOT/runtime/rules/go/lib/${goos}_${goarch}/libsuperschematic_rules.a")"
 for name in rules_run rules_declarations rules_check rules_free; do
@@ -78,7 +65,7 @@ done
 BIN="$(mktemp -d)"
 trap 'rm -rf "$BIN"' EXIT
 export CGO_ENABLED=1
-export CGO_LDFLAGS="$superscalar $versiongraph $engine $rules"
+export CGO_LDFLAGS="$superscalar $versiongraph $rules"
 (cd "$ROOT/runtime/engine/testdata/linkcheck" && go build -o "$BIN/linkcheck" .)
 "$BIN/linkcheck"
-echo "link check: one binary links superscalar's, the version graph's, the engine's and the rules' archives on ${goos}/${goarch}" >&2
+echo "link check: one binary links superscalar's, the version graph's and the rules' archives on ${goos}/${goarch}" >&2
