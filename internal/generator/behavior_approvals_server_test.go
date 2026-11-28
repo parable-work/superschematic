@@ -145,6 +145,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
 	rules "github.com/parable-work/superschematic/runtime/rules/go"
+	"github.com/parable-work/superschematic/runtime/schema/go/access"
 	"go.uber.org/zap"
 
 	api "example.com/schemas/api/fixture-approvals-api"
@@ -158,15 +159,26 @@ import (
 // with an authDb wires: Authorization: Bearer <subject>[:<permission>[,...]]
 // puts that subject on the request, holding those permissions, as an
 // identity middleware puts its principal and roles; no header, no caller.
+// A token of four parts, <subject>:<permissions>:<person>:<agent>, is an
+// agent run of that Agent acting for that person, as the agent
+// dispatcher's authenticator puts one (D158, D200).
 func authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && token != "" {
-			subject, held, _ := strings.Cut(token, ":")
+			parts := strings.Split(token, ":")
+			subject, held := parts[0], ""
+			if len(parts) > 1 {
+				held = parts[1]
+			}
 			var permissions []string
 			if held != "" {
 				permissions = strings.Split(held, ",")
 			}
 			ctx := session.ContextWithPrincipalID(r.Context(), subject)
+			if len(parts) == 4 {
+				ctx = session.ContextWithCaller(ctx, session.Caller{Subject: subject, Kind: "agent", ActingFor: &access.ActingFor{Kind: "user", Subject: parts[2]}})
+				ctx = session.ContextWithAgent(ctx, parts[3])
+			}
 			ctx = session.ContextWithRoles(ctx, []session.Role{{Name: "test", Permissions: permissions}})
 			r = r.WithContext(ctx)
 		}
@@ -530,6 +542,27 @@ func TestApprovals(t *testing.T) {
 		}
 		if moved.To != types.TaskStatusState_Proving {
 			t.Fatalf("bob's move to proving answered %+v", moved)
+		}
+	})
+
+	t.Run("an agent run's sign-off records whom it acts for and its Agent, which the server hands the core", func(t *testing.T) {
+		key, id := task(t)
+		working(t, key, id)
+		run := subject(t)
+		asRun := as(run + ":tasks.review:" + carol + ":reviewer-bot")
+		if _, err := asRun.TaskNamespace.Approvals.SignOff(ctx, key, types.TaskApprovalsSignOffInput{State: types.TaskApprovalsGate_Proving}); err != nil {
+			t.Fatalf("the run's sign-off: %v", err)
+		}
+		listed, err := asCarol.TaskNamespace.Approvals.ListSignOffs(ctx, key, types.TaskApprovalsListSignOffsInput{})
+		if err != nil {
+			t.Fatalf("carol's list: %v", err)
+		}
+		if len(listed.Items) != 1 {
+			t.Fatalf("the sign-offs are %+v, want the run's", listed.Items)
+		}
+		item := listed.Items[0]
+		if item.Subject != run || item.ActingFor != carol || item.Agent != "reviewer-bot" {
+			t.Fatalf("the run's sign-off is %+v, want its subject, acting for carol, of the Agent reviewer-bot", item)
 		}
 	})
 

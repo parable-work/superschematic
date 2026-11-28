@@ -36,7 +36,7 @@ func behaviorCaller(ctx context.Context) rules.Caller {
 				}
 			}
 		}
-		return rules.Caller{Subject: runtimesession.GetPrincipalID(ctx), Permissions: permissions}
+		return principalCaller(ctx, permissions)
 	}
 	if caller, ok := serviceauth.CallerFromContext(ctx); ok {
 		return rules.Caller{Subject: caller.Deployable, StandsIn: true}

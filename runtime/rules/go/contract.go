@@ -482,6 +482,12 @@ const (
 	// adapter answers its layout's types that compose it, since a table's
 	// API authorizes.
 	ReadKindComposing ReadKind = "composing"
+	// ReadKindPermissions is the permissions each of Subjects holds now
+	// (D200): what an Approvals requirement with recheckPermission reads of
+	// the subjects who signed earlier. The adapter answers it from the
+	// layout's identity tables (Layout.Permissions), and leaves out a
+	// subject it cannot answer for, which the core holds to none.
+	ReadKindPermissions ReadKind = "permissions"
 )
 
 // LinkedPage is how many rows a linked read asks for at a time, the core's
@@ -521,6 +527,9 @@ type ReadRequest struct {
 	// Behavior is a composing read's behavior (D77's primitive 3); "" for
 	// every other kind.
 	Behavior string `json:"behavior,omitempty"`
+	// Subjects are a permissions read's subjects (D200); nil for every
+	// other kind.
+	Subjects []string `json:"subjects,omitempty"`
 }
 
 // TableRef is one sub-table of a use, as a read across a table names it:
@@ -579,6 +588,15 @@ func (r ReadRequest) MarshalJSON() ([]byte, error) {
 			Kind     ReadKind `json:"kind"`
 			Behavior string   `json:"behavior"`
 		}{r.Kind, r.Behavior})
+	case ReadKindPermissions:
+		subjects := r.Subjects
+		if subjects == nil {
+			subjects = []string{}
+		}
+		return json.Marshal(struct {
+			Kind     ReadKind `json:"kind"`
+			Subjects []string `json:"subjects"`
+		}{r.Kind, subjects})
 	}
 	type plain ReadRequest
 	return json.Marshal(plain(r))
@@ -661,6 +679,9 @@ type Answer struct {
 	// Specs is a composing read's answer (D77's primitive 3), in name
 	// order: {"specs": [TypeSpec]}.
 	Specs []TypeSpec
+	// Permissions is a permissions read's answer (D200), by subject, a
+	// subject the host cannot answer for absent: {"permissions": {...}}.
+	Permissions map[string][]string
 }
 
 // MarshalJSON writes the answer as the variant its kind names.
@@ -709,6 +730,14 @@ func (a Answer) MarshalJSON() ([]byte, error) {
 		return json.Marshal(struct {
 			Specs []TypeSpec `json:"specs"`
 		}{specs})
+	case ReadKindPermissions:
+		held := a.Permissions
+		if held == nil {
+			held = map[string][]string{}
+		}
+		return json.Marshal(struct {
+			Permissions map[string][]string `json:"permissions"`
+		}{held})
 	default:
 		return nil, fmt.Errorf("rules: no answer of kind %q", a.Kind)
 	}
@@ -743,6 +772,8 @@ func (a *Answer) UnmarshalJSON(data []byte) error {
 		case "specs":
 			out.Kind = ReadKindComposing
 			err = json.Unmarshal(value, &out.Specs)
+		case ReadKindPermissions:
+			err = json.Unmarshal(value, &out.Permissions)
 		default:
 			err = fmt.Errorf("rules: no answer of kind %q", variant)
 		}

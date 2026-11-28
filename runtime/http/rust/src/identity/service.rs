@@ -158,6 +158,9 @@ pub struct IdentityPrincipal {
     /// The API key's id (D114), and empty for a session's principal.
     pub api_key_id: String,
     pub transport: Transport,
+    /// When the session signed in, its `createdAt` in epoch milliseconds
+    /// (D200); `None` for an API key's principal, which signs no one in.
+    pub signed_in_at: Option<i64>,
 }
 
 impl IdentityPrincipal {
@@ -189,6 +192,14 @@ impl IdentityPrincipal {
             principal = principal.with_credential(crate::auth::Credential {
                 kind: crate::auth::CredentialKind::ApiKey,
                 id: self.api_key_id.clone(),
+            });
+        }
+        // When the session signed in, which an Approvals requirement's
+        // recent-sign-in proof reads (D200); an API key proves none.
+        if let Some(signed_in_at) = self.signed_in_at {
+            principal = principal.with_assurance(crate::auth::Assurance {
+                signed_in_at: Some(signed_in_at),
+                user_verified: false,
             });
         }
         principal
@@ -235,7 +246,19 @@ impl IdentityPrincipal {
             session_id,
             api_key_id,
             transport,
+            signed_in_at: principal
+                .assurance
+                .as_ref()
+                .and_then(|assurance| assurance.signed_in_at),
         })
+    }
+}
+
+/// A time as epoch milliseconds, negative before the epoch.
+fn epoch_millis(at: std::time::SystemTime) -> i64 {
+    match at.duration_since(std::time::UNIX_EPOCH) {
+        Ok(after) => i64::try_from(after.as_millis()).unwrap_or(i64::MAX),
+        Err(before) => -i64::try_from(before.duration().as_millis()).unwrap_or(i64::MAX),
     }
 }
 
@@ -1073,6 +1096,7 @@ impl Service {
             session_id: session.id.clone(),
             api_key_id: String::new(),
             transport,
+            signed_in_at: Some(epoch_millis(session.created_at)),
         })
     }
 
@@ -1129,6 +1153,7 @@ impl Service {
             session_id: String::new(),
             api_key_id: key.id.clone(),
             transport: Transport::Bearer,
+            signed_in_at: None,
         })
     }
 
