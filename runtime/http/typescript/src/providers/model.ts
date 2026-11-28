@@ -12,8 +12,9 @@ credential reaches only the runner (credentials.ts).
  * the run, replayed: its content, the tool calls it made, which the tool
  * messages after it answer, and the provider's own state of it, as the
  * provider returned them. A provider builds its API's conversation from
- * these alone, a Claude provider each tool_use block before its
- * tool_result and the turn's thinking blocks passed back unchanged.
+ * these alone: a provider of a model API with tool-use blocks puts each
+ * tool call before its result and passes the turn's reasoning blocks back
+ * unchanged.
  */
 export interface ModelMessage {
   readonly role: 'system' | 'user' | 'assistant' | 'tool';
@@ -68,8 +69,8 @@ export interface ModelCompletion {
   readonly usage: ModelUsage;
   /**
    * The provider's own record of the turn, as JSON, which no one but the
-   * provider reads: a Claude provider's content blocks, its thinking with
-   * their signatures among them. The dispatcher keeps it with the
+   * provider reads: the content blocks a model API returned, its signed
+   * reasoning blocks among them. The dispatcher keeps it with the
    * completion, unredacted while the run lives, and passes it back,
    * unchanged, on that assistant message in every later turn; a reader of
    * the transcript, and the transcript a run leaves when it ends, hold it
