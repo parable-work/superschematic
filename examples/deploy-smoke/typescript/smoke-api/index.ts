@@ -12,15 +12,24 @@
 
 import { notFound } from '@superschematic/http-runtime';
 import { enqueue, type Attachment, type CoreCaller } from '@superschematic/http-runtime/postgres';
-import type { BehaviorsImplementation, Constructor, Deps, JobsConstructor, LineItemsImplementation, WorkersConstructor } from '@smoke/smoke-api-api';
+import type { BehaviorsImplementation, Constructor, Deps, JobsConstructor, LineItemsImplementation, RuntimeOptionsConstructor, WorkersConstructor } from '@smoke/smoke-api-api';
+import type { IdentityUUID } from '@smoke/smoke-db-types';
 import type { AlertRow, CheckInRow, FollowUpRow, LineItemRow } from '@smoke/smoke-db-types/orm';
 import { drainLineItemQueue } from '@smoke/smoke-db-types/queues';
 import { embed } from './embed.ts';
+import { billsImplementation, memosImplementation, noticesImplementation, payeesImplementation, platformWorkers, runtimeOptions } from './platform.ts';
 
 export const create: Constructor = deps => ({
   lineItems: lineItemsImplementation(deps),
   behaviors: behaviorsImplementation(deps),
+  bills: billsImplementation(deps),
+  notices: noticesImplementation(deps),
+  memos: memosImplementation(deps),
+  payees: payeesImplementation(deps),
 });
+
+// The inbound path's options beside the generated server's (platform.ts).
+export const createRuntimeOptions: RuntimeOptionsConstructor = runtimeOptions;
 
 /** How long a follow-up's deadline and a check-in's wake-up wait. */
 const WAKE_AFTER_MS = 5_000;
@@ -39,6 +48,7 @@ export const createJobs: JobsConstructor = deps => ({
 // The worker drains a line item as the system actor (D87): one claim per
 // line item at a time, since the queue serializes on it.
 export const createWorkers: WorkersConstructor = deps => ({
+  ...platformWorkers(deps),
   async drainLineItems(message) {
     const orm = deps.orm.asSystem();
     const item = await orm.lineItem.findOne({ id: { eq: message.lineItemId } });
@@ -101,7 +111,7 @@ function view(row: LineItemRow) {
 }
 
 function fileView(file: Attachment) {
-  return { id: file.id, lineItemId: file.key, name: file.name, size: file.size, contentHash: file.contentHash, objectKey: file.objectKey, state: file.state };
+  return { id: file.id as IdentityUUID, lineItemId: file.key as IdentityUUID, name: file.name, size: file.size, contentHash: file.contentHash, objectKey: file.objectKey, state: file.state };
 }
 
 function lineItemsImplementation(deps: Deps): LineItemsImplementation {
@@ -112,7 +122,7 @@ function lineItemsImplementation(deps: Deps): LineItemsImplementation {
         { to: { table: 'LineItem', key: id }, name: input.name, mediaType: input.mediaType, size: input.size, sha256: input.sha256 },
         { bucket, expiresInSeconds: 600 }
       );
-      return { fileId: attachment.id, url: upload.url, contentType: input.mediaType };
+      return { fileId: attachment.id as IdentityUUID, url: upload.url, contentType: input.mediaType };
     },
     async completeFile({ fileId }) {
       return fileView(await deps.orm.attachments.complete({ table: 'LineItem', id: fileId }, { bucket }));
@@ -122,7 +132,7 @@ function lineItemsImplementation(deps: Deps): LineItemsImplementation {
     },
     async backlinks({ id }) {
       const { items } = await deps.orm.references.referencedBy({ table: 'LineItem', key: id });
-      return items.map(item => ({ lineItemId: item.key, role: item.role ?? '' }));
+      return items.map(item => ({ table: item.table, key: item.key, role: item.role ?? '' }));
     },
     async createLineItem({ input }) {
       return view(await deps.orm.lineItem.createOne({ name: input.name, amount: input.amount, embedding: embed(input.name) }));

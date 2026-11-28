@@ -32,6 +32,8 @@ const { values: flags } = parseArgs({
     outputs: { type: 'string' },
     'ready-seconds': { type: 'string', default: '600' },
     'drain-seconds': { type: 'string', default: '240' },
+    // How soon after its due an urgent deadline must fire; unchecked unless set.
+    'urgent-seconds': { type: 'string' },
   },
 });
 
@@ -303,10 +305,18 @@ if (drainedLater < 4_000) fail(`the worker drained ${prefix}coffee ${Math.round(
 ok(`the worker drained ${prefix}coffee once its delay had passed`, drainedLater);
 timings.push(['delayed enqueue to drained', drainedLater]);
 
+/** How long after its create a follow-up's deadline is due (smoke-db's FollowUp). */
+const WAKE_AFTER_MS = 5_000;
+
 const followUp = await member.call('POST', `${api}/follow-ups`, { title: `${prefix}follow-up` });
 expect('create a follow-up', followUp.status, [200, 201], followUp.text);
 const followUpDue = await until('the follow-up', `follow-ups/${followUp.json?.data?.id}`, data => data.status === 'due');
-ok("the follow-up's Timers deadline fired", followUpDue);
+// An urgent deadline fires within --urgent-seconds of its due (D151): on
+// Cloudflare the write wakes the worker's Workflow for its time.
+if (flags['urgent-seconds'] && followUpDue > WAKE_AFTER_MS + Number(flags['urgent-seconds']) * 1000) {
+  fail(`the follow-up's deadline fired ${Math.round(followUpDue - WAKE_AFTER_MS)} ms after its due, past ${flags['urgent-seconds']}s`);
+}
+ok("the follow-up's Timers deadline fired" + (flags['urgent-seconds'] ? `, within ${flags['urgent-seconds']}s of its due` : ''), followUpDue);
 timings.push(['deadline to fired', followUpDue]);
 
 const checkIn = await member.call('POST', `${api}/check-ins`, { title: `${prefix}check-in` });
@@ -349,8 +359,122 @@ expect('file it onto another line item', filed.status, [200, 201], filed.text);
 if (filed.json?.data?.objectKey !== completed.json?.data?.objectKey) fail(`the filed file names ${filed.json?.data?.objectKey}, want the same object`);
 const backlinks = await member.call('GET', `${api}/line-items/${items.coffee}/backlinks`);
 expect('backlinks', backlinks.status, 200, backlinks.text);
-if (!(backlinks.json?.data ?? []).some((b: { lineItemId: string }) => b.lineItemId === items.tea)) fail(`${prefix}coffee's backlinks are ${backlinks.text.slice(0, 300)}, want ${prefix}tea`);
+if (!(backlinks.json?.data ?? []).some((b: { table: string; key: string }) => b.table === 'LineItem' && b.key === items.tea)) fail(`${prefix}coffee's backlinks are ${backlinks.text.slice(0, 300)}, want ${prefix}tea`);
 ok(`the file filed onto ${prefix}coffee with no second upload, which lists ${prefix}tea among its backlinks`);
+
+// A poll of a read until what it answers holds, within drain-seconds: what
+// it last answered, and how long it took.
+async function poll<T>(what: string, read: () => Promise<{ status: number; json: any; text: string }>, holds: (json: any) => T | undefined): Promise<{ value: T; ms: number }> {
+  const from = performance.now();
+  const by = Date.now() + Number(flags['drain-seconds']) * 1000;
+  for (;;) {
+    const answer = await read();
+    expect(`read ${what}`, answer.status, 200, answer.text);
+    const value = holds(answer.json);
+    if (value !== undefined) return { value, ms: performance.now() - from };
+    if (Date.now() > by) fail(`${what} did not come within ${flags['drain-seconds']}s: ${answer.text.slice(0, 400)}`);
+    await sleep(500);
+  }
+}
+
+// Phone numbers of this run's own, in E.164: the member's, a payee's and
+// one no one holds.
+const digits = (n: number) => String(Math.floor(Math.random() * 10 ** n)).padStart(n, '0');
+const memberPhone = `+1555${digits(7)}`;
+const payeePhone = `+1556${digits(7)}`;
+const strangerPhone = `+1557${digits(7)}`;
+
+// A bill whose recurrence reminds its owner (D152), and the notifier that
+// tells them (D153). The route is a row the administrator writes; the
+// member's phone and preference, a notice in the inbox and by SMS, are
+// rows the member writes. The bill's first occurrence is due 25 seconds
+// on and reminds 20 seconds before: the behavior worker BillReminders
+// fires the remind deadline, hands its event to the notifier, and the
+// worker Notify writes the member's notice and sends it through the stub
+// relay, which answers it delivered.
+const route = await admin.call('PUT', `${api}/notifications/routes/bill-reminded`);
+expect("write the bill's route", route.status, 200, route.text);
+const reach = await member.call('PUT', `${api}/notifications/reach`, { phone: memberPhone });
+expect("write the member's phone and preference", reach.status, 200, reach.text);
+ok(`the route of a bill's reminder, and the member's phone ${memberPhone} and preference, are rows`);
+const bill = await member.call('POST', `${api}/bills`, { title: `${prefix}rent` });
+expect('create a bill', bill.status, [200, 201], bill.text);
+const billId: string = bill.json?.data?.id ?? fail(`create a bill answered ${bill.text.slice(0, 200)}`);
+const reminded = await poll(
+  "the bill's reminder",
+  () => member.call('GET', `${api}/bills/${billId}/occurrences`),
+  json => {
+    const [first] = json?.data ?? [];
+    return first?.remindedAt ? first : undefined;
+  },
+);
+const lateBy = Date.parse(reminded.value.remindedAt) - Date.parse(reminded.value.remindAt);
+if (lateBy < 0) fail(`the bill's occurrence reminded ${-lateBy} ms before its remind time: ${JSON.stringify(reminded.value)}`);
+ok(`the bill's occurrence ${reminded.value.key} reminded, ${Math.round(lateBy)} ms after its remind time`, reminded.ms);
+timings.push(['recurrence to reminded', reminded.ms]);
+const noticed = await poll(
+  "the bill's notice in the member's inbox",
+  () => member.call('GET', `${api}/inbox`),
+  json => (Array.isArray(json) ? json : []).find((n: { subjectKey?: string; eventKind?: string }) => n.subjectKey === billId && n.eventKind === 'recurrence.reminded'),
+);
+ok(`the notifier put the reminder in the member's inbox, notice ${noticed.value.reference}`, noticed.ms);
+timings.push(['reminded to inbox', noticed.ms]);
+const delivered = await poll(
+  "the notice's SMS",
+  () => member.call('GET', `${api}/notifications/notices/${noticed.value.id}/deliveries`),
+  json => (json?.data ?? []).find((d: { channelKind: string; state: string }) => d.channelKind === 'sms' && d.state === 'delivered'),
+);
+if (!String(delivered.value.providerMessageId ?? '').startsWith('stub-')) fail(`the SMS went out under ${delivered.value.providerMessageId}, not through the stub relay`);
+ok(`the notice went out by SMS through the stub relay, ${delivered.value.providerMessageId}`, delivered.ms);
+timings.push(['inbox to SMS delivered', delivered.ms]);
+
+// A memo that search finds by its words once the worker IndexSearch has
+// indexed it, and by its new words, not its old, once it changed (D155).
+const firstWord = `w${run}first`;
+const secondWord = `w${run}second`;
+const hits = (q: string) => member.call('GET', `${api}/search?q=${encodeURIComponent(q)}`);
+const found = (memoId: string) => (json: any) => ((json?.data?.items ?? []).some((h: { table: string; key: string }) => h.table === 'Memo' && h.key === memoId) ? true : undefined);
+const memo = await member.call('POST', `${api}/memos`, { title: `${prefix}memo`, text: `a receipt filed under ${firstWord}` });
+expect('create a memo', memo.status, [200, 201], memo.text);
+const memoId: string = memo.json?.data?.id ?? fail(`create a memo answered ${memo.text.slice(0, 200)}`);
+const indexed = await poll(`a search for ${firstWord}`, () => hits(firstWord), found(memoId));
+ok(`a search finds the memo by ${firstWord} once IndexSearch indexed it`, indexed.ms);
+timings.push(['write to searchable', indexed.ms]);
+const changed = await member.call('PUT', `${api}/memos/${memoId}`, { title: `${prefix}memo`, text: `a receipt filed under ${secondWord}` });
+expect('change the memo', changed.status, 200, changed.text);
+const reindexed = await poll(`a search for ${secondWord}`, () => hits(secondWord), found(memoId));
+const stale = await hits(firstWord);
+expect(`a search for ${firstWord}`, stale.status, 200, stale.text);
+if (found(memoId)(stale.json)) fail(`a search for ${firstWord} still finds the memo after its text changed: ${stale.text.slice(0, 300)}`);
+ok(`the index kept current: the memo is found by ${secondWord}, and no longer by ${firstWord}`, reindexed.ms);
+timings.push(['change to searchable', reindexed.ms]);
+
+// The inbound path (D157), through the stub relay's callback, which the
+// generated server serves at /webhooks/sms/inbound: a text from a payee
+// with a grant on a line item is filed onto it by the worker Runs, acting
+// as the payee, so the line item lists the message among its backlinks;
+// a text from a number no one holds is held in triage.
+const payee = await admin.call('POST', `${api}/payees`, { name: `Payee ${run}`, phone: payeePhone, lineItemId: items.salary });
+expect('create a payee with a grant', payee.status, [200, 201], payee.text);
+ok(`a payee at ${payeePhone} with a grant on ${prefix}salary`, payee.ms);
+const relay = (from: string, text: string) => anon.call('POST', `${apiURL}/webhooks/sms/inbound`, { messages: [{ id: `${run}-${from}`, from, text }] });
+const fromPayee = await relay(payeePhone, `${prefix}paid in full`);
+expect("the stub relay's callback, the payee's text", fromPayee.status, 200, fromPayee.text);
+if (fromPayee.json?.[0]?.outcome !== 'run') fail(`the payee's text came to ${fromPayee.text.slice(0, 300)}, want a run`);
+const filedOnto = await poll(
+  `${prefix}salary's backlinks`,
+  () => member.call('GET', `${api}/line-items/${items.salary}/backlinks`),
+  json => (json?.data ?? []).find((b: { table: string; key: string }) => b.table === 'Message' && b.key === fromPayee.json[0].message),
+);
+ok(`the payee's text landed on ${prefix}salary, the row its grant names`, filedOnto.ms);
+timings.push(['inbound to filed', filedOnto.ms]);
+const fromStranger = await relay(strangerPhone, `${prefix}who is this`);
+expect("the stub relay's callback, a stranger's text", fromStranger.status, 200, fromStranger.text);
+if (fromStranger.json?.[0]?.outcome !== 'unknown') fail(`a stranger's text came to ${fromStranger.text.slice(0, 300)}, want unknown`);
+const triage = await admin.call('GET', `${api}/triage`);
+expect('triage', triage.status, 200, triage.text);
+if (!(triage.json?.data ?? []).some((m: { id: string }) => m.id === fromStranger.json[0].message)) fail(`triage holds ${triage.text.slice(0, 300)}, want the stranger's text`);
+ok(`a text from ${strangerPhone}, whom no one holds, is held in triage`);
 
 const out = await member.call('POST', `${api}/auth/logout`);
 expect('sign out', out.status, [200, 204], out.text);

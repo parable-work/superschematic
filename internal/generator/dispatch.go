@@ -1295,6 +1295,11 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 		}
 		output.AddIndirectModules(closure)
 	}
+	// Its router serves the visible @mcp tools at POST /api/mcp (D81,
+	// #660).
+	if output.MCP, err = r.goMCP(output); err != nil {
+		return nil, fmt.Errorf("generator: go api for %s: %w", r.Config.Name, err)
+	}
 	return output, nil
 }
 
@@ -1312,6 +1317,9 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, error) {
 	var deps apigen.DepsInfo
 	var roots []*ir.Schema
+	// database is the API's database's schema, whose @attachments the
+	// file processor's pass reads (apigen.WithFiles).
+	var database *ir.Schema
 	needs := func(service, what, lang string, enabled func(*registry.Outputs) bool) error {
 		if r.Options.DependencyConfig == nil {
 			return nil
@@ -1363,6 +1371,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		// notifier, dispatcher and inbound path, its calendar and search,
 		// and its grants (D190, D192, D187, D180).
 		deps.Wiring = apigen.WiringOf(schema, deps.SQLite)
+		database = schema
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)
@@ -1442,6 +1451,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		}
 	}
 	deps.Providers = providers
+	deps.Wiring = apigen.WithFiles(deps.Wiring, database, providers, deps.SQLite)
 	return deps, roots, nil
 }
 
@@ -1888,7 +1898,7 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 		}
 		held = schema != nil && (len(schema.AudienceTables()) > 0 || schema.AccessGrantsTable() != nil)
 	}
-	if !r.Schema.HasTableOperations() && !graphs && !held {
+	if !r.Schema.HasTableOperations() && !graphs && !held && !r.rustWires(db) {
 		return nil
 	}
 	if r.Options.DependencyConfig != nil {

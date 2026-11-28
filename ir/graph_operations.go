@@ -164,7 +164,8 @@ func (s *OperationSet) IsGraphOperations() bool {
 // TakesSetClause reports whether the set's class takes the user clause
 // (@auth, @requirePermission, @publicRoute), which each operation the
 // loader adds takes as its own: a @behaviorOperations set (D103), a
-// @graphOperations set (D138) and a @rowFeatureOperations set (#723).
+// @graphOperations set (D138), a @rowFeatureOperations set (#723) and a
+// @triageOperations set (#746).
 func (s *OperationSet) TakesSetClause() bool {
-	return s.IsBehaviorOperations() || s.IsGraphOperations() || s.IsRowFeatureOperations()
+	return s.IsBehaviorOperations() || s.IsGraphOperations() || s.IsRowFeatureOperations() || s.IsTriageOperations()
 }

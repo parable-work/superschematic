@@ -350,14 +350,11 @@ it in place of the old one, for a stamp no database has applied. It names
 a stamp a projection of the target declares, and builds a DB service
 alone, without `--with-deps`.
 
-`outputs.api.mcp: true` makes a TypeScript or a Rust API's router serve
-the API's visible `@mcp` operations as MCP tools at `POST /api/mcp`,
+`outputs.api.mcp: true` makes the API's router, TypeScript, Rust or Go,
+serve the API's visible `@mcp` operations as MCP tools at `POST /api/mcp`,
 beside its OpenAPI document at `GET /api/openapi.json`, which every
 server serves
 ([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
-The Go server serves no MCP endpoint yet, so the config fails to load
-with it on a Go API, `--api-language` included:
-`outputs.api.mcp is on and the API's language is GO: a TypeScript API and a Rust API serve the MCP endpoint; Go follows; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)`.
 With a tool whose `invocationPolicy` is `"ask"`, the build needs
 `outputs.api.mcpConfirmationKey`, the `@envVars` secret the endpoint signs
 its confirmations with

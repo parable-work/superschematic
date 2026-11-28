@@ -34,6 +34,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
 	"github.com/parable-work/superschematic/internal/loader/search"
+	"github.com/parable-work/superschematic/internal/loader/triageops"
 	"github.com/parable-work/superschematic/internal/loader/tsreader"
 	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/loader/versiongraph"
@@ -493,6 +494,9 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 		if set.IsRowFeatureOperations() {
 			why = "whose tables' references and files its @rowFeatureOperations sets serve"
 		}
+		if set.IsTriageOperations() {
+			why = "whose inbound path's triage its @triageOperations set serves"
+		}
 	}
 	if schema.HasTableOperations() {
 		why = "whose tables its @tableOperation operations read and write"
@@ -763,6 +767,21 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 		refused = append(refused, err)
 	} else {
 		added, err := rowfeatureops.Expand(schema, vin.Database, reg)
+		if err != nil {
+			return nil, err
+		}
+		if len(added) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// The inbound path's triage joins its @triageOperations set the same
+	// way (#746), with the types it takes and returns.
+	if err := verify.CheckTriageOperations(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
+		added, err := triageops.Expand(schema, vin.Database, reg)
 		if err != nil {
 			return nil, err
 		}

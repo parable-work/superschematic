@@ -684,8 +684,10 @@ let found = search_tables(Repositories::new(&client)?.untyped(), Some(&principal
 ```
 
 `search_routes(SearchRoutes::new(tables, authenticator))` serves
-`GET /api/search`, and `search_mcp_tool` with `call_search_tool` the MCP
-tool; an app merges the route into its router. A party's or an agent run's
+`GET /api/search`, and `SearchTool` the MCP tool (`search_mcp_tool`,
+`call_search_tool`). A generated Rust server merges the route, serves the
+tool and runs a `@worker` of a `@searchable` declaration's queue through
+`index_search` itself (#617), with the options `Wire::search` answers. A party's or an agent run's
 search, through `access::GrantAuthenticator`, keeps to the rows its grants
 reach, as in TypeScript.
 
@@ -722,8 +724,10 @@ options its implementation's `NewWiring` answers in `Wiring.Search`; and a
 `@worker` of a `@searchable` declaration's queue hands each message to
 `IndexSearch` with `Wiring.Indexing`, with no method of the
 implementation's ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)).
-A Go server serves no MCP endpoint (D81, D116), so it serves neither
-tool. `ReindexSearch` builds every row's index row again.
+A Go server with `outputs.api.mcp` on serves the tool on its MCP endpoint
+(#616): the API package's `MCPTools` calls `CallSearchTool` as the
+endpoint's caller with its roles' permissions, with `Wiring.Search`'s
+options. `ReindexSearch` builds every row's index row again.
 Over a database that lists `sqlite`, the SQLite database's `CrossTables()`
 searches the file as the TypeScript runtime does on SQLite
 ([On SQLite and D1](#on-sqlite-and-d1), [Go on SQLite](#go-on-sqlite)).
@@ -1559,6 +1563,16 @@ export const createJobs: JobsConstructor = deps => ({
   processFiles: async () => void (await api.processPendingFiles(deps, createRuntimeOptions(deps))),
 });
 ```
+
+The Go and Rust runtimes make the same pass, over the same scenarios
+(`runtime/http/testdata/file_processing_parity.json`): Go's
+`fileprocessing.Process`, which a generated Go API's
+`ProcessPendingFiles(ctx, deps, wiring)` runs over `Deps.DB` with the
+bucket `Wiring.Files` names, and Rust's
+`orm::file_processing::process_files` over the repositories'
+`attachments()`, on Postgres and on a SQLite file (#603). A pass does
+not retry a file: a processor that fails on it ends it `failed`. An
+error of the database's is the pass's own, which its job retries.
 
 A `@searchable` table that indexes its attachments (the default) hears
 the write of a file's text through its triggers and indexes the text with
@@ -4183,9 +4197,9 @@ moves to the next business day.
 | `weekendDays` | the days a due date moves off; `saturday` and `sunday` when absent |
 | `holidays` | `{ table, calendarField, dateField, field }`: the holiday table your app fills, and this table's field that names a row's calendar |
 | `relative` | `{ via, type, field }`: the to-one relation, the table it points at, and that table's date field |
-| `opensBefore` | how long before its due an occurrence opens (ISO 8601, `P14D`); with none it opens when the one before it falls due |
-| `remindBefore` | how long before its due an occurrence reminds |
-| `overdueAfter` | how long after its due an open occurrence is missed; at its due when absent |
+| `opensBefore` | how long before its due an occurrence opens, a `Temporal.Period` (ISO 8601, `P14D`); with none it opens when the one before it falls due |
+| `remindBefore` | how long before its due an occurrence reminds, a `Temporal.Period` |
+| `overdueAfter` | how long after its due an open occurrence is missed, a `Temporal.Period`; at its due when absent |
 | `permission` | the permission `complete` and `listOccurrences` need |
 | `managePermission` | the permission `setRecurrence`, `skip` and `moveOne` need; `permission` when absent |
 
@@ -4278,9 +4292,10 @@ let calendar = read_calendar(Repositories::new(&client)?.untyped(), Some(&princi
 let routes = calendar_routes(CalendarRoutes::new(Tables::new(pool, postgres_definition), authenticator));
 ```
 
-`call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes,
-and `issue_calendar_feed`, `rotate_calendar_feed` and
-`revoke_calendar_feed` are the feed's operations.
+`call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes
+(`CalendarTool`), and `issue_calendar_feed`, `rotate_calendar_feed` and
+`revoke_calendar_feed` are the feed's operations. A generated Rust server
+merges the calendar's routes and serves its tool itself on Postgres (#617).
 
 A Rust server whose database lists `sqlite` first serves Recurrence there
 too (#615): the router's `recurrence` routes run the operations through
@@ -4323,7 +4338,8 @@ stack's Go server mounts `CalendarRoutes` itself at `/api/calendar`,
 behind the API's auth step but for a feed's fetch, with the options its
 implementation's `NewWiring` answers in `Wiring.Calendar`
 ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server));
-it serves no MCP endpoint, so no calendar tool. A Go server whose
+with `outputs.api.mcp` on, its MCP endpoint serves the calendar tool
+through `MCPTools`, as the endpoint's caller (#616). A Go server whose
 calendar source is titled by an `Encrypted<T>` field is refused it. Over a
 database that lists `sqlite`, Recurrence's operations run through the core
 in the SQLite repositories' transactions, and the SQLite database's

@@ -29,7 +29,7 @@ service's config lists, and regenerates it on every change:
 - the HTTP server: routing, argument decoding, validation, permission
   checks, rate, body and time limits, pagination, webhook signature checks
 - OpenAPI, client SDKs in four languages, MCP tool documents, and on a
-  TypeScript or a Rust API an MCP endpoint that serves the tools
+  TypeScript, a Rust or a Go API an MCP endpoint that serves the tools
 - environment variable loaders, and the server entrypoints, Dockerfiles
   and CI of a stack
 
@@ -87,6 +87,7 @@ breaks your code, the type checker of each language points at the line.
 | Every past version of a row | `@versioned` | a history table, triggers, history readers, writes fenced by version | nothing | [Versioned tables](/superschematic/reference/versioned-tables/) |
 | Branches, commits and merges over a set of tables, siblings ordered by keys an insert writes one row for, and a table of what is released | `@versionGraph`, `@graphMember` | the graph's tables and an engine in each language | nothing | [Version graphs](/superschematic/reference/version-graphs/) |
 | Routes over a version graph's operations: change sets, commits, merges and releases, with no handler to write | `@graphOperations(Root)` on a class of an API schema | a route per operation with typed inputs and results, in the OpenAPI and the SDKs, served by the TypeScript, Go and Rust servers | nothing | [API routes](/superschematic/guides/api-routes/#a-version-graphs-operations) |
+| Routes over the inbound path's triage: the held messages by page and channel, one with its files, settling one onto a party and dismissing one | `@triageOperations(Party)` on a class of an API schema | a route per operation with typed inputs and results, in the OpenAPI and the SDKs, MCP tools for the reads, served by the TypeScript server, and a Topcoat console's pages over them | nothing | [Outside parties](/superschematic/guides/parties/#serve-triage-as-routes) |
 | Routes over a table's references, backlinks and files: uploads straight to a bucket, a file filed elsewhere, the rows that point at a row, each read held to what the caller may read | `@rowFeatureOperations(Table)` on a class of an API schema | a route per operation with typed inputs and results, in the OpenAPI and the SDKs, MCP tools for the reads, served by the TypeScript and Go servers | nothing | [API routes](/superschematic/guides/api-routes/#a-tables-references-and-files) |
 | A read-only SQL view | `@projection`, `@join`, `@column` | the view, its row type and a read-only repository in both ORMs, and an API view's `@source` | nothing | [Projections](/superschematic/reference/projections/) |
 | A report: aggregates, time buckets, a paged list over joined tables | `@query<Params, Row>({ name, sql, orderBy?, page?, returns? })`, its params and row as types, its SQL sharing string constants | a typed function of both ORMs, `orm.queries.<name>(params)` and `Queries.<Name>(ctx, params)`, its rows decoded; `queries verify` prepares it on Postgres into `queries.lock`, which `check`, `build` and `migrate plan` hold it to | the SQL | [Declared queries](/superschematic/reference/declared-queries/) |
@@ -165,7 +166,7 @@ The core's runtime for these is TypeScript, over Postgres.
 | A static front end | a Site service | the config, served in each environment, that holds each API's address, and CORS on each API it calls | the front end | [Static sites](/superschematic/guides/static-sites/#declare-a-site) |
 | A front end and its APIs on one origin, for a cookie session with no CORS | `origins: [{ site, apis }]` in `@stack` | each API under `/api/<service>` on the site's address, in `stack dev`, on gcp's load balancer and through the site's Worker on Cloudflare, and the config that names it there | nothing | [Static sites](/superschematic/guides/static-sites/#one-origin) |
 | Clients in Go, TypeScript, Python, Rust | a line per language in `outputs.sdk` | an SDK with the server's checks, pages, errors and retries | nothing | [Client SDKs](/superschematic/guides/client-sdks/#generate-them) |
-| Tools an AI agent can call | `@mcp` on operations | MCP tool documents beside the SDKs, and with `outputs.api.mcp` a TypeScript or a Rust API's endpoint at `POST /api/mcp`, which runs an `invocationPolicy: "ask"` tool only once the person confirms the call | nothing; with an `ask` tool, the secret `outputs.api.mcpConfirmationKey` names, set per environment | [MCP tools](/superschematic/reference/mcp-tools/) |
+| Tools an AI agent can call | `@mcp` on operations | MCP tool documents beside the SDKs, and with `outputs.api.mcp` a TypeScript, a Rust or a Go API's endpoint at `POST /api/mcp`, which runs an `invocationPolicy: "ask"` tool only once the person confirms the call | nothing; with an `ask` tool, the secret `outputs.api.mcpConfirmationKey` names, set per environment | [MCP tools](/superschematic/reference/mcp-tools/) |
 | Labels and controls for forms | `@docs`, `@purpose`, `@display`, `@uiControl` | the metadata a schema form reads | nothing | [Documentation](/superschematic/reference/documentation/) |
 
 ## Running and deploying

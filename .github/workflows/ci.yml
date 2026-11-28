@@ -402,6 +402,17 @@ jobs:
         working-directory: runtime/http/typescript/test/workerd
         run: bun install --frozen-lockfile
 
+      - name: Install the HTTP runtime's dependencies
+        # The cloudflare extension's TestWakeRelayUnderWorkerd bundles a
+        # drainer's queue waker from the runtime's source (src/workers.ts),
+        # whose imports reach hono and superscalar: bun build resolves them
+        # from this package's node_modules, and superscalar through the
+        # link to the checkout scripts/superscalar-dep.sh stood up.
+        working-directory: runtime/http/typescript
+        run: |
+          bun install --frozen-lockfile
+          bun run link-deps
+
       - name: Install the pulumi CLI
         # extensions/pulumi drives it, and its integration test runs it
         # against a file:// backend with the random provider, which needs no

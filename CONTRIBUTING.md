@@ -331,11 +331,14 @@ gcp and cloudflare targets with `examples/deploy-smoke` (D97), a project
 shaped like a finances app: an API over the user model with a vector
 column, a keyed queue its TypeScript worker drains, a declared query, a
 job whose name is too long for a GCP service account, and a site on one
-origin with the API (D91). `scripts/smoke.sh <environment>` deploys
+origin with the API (D91); the behaviors a behavior worker runs (D151), a
+recurrence whose reminder fires (D152), the notifier with a stub channel
+adapter (D153), search across tables (D155) and the inbound path through
+the stub relay (D157). `scripts/smoke.sh <environment>` deploys
 `smoke-stack`'s `Gcp` or `Cloudflare`, checks it through the site's
 origin, signing in with a cookie, running the query and `nearest` and
-waiting for the worker to drain a message, prints the sign-ins' and the
-drain's times, and destroys it (`--keep` leaves it up, `--destroy`
+waiting for the worker to drain a message and for each feature's worker
+to move its rows, prints the sign-ins' and the workers' times, and destroys it (`--keep` leaves it up, `--destroy`
 removes it later). `smoke.sh Dev` runs the same checks against `stack
 dev`, with no cloud. The example's README lists them.
 

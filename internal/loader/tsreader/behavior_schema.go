@@ -5,8 +5,15 @@ import (
 	"strconv"
 	"strings"
 
+	scalars "github.com/parable-work/superscalar/go"
+
 	"github.com/parable-work/superschematic/internal/registry"
 )
+
+// scalarKeyword is the keyword a schema names a superscalar scalar under,
+// the one a tool's schema names its parameter's by
+// (apigen.DefaultToolScalarKey).
+const scalarKeyword = "x-superschematic-scalar"
 
 // The authoring types of @superschematic/db that a behavior's class writes
 // a JSON Schema with (packages/db/src/behaviorclass.ts).
@@ -31,6 +38,9 @@ const maxSchemaDepth = 32
 //
 //   - string, number and boolean are their JSON types, Integer is
 //     "integer", unknown is the empty schema;
+//   - a superscalar scalar (Temporal.Period) is its JSON type with the
+//     bounds and the pattern its definition declares, and its name under
+//     x-superschematic-scalar;
 //   - a string or number literal, or a union of them, is an enum of them;
 //     true or false, or Const<V>, is a const;
 //   - T | null is T's schema with "null" beside its type, and any other
@@ -332,6 +342,9 @@ func (r *behaviorClassReader) referenceSchema(node *astNode, depth int) (map[str
 			return map[string]any{"const": value}, true
 		}
 	}
+	if brand, ok := r.w.scalarBrand(r.w.checker.GetTypeFromTypeNode(node)); ok {
+		return r.scalarSchema(node, brand)
+	}
 	switch name {
 	case "Array", "ReadonlyArray":
 		if len(args) == 1 {
@@ -385,6 +398,43 @@ func (r *behaviorClassReader) referenceSchema(node *astNode, depth int) (map[str
 	}
 	r.fail(node, "a behavior's class writes no JSON Schema for %s: an interface, a type alias or an authoring type of @superschematic/db (JsonSchema, Integer, Const)", name)
 	return nil, false
+}
+
+// scalarSchema is the schema of the superscalar scalar a type names: the
+// JSON type, the length and value bounds and the pattern its definition
+// declares, which any JSON Schema validator holds a value to, and its name
+// under x-superschematic-scalar. What only the scalar's own validator
+// refuses (HasCustomValidate) a reader of the keyword checks, not the
+// schema.
+func (r *behaviorClassReader) scalarSchema(node *astNode, brand string) (map[string]any, bool) {
+	meta, ok := scalars.ScalarMetadataByCanonical[brand]
+	if !ok {
+		r.fail(node, "a behavior's schema names scalar %s, which superscalar does not define", brand)
+		return nil, false
+	}
+	switch meta.JSONSchemaType {
+	case "string", "integer", "number", "boolean":
+	default:
+		r.fail(node, "a behavior's schema names scalar %s, whose JSON type (%s) is no string, number or boolean", brand, meta.JSONSchemaType)
+		return nil, false
+	}
+	out := map[string]any{"type": meta.JSONSchemaType, scalarKeyword: brand}
+	if meta.MinLength > 0 {
+		out["minLength"] = json.Number(strconv.Itoa(meta.MinLength))
+	}
+	if meta.MaxLength > 0 {
+		out["maxLength"] = json.Number(strconv.Itoa(meta.MaxLength))
+	}
+	if meta.Minimum != nil {
+		out["minimum"] = json.Number(strconv.FormatInt(*meta.Minimum, 10))
+	}
+	if meta.Maximum != nil {
+		out["maximum"] = json.Number(strconv.FormatInt(*meta.Maximum, 10))
+	}
+	if meta.Pattern != "" {
+		out["pattern"] = meta.Pattern
+	}
+	return out, true
 }
 
 // eachItem is the schema of a list's items, read at the list's path with

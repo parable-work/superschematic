@@ -3,6 +3,7 @@ package cloudflare
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 
 	ir "github.com/parable-work/superschematic/ir"
@@ -16,8 +17,13 @@ import (
 // until it is stopped, so each firing runs the worker's claim loop for a
 // window, WORKER_DRAIN_SECONDS, then stops it as SIGTERM stops a process:
 // it claims no more, lets the running handlers finish within the grace and
-// gives back the rest. The queue stays its Postgres table, so its keys,
-// serialization, backoff, retention and dead messages are the table's
+// gives back the rest. Its window and grace together fit within the CPU
+// time a firing may take (DefaultCPUMilliseconds, or its cpuMs), so a
+// firing ends before Cloudflare stops it, whatever its handlers do: the
+// window is ir.DefaultWorkerDrainSeconds, or less when the CPU time leaves
+// less, and a drainSeconds that does not fit is refused (D151, #600). The
+// queue stays its table, so its keys, serialization, backoff,
+// retention and dead messages are the table's
 // (D53, D68, D80) whoever claims it, an enqueue still commits with the
 // write that caused it, and @enqueueOnChange's triggers still feed it. A
 // message waits at most the gap between one firing's window and the next
@@ -35,16 +41,13 @@ import (
 // A behavior worker (D103, D151) is a drainer too: its drain.ts runs its
 // table's deadline, change and event queues at each firing, each claiming
 // batches of up to its concurrency, with the handlers its main.ts runs
-// under stack dev. Its window and grace together fit within the CPU time a
-// firing may take (DefaultCPUMilliseconds, or its cpuMs), so a firing ends
-// before Cloudflare stops it, whatever its handlers do: the window is
-// ir.DefaultWorkerDrainSeconds, or less when the CPU time leaves less, and
-// a drainSeconds that does not fit is refused. A firing that leaves a
-// backlog logs a warning naming the queue, and the next firing takes the
-// rest.
+// under stack dev, its window held to its CPU time as every drainer's is.
+// A firing that leaves a backlog logs a warning naming the queue, and the
+// next firing takes the rest.
 //
 // Every drainer's Worker is also a Workflow of the class its drain.ts
-// exports, which a write wakes before the next firing (wakes.go).
+// exports, which a write wakes before the next firing, and a drainer
+// another drainer wakes has a wake relay too (wakes.go).
 
 // Drainer runs TypeScript workers as Cloudflare Workers that drain their
 // queues at each firing of a Cron Trigger.
@@ -109,8 +112,9 @@ func drainerPlatform() registry.PlatformSpec {
 // It refuses, as unrealizable: more than one instance, since each firing
 // runs one claim loop and a Cron Trigger fires once a minute, so the
 // worker's concurrency is what grows; an instance range, which no target
-// scales yet (D53, amended); and a window and grace over
-// MaxScheduledRunSeconds, which Cloudflare would cut short.
+// scales yet (D53, amended); and a window and grace past the CPU time a
+// firing may take, which Cloudflare would cut short. The CPU time is at
+// most 300 s, so they never reach MaxScheduledRunSeconds.
 func lowerDrainer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	d := ctx.Deployable
 	env := ctx.Environment
@@ -137,26 +141,25 @@ func lowerDrainer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if hasDrain {
 		drain = int(set)
 	}
-	if behavior := len(run.Queues) > 0; behavior {
-		// A behavior worker's firing ends before the invocation's CPU
-		// limit (D151): its window and grace, wall time, bound the CPU
-		// time it takes, whatever its handlers do.
-		cpu := DefaultCPUMilliseconds
-		if n, ok := wholeNumber(d.Settings["cpuMs"]); ok {
-			cpu = int(n)
-		}
-		budget := cpu/1000 - grace
-		switch {
-		case budget < 1:
-			return registry.Lowered{}, registry.Unrealizable("behavior worker %s lets its handlers finish for %s, and a firing on Workers may take %dms of CPU time (cpuMs), which leaves it no time to claim; raise cpuMs or shorten its @behaviorWorker's grace (D151)", d.Name, seconds(grace), cpu)
-		case hasDrain && drain > budget:
-			return registry.Lowered{}, registry.Unrealizable("behavior worker %s claims for %s and lets its handlers finish for %s at each firing, and a firing on Workers may take %dms of CPU time (cpuMs), which the two must fit within so the firing ends before Cloudflare stops it; shorten drainSeconds to %d or raise cpuMs (D151)", d.Name, seconds(drain), seconds(grace), cpu, budget)
-		case !hasDrain && drain > budget:
-			drain = budget
-		}
+	// A firing ends before the invocation's CPU limit (D151, #600): its
+	// window and grace, wall time, bound the CPU time it takes, whatever
+	// its handlers do, a @worker's as a behavior worker's.
+	what, decorator := "worker", "@worker"
+	if len(run.Queues) > 0 {
+		what, decorator = "behavior worker", "@behaviorWorker"
 	}
-	if drain+grace > MaxScheduledRunSeconds {
-		return registry.Lowered{}, registry.Unrealizable("worker %s claims for %s and lets its handlers finish for %s at each firing, %s in all, and Cloudflare stops a scheduled run after %s; shorten drainSeconds or its @worker's grace", d.Name, seconds(drain), seconds(grace), seconds(drain+grace), seconds(MaxScheduledRunSeconds))
+	cpu := DefaultCPUMilliseconds
+	if n, ok := wholeNumber(d.Settings["cpuMs"]); ok {
+		cpu = int(n)
+	}
+	budget := cpu/1000 - grace
+	switch {
+	case budget < 1:
+		return registry.Lowered{}, registry.Unrealizable("%s %s lets its handlers finish for %s, and a firing on Workers may take %dms of CPU time (cpuMs), which leaves it no time to claim; raise cpuMs or shorten its %s's grace (D151)", what, d.Name, seconds(grace), cpu, decorator)
+	case hasDrain && drain > budget:
+		return registry.Lowered{}, registry.Unrealizable("%s %s claims for %s and lets its handlers finish for %s at each firing, and a firing on Workers may take %dms of CPU time (cpuMs), which the two must fit within so the firing ends before Cloudflare stops it; shorten drainSeconds to %d or raise cpuMs (D151)", what, d.Name, seconds(drain), seconds(grace), cpu, budget)
+	case !hasDrain && drain > budget:
+		drain = budget
 	}
 	version, err := bundleVersion(ctx, v)
 	if err != nil {
@@ -170,14 +173,20 @@ func lowerDrainer(ctx registry.PlatformContext) (registry.Lowered, error) {
 			return registry.Lowered{}, fmt.Errorf("worker %s: %w", d.Name, err)
 		}
 	}
-	out := registry.Lowered{Resources: workerNodes(d, v, false, settingBool(d.Settings, "logs", true), version)}
+	// A drainer wakes another drainer through the other's wake relay
+	// (#600, wakes.go): a service binding to the relay's Worker, which its
+	// own Worker waits for, so nothing waits for the other's version.
+	relays, err := addWakes(d, version, true)
+	if err != nil {
+		return registry.Lowered{}, err
+	}
+	logs := settingBool(d.Settings, "logs", true)
+	out := registry.Lowered{Resources: workerNodes(d, v, false, logs, version)}
 	// The Worker waits for each Worker its service bindings name, so a
 	// destroy removes it, with its bindings, first (calls.go).
-	out.Resources[0].DependsOn = bindingDependencies(d)
-	// A drainer wakes no other drainer: its version would wait for the
-	// other's Workflow, and two drainers over one database would wait for
-	// each other. What its handlers leave another worker, the other's next
-	// firing takes (wakes.go).
+	deps := append(bindingDependencies(d), relays...)
+	slices.Sort(deps)
+	out.Resources[0].DependsOn = slices.Compact(deps)
 	if run.Instances > 0 {
 		// The Workflow a wake creates an instance of, of the class the
 		// deployment's version exports, so it waits for the deployment
@@ -203,6 +212,15 @@ func lowerDrainer(ctx registry.PlatformContext) (registry.Lowered, error) {
 				"schedules":  []any{map[string]any{"cron": DrainSchedule}},
 			},
 		})
+		// Another drainer's writes reach this one's queues: it wakes this
+		// one through a relay, whose version binds the Workflow (#600).
+		if wokenByDrainer(d) {
+			relay, err := wakeRelay(ctx, v, logs)
+			if err != nil {
+				return registry.Lowered{}, err
+			}
+			out.Resources = append(out.Resources, relay...)
+		}
 	}
 	return out, nil
 }

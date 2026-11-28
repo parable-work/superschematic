@@ -7,6 +7,7 @@
 //! what the queue's worker runs: each ready message of the SearchIndexing
 //! queue, handed to index_search in a write of the file.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,6 +19,13 @@ use runtime::access::sqlite::{issue_grant, revoke_grant, GrantAuthenticator};
 use runtime::access::IssueGrant;
 use runtime::orm::search_tables::sqlite::{call_search_tool, index_search, reindex_search, search_routes, search_tables, SearchRoutes};
 use runtime::orm::search_tables::{Embedder, SearchEmbeddings, SearchIndexing, SearchOptions, SearchRequest, SearchResult};
+use runtime::bucket::{Bucket, BucketError, Bytes, ListOptions, Object, Page, PutOptions, PutResult, Reader, SignedUrlOptions, Stream};
+use runtime::orm::file_processing::{process_files, FileProcessingOptions, FileProcessingRun};
+use runtime::orm::rowfeatures::{BeginFile, FileRef, ProcessingState, RowRef};
+use runtime::providers::{
+    providers_from, ConfigValue, ExtractedText, FileInput, FileProcessor, Preview as FilePreview, PreviewOptions, ProviderDefinition, ProviderInstance, Providers,
+    ProvidersOptions, RuntimeInterface,
+};
 use runtime::orm::sqlite::{execute_rows, query_rows, rusqlite, Database};
 use runtime::orm::{AccessCaller, Caller, Error, FieldKeyring, FindOptions, Values, WriteOptions};
 use runtime::{Authenticator, BoxError, Principal, PrincipalKind};
@@ -234,6 +242,13 @@ impl File {
     }
 }
 
+/// Runs `future` to its end on this thread: a pass, a begin or a
+/// complete inside a write of the file, whose connection a task does not
+/// hold across threads.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    tokio::task::block_in_place(|| tokio::runtime::Handle::current().block_on(future))
+}
+
 fn sorted(mut keys: Vec<String>) -> Vec<String> {
     keys.sort();
     keys
@@ -447,6 +462,45 @@ async fn search_across_tables_on_sqlite() {
         assert_eq!(db.count("SELECT count(*) FROM search_index WHERE (title || ' ' || coalesce(body, '') || ' ' || coalesce(comments, '') || ' ' || coalesce(files, '')) LIKE '%obsidian%'"), 0);
     }
 
+    case("an uploaded file's text the file processor extracts is indexed with its row, and a file the processor fails on ends failed");
+    {
+        let asked = Arc::new(AtomicUsize::new(0));
+        let providers = file_processors(&asked);
+        let bucket = MemoryBucket::default();
+        // A browser's upload: begin, the PUT its URL takes, and complete,
+        // which asks the file's text. A member that reaches the bucket
+        // runs the file's statements when first polled, in the write.
+        let upload = async |name: &str, media_type: &str, text: &str| {
+            let begin = BeginFile { to: RowRef::new("Unit", &unit_a), name: name.to_owned(), media_type: media_type.to_owned(), size: text.len() as u64, sha256: sha256_hex(text.as_bytes()), caption: None };
+            let (file, _) = db.tx(&system, |r| block_on(r.attachments()?.begin(&begin, &bucket, None))).unwrap();
+            bucket.put(&file.object_key, runtime::bucket::Body::full(text.as_bytes().to_vec()), PutOptions::content_type(media_type)).await.unwrap();
+            db.tx(&system, |r| block_on(r.attachments()?.complete(&FileRef::new("Unit", &file.id), &bucket))).unwrap()
+        };
+        let plan = upload("plan.txt", "text/plain", "Hawthorn rows along the north wall.").await;
+        let survey = upload("survey.pdf", "application/pdf", "Rowan saplings by the shed.").await;
+        assert_eq!(plan.extraction, ProcessingState::Pending);
+        db.drain(&none);
+        let pass = FileProcessingOptions::new(&providers, &bucket);
+        let run = db.tx(&system, |r| block_on(process_files(&r.attachments()?, &pass))).unwrap();
+        assert_eq!(run, FileProcessingRun { extracted: 1, previewed: 0, failed: 1 });
+        let got = db.tx(&system, |r| r.attachments()?.get(&FileRef::new("Unit", &plan.id))).unwrap();
+        assert_eq!((got.extraction, got.extracted_text.as_deref()), (ProcessingState::Done, Some("Hawthorn rows along the north wall.")));
+        let got = db.tx(&system, |r| r.attachments()?.get(&FileRef::new("Unit", &survey.id))).unwrap();
+        assert_eq!((got.extraction, got.extracted_text), (ProcessingState::Failed, None));
+        // The write of the text enqueues the row, whose index row then
+        // holds it: a word only in the file finds the unit.
+        assert_eq!(db.drain(&none), 1);
+        let (hawthorn, keys) = db.found(Some(&as_alice), "hawthorn", &none, |_| {});
+        assert_eq!(keys, [format!("Unit:{unit_a}")]);
+        assert_eq!(hawthorn.items[0].matched, "files");
+        assert_eq!(db.found(Some(&as_alice), "rowan", &none, |_| {}).0.total, 0);
+        // Nothing is pending: the next pass asks no processor anything.
+        let before = asked.load(Ordering::SeqCst);
+        let next = db.tx(&system, |r| block_on(process_files(&r.attachments()?, &pass))).unwrap();
+        assert_eq!(next, FileProcessingRun::default());
+        assert_eq!(asked.load(Ordering::SeqCst), before);
+    }
+
     case("an index row follows its row: an audience change and a delete at once, a change of text once the queue drains");
     {
         assert!(db.keys(&as_bob, "walnut").contains(&format!("Folder:{shared_folder}")));
@@ -555,4 +609,111 @@ async fn search_across_tables_on_sqlite() {
             assert_eq!(got, search["sqlite"], "{name}");
         }
     }
+}
+
+/// A bucket in memory: each object's bytes and media type, by name.
+#[derive(Default)]
+struct MemoryBucket(std::sync::Mutex<Objects>);
+
+/// Each object's bytes and media type, by name.
+type Objects = std::collections::HashMap<String, (Vec<u8>, Option<String>)>;
+
+/// One chunk, then the end.
+struct Once(Option<Bytes>);
+
+impl Stream for Once {
+    type Item = Result<Bytes, BucketError>;
+    fn poll_next(mut self: std::pin::Pin<&mut Self>, _: &mut std::task::Context<'_>) -> std::task::Poll<Option<Self::Item>> {
+        std::task::Poll::Ready(self.0.take().map(Ok))
+    }
+}
+
+#[async_trait]
+impl Bucket for MemoryBucket {
+    fn name(&self) -> &str {
+        "unit-files"
+    }
+
+    async fn put(&self, name: &str, body: runtime::bucket::Body, options: PutOptions) -> Result<PutResult, BucketError> {
+        let bytes = body.as_bytes().cloned().unwrap_or_default().to_vec();
+        let object = Object { name: name.to_owned(), size: bytes.len() as u64, content_type: options.content_type.clone(), updated: None };
+        self.0.lock().unwrap().insert(name.to_owned(), (bytes, options.content_type));
+        Ok(PutResult { object, created: true })
+    }
+
+    async fn head(&self, name: &str) -> Result<Option<Object>, BucketError> {
+        Ok(self.0.lock().unwrap().get(name).map(|(bytes, content_type)| Object { name: name.to_owned(), size: bytes.len() as u64, content_type: content_type.clone(), updated: None }))
+    }
+
+    async fn get(&self, name: &str) -> Result<Reader, BucketError> {
+        let Some((bytes, content_type)) = self.0.lock().unwrap().get(name).cloned() else {
+            return Err(BucketError::NotFound { bucket: "unit-files".into(), object: name.into() });
+        };
+        let object = Object { name: name.to_owned(), size: bytes.len() as u64, content_type, updated: None };
+        Ok(Reader::new(object, Once(Some(Bytes::from(bytes)))))
+    }
+
+    async fn delete(&self, name: &str) -> Result<(), BucketError> {
+        self.0.lock().unwrap().remove(name);
+        Ok(())
+    }
+
+    async fn list(&self, _options: ListOptions) -> Result<Page, BucketError> {
+        Ok(Page::default())
+    }
+
+    async fn signed_url(&self, name: &str, _options: SignedUrlOptions) -> Result<String, BucketError> {
+        Ok(format!("memory://unit-files/{name}"))
+    }
+}
+
+/// The SHA-256 of `bytes`, 64 lowercase hex digits.
+fn sha256_hex(bytes: &[u8]) -> String {
+    ring::digest::digest(&ring::digest::SHA256, bytes).as_ref().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A stub file processor of `types` (D159): a file's text is its bytes,
+/// or with `fails` every call fails. It counts the calls into it.
+struct StubProcessor {
+    types: Vec<String>,
+    fails: bool,
+    asked: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl FileProcessor for StubProcessor {
+    fn media_types(&self) -> Vec<String> {
+        self.types.clone()
+    }
+
+    async fn extract_text(&self, file: &FileInput) -> Result<Option<ExtractedText>, BoxError> {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        if self.fails {
+            return Err("the stub cannot read this file".into());
+        }
+        Ok(Some(ExtractedText { text: String::from_utf8_lossy(&file.bytes).into_owned(), ..ExtractedText::default() }))
+    }
+
+    async fn preview(&self, _file: &FileInput, _options: &PreviewOptions) -> Result<Option<FilePreview>, BoxError> {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        if self.fails {
+            return Err("the stub cannot read this file".into());
+        }
+        Ok(None)
+    }
+}
+
+/// The providers of two files slots: FILES a stub of plain text, and
+/// MORE_FILES one of PDFs that fails.
+fn file_processors(asked: &Arc<AtomicUsize>) -> Providers {
+    let mut options = ProvidersOptions::default();
+    for (slot, name, types, fails) in [("FILES", "plain-text", "text/plain", false), ("MORE_FILES", "broken-pdf", "application/pdf", true)] {
+        options.slots.insert(slot.to_owned(), "files".to_owned());
+        options.config.insert(slot.to_owned(), ConfigValue::Text(name.to_owned()));
+        let asked = Arc::clone(asked);
+        options.definitions.push(ProviderDefinition::new(name, RuntimeInterface::Files, move |_, _| {
+            Ok(ProviderInstance::Files(Arc::new(StubProcessor { types: vec![types.to_owned()], fails, asked: Arc::clone(&asked) })))
+        }));
+    }
+    providers_from(options).unwrap()
 }

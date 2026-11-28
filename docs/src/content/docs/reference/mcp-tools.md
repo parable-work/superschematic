@@ -1,6 +1,6 @@
 ---
 title: MCP tools
-description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, the MCP endpoint a TypeScript or a Rust API serves them at, and how an extension adds its rules, vendor keys and policy.
+description: The @mcp and @icon decorators on operations, a tool's invocation policy, the tool documents the SDK generators write from them, the MCP endpoint a TypeScript, a Rust or a Go API serves them at, and how an extension adds its rules, vendor keys and policy.
 sidebar:
   order: 4
 ---
@@ -206,6 +206,13 @@ what it may read. The rest, a reference's removal and a file's upload,
 completion, download, filing and removal, stay routes: their `@mcp` is
 hidden with the reason, since a file's bytes go to and from the bucket
 through a signed URL, which no tool call carries.
+
+An operation the build adds for a `@triageOperations` set
+([Serve triage as routes](/superschematic/guides/parties/#serve-triage-as-routes))
+is a visible tool when it reads (#746): `triage`, the held messages, and
+`triage_message`, one of them, each run as its caller, who holds the
+triage permission. The settle and the dismiss stay routes, their `@mcp`
+hidden with the reason: each decides who a sender is.
 
 A `@tableOperation` that declares no `@mcp` is a visible tool whose handle
 is its method's name in snake case, `list_issues`, and one that declares
@@ -803,9 +810,22 @@ The APIs of one server share its paths, so a server serves one API with
 `mcp` on, and the stack's build refuses a second:
 `stack shop-stack: server Web serves shop-api and shop-admin, which both turn on outputs.api.mcp, and one server answers POST /api/mcp for one API; serve them from two servers, or turn mcp off in one (D81)`.
 
-The Go server serves no MCP endpoint yet. Its config fails to load with
-`mcp` on:
-`outputs.api.mcp is on and the API's language is GO: a TypeScript API and a Rust API serve the MCP endpoint; Go follows; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)`.
+A Go API serves the same endpoint (#660). The API package's `mcp.go`
+holds the tool table, each tool with its route's method and path, and
+`RegisterRoutes` mounts the HTTP runtime's `mcp` endpoint at
+`POST /api/mcp`, its options in `Config.MCP`: `ConfirmationKey`, which a
+stack's server reads from the API's config; `CallGate`, the dispatcher's
+`MCPCallGate` when `Deps` holds one; and `Tools`, the calendar's and
+search's tools when the database has them. A call is a request to the
+tool's route through the router `RegisterRoutes` was given, as the
+caller the endpoint's request authenticated; `tools/list` offers a tool
+whose route's permission check lets the caller through; and a tool that
+asks is checked through its route's steps and decoding, stopped before
+the implementation, before anyone is asked (D98). The route of a
+`@manualRouteRegistration` operation and of the user model's is not
+checked before the confirmation, since its handler is not the generated
+one. The Go endpoint is held to the engine's recorded exchanges and to
+the TypeScript runtime's confirmation tokens, as the Rust one is.
 
 ### A key for a call that runs once
 

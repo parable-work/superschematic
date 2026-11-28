@@ -2639,13 +2639,19 @@
                   },
                   "opensBefore": {
                     "description": "How long before its due an occurrence opens, an ISO 8601 duration (P14D); with none it opens when the occurrence before it falls due, the first when it is planned.",
-                    "minLength": 2,
-                    "type": "string"
+                    "maxLength": 64,
+                    "minLength": 3,
+                    "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+                    "type": "string",
+                    "x-superschematic-scalar": "Temporal.Period"
                   },
                   "overdueAfter": {
                     "description": "How long after its due an open occurrence is missed, an ISO 8601 duration (P1D); at its due when absent.",
-                    "minLength": 2,
-                    "type": "string"
+                    "maxLength": 64,
+                    "minLength": 3,
+                    "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+                    "type": "string",
+                    "x-superschematic-scalar": "Temporal.Period"
                   },
                   "permission": {
                     "description": "The permission complete and listOccurrences need; any caller when absent.",
@@ -2681,8 +2687,11 @@
                   },
                   "remindBefore": {
                     "description": "How long before its due an occurrence reminds, an ISO 8601 duration (P3D): the deadline remind.",
-                    "minLength": 2,
-                    "type": "string"
+                    "maxLength": 64,
+                    "minLength": 3,
+                    "pattern": "^P(?:[0-9]{1,9}Y)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}W)?(?:[0-9]{1,9}D)?(?:T(?:[0-9]{1,9}H)?(?:[0-9]{1,9}M)?(?:[0-9]{1,9}(?:\\.[0-9]{1,9})?S)?)?$",
+                    "type": "string",
+                    "x-superschematic-scalar": "Temporal.Period"
                   },
                   "timeZone": {
                     "description": "The IANA time zone a recurrence is read in when setRecurrence names none; UTC when absent.",
@@ -6046,6 +6055,9 @@
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
         },
+        "triageOperations": {
+          "$ref": "#/$defs/TriageOperationsConfig"
+        },
         "userAdministration": {
           "$ref": "#/$defs/UserAdministrationConfig"
         },
@@ -6120,6 +6132,9 @@
         },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
+        },
+        "triageOperations": {
+          "$ref": "#/$defs/TriageOperationsConfig"
         },
         "userAdministration": {
           "$ref": "#/$defs/UserAdministrationConfig"
@@ -7457,6 +7472,22 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "TriageOperationsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "party": {
+          "type": "string"
+        },
+        "refersTo": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "party"
       ],
       "type": "object"
     },
