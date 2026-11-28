@@ -71,6 +71,8 @@ pub struct Wired {
     /// The database's tables, which each part runs over.
     pub tables: Tables,
     pub calendar: CalendarOptions,
+    /// The implementation's `Wire`, which `handlers` asks for the
+    /// authenticator; a wiring that wraps none has no use for it.
     wire: Arc<dyn Wire>,
 }
 
