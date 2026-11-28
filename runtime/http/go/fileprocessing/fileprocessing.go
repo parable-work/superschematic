@@ -245,7 +245,7 @@ func readObject(ctx context.Context, b bucket.Bucket, name string, maxBytes int6
 	if err != nil {
 		return nil, err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	if r.Object.Size > maxBytes {
 		return nil, refuse("object %s holds %d bytes, more than the %d a pass reads", name, r.Object.Size, maxBytes)
 	}
