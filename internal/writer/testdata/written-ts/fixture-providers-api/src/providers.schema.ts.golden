@@ -1,0 +1,68 @@
+import { Delivery } from "@schemas/fixture-providers-db";
+import { Authenticated, HttpMethod, docs as apiDocs, mcp, requirePermission, rest, tableOperation } from "@superschematic/api";
+import { Nullable, Secret, source } from "@superschematic/schema";
+import { envVars, providers } from "@superschematic/schema-config";
+import { Identity } from "superscalar";
+
+// A delivery as the API answers it.
+@source(Delivery)
+export abstract class DeliveryView {
+  id: Identity.UUID;
+
+  recipient: string;
+
+  body: string;
+
+  provider: string;
+
+  providerMessageId: string;
+}
+
+// The API's config (D159): a slot per runtime interface, each a field
+// whose value names the provider in each environment, and the fields
+// after it the settings of the providers that may fill it.
+@envVars
+@providers({ MODEL: "model", PREVIEWS: "files", RUNNER: "sandbox", SMS: "channel", VAULT: "credentials" })
+export abstract class ProvidersApiConfig {
+  SMS: Nullable<string>;
+
+  SMS_URL: Nullable<string>;
+
+  SMS_ACCOUNT: Nullable<string>;
+
+  SMS_SENDER: Nullable<string>;
+
+  SMS_TOKEN: Nullable<Secret<string>>;
+
+  VAULT: Nullable<string>;
+
+  VAULT_URL: Nullable<string>;
+
+  VAULT_VAULTS: Nullable<string>;
+
+  VAULT_TOKEN: Nullable<Secret<string>>;
+
+  RUNNER: Nullable<string>;
+
+  RUNNER_WORKDIR: Nullable<string>;
+
+  MODEL: Nullable<string>;
+
+  MODEL_MODEL: Nullable<string>;
+
+  PREVIEWS: Nullable<string>;
+
+  PREVIEWS_MAX_CHARS: Nullable<string>;
+}
+
+export class Deliveries extends Authenticated {
+  // A delivery, which a relay holding messages.relay reads.
+  @apiDocs({ title: "Get delivery", description: "A delivery, which a relay holding messages.relay reads.", capability: "deliveries.get-delivery", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "get_delivery", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "deliveries/{id}")
+  @requirePermission(["messages.relay"])
+  @tableOperation()
+  getDelivery(id: Identity.UUID): DeliveryView {
+    throw new Error("schema declaration only");
+  }
+}

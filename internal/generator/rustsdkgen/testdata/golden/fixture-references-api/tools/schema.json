@@ -1,0 +1,862 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FixtureReferencesApiSdk Tool Definitions",
+  "description": "LLM tool calling bindings for fixture-references-api API",
+  "tools": [
+    {
+      "name": "note.addReference",
+      "operationId": "NoteAddReferenceHandler",
+      "title": "Note: add reference",
+      "mcp": {
+        "hidden": false,
+        "name": "Note: add reference",
+        "handle": "note_add_reference",
+        "description": "Makes the row point at another row, of any table it may point at, with a role (none unless given), once per target and role; answers the reference, the one there when it was there.",
+        "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "note.add-reference",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Makes the row point at another row, of any table it may point at, with a role (none unless given), once per target and role; answers the reference, the one there when it was there.",
+      "namespace": "note",
+      "methodName": "add_reference",
+      "httpMethod": "POST",
+      "httpPath": "/api/note/{id}/references",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f707de4eca8a68a5f6d2bb1babcf247f0a8d5ae7ba3736a9903a8b90b88a449c",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "role": {"description":"A string value","type":["string","null"]},
+          "to": {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowReference object"
+      }
+    },
+    {
+      "name": "note.attachments",
+      "operationId": "NoteAttachmentsHandler",
+      "title": "Note: attachments",
+      "mcp": {
+        "hidden": false,
+        "name": "Note: attachments",
+        "handle": "note_attachments",
+        "description": "Lists the row's ready files, oldest first.",
+        "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false},
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "note.attachments",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists the row's ready files, oldest first.",
+      "namespace": "note",
+      "methodName": "attachments",
+      "httpMethod": "GET",
+      "httpPath": "/api/note/{id}/files",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of RowAttachment",
+        "items": {
+          "type": "object",
+          "description": "RowAttachment object"
+        }
+      }
+    },
+    {
+      "name": "note.backlinks",
+      "operationId": "NoteBacklinksHandler",
+      "title": "Note: backlinks",
+      "mcp": {
+        "hidden": false,
+        "name": "Note: backlinks",
+        "handle": "note_backlinks",
+        "description": "Lists the rows that point at the row, across every table, through a reference or a ref block of a message, each one the caller can read, most recent first. Only the owner of a row whose audience is not everyone hears how many rows it cannot see point at it.",
+        "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false},
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "note.backlinks",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists the rows that point at the row, across every table, through a reference or a ref block of a message, each one the caller can read, most recent first. Only the owner of a row whose audience is not everyone hears how many rows it cannot see point at it.",
+      "namespace": "note",
+      "methodName": "backlinks",
+      "httpMethod": "GET",
+      "httpPath": "/api/note/{id}/backlinks",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowBacklinks object"
+      }
+    },
+    {
+      "name": "note.beginUpload",
+      "operationId": "NoteBeginUploadHandler",
+      "title": "Note: begin upload",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A file's upload, download and filing stay routes: its bytes go to and from the bucket through a signed URL, which no tool call carries (#723)."
+      },
+      "capability": "note.begin-upload",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Starts an upload of a file to the row: a pending file, held to the table's bounds with the row's other files and uploads, and the URL the browser puts the file's bytes to, straight to the bucket, before it expires.",
+      "namespace": "note",
+      "methodName": "begin_upload",
+      "httpMethod": "POST",
+      "httpPath": "/api/note/{id}/files",
+      "requiresAuth": true,
+      "requiredPermissions": ["notes.upload"],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c3f3966a612f3bcbbdb64770efe442cdea745183e1565e78fac6d239951c7aaf",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "caption": {"description":"A string value","type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "mediaType": {"description":"A string value","type":"string"},
+          "name": {"description":"A string value","type":"string"},
+          "sha256": {"description":"A string value","type":"string"},
+          "size": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["id", "mediaType", "name", "sha256", "size"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowAttachmentBegun object"
+      }
+    },
+    {
+      "name": "note.completeUpload",
+      "operationId": "NoteCompleteUploadHandler",
+      "title": "Note: complete upload",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A file's upload, download and filing stay routes: its bytes go to and from the bucket through a signed URL, which no tool call carries (#723)."
+      },
+      "capability": "note.complete-upload",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Checks an upload's bytes in the bucket against the size and SHA-256 its begin declared, and makes the file ready; a file whose bytes differ is removed.",
+      "namespace": "note",
+      "methodName": "complete_upload",
+      "httpMethod": "POST",
+      "httpPath": "/api/note/{id}/files/{file}/complete",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {"description":"file parameter","type":"string"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["file", "id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowAttachment object"
+      }
+    },
+    {
+      "name": "note.download",
+      "operationId": "NoteDownloadHandler",
+      "title": "Note: download",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A file's upload, download and filing stay routes: its bytes go to and from the bucket through a signed URL, which no tool call carries (#723)."
+      },
+      "capability": "note.download",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Signs a URL that downloads one of the row's files until it expires, and answers the file, whose preview this first view asks.",
+      "namespace": "note",
+      "methodName": "download",
+      "httpMethod": "GET",
+      "httpPath": "/api/note/{id}/files/{file}",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {"description":"file parameter","type":"string"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["file", "id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowAttachmentDownload object"
+      }
+    },
+    {
+      "name": "note.fileAttachment",
+      "operationId": "NoteFileAttachmentHandler",
+      "title": "Note: file attachment",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A file's upload, download and filing stay routes: its bytes go to and from the bucket through a signed URL, which no tool call carries (#723)."
+      },
+      "capability": "note.file-attachment",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Files one of the row's files onto another row, which may be of another table, with no second upload: a copy that names the same object, or with move the file itself. When the table keeps references that may point at the other row, the row then points at it with the role (filed unless given), so the other row lists it among its backlinks.",
+      "namespace": "note",
+      "methodName": "file_attachment",
+      "httpMethod": "POST",
+      "httpPath": "/api/note/{id}/files/{file}/file",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:7b2ed401442d16e2aa723aaf7f830242f848b62ccfbace068d5e42f4af87c6ca",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {"description":"file parameter","type":"string"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "move": {"description":"A boolean value (true or false)","type":["boolean","null"]},
+          "role": {"description":"A string value","type":["string","null"]},
+          "to": {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"}
+        },
+        "required": ["file", "id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowAttachment object"
+      }
+    },
+    {
+      "name": "note.references",
+      "operationId": "NoteReferencesHandler",
+      "title": "Note: references",
+      "mcp": {
+        "hidden": false,
+        "name": "Note: references",
+        "handle": "note_references",
+        "description": "Lists the references the row holds, oldest first, each to a row the caller can read.",
+        "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false},
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "note.references",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists the references the row holds, oldest first, each to a row the caller can read.",
+      "namespace": "note",
+      "methodName": "references",
+      "httpMethod": "GET",
+      "httpPath": "/api/note/{id}/references",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of RowReference",
+        "items": {
+          "type": "object",
+          "description": "RowReference object"
+        }
+      }
+    },
+    {
+      "name": "note.removeReference",
+      "operationId": "NoteRemoveReferenceHandler",
+      "title": "Note: remove reference",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A reference's removal stays a route: a tool adds references and reads them (#723)."
+      },
+      "capability": "note.remove-reference",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Stops the row pointing at another row with the role, or with any role when none is given; answers how many references it removed.",
+      "namespace": "note",
+      "methodName": "remove_reference",
+      "httpMethod": "POST",
+      "httpPath": "/api/note/{id}/references/remove",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f707de4eca8a68a5f6d2bb1babcf247f0a8d5ae7ba3736a9903a8b90b88a449c",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "role": {"description":"A string value","type":["string","null"]},
+          "to": {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowReferencesRemoved object"
+      }
+    },
+    {
+      "name": "ticket.addReference",
+      "operationId": "TicketAddReferenceHandler",
+      "title": "Ticket: add reference",
+      "mcp": {
+        "hidden": false,
+        "name": "Ticket: add reference",
+        "handle": "ticket_add_reference",
+        "description": "Makes the row point at another row, of any table it may point at, with a role (none unless given), once per target and role; answers the reference, the one there when it was there.",
+        "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":false,"destructiveHint":true,"idempotentHint":false},
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "ticket.add-reference",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Makes the row point at another row, of any table it may point at, with a role (none unless given), once per target and role; answers the reference, the one there when it was there.",
+      "namespace": "ticket",
+      "methodName": "add_reference",
+      "httpMethod": "POST",
+      "httpPath": "/api/ticket/{id}/references",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f707de4eca8a68a5f6d2bb1babcf247f0a8d5ae7ba3736a9903a8b90b88a449c",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "role": {"description":"A string value","type":["string","null"]},
+          "to": {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowReference object"
+      }
+    },
+    {
+      "name": "ticket.attachments",
+      "operationId": "TicketAttachmentsHandler",
+      "title": "Ticket: attachments",
+      "mcp": {
+        "hidden": false,
+        "name": "Ticket: attachments",
+        "handle": "ticket_attachments",
+        "description": "Lists the row's ready files, oldest first.",
+        "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false},
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "ticket.attachments",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists the row's ready files, oldest first.",
+      "namespace": "ticket",
+      "methodName": "attachments",
+      "httpMethod": "GET",
+      "httpPath": "/api/ticket/{id}/files",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of RowAttachment",
+        "items": {
+          "type": "object",
+          "description": "RowAttachment object"
+        }
+      }
+    },
+    {
+      "name": "ticket.backlinks",
+      "operationId": "TicketBacklinksHandler",
+      "title": "Ticket: backlinks",
+      "mcp": {
+        "hidden": false,
+        "name": "Ticket: backlinks",
+        "handle": "ticket_backlinks",
+        "description": "Lists the rows that point at the row, across every table, through a reference or a ref block of a message, each one the caller can read, most recent first. Only the owner of a row whose audience is not everyone hears how many rows it cannot see point at it.",
+        "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false},
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "ticket.backlinks",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists the rows that point at the row, across every table, through a reference or a ref block of a message, each one the caller can read, most recent first. Only the owner of a row whose audience is not everyone hears how many rows it cannot see point at it.",
+      "namespace": "ticket",
+      "methodName": "backlinks",
+      "httpMethod": "GET",
+      "httpPath": "/api/ticket/{id}/backlinks",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowBacklinks object"
+      }
+    },
+    {
+      "name": "ticket.beginUpload",
+      "operationId": "TicketBeginUploadHandler",
+      "title": "Ticket: begin upload",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A file's upload, download and filing stay routes: its bytes go to and from the bucket through a signed URL, which no tool call carries (#723)."
+      },
+      "capability": "ticket.begin-upload",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Starts an upload of a file to the row: a pending file, held to the table's bounds with the row's other files and uploads, and the URL the browser puts the file's bytes to, straight to the bucket, before it expires.",
+      "namespace": "ticket",
+      "methodName": "begin_upload",
+      "httpMethod": "POST",
+      "httpPath": "/api/ticket/{id}/files",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:c3f3966a612f3bcbbdb64770efe442cdea745183e1565e78fac6d239951c7aaf",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "caption": {"description":"A string value","type":["string","null"]},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "mediaType": {"description":"A string value","type":"string"},
+          "name": {"description":"A string value","type":"string"},
+          "sha256": {"description":"A string value","type":"string"},
+          "size": {"description":"Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.","maximum":9007199254740991,"minimum":-9007199254740991,"type":"integer","x-superschematic-scalar":"Generic.Int64"}
+        },
+        "required": ["id", "mediaType", "name", "sha256", "size"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowAttachmentBegun object"
+      }
+    },
+    {
+      "name": "ticket.completeUpload",
+      "operationId": "TicketCompleteUploadHandler",
+      "title": "Ticket: complete upload",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A file's upload, download and filing stay routes: its bytes go to and from the bucket through a signed URL, which no tool call carries (#723)."
+      },
+      "capability": "ticket.complete-upload",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Checks an upload's bytes in the bucket against the size and SHA-256 its begin declared, and makes the file ready; a file whose bytes differ is removed.",
+      "namespace": "ticket",
+      "methodName": "complete_upload",
+      "httpMethod": "POST",
+      "httpPath": "/api/ticket/{id}/files/{file}/complete",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {"description":"file parameter","type":"string"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["file", "id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowAttachment object"
+      }
+    },
+    {
+      "name": "ticket.download",
+      "operationId": "TicketDownloadHandler",
+      "title": "Ticket: download",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A file's upload, download and filing stay routes: its bytes go to and from the bucket through a signed URL, which no tool call carries (#723)."
+      },
+      "capability": "ticket.download",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Signs a URL that downloads one of the row's files until it expires, and answers the file, whose preview this first view asks.",
+      "namespace": "ticket",
+      "methodName": "download",
+      "httpMethod": "GET",
+      "httpPath": "/api/ticket/{id}/files/{file}",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {"description":"file parameter","type":"string"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["file", "id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowAttachmentDownload object"
+      }
+    },
+    {
+      "name": "ticket.fileAttachment",
+      "operationId": "TicketFileAttachmentHandler",
+      "title": "Ticket: file attachment",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A file's upload, download and filing stay routes: its bytes go to and from the bucket through a signed URL, which no tool call carries (#723)."
+      },
+      "capability": "ticket.file-attachment",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Files one of the row's files onto another row, which may be of another table, with no second upload: a copy that names the same object, or with move the file itself. When the table keeps references that may point at the other row, the row then points at it with the role (filed unless given), so the other row lists it among its backlinks.",
+      "namespace": "ticket",
+      "methodName": "file_attachment",
+      "httpMethod": "POST",
+      "httpPath": "/api/ticket/{id}/files/{file}/file",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:7b2ed401442d16e2aa723aaf7f830242f848b62ccfbace068d5e42f4af87c6ca",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {"description":"file parameter","type":"string"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "move": {"description":"A boolean value (true or false)","type":["boolean","null"]},
+          "role": {"description":"A string value","type":["string","null"]},
+          "to": {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"}
+        },
+        "required": ["file", "id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowAttachment object"
+      }
+    },
+    {
+      "name": "ticket.getTicket",
+      "operationId": "TicketGetTicketHandler",
+      "title": "",
+      "capability": "",
+      "lifecycle": "",
+      "visibility": "",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "getTicket endpoint (Requires authentication)",
+      "namespace": "ticket",
+      "methodName": "get_ticket",
+      "httpMethod": "GET",
+      "httpPath": "/api/tickets/{id}",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "Ticket object"
+      }
+    },
+    {
+      "name": "ticket.references",
+      "operationId": "TicketReferencesHandler",
+      "title": "Ticket: references",
+      "mcp": {
+        "hidden": false,
+        "name": "Ticket: references",
+        "handle": "ticket_references",
+        "description": "Lists the references the row holds, oldest first, each to a row the caller can read.",
+        "invocationPolicy": "auto",
+        "annotations": {"readOnlyHint":true,"destructiveHint":false,"idempotentHint":false},
+        "_meta": {"superschematic/operation-guidance":{"useWhen":"","doNotUseWhen":"","success":"","errors":[]}}
+      },
+      "capability": "ticket.references",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": {
+        "mode": "read_only",
+        "idempotencyKeyPointers": [],
+        "expectedRevisionPointers": []
+      },
+      "description": "Lists the references the row holds, oldest first, each to a row the caller can read.",
+      "namespace": "ticket",
+      "methodName": "references",
+      "httpMethod": "GET",
+      "httpPath": "/api/ticket/{id}/references",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:a0006e9d6977d9d3746873979fea0e630f9bbfb10d8c6728ccaa1c3e226f9ad0",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["id"]
+      },
+      "returns": {
+        "type": "array",
+        "description": "Array of RowReference",
+        "items": {
+          "type": "object",
+          "description": "RowReference object"
+        }
+      }
+    },
+    {
+      "name": "ticket.removeAttachment",
+      "operationId": "TicketRemoveAttachmentHandler",
+      "title": "Ticket: remove attachment",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A file's upload, download and filing stay routes: its bytes go to and from the bucket through a signed URL, which no tool call carries (#723)."
+      },
+      "capability": "ticket.remove-attachment",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Removes one of the row's files; its object is released once no file names it.",
+      "namespace": "ticket",
+      "methodName": "remove_attachment",
+      "httpMethod": "DELETE",
+      "httpPath": "/api/ticket/{id}/files/{file}",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f86a1a4eb6a568dc628e71693b0779651cf99bf9bf66352e7a559fff82016677",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "file": {"description":"file parameter","type":"string"},
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"}
+        },
+        "required": ["file", "id"]
+      },
+      "returns": {
+        "type": "boolean",
+        "description": "A boolean value (true or false)"
+      }
+    },
+    {
+      "name": "ticket.removeReference",
+      "operationId": "TicketRemoveReferenceHandler",
+      "title": "Ticket: remove reference",
+      "mcp": {
+        "hidden": true,
+        "hiddenReason": "A reference's removal stays a route: a tool adds references and reads them (#723)."
+      },
+      "capability": "ticket.remove-reference",
+      "lifecycle": "active",
+      "visibility": "public",
+      "audience": "",
+      "guidance": {"useWhen":"","doNotUseWhen":"","success":"","errors":[]},
+      "replay": null,
+      "description": "Stops the row pointing at another row with the role, or with any role when none is given; answers how many references it removed.",
+      "namespace": "ticket",
+      "methodName": "remove_reference",
+      "httpMethod": "POST",
+      "httpPath": "/api/ticket/{id}/references/remove",
+      "requiresAuth": true,
+      "requiredPermissions": [],
+      "isScoped": false,
+      "bindingStatus": "ready",
+      "inputSchemaDigest": "sha256:f707de4eca8a68a5f6d2bb1babcf247f0a8d5ae7ba3736a9903a8b90b88a449c",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": {"description":"id parameter","pattern":"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$","type":"string","x-superschematic-scalar":"Identity.UUID"},
+          "role": {"description":"A string value","type":["string","null"]},
+          "to": {"additionalProperties":false,"description":"RowRef object","properties":{"key":{"description":"A string value","type":"string"},"table":{"description":"A string value","type":"string"}},"required":["key","table"],"type":"object"}
+        },
+        "required": ["id", "to"]
+      },
+      "returns": {
+        "type": "object",
+        "description": "RowReferencesRemoved object"
+      }
+    }
+  ]
+}

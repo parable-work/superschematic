@@ -1,0 +1,703 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "schemaVersion": "1.0",
+  "generatedAt": "2026-01-02T03:04:05Z",
+  "apiId": "fixture-references-api",
+  "sdkClassName": "FixtureReferencesApiSDK",
+  "tools": [
+    {
+      "toolName": "note.backlinks",
+      "apiId": "fixture-references-api",
+      "namespace": "note",
+      "methodName": "backlinks",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.attachments",
+      "apiId": "fixture-references-api",
+      "namespace": "note",
+      "methodName": "attachments",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.beginUpload",
+      "apiId": "fixture-references-api",
+      "namespace": "note",
+      "methodName": "beginUpload",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "name",
+          "required": true,
+          "kind": "input",
+          "target": "input.name"
+        },
+        {
+          "toolParameter": "mediaType",
+          "required": true,
+          "kind": "input",
+          "target": "input.mediaType"
+        },
+        {
+          "toolParameter": "size",
+          "required": true,
+          "kind": "input",
+          "target": "input.size"
+        },
+        {
+          "toolParameter": "sha256",
+          "required": true,
+          "kind": "input",
+          "target": "input.sha256"
+        },
+        {
+          "toolParameter": "caption",
+          "required": false,
+          "kind": "input",
+          "target": "input.caption"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["name", "mediaType", "size", "sha256", "caption"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.download",
+      "apiId": "fixture-references-api",
+      "namespace": "note",
+      "methodName": "download",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "file",
+          "required": true,
+          "kind": "path",
+          "target": "path.file"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "file"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.completeUpload",
+      "apiId": "fixture-references-api",
+      "namespace": "note",
+      "methodName": "completeUpload",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "file",
+          "required": true,
+          "kind": "path",
+          "target": "path.file"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "file"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.fileAttachment",
+      "apiId": "fixture-references-api",
+      "namespace": "note",
+      "methodName": "fileAttachment",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "file",
+          "required": true,
+          "kind": "path",
+          "target": "path.file"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        },
+        {
+          "toolParameter": "move",
+          "required": false,
+          "kind": "input",
+          "target": "input.move"
+        },
+        {
+          "toolParameter": "role",
+          "required": false,
+          "kind": "input",
+          "target": "input.role"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "file"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["to", "move", "role"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.references",
+      "apiId": "fixture-references-api",
+      "namespace": "note",
+      "methodName": "references",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.addReference",
+      "apiId": "fixture-references-api",
+      "namespace": "note",
+      "methodName": "addReference",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        },
+        {
+          "toolParameter": "role",
+          "required": false,
+          "kind": "input",
+          "target": "input.role"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["to", "role"]
+        }
+      ]
+    },
+    {
+      "toolName": "note.removeReference",
+      "apiId": "fixture-references-api",
+      "namespace": "note",
+      "methodName": "removeReference",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        },
+        {
+          "toolParameter": "role",
+          "required": false,
+          "kind": "input",
+          "target": "input.role"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["to", "role"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.backlinks",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "backlinks",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.attachments",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "attachments",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.beginUpload",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "beginUpload",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "name",
+          "required": true,
+          "kind": "input",
+          "target": "input.name"
+        },
+        {
+          "toolParameter": "mediaType",
+          "required": true,
+          "kind": "input",
+          "target": "input.mediaType"
+        },
+        {
+          "toolParameter": "size",
+          "required": true,
+          "kind": "input",
+          "target": "input.size"
+        },
+        {
+          "toolParameter": "sha256",
+          "required": true,
+          "kind": "input",
+          "target": "input.sha256"
+        },
+        {
+          "toolParameter": "caption",
+          "required": false,
+          "kind": "input",
+          "target": "input.caption"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["name", "mediaType", "size", "sha256", "caption"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.removeAttachment",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "removeAttachment",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "file",
+          "required": true,
+          "kind": "path",
+          "target": "path.file"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "file"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.download",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "download",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "file",
+          "required": true,
+          "kind": "path",
+          "target": "path.file"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "file"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.completeUpload",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "completeUpload",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "file",
+          "required": true,
+          "kind": "path",
+          "target": "path.file"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "file"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.fileAttachment",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "fileAttachment",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "file",
+          "required": true,
+          "kind": "path",
+          "target": "path.file"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        },
+        {
+          "toolParameter": "move",
+          "required": false,
+          "kind": "input",
+          "target": "input.move"
+        },
+        {
+          "toolParameter": "role",
+          "required": false,
+          "kind": "input",
+          "target": "input.role"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id", "file"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["to", "move", "role"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.references",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "references",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.addReference",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "addReference",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        },
+        {
+          "toolParameter": "role",
+          "required": false,
+          "kind": "input",
+          "target": "input.role"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["to", "role"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.removeReference",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "removeReference",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        },
+        {
+          "toolParameter": "to",
+          "required": true,
+          "kind": "input",
+          "target": "input.to"
+        },
+        {
+          "toolParameter": "role",
+          "required": false,
+          "kind": "input",
+          "target": "input.role"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        },
+        {
+          "position": 1,
+          "kind": "input",
+          "target": "input",
+          "sources": ["to", "role"]
+        }
+      ]
+    },
+    {
+      "toolName": "ticket.getTicket",
+      "apiId": "fixture-references-api",
+      "namespace": "ticket",
+      "methodName": "getTicket",
+      "isScoped": false,
+      "arguments": [
+        {
+          "toolParameter": "id",
+          "required": true,
+          "kind": "path",
+          "target": "path.id"
+        }
+      ],
+      "methodArgs": [
+        {
+          "position": 0,
+          "kind": "path",
+          "target": "path",
+          "sources": ["id"]
+        }
+      ]
+    }
+  ]
+}

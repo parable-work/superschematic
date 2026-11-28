@@ -773,6 +773,13 @@ type FieldDef struct {
 	// it. See [GraphOperation].
 	GraphOperation *GraphOperation `json:"graphOperation,omitempty" yaml:"graphOperation,omitempty" jsonschema:"-"`
 
+	// RowFeatureOperation marks an operation the loader added for a
+	// @rowFeatureOperations set (#723, D154): a server routes it to a
+	// generated handler that runs it through the database's references
+	// and attachments. Nil for every authored operation. The data forms
+	// have no key for it. See [RowFeatureOperation].
+	RowFeatureOperation *RowFeatureOperation `json:"rowFeatureOperation,omitempty" yaml:"rowFeatureOperation,omitempty" jsonschema:"-"`
+
 	// TableOperation is @tableOperation (D106): the operation reads or
 	// writes one table through its @source views, with a handler the build
 	// writes and no implementation method. Nil for every other operation.

@@ -704,11 +704,24 @@ const { items, total } = await searchTables(orm, principal, { q: "walnut desk" }
 | the FTS5 table is a piece of the model's SQL of its own, after every object | the migration model has no form of a virtual table; a plan that adds the index runs it, and a table made `@searchable` with rows needs `reindexSearch` once |
 
 The triggers keep a row's index row whichever ORM writes it, so a
-service's Go types are built beside it. Go's search runs on SQLite too
-(#615): `crosstable` writes the same statements over the SQLite database's
-`CrossTables()`, with the same ranking, access and refusal of embeddings.
-Rust's search (D188) runs on Postgres alone, so a service that lists
-`sqlite` and declares `@searchable` takes no Rust types.
+service's Go and Rust types are built beside it. Go's search runs on
+SQLite too (#615): `crosstable` writes the same statements over the SQLite
+database's `CrossTables()`, with the same ranking, access and refusal of
+embeddings. So does Rust's, in `orm::search_tables::sqlite`:
+
+```rust
+use superschematic_http_runtime::orm::search_tables::sqlite::{index_search, search_routes, search_tables, SearchRoutes};
+
+// A worker's handler, in a write of the file.
+database.write(|connection| index_search(connection, sqlite_definition()?, &message, &SearchOptions::default()))?;
+let hits = database.read(|connection| search_tables(Repositories::new(connection)?.untyped(), Some(&principal), &request, &options))?;
+// GET /api/search, on a reading connection of the file.
+let routes = search_routes(SearchRoutes::new(types::orm::sqlite::tables(database), authenticator));
+```
+
+Each function runs on the connection it is given, in the caller's
+transaction, and answers at once; a request's `vector` is refused as
+invalid and embeddings in the options as a definition's error.
 
 ## Pages
 
@@ -1386,10 +1399,9 @@ goes, and a file's delete enqueues its object's release unless another
 file of the sub-table still names it, so a statement that deletes the
 files of one object releases it once. Of a statement that deletes a
 holder and a row it points at, a cleared message may name the holder
-the same statement deleted, which its worker finds gone. Go's
-repositories on SQLite read and write both sub-tables
-([Go on SQLite](#go-on-sqlite)). Rust's read neither yet, so a service
-that lists `sqlite` and declares either is refused with Rust's types.
+the same statement deleted, which its worker finds gone. Go's and
+Rust's repositories on SQLite read and write both sub-tables
+([Go on SQLite](#go-on-sqlite); Rust's below, #611).
 
 ### References and backlinks
 
@@ -1515,6 +1527,25 @@ let (file, upload) = orm.attachments()?.begin(&begin, bucket.as_ref(), None).awa
 tx.commit().await?;
 ```
 
+On a SQLite file (#611) the SQLite repositories open them too, over a
+`rusqlite::Connection` in the caller's transaction, which a write that
+takes a lock opens with `TransactionBehavior::Immediate`. They run the
+same statements in SQLite's words: a parameter `?n`, `CAST(... AS TEXT)`,
+the clock as RFC 3339 text, and a ref block found through `json_each`.
+They take no advisory lock, since the transaction holds the file's write
+lock. The members that touch only the file answer at once; `begin`,
+`complete`, `download` and `release` reach the bucket and are async, the
+file's statements running when first polled:
+
+```rust
+database.write(|connection| {
+    let orm = sqlite::Repositories::new(connection)?.acting(Some(user)).with_access(AccessCaller::of(Some(&principal)));
+    let backlinks = orm.references()?.referenced_by(&RowRef::new("Issue", &key), None)?;
+    let filed = orm.attachments()?.file(&onto)?;
+    Ok::<_, orm::Error>((backlinks, filed))
+})?;
+```
+
 ### In Go
 
 The Go ORM of a database with `@references`, `@attachments` or a table's
@@ -1539,10 +1570,15 @@ file, err := deps.DB.Attachments().Complete(ctx, rowrefs.FileRef{Table: "Issue",
 
 The types and the refusals (`rowrefs.Error` and its `Code`) are the
 schema runtime's `rowrefs` package; `bucket.ForAttachments` of the HTTP
-runtime is a listed bucket as the ORM reads it. A Go server serves
-neither as routes yet, as the TypeScript server does not: the
-implementation writes its routes over them. They run on SQLite too, over
+runtime is a listed bucket as the ORM reads it. They run on SQLite too, over
 the SQLite database and its transactions ([Go on SQLite](#go-on-sqlite)).
+
+An API serves a table's references, backlinks and files as routes, SDK
+methods and MCP tools with no code of yours, from a
+`@rowFeatureOperations` set
+([A table's references and files](/superschematic/guides/api-routes/#a-tables-references-and-files)),
+in TypeScript and Go; a Rust server keeps each a method of the
+implementation's trait for now (#723).
 
 ## State machines
 
@@ -4181,8 +4217,25 @@ let routes = calendar_routes(CalendarRoutes::new(Tables::new(pool, postgres_defi
 
 `call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes,
 and `issue_calendar_feed`, `rotate_calendar_feed` and
-`revoke_calendar_feed` are the feed's operations. A Rust server whose
-database lists `sqlite` first is refused Recurrence and a calendar source.
+`revoke_calendar_feed` are the feed's operations.
+
+A Rust server whose database lists `sqlite` first serves Recurrence there
+too (#615): the router's `recurrence` routes run the operations through
+the core in a transaction of the file, and the behavior worker claims on
+it. `orm::calendar::sqlite` holds the same read, feed and routes over the
+SQLite repositories, an occurrences source read by one statement in
+SQLite's words, and each answers at once on the connection it is given:
+
+```rust
+use superschematic_http_runtime::orm::calendar::sqlite::{calendar_routes, read_calendar, CalendarRoutes};
+
+let calendar = database.read(|connection| read_calendar(Repositories::new(connection)?.untyped(), Some(&principal), &read, &CalendarOptions::default()))?;
+// A read on a reading connection; a feed's issue, rotation and revocation on the writing one.
+let routes = calendar_routes(CalendarRoutes::new(types::orm::sqlite::tables(database), authenticator));
+```
+
+A generated Rust server does not mount the calendar's or the search's
+routes over a SQLite file yet; an app merges them into its router.
 
 A Go server serves Recurrence on Postgres as the TypeScript one does
 (D187): its `recurrence` routes run the operations through the behaviors'
