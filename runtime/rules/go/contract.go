@@ -390,7 +390,7 @@ func (a *Action) UnmarshalJSON(data []byte) error {
 		out.Own, out.Params = wire.Own, wire.Params
 	case ActionUpdate:
 		out.Key, out.Patch = wire.Key, wire.Patch
-	case ActionDelete:
+	case ActionDelete, ActionRead:
 		out.Key = wire.Key
 	case ActionOperation:
 		out.Key, out.UseID, out.Operation, out.Params = wire.Key, wire.UseID, wire.Operation, wire.Params

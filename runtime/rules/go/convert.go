@@ -282,6 +282,19 @@ func compactText(raw json.RawMessage) string {
 	return out.String()
 }
 
+// uuidWireOf is a UUID the driver scanned, as its base62 wire form.
+func uuidWireOf(value any, column Column, table *Table) (string, error) {
+	switch v := value.(type) {
+	case [16]byte:
+		return base62(new(big.Int).SetBytes(v[:])), nil
+	case string:
+		return uuidToWire(v)
+	case []byte:
+		return uuidToWire(string(v))
+	}
+	return "", fmt.Errorf("rules: %s.%s: a %T is no UUID", table.Type, column.Field, value)
+}
+
 // fromColumn is a column's value, as the driver scanned it, as the core
 // holds it: absent (false) for NULL; a timestamp as epoch milliseconds,
 // from a time.Time or from RFC 3339 text; a UUID as its base62 wire form;
@@ -302,24 +315,22 @@ func fromColumn(value any, column Column, table *Table) (json.RawMessage, bool, 
 		return json.RawMessage(strconv.FormatInt(millis, 10)), true, nil
 	}
 	if uuidTypes[column.Type] {
-		var wire string
-		switch v := value.(type) {
-		case [16]byte:
-			wire = base62(new(big.Int).SetBytes(v[:]))
-		case string:
-			converted, err := uuidToWire(v)
-			if err != nil {
-				return nil, false, err
+		// A list of UUIDs (a uuid[] column, @audience's effectiveAudience)
+		// as the list of their wire forms.
+		if items, ok := value.([]any); ok {
+			wires := make([]string, 0, len(items))
+			for _, item := range items {
+				wire, err := uuidWireOf(item, column, table)
+				if err != nil {
+					return nil, false, err
+				}
+				wires = append(wires, wire)
 			}
-			wire = converted
-		case []byte:
-			converted, err := uuidToWire(string(v))
-			if err != nil {
-				return nil, false, err
-			}
-			wire = converted
-		default:
-			return nil, false, fmt.Errorf("rules: %s.%s: a %T is no UUID", table.Type, column.Field, value)
+			return marshalled(wires)
+		}
+		wire, err := uuidWireOf(value, column, table)
+		if err != nil {
+			return nil, false, err
 		}
 		return marshalled(wire)
 	}

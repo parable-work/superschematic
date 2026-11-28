@@ -458,11 +458,15 @@ func (o *ORMOutput) HasBehaviorQueues() bool {
 }
 
 // OperationsUseRawJSON reports whether an operation of a use of any
-// table's takes or returns json.RawMessage, which interfaces.go's no-op
+// table's takes or returns json.RawMessage, or a use has a View, which
+// returns its fields as json.RawMessage: what interfaces.go's no-op
 // operations name.
 func (o *ORMOutput) OperationsUseRawJSON() bool {
 	for _, repo := range o.Repositories {
 		for _, use := range repo.Uses {
+			if len(use.View) > 0 {
+				return true
+			}
 			for _, op := range use.Operations {
 				if strings.Contains(op.Params, "json.RawMessage") || strings.Contains(op.ResultReturn(), "json.RawMessage") {
 					return true
