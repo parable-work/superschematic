@@ -19,6 +19,27 @@ import (
 // It returns the output root and the build's error.
 func buildRuntimeProviders(t *testing.T, edit func(stack string) string) (string, error) {
 	t.Helper()
+	project, schemasRoot := runtimeProvidersProject(t, edit)
+	t.Chdir(project)
+	outputRoot := t.TempDir()
+	buf := new(bytes.Buffer)
+	root := cli.New(cli.Config{Name: "superschematic"}, extensions()...)
+	root.SetOut(buf)
+	root.SetErr(buf)
+	root.SetIn(strings.NewReader(""))
+	root.SetArgs([]string{"build", filepath.Join(schemasRoot, "services", "notes-stack"), "--out", outputRoot})
+	if err := root.Execute(); err != nil {
+		return outputRoot, err
+	}
+	return outputRoot, nil
+}
+
+// runtimeProvidersProject copies examples/runtime-providers' schemas and
+// provider packages into a project, its paths pointing back at this
+// checkout, and lets edit change the stack's schema. It returns the
+// project and its schemas root.
+func runtimeProvidersProject(t *testing.T, edit func(stack string) string) (string, string) {
+	t.Helper()
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
@@ -55,18 +76,60 @@ func buildRuntimeProviders(t *testing.T, edit func(stack string) string) (string
 			t.Fatal(err)
 		}
 	}
+	return project, schemasRoot
+}
+
+// TestAProviderSourceEditRebuildsItsAPI (#608): build-all's cache key of an
+// API covers the sources of the provider packages its config lists. With
+// examples/runtime-providers built once, a second run builds nothing; an
+// edit to a source file of sms-relay-a, which notes-api lists by its
+// directory outside the schemas, rebuilds notes-api and the stack that
+// deploys it, and leaves notes-db, which lists none, up to date.
+func TestAProviderSourceEditRebuildsItsAPI(t *testing.T) {
+	project, schemasRoot := runtimeProvidersProject(t, nil)
 	t.Chdir(project)
 	outputRoot := t.TempDir()
-	buf := new(bytes.Buffer)
-	root := cli.New(cli.Config{Name: "superschematic"}, extensions()...)
-	root.SetOut(buf)
-	root.SetErr(buf)
-	root.SetIn(strings.NewReader(""))
-	root.SetArgs([]string{"build", filepath.Join(schemasRoot, "services", "notes-stack"), "--out", outputRoot})
-	if err := root.Execute(); err != nil {
-		return outputRoot, err
+	cacheRoot := t.TempDir()
+	run := func() string {
+		t.Helper()
+		buf := new(bytes.Buffer)
+		root := cli.New(cli.Config{Name: "superschematic"}, extensions()...)
+		root.SetOut(buf)
+		root.SetErr(buf)
+		root.SetIn(strings.NewReader(""))
+		root.SetArgs([]string{"build-all", filepath.Join(schemasRoot, "services"), "--out", outputRoot, "--cache", "--cache-root", cacheRoot})
+		if err := root.Execute(); err != nil {
+			t.Fatalf("build-all: %v\n%s", err, buf)
+		}
+		return buf.String()
 	}
-	return outputRoot, nil
+	services := []string{"notes-db", "notes-api", "notes-stack"}
+	first := run()
+	for _, name := range services {
+		if !strings.Contains(first, "OK: "+name+" (built") {
+			t.Fatalf("the first run did not build %s:\n%s", name, first)
+		}
+	}
+	second := run()
+	for _, name := range services {
+		if !strings.Contains(second, "OK: "+name+" (up to date") {
+			t.Fatalf("the second run did not find %s up to date:\n%s", name, second)
+		}
+	}
+	source := filepath.Join(project, "providers", "sms-relay-a", "src", "index.ts")
+	data, err := os.ReadFile(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, append(data, []byte("\n// edited\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	third := run()
+	for name, want := range map[string]string{"notes-api": "built", "notes-stack": "built", "notes-db": "up to date"} {
+		if !strings.Contains(third, "OK: "+name+" ("+want) {
+			t.Errorf("after an edit to sms-relay-a's source, %s is not %s:\n%s", name, want, third)
+		}
+	}
 }
 
 // TestRuntimeProvidersExampleStack builds examples/runtime-providers'

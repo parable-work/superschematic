@@ -693,6 +693,47 @@ export function rowFeatureOperations(
   return noopClassDecorator;
 }
 
+/** The options of a @triageOperations set (#746). */
+export type TriageOperationsOptions = {
+  /**
+   * The API's type the settle's party refers to (D61), a class one of the
+   * API's operations lists: a UI offers those rows to pick the party from.
+   * Unset, the party is its key.
+   */
+  readonly refersTo?: abstract new (...args: never[]) => unknown;
+};
+
+/**
+ * Serves the inbound path's triage (D157, #746), on a class with no
+ * members: superschematic adds the routes a staff member settles held
+ * messages through, GET /api/triage (the messages held in triage, newest
+ * first, a page at a time, those of one channel when asked), GET
+ * /api/triage/{message} (one message: its sender, channel, body and files),
+ * POST /api/triage/{message}/settle (settles it onto a row of the party
+ * table, its sender's address entered by hand or verified by a code) and
+ * POST /api/triage/{message}/dismiss (closes its triage), an SDK method
+ * each and an MCP tool for the two reads, with generated input and result
+ * types, each run through the database's inbound path by the generated
+ * TypeScript server as the request's caller, so the implementation has no
+ * method for them. The party table is a @party class of the API's
+ * database, imported from that service's package; the database declares
+ * the @conversations tables. Every route needs the class's
+ * @requirePermission, parties.triage when it names none, and its @auth,
+ * service clause, rate limit, body limit and timeout apply to each.
+ *
+ * ```ts
+ * @triageOperations(Contact, { refersTo: ContactView })
+ * @requirePermission(["parties.triage"])
+ * export abstract class Triage {}
+ * ```
+ */
+export function triageOperations(
+  _party: abstract new (...args: never[]) => unknown,
+  _options?: TriageOperationsOptions
+): ClassDecorator {
+  return noopClassDecorator;
+}
+
 /** The options of a behavior worker (D103). */
 export type BehaviorWorkerOptions = {
   /** How many messages of each of the table's behavior queues an instance handles at a time; one unless set. An environment's settings change it. */

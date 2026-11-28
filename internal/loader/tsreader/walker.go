@@ -775,6 +775,9 @@ func (w *walker) walkClass(node *astNode) {
 	if routes == nil {
 		routes = rowFeatureOperationsDecorator(decorators)
 	}
+	if routes == nil {
+		routes = triageOperationsDecorator(decorators)
+	}
 	if classHasMethods(node) || routes != nil {
 		if !w.kindSpec().AllowsOperationSets {
 			if routes != nil {
@@ -1801,6 +1804,13 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 	}
 	if set.IsRowFeatureOperations() {
 		w.checkRowFeatureOperationsClass(node, set, bases)
+		// No operations, as the data forms write it; the loader adds them.
+		set.Operations = []*ir.FieldDef{}
+		w.schema.OperationSets = append(w.schema.OperationSets, set)
+		return
+	}
+	if set.IsTriageOperations() {
+		w.checkTriageOperationsClass(node, set, bases)
 		// No operations, as the data forms write it; the loader adds them.
 		set.Operations = []*ir.FieldDef{}
 		w.schema.OperationSets = append(w.schema.OperationSets, set)

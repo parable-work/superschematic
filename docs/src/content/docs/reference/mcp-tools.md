@@ -207,6 +207,13 @@ completion, download, filing and removal, stay routes: their `@mcp` is
 hidden with the reason, since a file's bytes go to and from the bucket
 through a signed URL, which no tool call carries.
 
+An operation the build adds for a `@triageOperations` set
+([Serve triage as routes](/superschematic/guides/parties/#serve-triage-as-routes))
+is a visible tool when it reads (#746): `triage`, the held messages, and
+`triage_message`, one of them, each run as its caller, who holds the
+triage permission. The settle and the dismiss stay routes, their `@mcp`
+hidden with the reason: each decides who a sender is.
+
 A `@tableOperation` that declares no `@mcp` is a visible tool whose handle
 is its method's name in snake case, `list_issues`, and one that declares
 no `@docs` is given them, a read and a list replaying as `read_only`

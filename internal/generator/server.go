@@ -1408,6 +1408,16 @@ func (r run) planTypeScriptServer(stackName string, s *ir.ResolvedDeployable, cl
 		for _, call := range output.Deps.Calls {
 			in.PackageDirs[call.Package] = SDKDir(out, LangTypeScript, call.Service)
 		}
+		// providers.ts imports each provider package the API's config lists
+		// by its directory (D159), so the image holds that directory too; a
+		// package listed by its npm name resolves from node_modules (#608).
+		if p := output.Deps.Providers; p != nil {
+			for _, pkg := range p.Packages {
+				if strings.HasPrefix(pkg.Import, ".") {
+					in.PackageDirs["provider "+pkg.Name] = filepath.Join(APIDir(out, ref.Name), filepath.FromSlash(pkg.Import))
+				}
+			}
+		}
 		if s.Worker != nil && output.Deps.DatabaseTypesPackage != "" {
 			// The worker imports its queue's definition from the database's
 			// TypeScript types (D53).

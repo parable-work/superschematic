@@ -42,6 +42,7 @@
 pub mod agents;
 pub mod calendar;
 pub mod fieldcrypt;
+pub mod file_processing;
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 pub mod inbound;
 pub mod notify;

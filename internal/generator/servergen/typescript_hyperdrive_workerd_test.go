@@ -329,6 +329,8 @@ func TestTypeScriptHyperdriveUnderWorkerd(t *testing.T) {
 		// The script every site's Worker runs, which the cloudflare
 		// extension embeds (D91).
 		filepath.Join(testpaths.RepoRoot(t), "extensions", "cloudflare", "site.js"): filepath.Join(run, "site.js"),
+		// The script every wake relay runs (#600).
+		filepath.Join(testpaths.RepoRoot(t), "extensions", "cloudflare", "wake-relay.js"): filepath.Join(run, "wake-relay.js"),
 		wasm: filepath.Join(run, "superscalar_wasm_bg.wasm"),
 	} {
 		data, err := os.ReadFile(src)

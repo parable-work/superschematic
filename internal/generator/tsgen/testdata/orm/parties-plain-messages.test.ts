@@ -88,6 +88,9 @@ describe.skipIf(!available)('parties with plain messages', () => {
     // The photo is dropped, and the message says why: its table holds no files.
     const message = (await w.inbound.message(outcome!.message!))!;
     expect(String(message.detail)).toContain('no @attachments');
+    // The triage asks the messages table for no files either: it lists none.
+    const staff = { subject: crypto.randomUUID(), kind: 'user' as const, permissions: ['parties.triage'] };
+    expect(await w.inbound.attachmentsOf(staff, outcome!.message!)).toEqual([]);
 
     // The run request's handler, as the party through its grant: a report
     // on the granted job, the message filed onto it and onto the job. A

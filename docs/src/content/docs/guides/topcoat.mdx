@@ -669,6 +669,17 @@ The pages need the forms, the records and the display components, and a
 prefix under `/api` or `/_superschematic`, which the crate serves itself,
 is refused.
 
+An API that serves the inbound path's triage (`@triageOperations`,
+[Outside parties](/superschematic/guides/parties/#serve-triage-as-routes))
+gets its pages the same way, with nothing of the triage's own: the held
+messages at `/console/triage`, paged and filtered by channel, each linked
+to its page, which shows its sender, channel, body and files with the
+settle form (the party a picker of the rows the set's `refersTo` type
+lists, the trust a select) and the dismiss form. The nav offers the list
+only to a caller whose permissions cover it, the triage permission's
+holder; a caller without it is refused the list and a message's page
+(403). A Rust server keeps the four operations the implementation's.
+
 The crate reads the resources from the operations' REST paths and
 results. A GET of a collection that returns a list is its list, and a GET
 of an item that returns one record its item's page; either makes the

@@ -33,6 +33,8 @@ func applyBehaviorOperations(args []any, set *ir.OperationSet) error {
 		return fmt.Errorf("@behaviorOperations contradicts @graphOperations on the same class: a class takes one of them")
 	case set.RowFeatureOperations != nil:
 		return fmt.Errorf("@behaviorOperations contradicts @rowFeatureOperations on the same class: a class takes one of them")
+	case set.TriageOperations != nil:
+		return fmt.Errorf("@behaviorOperations contradicts @triageOperations on the same class: a class takes one of them")
 	}
 	if len(args) != 1 {
 		return fmt.Errorf("@behaviorOperations takes one argument, the table whose behaviors' operations the set serves, imported from the API's database: @behaviorOperations(Order)")

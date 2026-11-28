@@ -220,6 +220,12 @@ required-features = ["sqlite"]
 name = "worker_log"
 required-features = ["postgres", "logging"]
 
+# The file processor's pass over the scenarios the Go runtime writes
+# (#603), with the lines it logs.
+[[test]]
+name = "file_processing_parity"
+required-features = ["sqlite", "logging"]
+
 # Trace export against an OTLP receiver in the test's process (D67).
 [[test]]
 name = "telemetry"

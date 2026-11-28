@@ -177,7 +177,7 @@ func lowerServer(ctx registry.PlatformContext) (registry.Lowered, error) {
 	if err != nil {
 		return registry.Lowered{}, err
 	}
-	waits, err := addWakes(d, version)
+	waits, err := addWakes(d, version, false)
 	if err != nil {
 		return registry.Lowered{}, err
 	}

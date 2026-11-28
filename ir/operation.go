@@ -71,6 +71,12 @@ type OperationSet struct {
 	// other set. See [RowFeatureOperationsConfig].
 	RowFeatureOperations *RowFeatureOperationsConfig `json:"rowFeatureOperations,omitempty" yaml:"rowFeatureOperations,omitempty"`
 
+	// TriageOperations is @triageOperations(Party, { ... }) on a class
+	// with no methods (#746, D157): the loader fills Operations with the
+	// operations of the inbound path's triage. Nil for every other set.
+	// See [TriageOperationsConfig].
+	TriageOperations *TriageOperationsConfig `json:"triageOperations,omitempty" yaml:"triageOperations,omitempty"`
+
 	// Auth, Permissions and Public are a @behaviorOperations set's and a
 	// @graphOperations set's user clause, @auth, @requirePermission and
 	// @publicRoute on its class
