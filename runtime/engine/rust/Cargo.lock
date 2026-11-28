@@ -2297,7 +2297,6 @@ version = "0.0.0"
 dependencies = [
  "serde",
  "serde_json",
- "superschematic-engine-testkit",
  "superschematic-rules",
  "superschematic-rules-behaviors",
 ]

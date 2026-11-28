@@ -132,7 +132,6 @@ use std::path::{Path, PathBuf};
 
 use serde_json::{json, Map, Value};
 
-use superschematic_engine_testkit::{load, ScenarioFile};
 use superschematic_rules::{
     Action, Caller, Code, Command, Core, Declaration, FieldSpec, Refusal, Row, TypeSpec,
 };
@@ -141,6 +140,7 @@ use superschematic_rules_behaviors::comments;
 
 use crate::fixtures;
 use crate::host::{Applied, Logged, MemoryHost, Store, MAX_CHANGES};
+use crate::scenario::{load, ScenarioFile};
 use crate::shape::{self, FieldDef};
 use crate::symbols::Symbols;
 use crate::transcript::{Recorded, TranscriptClock};
