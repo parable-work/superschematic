@@ -49,6 +49,12 @@ func (iface Interface) title() string {
 // extension:<name>.
 func ExtensionSubject(provider string) string { return ir.ExtensionSubject(provider) }
 
+// CallerKey is the reserved setting of a provider that calls the app with
+// a key of its own (#744): slot SMS reads it from SMS_CALLER_KEY, a
+// Secret<string>, and a request whose Bearer token is the key runs as the
+// provider, with its role alone (ExtensionKeysOf, ExtensionAuthenticator).
+const CallerKey = ir.ProviderCallerKey
+
 // ConfigField is the config field a provider in slot reads its setting
 // key from: SMS and URL give SMS_URL.
 func ConfigField(slot, key string) string { return ir.ProviderConfigField(slot, key) }

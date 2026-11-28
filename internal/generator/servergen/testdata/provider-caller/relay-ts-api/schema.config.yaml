@@ -1,0 +1,12 @@
+# A TypeScript API whose config names a provider that calls the app with
+# its key, relay (#744): its routes take the key, which runs as the
+# provider with its role alone, and any other token goes on to the
+# implementation's authenticator.
+name: relay-ts-api
+kind: API
+providers:
+  - "../relay"
+outputs:
+  types:
+    typescript: { enabled: true }
+  api: { enabled: true, language: TYPESCRIPT }

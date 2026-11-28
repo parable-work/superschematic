@@ -678,6 +678,86 @@ async fn per_record_access() {
     assert_eq!(send(Method::GET, "/api/calendar/feed/grant_unknown.ics", None, None).await.0, 401);
     case("a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused");
 
+    // The active grants list for an administrator, the target owner and
+    // the holder, and are refused to anyone else (#735).
+    let access_admin = format!("{}:access.admin", people.admin_id);
+    let folder = app
+        .system(async |db| db.table("Folder").unwrap().create_one(&values(json!({"name": "Shared out", "owner": people.owner_id}))).await.unwrap())
+        .await;
+    let folder_id = folder["id"].as_str().unwrap().to_owned();
+    let (holder_a, holder_b) = (uuid(0xe1), uuid(0xe2));
+    let grant = async |holder: &str, target_type: &str, target_id: &str, ends_at: Option<SystemTime>| {
+        app.system(async |db| {
+            issue_grant(
+                db,
+                &IssueGrant {
+                    holder: holder.to_owned(),
+                    holder_kind: PrincipalKind::Party,
+                    role: "tenant".to_owned(),
+                    target_type: target_type.to_owned(),
+                    target_id: target_id.to_owned(),
+                    starts_at: None,
+                    ends_at,
+                    ends_when: None,
+                },
+            )
+            .await
+            .unwrap()
+        })
+        .await
+    };
+    let grant_id = |issued: &api::runtime::access::IssuedGrant| issued.grant["id"].as_str().unwrap().to_owned();
+    let on_folder_a = grant(&holder_a, "Folder", &folder_id, None).await;
+    let on_folder_b = grant(&holder_b, "Folder", &folder_id, None).await;
+    let on_contract_a = grant(&holder_a, "Contract", &contract_a, None).await;
+    // Ended ones, which no lister sees: revoked, and past its date.
+    let ended = grant(&holder_a, "Folder", &folder_id, None).await;
+    let ended_id = grant_id(&ended);
+    app.system(async |db| revoke_grant(db.client(), db.definition(), &ended_id, SystemTime::now()).await.unwrap())
+        .await;
+    let expired = grant(&holder_a, "Folder", &folder_id, Some(SystemTime::now() - Duration::from_secs(60))).await;
+    let sorted = |mut ids: Vec<String>| {
+        ids.sort();
+        ids
+    };
+    let listed = async |query: &str, as_: &str| -> Vec<String> {
+        let data = app.ok(Method::GET, &format!("/api/grants/active{query}"), as_, None).await;
+        sorted(data.as_array().unwrap().iter().map(|grant| grant["id"].as_str().unwrap().to_owned()).collect())
+    };
+    let on_folder = format!("?targetType=Folder&targetId={folder_id}");
+    // The administrator: every active grant the query keeps.
+    assert_eq!(listed(&on_folder, &access_admin).await, sorted(vec![grant_id(&on_folder_a), grant_id(&on_folder_b)]));
+    assert_eq!(listed(&format!("?holder={holder_a}"), &access_admin).await, sorted(vec![grant_id(&on_folder_a), grant_id(&on_contract_a)]));
+    let every = listed("", &access_admin).await;
+    for id in [grant_id(&on_folder_a), grant_id(&on_folder_b), grant_id(&on_contract_a)] {
+        assert!(every.contains(&id), "{every:?} holds no {id}");
+    }
+    assert!(!every.contains(&ended_id) && !every.contains(&grant_id(&expired)), "{every:?}");
+    // The target's owner: the grants on the row it owns, and no other.
+    assert_eq!(listed(&on_folder, &people.owner()).await, sorted(vec![grant_id(&on_folder_a), grant_id(&on_folder_b)]));
+    assert_eq!(listed(&format!("{on_folder}&holder={holder_b}"), &people.owner()).await, [grant_id(&on_folder_b)]);
+    assert_eq!(app.status(Method::GET, &format!("/api/grants/active?targetType=Contract&targetId={contract_a}"), &people.owner(), None).await, 403);
+    assert_eq!(app.status(Method::GET, "/api/grants/active", &people.owner(), None).await, 403);
+    // The holder, by its grant's token: its own grants, and no other's.
+    assert_eq!(listed(&format!("?holder={holder_a}"), &on_folder_a.token).await, sorted(vec![grant_id(&on_folder_a), grant_id(&on_contract_a)]));
+    assert_eq!(listed(&format!("?holder={holder_a}&targetType=Contract"), &on_folder_a.token).await, [grant_id(&on_contract_a)]);
+    assert_eq!(app.status(Method::GET, &format!("/api/grants/active?holder={holder_b}"), &on_folder_a.token, None).await, 403);
+    assert_eq!(app.status(Method::GET, &format!("/api/grants/active{on_folder}"), &on_folder_a.token, None).await, 403);
+    // Anyone else is refused, and a request with no caller is 401.
+    assert_eq!(app.status(Method::GET, &format!("/api/grants/active{on_folder}"), &people.other(), None).await, 403);
+    assert_eq!(app.status(Method::GET, &format!("/api/grants/active?holder={holder_a}"), &people.other(), None).await, 403);
+    assert_eq!(app.call(Method::GET, "/api/grants/active", None, None).await.status, 401);
+    // A grant is listed without its token's hash or its revocation.
+    let shown = app.ok(Method::GET, &format!("/api/grants/active?holder={holder_b}"), &access_admin, None).await;
+    let shown = shown.as_array().unwrap();
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!(shown[0]["holder"], Value::from(holder_b.clone()));
+    assert_eq!(shown[0]["holderKind"], "party");
+    assert_eq!(shown[0]["targetType"], "Folder");
+    assert_eq!(shown[0]["targetId"], Value::from(folder_id.clone()));
+    assert!(shown[0].get("tokenHash").is_none() && shown[0].get("revokedAt").is_none(), "{shown:?}");
+    case("the active grants list for an administrator, the target owner and the holder, and are refused to anyone else");
+
     drop(app);
     database.admin.batch_execute(&format!("DROP SCHEMA IF EXISTS {} CASCADE", database.schema)).await.unwrap();
 }

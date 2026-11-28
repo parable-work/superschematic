@@ -207,6 +207,12 @@ completion, download, filing and removal, stay routes: their `@mcp` is
 hidden with the reason, since a file's bytes go to and from the bucket
 through a signed URL, which no tool call carries.
 
+The operation the build adds for an `@accessGrantsOperations` set
+([The active grants as a route](/superschematic/guides/api-routes/#the-active-grants-as-a-route))
+is a visible tool, `active_grants` (#735), run as its caller: it lists the
+grants an administrator, a target's owner or a holder may see, as the route
+does.
+
 An operation the build adds for a `@triageOperations` set
 ([Serve triage as routes](/superschematic/guides/parties/#serve-triage-as-routes))
 is a visible tool when it reads (#746): `triage`, the held messages, and

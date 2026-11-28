@@ -177,6 +177,11 @@ pub use self::grants::*;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
+/// The active grants' route (#735), which a generated router serves for an
+/// `@accessGrantsOperations` set, over either dialect's tables.
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod routes;
+
 /// What the grants and the table access log read and write in either
 /// dialect: a grant's token and its row, a role's reaches, whether a
 /// grant's own columns end it, the principal it establishes, and an access

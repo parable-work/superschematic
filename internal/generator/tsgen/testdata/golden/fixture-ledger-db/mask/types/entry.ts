@@ -22,6 +22,7 @@ export function maskSecretsEntry(value: Entry): Entry {
     tags: Array.isArray(value.tags) ? value.tags : [],
     metadata: value.metadata,
     reviewedAt: value.reviewedAt,
+    settlesAt: value.settlesAt,
     createdAt: value.createdAt,
     createdBy: value.createdBy,
     updatedAt: value.updatedAt,

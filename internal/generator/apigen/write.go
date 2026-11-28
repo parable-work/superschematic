@@ -111,6 +111,7 @@ func WriteAPIWithProfile(output *APIOutput, outputDir string, prof *profile.Prof
 		{Condition: output.BuildsBehaviorCaller(), Template: "behavior_caller.tmpl", Filename: "behavior_caller.go"},
 		{Condition: output.Graphs != nil, Template: "graphs.tmpl", Filename: "graphs.go"},
 		{Condition: len(output.RowFeatureEndpoints) > 0, Template: "rowfeatures.tmpl", Filename: "rowfeatures.go"},
+		{Condition: len(output.AccessGrantEndpoints) > 0, Template: "accessgrants.tmpl", Filename: "accessgrants.go"},
 		{Condition: output.Deps.Providers != nil, Template: "providers.tmpl", Filename: "providers.go"},
 		{Condition: output.HasWiring(), Template: "wiring.tmpl", Filename: "wiring.go"},
 		{Condition: output.HasMCP(), Template: "mcp.tmpl", Filename: MCPFile},

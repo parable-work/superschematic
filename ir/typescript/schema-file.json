@@ -5,6 +5,16 @@
       "properties": {},
       "type": "object"
     },
+    "AccessGrantsOperationsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "permission": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "AccessLogDef": {
       "additionalProperties": false,
       "properties": {},
@@ -6007,6 +6017,9 @@
     "OperationSet": {
       "additionalProperties": false,
       "properties": {
+        "accessGrantsOperations": {
+          "$ref": "#/$defs/AccessGrantsOperationsConfig"
+        },
         "auth": {
           "default": false,
           "type": "boolean"
@@ -6082,6 +6095,9 @@
     "OperationSetFile": {
       "additionalProperties": false,
       "properties": {
+        "accessGrantsOperations": {
+          "$ref": "#/$defs/AccessGrantsOperationsConfig"
+        },
         "auth": {
           "default": false,
           "type": "boolean"

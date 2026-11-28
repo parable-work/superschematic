@@ -1,0 +1,46 @@
+name: relay-ts-api
+kind: API
+types:
+  # The API's config: its slot RELAY, a channel adapter, and the key the
+  # relay calls the app with.
+  RelayConfig:
+    name: RelayConfig
+    role: EmbeddedStruct
+    envVars: true
+    providerSlots: { RELAY: channel }
+    fields:
+      - name: RELAY
+        typeRef: { name: string }
+      - name: RELAY_CALLER_KEY
+        typeRef: { name: string }
+        secret: true
+  # Whom the route ran as.
+  CallerView:
+    name: CallerView
+    role: APIView
+    fields:
+      - name: subject
+        typeRef: { name: string }
+        required: true
+      - name: permissions
+        typeRef: { name: string, isArray: true }
+        required: true
+operationSets:
+  - name: Relayed
+    operations:
+      # What the relay posts: its role holds messages.relay.
+      - name: relay
+        typeRef: { name: CallerView }
+        required: true
+        auth: true
+        permissions: [messages.relay]
+        httpMethod: POST
+        restPath: relayed
+      # What a person reads, which the relay's role does not reach.
+      - name: readNotes
+        typeRef: { name: CallerView }
+        required: true
+        auth: true
+        permissions: [notes.read]
+        httpMethod: GET
+        restPath: notes

@@ -47,7 +47,7 @@ pub use channel::{
 };
 pub use contracts::{
     contract_of, extension_subject, provider_config_field, RuntimeContract, RuntimeInterface,
-    RUNTIME_CONTRACTS,
+    CALLER_KEY, RUNTIME_CONTRACTS,
 };
 pub use credentials::{
     apply_injection, use_credential, CredentialListing, CredentialProvider, CredentialQuery,

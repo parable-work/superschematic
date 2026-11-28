@@ -56,7 +56,12 @@ import (
 // worker open the database's SQLite file in a pool's place, as a server
 // does, and a worker's main.rs (worker_sqlite.rs.tmpl, and for a behavior
 // worker behavior_worker_sqlite.rs.tmpl) runs the runtime's loop over the
-// worker's drain, on connections of the worker's own to the file.
+// worker's drain, on connections of the worker's own to the file. A worker
+// of a runtime part's queue (the notifier's, the dispatcher's, the run
+// requests', a @searchable declaration's) runs it through the API crate's
+// Wired on either dialect, in the claim loop (worker.rs.tmpl, #725): on the
+// file the part's PartQueue claims on a connection of its own, with no
+// slot and no next due time.
 //
 // A Rust app's entrypoint (D78) is a crate beside the servers' too,
 // `<output-root>/server/<stack>/<app>/`. Its main.rs (app_main.rs.tmpl)
@@ -500,6 +505,17 @@ type RustAPI struct {
 	// reads from its config.
 	Providers bool
 
+	// CallerProviders is the variable a server keeps Deps' providers in
+	// when a provider the API's config lists calls the app with its key
+	// (#744): the handlers' authenticator is then the API crate's
+	// providers::caller_authenticator around it, outermost. Empty
+	// otherwise, and for an API whose identity service establishes its
+	// callers, which takes no key yet.
+	CallerProviders string
+	// HandlersRest is whether Handlers has fields beside the
+	// authenticator, which the wrapped handlers keep (..handlers).
+	HandlersRest bool
+
 	// Database is the pool Deps.db holds, nil without one.
 	Database *RustDatabase
 
@@ -530,6 +546,11 @@ type RustAPI struct {
 	// when its file operations sign URLs of one.
 	RowFeatures       bool
 	AttachmentsBucket *RustBucket
+
+	// AccessGrants is true when the API lists the active grants (#735):
+	// Implementations::new then takes Database's pool too, through whose
+	// repositories the router's handler reads them.
+	AccessGrants bool
 
 	// Idempotency is true when the API has @idempotent operations (D140):
 	// Implementations::new then takes Database's pool too, over which it
@@ -974,6 +995,10 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		if a.Config != nil && o.HasEnvConfig {
 			api.Config = taken.take(stem + "_config")
 			api.Providers = o.Providers != nil
+			if api.Providers && o.Providers.CallerKeys && o.ChecksEndUsers() && !background {
+				api.CallerProviders = taken.take(stem + "_caller_providers")
+				api.HandlersRest = len(o.HandlersFields()) > 1
+			}
 			for _, f := range a.Config.Derived {
 				derived[string(f.Kind)+" "+f.Service] = f.Key
 			}
@@ -1052,6 +1077,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose row feature operations run on %s (#723), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.RowFeatureDatabase())
 			}
 			api.RowFeatures = true
+		}
+		if o.HasAccessGrantOperations() && !background {
+			if api.Database == nil || api.Database.Service != o.AccessGrantsDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose active grants are read from %s (#735), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.AccessGrantsDatabase())
+			}
+			api.AccessGrants = true
 		}
 		if o.HasIdempotent() && !background {
 			if api.Database == nil {
@@ -1855,7 +1886,9 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 	}
 	switch {
 	case s.Worker == nil:
-	case !s.Worker.OnSQLite():
+	case !s.Worker.OnSQLite() || s.Worker.Runtime != "":
+		// A runtime part's queue is claimed in the claim loop on either
+		// dialect (#725).
 		uses = append(uses, rustutil.UseLine(runtime+"::worker", []string{"self", "Options"}))
 	case s.Worker.Behavior != nil:
 		// On a SQLite file a worker is drained (D116).
@@ -1979,7 +2012,7 @@ func (a *RustAPI) ImplementationsArgs() []string {
 	if a.ServiceAuthenticator != "" {
 		args = append(args, "Arc::new("+a.ServiceAuthenticator+")")
 	}
-	if a.Behaviors || a.Tables || a.Graphs || a.RowFeatures || a.Idempotency {
+	if a.Behaviors || a.Tables || a.Graphs || a.RowFeatures || a.AccessGrants || a.Idempotency {
 		args = append(args, a.Database.Var+".clone()")
 	}
 	if a.FieldKeys {
@@ -2018,7 +2051,9 @@ func WriteRust(s *RustServer, dir string) error {
 		main = "behavior_worker_sqlite.rs.tmpl"
 	case s.Worker != nil && s.Worker.Behavior != nil:
 		main = "behavior_worker.rs.tmpl"
-	case s.Worker != nil && s.Worker.OnSQLite():
+	case s.Worker != nil && s.Worker.OnSQLite() && s.Worker.Runtime == "":
+		// A runtime part's worker on a SQLite file runs the claim loop
+		// over the part's queue on the file (#725), as on Postgres.
 		main = "worker_sqlite.rs.tmpl"
 	case s.Worker != nil:
 		main = "worker.rs.tmpl"

@@ -519,13 +519,13 @@ func (q *{{ .Name }}Queue) Claim(ctx context.Context, n int, lease time.Duration
 		{{- else }}
 		msg.{{ toGoName .Name }} = {{ .GoType }}(temp{{ toGoName .Name }})
 		{{- end }}
-		{{- else if eq .QueueScanTemp "pgtype.Date" }}
+		{{- else if and .IsDateLike (eq .QueueScanTemp .CalendarScanType) }}
 		if temp{{ toGoName .Name }}.Valid {
 			{{- if .IsNullableScalar }}
-			date := {{ .GoType }}(temp{{ toGoName .Name }}.Time.Format("2006-01-02"))
+			date := {{ .GoType }}(temp{{ toGoName .Name }}.Time.Format({{ .CalendarLayout }}))
 			msg.{{ toGoName .Name }} = &date
 			{{- else }}
-			msg.{{ toGoName .Name }} = {{ .GoType }}(temp{{ toGoName .Name }}.Time.Format("2006-01-02"))
+			msg.{{ toGoName .Name }} = {{ .GoType }}(temp{{ toGoName .Name }}.Time.Format({{ .CalendarLayout }}))
 			{{- end }}
 		}
 		{{- else if eq .QueueScanTemp "sql.NullString" }}

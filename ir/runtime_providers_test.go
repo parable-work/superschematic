@@ -60,6 +60,14 @@ func TestARuntimeProviderIsCheckedAgainstItsContract(t *testing.T) {
 	if err := good().Check(); err != nil {
 		t.Fatalf("a channel adapter with send, health and inbound: %v", err)
 	}
+	if p := good(); p.CallsTheApp() {
+		t.Fatal("a provider whose config lists no CALLER_KEY calls the app")
+	}
+	calling := good()
+	calling.Config = append(calling.Config, ProviderConfigKey{Key: ProviderCallerKey, Secret: true})
+	if err := calling.Check(); err != nil || !calling.CallsTheApp() {
+		t.Fatalf("a provider that lists a secret CALLER_KEY: %v, calls the app %v", err, calling.CallsTheApp())
+	}
 	p := good()
 	p.Operations = nil
 	if err := p.Check(); err != nil {
@@ -85,6 +93,7 @@ func TestARuntimeProviderIsCheckedAgainstItsContract(t *testing.T) {
 		"a name with capitals":                  {func(p *RuntimeProvider) { p.Name = "SmsRelay" }, `name "SmsRelay" is lower-case`},
 		"a lower-case config key":               {func(p *RuntimeProvider) { p.Config[1].Key = "url" }, `config key "url" is upper-case`},
 		"a config key twice":                    {func(p *RuntimeProvider) { p.Config[1].Key = "TOKEN" }, "config key TOKEN is declared twice"},
+		"a caller key that is no secret":        {func(p *RuntimeProvider) { p.Config = append(p.Config, ProviderConfigKey{Key: ProviderCallerKey}) }, "config key CALLER_KEY is the key the provider calls the app with"},
 		"a role over a whole area":              {func(p *RuntimeProvider) { p.Role = []string{"messages"} }, `role permission "messages" names an area`},
 		"a role that is no dotted path":         {func(p *RuntimeProvider) { p.Role = []string{"messages.*"} }, "is a dotted path of words"},
 	} {

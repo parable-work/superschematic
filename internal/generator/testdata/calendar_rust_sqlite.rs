@@ -17,7 +17,8 @@ use http::{Method, Request};
 use http_body_util::BodyExt;
 use runtime::access::sqlite::{authenticate_grant, issue_grant, GrantAuthenticator};
 use runtime::access::IssueGrant;
-use runtime::orm::calendar::sqlite::{calendar_routes, read_calendar, CalendarRoutes};
+use runtime::mcp::{CallOutcome, EndpointTool};
+use runtime::orm::calendar::sqlite::{calendar_routes, read_calendar, CalendarRoutes, CalendarTool};
 use runtime::orm::calendar::{iso, CalendarOptions, CalendarRead};
 use runtime::orm::sqlite::{rusqlite, Database, Repositories};
 use runtime::orm::{AccessCaller, Error, FieldKeyring, FindOptions, Values};
@@ -249,6 +250,20 @@ async fn the_calendar_on_sqlite() {
     };
     assert_eq!(read(&owner_id).await, file.listed(&owner));
     assert_eq!(read(&other_id).await, file.listed(&other));
+    // The calendar as the MCP endpoint's tool over the file (#725), run as
+    // the endpoint's caller: the same entries as the route's.
+    let tool = CalendarTool { tables: tables.clone(), options: CalendarOptions::default() };
+    let arguments = json!({"from": iso(now - 86_400_000), "to": iso(now + 86_400_000)}).as_object().unwrap().clone();
+    for principal in [&owner, &other] {
+        let CallOutcome::Result(called) = tool.call(principal, &arguments).await.unwrap() else {
+            panic!("the calendar tool answered a problem");
+        };
+        let mut titles: Vec<String> = called["entries"].as_array().unwrap().iter().map(|e| e["title"].as_str().unwrap().to_owned()).collect();
+        titles.sort();
+        assert_eq!(titles, file.listed(principal));
+    }
+    let refused = tool.call(&owner, &serde_json::Map::new()).await.unwrap();
+    assert!(matches!(refused, CallOutcome::Problem(_)), "a call with no window is a problem");
     assert_eq!(send(Method::GET, &format!("/api/calendar?{window}"), None, None).await.0, 401);
     assert_eq!(send(Method::GET, "/api/calendar", Some(&owner_id), None).await.0, 400);
     let issue = async |as_: &str, body: Value| -> Value {

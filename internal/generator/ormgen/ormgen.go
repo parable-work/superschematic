@@ -18,6 +18,7 @@ import (
 	"path"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
@@ -622,10 +623,16 @@ type Field struct {
 	IsFloatLike      bool
 	IsBoolLike       bool
 	IsDateTimeLike   bool
-	IsDateLike       bool
-	IsJSONLike       bool
-	IsEnum           bool // the field's type is an enum, local or imported
-	IsSecret         bool // @secret: never sent to a client
+	// IsDateLike is a calendar value the row holds as text: a date
+	// (Temporal.Date, a DATE column) or a wall date-time
+	// (Temporal.LocalDateTime, a TIMESTAMP column), which
+	// IsLocalDateTimeLike tells apart. Both bind as their text, scan
+	// through a pgtype value (CalendarScanType) and filter as DateFilter.
+	IsDateLike          bool
+	IsLocalDateTimeLike bool
+	IsJSONLike          bool
+	IsEnum              bool // the field's type is an enum, local or imported
+	IsSecret            bool // @secret: never sent to a client
 	// IsEncrypted is an Encrypted<T> field (D85), whose column holds its
 	// envelope: a write seals it and a read opens it (encrypted.go).
 	IsEncrypted bool
@@ -724,11 +731,45 @@ func (r Relationship) FilterConditions() []FilterCondition {
 // and stays the Go API: its Eq and In bind JSON text, which pgx sends as
 // such, so they compare JSONB values as the TypeScript filter's eq and in
 // do, and its ILike, which Postgres has no operator for on JSONB, fails.
+//
+// A wall date-time's (sqlutil.FilterLocalDateTime) is a date's: DateFilter,
+// whose values are the column's text, which Postgres reads as its type.
 func goFilterKind(kind sqlutil.FilterKind) sqlutil.FilterKind {
-	if kind == sqlutil.FilterJSON {
+	switch kind {
+	case sqlutil.FilterJSON:
 		return sqlutil.FilterString
+	case sqlutil.FilterLocalDateTime:
+		return sqlutil.FilterDate
 	}
 	return kind
+}
+
+// The layouts a calendar value's text is written in: a date's, and a wall
+// date-time's canonical form, its seconds always and a fraction only when
+// it is not zero (Temporal.LocalDateTime).
+const (
+	dateLayout          = "2006-01-02"
+	localDateTimeLayout = "2006-01-02T15:04:05.999999999"
+)
+
+// CalendarScanType is the pgtype value a calendar column (IsDateLike)
+// scans into, which pgx reads no text from: pgtype.Date for a DATE and
+// pgtype.Timestamp for a TIMESTAMP, each a time.Time and whether it is
+// set.
+func (f Field) CalendarScanType() string {
+	if f.IsLocalDateTimeLike {
+		return "pgtype.Timestamp"
+	}
+	return "pgtype.Date"
+}
+
+// CalendarLayout is the Go layout that writes a calendar column's scanned
+// time as the field's text, quoted.
+func (f Field) CalendarLayout() string {
+	if f.IsLocalDateTimeLike {
+		return strconv.Quote(localDateTimeLayout)
+	}
+	return strconv.Quote(dateLayout)
 }
 
 // filterConditions are the conditions of a filter of kind on the member
@@ -1923,7 +1964,8 @@ func extractField(fieldDef *ir.FieldDef, schema *ir.Schema, scalars map[string]s
 		IsFloatLike:               class.FloatLike,
 		IsBoolLike:                class.BoolLike,
 		IsDateTimeLike:            class.DateTimeLike,
-		IsDateLike:                class.DateLike,
+		IsDateLike:                class.DateLike || class.LocalDateTimeLike,
+		IsLocalDateTimeLike:       class.LocalDateTimeLike,
 		IsJSONLike:                class.JSONLike,
 		IsEnum:                    isEnum,
 		IsSecret:                  fieldDef.Secret || fieldDef.EncryptedAtRest,

@@ -4,9 +4,16 @@
 // its config names in an environment, made from the settings after it, over
 // the provider packages its config lists. The entrypoints fill
 // Deps.providers with providersOf.
-
-import type { Logger } from '@superschematic/http-runtime';
-import { providersFrom, type ProviderDefinition, type Providers, type RuntimeInterface } from '@superschematic/http-runtime/providers';
+import type { Authenticator, Logger } from '@superschematic/http-runtime';
+import {
+  extensionAuthenticator,
+  extensionKeysOf,
+  providersFrom,
+  type ExtensionKey,
+  type ProviderDefinition,
+  type Providers,
+  type RuntimeInterface,
+} from '@superschematic/http-runtime/providers';
 import localSandboxProvider from '../../../../../runtime-providers/providers/local-sandbox';
 import smsRelayAProvider from '../../../../../runtime-providers/providers/sms-relay-a';
 import stubModelProvider from '../../../../../runtime-providers/providers/stub-model';
@@ -42,4 +49,27 @@ export function providersOf(config: EnvConfig, log?: Logger): Providers {
     definitions: providerDefinitions(),
     ...(log ? { log } : {}),
   });
+}
+
+/**
+ * The keys the providers config names call the app with (#744): one per
+ * slot whose provider lists CALLER_KEY and whose <SLOT>_CALLER_KEY config
+ * sets, with the provider's name and role.
+ */
+export function extensionKeys(config: EnvConfig): readonly ExtensionKey[] {
+  return extensionKeysOf({
+    slots: providerSlots,
+    config: config as unknown as Readonly<Record<string, unknown>>,
+    definitions: providerDefinitions(),
+  });
+}
+
+/**
+ * The authenticator of work-api's routes around inner (#744): a request
+ * whose Bearer token is one of extensionKeys(config) runs as that provider,
+ * with its role alone, and any other goes on to inner, the grants' or the
+ * implementation's. The entrypoints wrap it outermost.
+ */
+export function callerAuthenticator(config: EnvConfig, inner: Authenticator): Authenticator {
+  return extensionAuthenticator(extensionKeys(config), inner);
 }

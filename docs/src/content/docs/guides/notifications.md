@@ -15,7 +15,7 @@ person who sent it.
 | Built | Not built yet |
 | --- | --- |
 | `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Rust and Go on D1 |
-| the same notifier in the Rust runtime, on Postgres and SQLite ([in Rust](#in-rust)) | a generated Rust server that builds it over a database that lists `sqlite` first (#725) |
+| the same notifier in the Rust runtime, on Postgres and SQLite ([in Rust](#in-rust)), which a generated Rust server builds into its `Deps` on either, with its inbox, its relay callbacks and its worker (#707, #725) | |
 | the same notifier in the Go runtime, on Postgres and SQLite, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | the same generated over a database that lists `sqlite` first (#717) |
 | raising an event in the caller's transaction; Recurrence's opened, reminded, due and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties; a generated TypeScript server that builds the notifier into its `Deps`, mounts the relays' callbacks and the inbox, and drains the dispatch queue ([the generated server](#what-the-generated-server-wires)) | the same in a generated Go or Rust server |
@@ -429,8 +429,9 @@ transaction. A reply action's statements answer at once there, and so
 must a file's bucket the inbound path calls in a transaction.
 `worker_queue()` claims the dispatch queue over a connection of its own to
 the file; it takes no slot and reads no next due time (D145). A generated
-Rust server over a database that lists `sqlite` first does not wire the
-notifier yet (#725): the implementation builds it over the file.
+Rust server over a database that lists `sqlite` first wires the notifier
+over the file as it does over a pool (#725): its `Wired` builds it over
+the file's tables, and its dispatch worker claims the queue there.
 
 ## In Go
 

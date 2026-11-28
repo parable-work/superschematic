@@ -326,7 +326,7 @@ var temp{{ toGoName $member.Field.Name }} pgtype.Point
 {{- else if and $member.Field.IsInterval $member.Field.IsNullableScalar }}
 var temp{{ toGoName $member.Field.Name }} *time.Duration
 {{- else if and (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) $member.Field.IsDateLike }}
-var temp{{ toGoName $member.Field.Name }} pgtype.Date
+var temp{{ toGoName $member.Field.Name }} {{ $member.Field.CalendarScanType }}
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") (not $member.Field.IsNullableBool) }}
 var temp{{ toGoName $member.Field.Name }} sql.NullString
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) }}
@@ -383,10 +383,10 @@ result.{{ toGoName $member.Field.Name }} = (*{{ $member.Field.GoType }})(temp{{ 
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	{{- if $member.Field.IsNullableScalar }}
 	// Nullable date scalar: typegen emits *Scalar, take address of converted value
-	tmp{{ toGoName $member.Field.Name }} := {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format("2006-01-02"))
+	tmp{{ toGoName $member.Field.Name }} := {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format({{ $member.Field.CalendarLayout }}))
 	result.{{ toGoName $member.Field.Name }} = &tmp{{ toGoName $member.Field.Name }}
 	{{- else }}
-	result.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format("2006-01-02"))
+	result.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format({{ $member.Field.CalendarLayout }}))
 	{{- end }}
 }
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") (not $member.Field.IsNullableBool) }}
@@ -458,10 +458,10 @@ entity.{{ toGoName $member.Field.Name }} = (*{{ $member.Field.GoType }})(temp{{ 
 if temp{{ toGoName $member.Field.Name }}.Valid {
 	{{- if $member.Field.IsNullableScalar }}
 	// Nullable date scalar: typegen emits *Scalar, take address of converted value
-	tmp{{ toGoName $member.Field.Name }} := {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format("2006-01-02"))
+	tmp{{ toGoName $member.Field.Name }} := {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format({{ $member.Field.CalendarLayout }}))
 	entity.{{ toGoName $member.Field.Name }} = &tmp{{ toGoName $member.Field.Name }}
 	{{- else }}
-	entity.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format("2006-01-02"))
+	entity.{{ toGoName $member.Field.Name }} = {{ $member.Field.GoType }}(temp{{ toGoName $member.Field.Name }}.Time.Format({{ $member.Field.CalendarLayout }}))
 	{{- end }}
 }
 {{- else if and (not $member.Field.IsRequired) (not $member.Field.IsPrimaryKey) (not $member.Field.IsAuditField) (not $member.Field.IsArray) (eq $member.Field.GoType "string") (not $member.Field.IsNullableBool) }}
@@ -546,7 +546,7 @@ var temp{{ toGoName $field.Name }} pgtype.Point
 {{- else if and $field.IsInterval $field.IsNullableScalar }}
 var temp{{ toGoName $field.Name }} *time.Duration
 {{- else if and (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) $field.IsDateLike }}
-var temp{{ toGoName $field.Name }} pgtype.Date
+var temp{{ toGoName $field.Name }} {{ $field.CalendarScanType }}
 {{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (eq $field.GoType "string") (not $field.IsNullableBool) }}
 var temp{{ toGoName $field.Name }} sql.NullString
 {{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) }}
@@ -645,10 +645,10 @@ if selected{{ toGoName $field.Name }} {
 if selected{{ toGoName $field.Name }} && temp{{ toGoName $field.Name }}.Valid {
 	{{- if $field.IsNullableScalar }}
 	// Nullable date scalar: typegen emits *Scalar, take address of converted value
-	tmp{{ toGoName $field.Name }} := {{ $field.GoType }}(temp{{ toGoName $field.Name }}.Time.Format("2006-01-02"))
+	tmp{{ toGoName $field.Name }} := {{ $field.GoType }}(temp{{ toGoName $field.Name }}.Time.Format({{ $field.CalendarLayout }}))
 	result.{{ toGoName $field.Name }} = &tmp{{ toGoName $field.Name }}
 	{{- else }}
-	result.{{ toGoName $field.Name }} = {{ $field.GoType }}(temp{{ toGoName $field.Name }}.Time.Format("2006-01-02"))
+	result.{{ toGoName $field.Name }} = {{ $field.GoType }}(temp{{ toGoName $field.Name }}.Time.Format({{ $field.CalendarLayout }}))
 	{{- end }}
 }
 {{- else if and (not $field.IsRequired) (not $field.IsPrimaryKey) (not $field.IsAuditField) (not $field.IsArray) (eq $field.GoType "string") (not $field.IsNullableBool) }}

@@ -5,3 +5,4 @@ export * from './identity_name';
 export * from './identity_uuid';
 export * from './temporal_date';
 export * from './temporal_date_time';
+export * from './temporal_local_date_time';

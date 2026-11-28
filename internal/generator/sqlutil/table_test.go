@@ -45,7 +45,7 @@ func TestTablesOfModelsALedger(t *testing.T) {
 	for _, c := range entry.Columns {
 		columns = append(columns, c.Name)
 	}
-	if want := "id account_id transfer_id amount_cents booked_on kind memo external_id tags metadata reviewed_at created_at created_by updated_at updated_by deleted_at deleted_by"; strings.Join(columns, " ") != want {
+	if want := "id account_id transfer_id amount_cents booked_on kind memo external_id tags metadata reviewed_at settles_at created_at created_by updated_at updated_by deleted_at deleted_by"; strings.Join(columns, " ") != want {
 		t.Errorf("Entry's columns = %s, want %s", strings.Join(columns, " "), want)
 	}
 	if !entry.SoftDelete || !entry.DeletedBy || !entry.Search || entry.Key != "id" {
@@ -57,7 +57,7 @@ func TestTablesOfModelsALedger(t *testing.T) {
 	}
 	for column, want := range map[string]FilterKind{
 		"id": FilterUUID, "account_id": FilterUUID, "amount_cents": FilterInt, "booked_on": FilterDate, "kind": FilterString,
-		"memo": FilterString, "tags": FilterNone, "metadata": FilterJSON, "reviewed_at": FilterDateTime, "created_at": FilterDateTime,
+		"memo": FilterString, "tags": FilterNone, "metadata": FilterJSON, "reviewed_at": FilterDateTime, "settles_at": FilterLocalDateTime, "created_at": FilterDateTime,
 		"created_by": FilterUUID, "deleted_at": FilterNone,
 	} {
 		if kinds[column] != want {
@@ -71,9 +71,10 @@ func TestTablesOfModelsALedger(t *testing.T) {
 	for _, c := range entry.SortColumns() {
 		sorts = append(sorts, c.Field)
 	}
-	// memo, externalId and reviewedAt may be null, and sort all the same,
+	// memo, externalId, reviewedAt and settlesAt may be null, and sort all the
+	// same,
 	// their nulls last (D112).
-	if want := "id amountCents bookedOn memo externalId reviewedAt createdAt updatedAt"; strings.Join(sorts, " ") != want {
+	if want := "id amountCents bookedOn memo externalId reviewedAt settlesAt createdAt updatedAt"; strings.Join(sorts, " ") != want {
 		t.Errorf("Entry sorts by %s, want %s", strings.Join(sorts, " "), want)
 	}
 	if key := entry.UniqueKeyNamed("account,externalId"); key == nil || key.Conflict != "(account_id, external_id) WHERE deleted_at IS NULL" || key.Keep != "account_id = entry.account_id" {
@@ -175,7 +176,7 @@ func TestSQLiteTableStatementsOfALedger(t *testing.T) {
 		}
 	}
 	for name, want := range map[string]string{
-		"getOne":        `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id = ?1`,
+		"getOne":        `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id = ?1`,
 		"pageKeyExists": "SELECT EXISTS (SELECT 1 FROM entry WHERE entry.id = ?1)",
 		"update":        "UPDATE entry SET %s WHERE id = ?%d",
 		"updatedAt":     "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
@@ -192,7 +193,7 @@ func TestSQLiteTableStatementsOfALedger(t *testing.T) {
 			t.Errorf("Entry's %s on SQLite = %q, want %q", name, got, want)
 		}
 	}
-	if !strings.HasSuffix(entry.Upsert, `DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`) {
+	if !strings.HasSuffix(entry.Upsert, `DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`) {
 		t.Errorf("Entry's upsert on SQLite = %q", entry.Upsert)
 	}
 	c := SQLiteClauses()

@@ -51,9 +51,10 @@ func Definition(client ...*http.Client) providers.Definition {
 		Name:       "sms-relay-a",
 		Implements: providers.Channel,
 		Config: map[string]providers.SettingSpec{
-			"URL":    {Description: "The relay's base URL."},
-			"TOKEN":  {Secret: true, Description: "The relay's API token, which also signs its callbacks."},
-			"SENDER": {Optional: true, Description: "The number messages are sent from; the relay's default when unset."},
+			"URL":               {Description: "The relay's base URL."},
+			"TOKEN":             {Secret: true, Description: "The relay's API token, which also signs its callbacks."},
+			"SENDER":            {Optional: true, Description: "The number messages are sent from; the relay's default when unset."},
+			providers.CallerKey: {Secret: true, Optional: true, Description: "The key the relay calls the app with, to read the deliveries it sent (#744): the API resolves a request bearing it to this provider's principal, which may relay messages and nothing else. An environment that lets the relay call nothing leaves it unset."},
 		},
 		Role: []string{"messages.relay"},
 		Create: func(_ context.Context, settings providers.Settings, pc providers.Context) (any, error) {

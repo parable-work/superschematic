@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { GenericInt64, GenericJSON, IdentityName, IdentityUUID, TemporalDate, TemporalDateTime, EntryKind, Account, Entry, EntryPosted, MailingAddress,  } from '@schemas/fixture-ledger-db-types/types';
+import type { GenericInt64, GenericJSON, IdentityName, IdentityUUID, TemporalDate, TemporalDateTime, TemporalLocalDateTime, EntryKind, Account, Entry, EntryPosted, MailingAddress,  } from '@schemas/fixture-ledger-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-ledger-db-types';
@@ -76,7 +76,7 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 ## Type System
 
 
-### Scalars (6)
+### Scalars (7)
 
 
 - **Generic.Int64** - Signed 64-bit integer; range bounded by JavaScript's safe-integer ceiling.
@@ -108,6 +108,11 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 - **Temporal.DateTime** - ISO8601 datetime string. Epoch wire values keep this scalar and declare x-temporal-format (unix, unix_millis, unix_micros, unix_nanos) on the property; the unit is never guessed from digit count.
   - TypeScript type: `JSDate`
   - Wire format: TypeScript schemas use `@temporalFormat('...')`; JSON/YAML schemas use `x-temporal-format`.
+
+
+- **Temporal.LocalDateTime** - Date and time of day with no zone or offset (a wall-clock reading), normalized to 'YYYY-MM-DDTHH:MM:SS'. Accepts 'T', 't' or a space between the date and the time, and a time without seconds. Refuses a value that carries a zone or an offset.
+  - TypeScript type: `string`
+  - Max length: 40
 
 
 

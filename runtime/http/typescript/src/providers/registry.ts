@@ -3,11 +3,12 @@ import { withCaller } from '../caller.js';
 import { createLogger, type Logger } from '../logger.js';
 import type { Revealable } from '../secret.js';
 import type { ChannelAdapter } from './channel.js';
-import { contractOf, providerConfigField, type RuntimeInterface } from './contracts.js';
+import { CALLER_KEY, contractOf, providerConfigField, type RuntimeInterface } from './contracts.js';
 import type { CredentialProvider } from './credentials.js';
 import {
   checkProviderInstance,
   extensionPrincipal,
+  type ExtensionKey,
   ProviderSettings,
   type ProviderDefinition,
   type ProviderInterfaces,
@@ -193,6 +194,30 @@ export function providersFrom(options: ProvidersOptions): Providers {
     files: slot => get(slot, 'files'),
     principalOf: slot => entryOf(slot).principal,
   };
+}
+
+/**
+ * The keys the providers options.config configures call the app with
+ * (#744): one per slot whose provider lists CALLER_KEY and whose
+ * <SLOT>_CALLER_KEY the config sets, a secret, with the provider's name and
+ * role. A server wraps its authenticator in extensionAuthenticator over
+ * them, outermost. It reads what providersFrom reads and checks nothing
+ * itself: a server builds Deps.providers with providersFrom beside it,
+ * which refuses a config that names an unknown provider or holds the key
+ * as no secret.
+ */
+export function extensionKeysOf(options: Pick<ProvidersOptions, 'slots' | 'config' | 'definitions'>): readonly ExtensionKey[] {
+  const byName = new Map(options.definitions.map(definition => [definition.name, definition] as const));
+  const keys: ExtensionKey[] = [];
+  for (const slot of Object.keys(options.slots).sort()) {
+    const name = options.config[slot];
+    const definition = typeof name === 'string' ? byName.get(name) : undefined;
+    if (!definition || definition.implements !== options.slots[slot] || !definition.config?.[CALLER_KEY]) continue;
+    const key = options.config[providerConfigField(slot, CALLER_KEY)];
+    if (!isRevealable(key) || key.reveal() === '') continue;
+    keys.push(Object.freeze({ key, provider: Object.freeze({ name: definition.name, role: Object.freeze([...(definition.role ?? [])]) }) }));
+  }
+  return Object.freeze(keys);
 }
 
 /** The provider with each of its methods run within principal, the provider's own. */

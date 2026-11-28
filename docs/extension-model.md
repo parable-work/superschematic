@@ -2279,6 +2279,8 @@ Each provider acts as its own principal, of kind `extension`
 (`ir.PrincipalExtension`), subject `extension:<name>`, holding its
 manifest's role. `providersFrom` runs every call into a provider within
 that principal, and `extensionAuthenticator` authenticates a provider
-that calls the app with its own key as it. A credential provider returns
+that calls the app with its own key as it: the slot's `<SLOT>_CALLER_KEY`,
+a `Secret<string>` of the API's config, which every language's generated
+server wraps the routes' authenticator in, outermost (#744). A credential provider returns
 no value to its caller: `resolve` answers a sealed `Injection`, which only
 the runner opens.

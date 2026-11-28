@@ -20,7 +20,7 @@ use serde_json::{json, Value};
 use superschematic_http_runtime::providers::{
     ChannelAdapter, ChannelHealth, DeliveryState, DeliveryStatus, InboundMessage, OptOut,
     OutboundMessage, ProviderDefinition, ProviderInstance, ProviderSettingSpec, RuntimeInterface,
-    SecretValue, SendResult, WebhookRequest,
+    SecretValue, SendResult, WebhookRequest, CALLER_KEY,
 };
 use superschematic_http_runtime::BoxError;
 
@@ -63,7 +63,10 @@ impl Relay for Outbox {
         if health {
             return Ok((200, json!({ "ok": true })));
         }
-        Ok((200, json!({ "id": format!("a-{}", sent.len()), "status": "accepted" })))
+        Ok((
+            200,
+            json!({ "id": format!("a-{}", sent.len()), "status": "accepted" }),
+        ))
     }
 }
 
@@ -124,7 +127,10 @@ impl Adapter {
     }
 
     fn bearer(&self) -> (String, String) {
-        ("authorization".to_owned(), format!("Bearer {}", self.token.reveal()))
+        (
+            "authorization".to_owned(),
+            format!("Bearer {}", self.token.reveal()),
+        )
     }
 }
 
@@ -178,7 +184,10 @@ impl ChannelAdapter for Adapter {
         };
         let (status, _) = self.relay.call(request).await?;
         Ok(if status == 200 {
-            ChannelHealth { ok: true, detail: None }
+            ChannelHealth {
+                ok: true,
+                detail: None,
+            }
         } else {
             ChannelHealth {
                 ok: false,
@@ -241,17 +250,22 @@ impl ChannelAdapter for Adapter {
 
 /// The definition, over `relay`.
 pub fn definition_with(relay: Arc<dyn Relay>) -> ProviderDefinition {
-    ProviderDefinition::new("sms-relay-a", RuntimeInterface::Channel, move |settings, _| {
-        Ok(ProviderInstance::Channel(Arc::new(Adapter {
-            base: settings.text("URL")?.trim_end_matches('/').to_owned(),
-            token: settings.secret("TOKEN")?,
-            sender: settings.optional_text("SENDER")?.map(str::to_owned),
-            relay: relay.clone(),
-        })))
-    })
+    ProviderDefinition::new(
+        "sms-relay-a",
+        RuntimeInterface::Channel,
+        move |settings, _| {
+            Ok(ProviderInstance::Channel(Arc::new(Adapter {
+                base: settings.text("URL")?.trim_end_matches('/').to_owned(),
+                token: settings.secret("TOKEN")?,
+                sender: settings.optional_text("SENDER")?.map(str::to_owned),
+                relay: relay.clone(),
+            })))
+        },
+    )
     .with_setting("URL", ProviderSettingSpec::plain())
     .with_setting("TOKEN", ProviderSettingSpec::secret())
     .with_setting("SENDER", ProviderSettingSpec::plain().optional())
+    .with_setting(CALLER_KEY, ProviderSettingSpec::secret().optional())
     .with_role(["messages.relay"])
     .with_operations(["status", "inbound"])
 }

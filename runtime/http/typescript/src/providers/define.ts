@@ -2,7 +2,7 @@ import type { Authenticator, Principal } from '../auth.js';
 import type { Logger } from '../logger.js';
 import { SECRET_MASK, SecretValue, type Revealable } from '../secret.js';
 import type { ChannelAdapter } from './channel.js';
-import { contractOf, extensionSubject, RUNTIME_CONTRACTS, type RuntimeInterface } from './contracts.js';
+import { CALLER_KEY, contractOf, extensionSubject, RUNTIME_CONTRACTS, type RuntimeInterface } from './contracts.js';
 import type { CredentialProvider } from './credentials.js';
 import type { FileProcessor } from './files.js';
 import type { ModelProvider } from './model.js';
@@ -80,6 +80,9 @@ export function defineProvider<I extends RuntimeInterface>(definition: ProviderD
   }
   for (const key of Object.keys(definition.config ?? {})) {
     if (!KEY.test(key)) throw new ProviderContractError(`${where}: config key ${JSON.stringify(key)} is upper-case letters, digits and underscores`);
+    if (key === CALLER_KEY && !definition.config![key]!.secret) {
+      throw new ProviderContractError(`${where}: config key ${CALLER_KEY} is the key the provider calls the app with, which an environment sets as a secret; declare it { secret: true } (#744)`);
+    }
   }
   for (const permission of definition.role ?? []) {
     const segments = permission.split('.');
@@ -199,13 +202,19 @@ export class ProviderSettings {
   }
 }
 
+/** A key a provider calls the app with, and the provider it is (#744). */
+export interface ExtensionKey {
+  readonly key: Revealable<string>;
+  readonly provider: Pick<ProviderDefinition, 'name' | 'role'>;
+}
+
 /**
  * An Authenticator for the providers that call the app over HTTP, a
  * messaging bridge that connects outward and relays replies, for one: a
  * Bearer token equal to one of keys is that provider's principal, with its
  * role's permissions alone. Any other request is left to next.
  */
-export function extensionAuthenticator(keys: readonly { readonly key: Revealable<string>; readonly provider: Pick<ProviderDefinition, 'name' | 'role'> }[], next?: Authenticator): Authenticator {
+export function extensionAuthenticator(keys: readonly ExtensionKey[], next?: Authenticator): Authenticator {
   const encoder = new TextEncoder();
   const equal = (a: string, b: string): boolean => {
     const x = encoder.encode(a);

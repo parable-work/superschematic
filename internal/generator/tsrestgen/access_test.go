@@ -107,6 +107,7 @@ var accessCases = []string{
 	"an expired or revoked grant is refused on the very next call",
 	"a reveal opens the value for a holder of its permission and writes an access-log row",
 	"the grants and the access log list through the routes the build serves over views of them",
+	"the active grants list for an administrator, the target owner and the holder, and are refused to anyone else",
 }
 
 // TestGeneratedAccessEndToEnd serves fixture-access-api's generated router

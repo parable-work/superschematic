@@ -330,7 +330,7 @@ func (o *APIOutput) TableArgs() []string {
 // table operation, which it serves from the table's repository (D106).
 // Its namespace's trait has no method for it.
 func (e EndpointInfo) RouterServed() bool {
-	return e.Behavior != nil || e.Table != nil || e.Graph != nil || e.RowFeature != nil
+	return e.Behavior != nil || e.Table != nil || e.Graph != nil || e.RowFeature != nil || e.AccessGrants != nil
 }
 
 // checkTableDeps refuses table operations the crate cannot serve: an API
@@ -361,57 +361,16 @@ func (o *APIOutput) TablesInterfacesUse() string {
 // checkSQLiteDeps refuses what a Rust server on a SQLite file does not run
 // yet (D116), by name: its Deps.db is the file, where the engine is built
 // over a Postgres pool. Its identity store runs on the file, on a
-// connection of its own, its behaviors run on it, and its workers claim on
-// it, a @worker's queue and a @behaviorWorker's alike.
+// connection of its own, its behaviors run on it, its workers claim on it,
+// a @worker's queue and a @behaviorWorker's alike, and its runtime parts
+// (parties, the inbound path, the agent orchestration, the notifier,
+// search, the calendar and grants) are built over it (#725).
 func (o *APIOutput) checkSQLiteDeps(deps *DepsInfo) error {
 	if !deps.SQLite || deps.Database == "" {
 		return nil
 	}
-	refuse := func(what string) error {
-		return fmt.Errorf("rustrestgen: %s is a Rust API on %s, whose DB service lists sqlite first, and %s on Postgres alone so far (D116); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", o.SchemaName, deps.Database, what, deps.Database)
-	}
 	if len(o.Derivers) > 0 {
-		return refuse("the Rust server runs a deriver")
-	}
-	if len(o.PostgresFeatures) > 0 {
-		return refuse("the Rust server wires " + strings.Join(o.PostgresFeatures, ", ") + " (D157, D158, D193, #725)")
+		return fmt.Errorf("rustrestgen: %s is a Rust API on %s, whose DB service lists sqlite first, and the Rust server runs a deriver on Postgres alone so far (D116); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", o.SchemaName, deps.Database, deps.Database)
 	}
 	return nil
-}
-
-// postgresFeaturesOf are the features of databases a Rust server wires on
-// Postgres alone, each "Type: feature", in type order: parties, the
-// inbound path and the agent orchestration (D193). The Rust runtime serves
-// them on SQLite too (#618), over orm::store; the generated server's
-// wiring of them is Postgres's (#707), so a server over a sqlite-first
-// database is refused them until it wires them there (#725). Recurrence,
-// whose operations and deadline worker the Rust adapter runs on SQLite
-// too, and a calendar source, which orm::calendar::sqlite reads (#615),
-// are served on either dialect.
-func postgresFeaturesOf(databases []*ir.Schema) []string {
-	var out []string
-	for _, database := range databases {
-		names := make([]string, 0, len(database.Types))
-		for name := range database.Types {
-			names = append(names, name)
-		}
-		slices.Sort(names)
-		for _, name := range names {
-			td := database.Types[name]
-			// Parties and the inbound path (D157) and the agent
-			// orchestration (D158): the generated wiring is Postgres's
-			// alone (#725).
-			switch {
-			case td.Party != nil:
-				out = append(out, name+": @party")
-			case td.Conversations != nil:
-				out = append(out, name+": @conversations")
-			case td.RunRequests != nil:
-				out = append(out, name+": @runRequests")
-			case td.Agents != nil:
-				out = append(out, name+": @agents")
-			}
-		}
-	}
-	return out
 }

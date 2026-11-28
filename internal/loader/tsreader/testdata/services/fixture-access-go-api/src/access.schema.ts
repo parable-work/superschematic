@@ -2,6 +2,7 @@ import { Identity } from "superscalar";
 import { Nullable, Validate } from "@superschematic/schema";
 import {
   Authenticated,
+  accessGrantsOperations,
   HttpMethod,
   SearchQuery,
   decrypted,
@@ -212,3 +213,9 @@ export class Requests extends Authenticated {
     throw new Error("schema declaration only");
   }
 }
+
+// The grants active now (#735): an administrator of access lists every
+// one, the owner of a grant's target the grants on it, and a holder its
+// own.
+@accessGrantsOperations({ permission: "access.admin" })
+export abstract class Grants {}

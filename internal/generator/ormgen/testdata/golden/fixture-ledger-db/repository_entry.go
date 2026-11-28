@@ -34,6 +34,7 @@ var EntryAllowedFields = map[string]bool{
 	"tags":         true,
 	"metadata":     true,
 	"reviewed_at":  true,
+	"settles_at":   true,
 	"created_at":   true,
 	"created_by":   true,
 	"updated_at":   true,
@@ -55,6 +56,7 @@ var EntryQuotedFields = map[string]string{
 	"tags":         `tags`,
 	"metadata":     `metadata`,
 	"reviewed_at":  `reviewed_at`,
+	"settles_at":   `settles_at`,
 	"created_at":   `created_at`,
 	"created_by":   `created_by`,
 	"updated_at":   `updated_at`,
@@ -80,6 +82,7 @@ var entrySortColumns = map[EntrySortField]struct {
 	EntrySortByMemo:        {`entry.memo`, `page_key.memo`, true},
 	EntrySortByExternalId:  {`entry.external_id`, `page_key.external_id`, true},
 	EntrySortByReviewedAt:  {`entry.reviewed_at`, `page_key.reviewed_at`, true},
+	EntrySortBySettlesAt:   {`entry.settles_at`, `page_key.settles_at`, true},
 	EntrySortByCreatedAt:   {`entry.created_at`, `page_key.created_at`, false},
 	EntrySortByUpdatedAt:   {`entry.updated_at`, `page_key.updated_at`, false},
 }
@@ -333,6 +336,9 @@ func (r *EntryRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 		if opts.Fields.ReviewedAt {
 			fieldStrings = append(fieldStrings, "reviewed_at")
 		}
+		if opts.Fields.SettlesAt {
+			fieldStrings = append(fieldStrings, "settles_at")
+		}
 		if opts.Fields.CreatedAt {
 			fieldStrings = append(fieldStrings, "created_at")
 		}
@@ -359,7 +365,7 @@ func (r *EntryRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 		query = fmt.Sprintf(`SELECT %s FROM entry WHERE id = $1`, selectFields)
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		query = `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id = $1`
+		query = `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id = $1`
 	}
 	query += " AND deleted_at IS NULL"
 
@@ -381,6 +387,7 @@ func (r *EntryRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 	var tempTags []*string
 	var tempMetadata []byte
 	var tempReviewedAt *types.TemporalDateTime
+	var tempSettlesAt pgtype.Timestamp
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelAccount *types.IdentityUUID
@@ -397,6 +404,7 @@ func (r *EntryRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 		var selectedMemo bool
 		var selectedExternalId bool
 		var selectedReviewedAt bool
+		var selectedSettlesAt bool
 
 		scanDest := make([]any, len(fieldStrings))
 		for i, fieldName := range fieldStrings {
@@ -423,6 +431,9 @@ func (r *EntryRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 			case "reviewed_at":
 				scanDest[i] = &tempReviewedAt
 				selectedReviewedAt = true
+			case "settles_at":
+				scanDest[i] = &tempSettlesAt
+				selectedSettlesAt = true
 			case "created_at":
 				scanDest[i] = &result.CreatedAt
 			case "created_by":
@@ -472,6 +483,11 @@ func (r *EntryRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.ReviewedAt = tempReviewedAt
 			}
+			if selectedSettlesAt && tempSettlesAt.Valid {
+				// Nullable date scalar: typegen emits *Scalar, take address of converted value
+				tmpSettlesAt := types.TemporalLocalDateTime(tempSettlesAt.Time.Format("2006-01-02T15:04:05.999999999"))
+				result.SettlesAt = &tmpSettlesAt
+			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
 			}
@@ -504,6 +520,8 @@ func (r *EntryRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 			&tempMetadata,
 
 			&tempReviewedAt,
+
+			&tempSettlesAt,
 
 			&result.CreatedAt,
 
@@ -541,6 +559,11 @@ func (r *EntryRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 			if tempReviewedAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.ReviewedAt = tempReviewedAt
+			}
+			if tempSettlesAt.Valid {
+				// Nullable date scalar: typegen emits *Scalar, take address of converted value
+				tmpSettlesAt := types.TemporalLocalDateTime(tempSettlesAt.Time.Format("2006-01-02T15:04:05.999999999"))
+				result.SettlesAt = &tmpSettlesAt
 			}
 		}
 	}
@@ -656,7 +679,7 @@ func (r *EntryRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.Id
 	}
 
 	// Build query with explicit column order
-	query := fmt.Sprintf(`SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id IN (%s)`, strings.Join(placeholders, ", "))
+	query := fmt.Sprintf(`SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id IN (%s)`, strings.Join(placeholders, ", "))
 	query += " AND deleted_at IS NULL"
 
 	// Execute query
@@ -685,6 +708,7 @@ func (r *EntryRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.Id
 		var tempTags []*string
 		var tempMetadata []byte
 		var tempReviewedAt *types.TemporalDateTime
+		var tempSettlesAt pgtype.Timestamp
 
 		// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 		var tempRelAccount *types.IdentityUUID
@@ -714,6 +738,8 @@ func (r *EntryRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.Id
 			&tempMetadata,
 
 			&tempReviewedAt,
+
+			&tempSettlesAt,
 
 			&entity.CreatedAt,
 
@@ -752,6 +778,11 @@ func (r *EntryRepository) getManyByIDs(ctx context.Context, uniqueIDs []types.Id
 		}
 		if tempReviewedAt != nil {
 			entity.ReviewedAt = tempReviewedAt
+		}
+		if tempSettlesAt.Valid {
+			// Nullable date scalar: typegen emits *Scalar, take address of converted value
+			tmpSettlesAt := types.TemporalLocalDateTime(tempSettlesAt.Time.Format("2006-01-02T15:04:05.999999999"))
+			entity.SettlesAt = &tmpSettlesAt
 		}
 
 		// Set relationship IDs from scanned FK values
@@ -818,6 +849,9 @@ func (r *EntryRepository) FindOne(ctx context.Context, filter *EntryFilter, opts
 		if opts.Fields.ReviewedAt {
 			fieldStrings = append(fieldStrings, "reviewed_at")
 		}
+		if opts.Fields.SettlesAt {
+			fieldStrings = append(fieldStrings, "settles_at")
+		}
 		if opts.Fields.CreatedAt {
 			fieldStrings = append(fieldStrings, "created_at")
 		}
@@ -843,7 +877,7 @@ func (r *EntryRepository) FindOne(ctx context.Context, filter *EntryFilter, opts
 		selectFields = buildSelectFieldsTyped(fieldStrings, "entry")
 	} else {
 		// Select all fields in explicit order matching scan order (using OrderedMembers for schema order)
-		selectFields = `"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`
+		selectFields = `"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`
 		if opts == nil {
 			opts = &EntryFindOptions{}
 		}
@@ -885,6 +919,7 @@ func (r *EntryRepository) FindOne(ctx context.Context, filter *EntryFilter, opts
 	var tempTags []*string
 	var tempMetadata []byte
 	var tempReviewedAt *types.TemporalDateTime
+	var tempSettlesAt pgtype.Timestamp
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelAccount *types.IdentityUUID
@@ -899,6 +934,7 @@ func (r *EntryRepository) FindOne(ctx context.Context, filter *EntryFilter, opts
 		var selectedMemo bool
 		var selectedExternalId bool
 		var selectedReviewedAt bool
+		var selectedSettlesAt bool
 		var selectedRelAccount bool
 		var selectedRelTransfer bool
 
@@ -927,6 +963,9 @@ func (r *EntryRepository) FindOne(ctx context.Context, filter *EntryFilter, opts
 			case "reviewed_at":
 				scanDest[i] = &tempReviewedAt
 				selectedReviewedAt = true
+			case "settles_at":
+				scanDest[i] = &tempSettlesAt
+				selectedSettlesAt = true
 			case "created_at":
 				scanDest[i] = &result.CreatedAt
 			case "created_by":
@@ -976,6 +1015,11 @@ func (r *EntryRepository) FindOne(ctx context.Context, filter *EntryFilter, opts
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.ReviewedAt = tempReviewedAt
 			}
+			if selectedSettlesAt && tempSettlesAt.Valid {
+				// Nullable date scalar: typegen emits *Scalar, take address of converted value
+				tmpSettlesAt := types.TemporalLocalDateTime(tempSettlesAt.Time.Format("2006-01-02T15:04:05.999999999"))
+				result.SettlesAt = &tmpSettlesAt
+			}
 			if jsonFieldDecodeErr != nil {
 				return nil, jsonFieldDecodeErr
 			}
@@ -1018,6 +1062,8 @@ func (r *EntryRepository) FindOne(ctx context.Context, filter *EntryFilter, opts
 
 			&tempReviewedAt,
 
+			&tempSettlesAt,
+
 			&result.CreatedAt,
 
 			&result.CreatedBy,
@@ -1054,6 +1100,11 @@ func (r *EntryRepository) FindOne(ctx context.Context, filter *EntryFilter, opts
 			if tempReviewedAt != nil {
 				// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 				result.ReviewedAt = tempReviewedAt
+			}
+			if tempSettlesAt.Valid {
+				// Nullable date scalar: typegen emits *Scalar, take address of converted value
+				tmpSettlesAt := types.TemporalLocalDateTime(tempSettlesAt.Time.Format("2006-01-02T15:04:05.999999999"))
+				result.SettlesAt = &tmpSettlesAt
 			}
 		}
 	}
@@ -1261,6 +1312,9 @@ func entryFieldStrings(fields EntryFields) []string {
 	if fields.ReviewedAt {
 		fieldStrings = append(fieldStrings, "reviewed_at")
 	}
+	if fields.SettlesAt {
+		fieldStrings = append(fieldStrings, "settles_at")
+	}
 	if fields.CreatedAt {
 		fieldStrings = append(fieldStrings, "created_at")
 	}
@@ -1312,6 +1366,7 @@ func (r *EntryRepository) findRows(ctx context.Context, method, query string, ar
 		var tempTags []*string
 		var tempMetadata []byte
 		var tempReviewedAt *types.TemporalDateTime
+		var tempSettlesAt pgtype.Timestamp
 
 		// Create temporary variables for relationship foreign keys (we don't store these directly on the struct)
 		var tempRelAccount *types.IdentityUUID
@@ -1323,6 +1378,7 @@ func (r *EntryRepository) findRows(ctx context.Context, method, query string, ar
 		var selectedMemo bool
 		var selectedExternalId bool
 		var selectedReviewedAt bool
+		var selectedSettlesAt bool
 		var selectedRelAccount bool
 		var selectedRelTransfer bool
 
@@ -1351,6 +1407,9 @@ func (r *EntryRepository) findRows(ctx context.Context, method, query string, ar
 			case "reviewed_at":
 				scanDest[i] = &tempReviewedAt
 				selectedReviewedAt = true
+			case "settles_at":
+				scanDest[i] = &tempSettlesAt
+				selectedSettlesAt = true
 			case "created_at":
 				scanDest[i] = &result.CreatedAt
 			case "created_by":
@@ -1401,6 +1460,11 @@ func (r *EntryRepository) findRows(ctx context.Context, method, query string, ar
 		if selectedReviewedAt && tempReviewedAt != nil {
 			// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 			result.ReviewedAt = tempReviewedAt
+		}
+		if selectedSettlesAt && tempSettlesAt.Valid {
+			// Nullable date scalar: typegen emits *Scalar, take address of converted value
+			tmpSettlesAt := types.TemporalLocalDateTime(tempSettlesAt.Time.Format("2006-01-02T15:04:05.999999999"))
+			result.SettlesAt = &tmpSettlesAt
 		}
 		if jsonFieldDecodeErr != nil {
 			return nil, jsonFieldDecodeErr
@@ -1538,7 +1602,7 @@ func (r *EntryRepository) FindPage(ctx context.Context, filter *EntryFilter, opt
 	}
 	column, ok := entrySortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Entry sorts by id, amountCents, bookedOn, memo, externalId, reviewedAt, createdAt and updatedAt, not %q", string(field))
+		return nil, fmt.Errorf("orm: Entry sorts by id, amountCents, bookedOn, memo, externalId, reviewedAt, settlesAt, createdAt and updatedAt, not %q", string(field))
 	}
 	byKey := field == EntrySortById
 
@@ -1733,6 +1797,16 @@ func (r *EntryRepository) CreateOne(ctx context.Context, input *types.Entry) (*t
 			values = append(values, time.Time(*input.ReviewedAt))
 		}
 	}
+	// Optional field: settlesAt - only add if set
+	{
+		if input.SettlesAt != nil {
+			fields = append(fields, `settles_at`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+			values = append(values, *input.SettlesAt)
+		}
+	}
 	// Required field: createdBy
 	fields = append(fields, `created_by`)
 	paramNum++
@@ -1787,7 +1861,7 @@ func (r *EntryRepository) CreateOne(ctx context.Context, input *types.Entry) (*t
 	}
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	returningClause := `"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`
+	returningClause := `"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`
 	query := fmt.Sprintf(
 		`INSERT INTO entry (%s) VALUES (%s) RETURNING %s`,
 		strings.Join(fields, ", "),
@@ -1813,6 +1887,7 @@ func (r *EntryRepository) CreateOne(ctx context.Context, input *types.Entry) (*t
 	var tempTags []*string
 	var tempMetadata []byte
 	var tempReviewedAt *types.TemporalDateTime
+	var tempSettlesAt pgtype.Timestamp
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelAccount *types.IdentityUUID
@@ -1842,6 +1917,8 @@ func (r *EntryRepository) CreateOne(ctx context.Context, input *types.Entry) (*t
 		&tempMetadata,
 
 		&tempReviewedAt,
+
+		&tempSettlesAt,
 
 		&result.CreatedAt,
 
@@ -1881,6 +1958,11 @@ func (r *EntryRepository) CreateOne(ctx context.Context, input *types.Entry) (*t
 		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 		result.ReviewedAt = tempReviewedAt
 	}
+	if tempSettlesAt.Valid {
+		// Nullable date scalar: typegen emits *Scalar, take address of converted value
+		tmpSettlesAt := types.TemporalLocalDateTime(tempSettlesAt.Time.Format("2006-01-02T15:04:05.999999999"))
+		result.SettlesAt = &tmpSettlesAt
+	}
 
 	// Set relationship IDs from scanned FK values
 	if tempRelAccount != nil {
@@ -1905,8 +1987,8 @@ var entryUniqueKeys = map[EntryUniqueKey]struct {
 	conflict, keep, rows, held string
 	columns                    []string
 }{
-	EntryUniqueById:                {`(id)`, `id = entry.id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (id) IN (%s)`, ``, []string{`id`}},
-	EntryUniqueByAccountExternalId: {`(account_id, external_id) WHERE deleted_at IS NULL`, `account_id = entry.account_id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)`, ``, []string{`account_id`, `external_id`}},
+	EntryUniqueById:                {`(id)`, `id = entry.id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (id) IN (%s)`, ``, []string{`id`}},
+	EntryUniqueByAccountExternalId: {`(account_id, external_id) WHERE deleted_at IS NULL`, `account_id = entry.account_id`, `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)`, ``, []string{`account_id`, `external_id`}},
 }
 
 // entryKeyOf is the text of row's values of the unique key on, as
@@ -1942,6 +2024,7 @@ func (r *EntryRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Entr
 	var tempTags []*string
 	var tempMetadata []byte
 	var tempReviewedAt *types.TemporalDateTime
+	var tempSettlesAt pgtype.Timestamp
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelAccount *types.IdentityUUID
@@ -1971,6 +2054,8 @@ func (r *EntryRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Entr
 		&tempMetadata,
 
 		&tempReviewedAt,
+
+		&tempSettlesAt,
 
 		&result.CreatedAt,
 
@@ -2013,6 +2098,11 @@ func (r *EntryRepository) scanReturned(row pgx.Row, inserted *bool) (*types.Entr
 	if tempReviewedAt != nil {
 		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 		result.ReviewedAt = tempReviewedAt
+	}
+	if tempSettlesAt.Valid {
+		// Nullable date scalar: typegen emits *Scalar, take address of converted value
+		tmpSettlesAt := types.TemporalLocalDateTime(tempSettlesAt.Time.Format("2006-01-02T15:04:05.999999999"))
+		result.SettlesAt = &tmpSettlesAt
 	}
 
 	// Set relationship IDs from scanned FK values
@@ -2179,6 +2269,16 @@ func (r *EntryRepository) upsertRow(ctx context.Context, input *types.Entry, on 
 			values = append(values, time.Time(*input.ReviewedAt))
 		}
 	}
+	// Optional field: settlesAt - only add if set
+	{
+		if input.SettlesAt != nil {
+			fields = append(fields, `settles_at`)
+			paramNum++
+			placeholders = append(placeholders, fmt.Sprintf("$%d", paramNum))
+			// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+			values = append(values, *input.SettlesAt)
+		}
+	}
 	// Required field: createdBy
 	fields = append(fields, `created_by`)
 	paramNum++
@@ -2323,6 +2423,20 @@ func (r *EntryRepository) upsertRow(ctx context.Context, input *types.Entry, on 
 		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
 		values = append(values, time.Time(*update.ReviewedAt))
 	}
+	if update.SettlesAt != nil && update.SettlesAtSetNull {
+		return nil, fmt.Errorf("settles_at cannot be updated with both value and null assignment")
+	}
+	if update.SettlesAtSetNull {
+		setClauses = append(setClauses, `settles_at = NULL`)
+		compareCurrent = append(compareCurrent, `entry.settles_at`)
+		compareNext = append(compareNext, `NULL`)
+	} else if update.SettlesAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`settles_at = $%d`, paramNum))
+		compareCurrent = append(compareCurrent, `entry.settles_at`)
+		compareNext = append(compareNext, fmt.Sprintf(`$%d`, paramNum))
+		values = append(values, *update.SettlesAt)
+	}
 	// Handle relationship foreign key: account
 	if update.AccountID != nil {
 		paramNum++
@@ -2371,7 +2485,7 @@ func (r *EntryRepository) upsertRow(ctx context.Context, input *types.Entry, on 
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", (xmax = 0) AS _inserted`,
+		`INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", (xmax = 0) AS _inserted`,
 		strings.Join(fields, ", "),
 		"("+strings.Join(placeholders, ", ")+")",
 		key.conflict,
@@ -2465,7 +2579,7 @@ func (r *EntryRepository) UpsertMany(ctx context.Context, inputs []*types.Entry,
 	if update.DeletedBy {
 		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not deletedBy")
 	}
-	batch, err := upsertBatch("Entry", opts.Batch, 4368)
+	batch, err := upsertBatch("Entry", opts.Batch, 4095)
 	if err != nil {
 		return nil, err
 	}
@@ -2540,6 +2654,11 @@ func (r *EntryRepository) upsertBatches(ctx context.Context, inputs []*types.Ent
 		setClauses = append(setClauses, `reviewed_at = EXCLUDED.reviewed_at`)
 		compareCurrent = append(compareCurrent, `entry.reviewed_at`)
 		compareNext = append(compareNext, `EXCLUDED.reviewed_at`)
+	}
+	if update.SettlesAt {
+		setClauses = append(setClauses, `settles_at = EXCLUDED.settles_at`)
+		compareCurrent = append(compareCurrent, `entry.settles_at`)
+		compareNext = append(compareNext, `EXCLUDED.settles_at`)
 	}
 	if update.Account {
 		setClauses = append(setClauses, `account_id = EXCLUDED.account_id`)
@@ -2639,6 +2758,16 @@ func (r *EntryRepository) upsertBatches(ctx context.Context, inputs []*types.Ent
 				}
 				row = append(row, cell)
 			}
+			// Optional field: settlesAt
+			{
+				cell := batchInsertCell{column: `settles_at`}
+				if input.SettlesAt != nil {
+					// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+					cell.value = *input.SettlesAt
+					cell.set = true
+				}
+				row = append(row, cell)
+			}
 			// Required field: createdBy
 			{
 				cell := batchInsertCell{column: `created_by`, set: true}
@@ -2708,7 +2837,7 @@ func (r *EntryRepository) upsertBatches(ctx context.Context, inputs []*types.Ent
 			}
 		}
 		query := fmt.Sprintf(
-			`INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", (xmax = 0) AS _inserted`,
+			`INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by", (xmax = 0) AS _inserted`,
 			strings.Join(fieldNames, ", "),
 			strings.Join(valuePlaceholders, ", "),
 			key.conflict,
@@ -2888,7 +3017,7 @@ func (r *EntryRepository) heldOfKey(ctx context.Context, on EntryUniqueKey, keyV
 }
 
 // CreateMany inserts multiple Entry records and returns them in the
-// inputs' order: a statement of at most 4368 rows, in a transaction of its
+// inputs' order: a statement of at most 4095 rows, in a transaction of its
 // own when it takes more than one and none is open.
 func (r *EntryRepository) CreateMany(ctx context.Context, inputs []*types.Entry) ([]*types.Entry, error) {
 	if len(inputs) == 0 {
@@ -2991,6 +3120,16 @@ func (r *EntryRepository) CreateMany(ctx context.Context, inputs []*types.Entry)
 			}
 			row = append(row, cell)
 		}
+		// Optional field: settlesAt
+		{
+			cell := batchInsertCell{column: `settles_at`}
+			if input.SettlesAt != nil {
+				// Dereference pointer for database value (nullable complex types, enums, and scalars are pointers)
+				cell.value = *input.SettlesAt
+				cell.set = true
+			}
+			row = append(row, cell)
+		}
 		// Required field: createdBy
 		{
 			cell := batchInsertCell{column: `created_by`, set: true}
@@ -3047,7 +3186,7 @@ func (r *EntryRepository) CreateMany(ctx context.Context, inputs []*types.Entry)
 	}
 	// More than one statement runs in a transaction of its own when none is
 	// open.
-	if len(batch) <= 4368 {
+	if len(batch) <= 4095 {
 		return r.createBatches(ctx, batch)
 	}
 	return inTransaction(ctx, r.database(), r.tx, func(tx pgx.Tx) ([]*types.Entry, error) {
@@ -3056,12 +3195,12 @@ func (r *EntryRepository) CreateMany(ctx context.Context, inputs []*types.Entry)
 }
 
 // createBatches is CreateMany of batch on the repository's connection: a
-// statement of at most 4368 rows at a time, as many as Postgres binds the
+// statement of at most 4095 rows at a time, as many as Postgres binds the
 // parameters of, each returning its rows in the order of its VALUES.
 func (r *EntryRepository) createBatches(ctx context.Context, batch [][]batchInsertCell) ([]*types.Entry, error) {
 	results := make([]*types.Entry, 0, len(batch))
-	for start := 0; start < len(batch); start += 4368 {
-		created, err := r.createBatch(ctx, batch[start:min(start+4368, len(batch))])
+	for start := 0; start < len(batch); start += 4095 {
+		created, err := r.createBatch(ctx, batch[start:min(start+4095, len(batch))])
 		if err != nil {
 			return nil, err
 		}
@@ -3077,7 +3216,7 @@ func (r *EntryRepository) createBatch(ctx context.Context, batch [][]batchInsert
 		`INSERT INTO entry (%s) VALUES %s RETURNING %s`,
 		strings.Join(fieldNames, ", "),
 		strings.Join(valuePlaceholders, ", "),
-		`"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
+		`"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
 	)
 	var rows pgx.Rows
 	var err error
@@ -3174,6 +3313,16 @@ func (r *EntryRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, 
 		setClauses = append(setClauses, fmt.Sprintf(`reviewed_at = $%d`, paramNum))
 		values = append(values, time.Time(*update.ReviewedAt))
 	}
+	if update.SettlesAt != nil && update.SettlesAtSetNull {
+		return nil, fmt.Errorf("settles_at cannot be updated with both value and null assignment")
+	}
+	if update.SettlesAtSetNull {
+		setClauses = append(setClauses, `settles_at = NULL`)
+	} else if update.SettlesAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`settles_at = $%d`, paramNum))
+		values = append(values, *update.SettlesAt)
+	}
 	// Handle relationship foreign key: account
 	if update.AccountID != nil {
 		paramNum++
@@ -3221,7 +3370,7 @@ func (r *EntryRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, 
 	query += " AND deleted_at IS NULL"
 
 	// Build RETURNING clause with explicit column order matching scan order (using OrderedMembers for schema order)
-	query += ` RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`
+	query += ` RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`
 
 	// Execute query
 	var row pgx.Row
@@ -3241,6 +3390,7 @@ func (r *EntryRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, 
 	var tempTags []*string
 	var tempMetadata []byte
 	var tempReviewedAt *types.TemporalDateTime
+	var tempSettlesAt pgtype.Timestamp
 
 	// Create temporary variables for relationship foreign keys (we don't store these in the struct)
 	var tempRelAccount *types.IdentityUUID
@@ -3270,6 +3420,8 @@ func (r *EntryRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, 
 		&tempMetadata,
 
 		&tempReviewedAt,
+
+		&tempSettlesAt,
 
 		&result.CreatedAt,
 
@@ -3311,6 +3463,11 @@ func (r *EntryRepository) UpdateOne(ctx context.Context, id types.IdentityUUID, 
 	if tempReviewedAt != nil {
 		// Nullable enum/scalar: typegen emits *Enum or *Scalar, assign pointer directly
 		result.ReviewedAt = tempReviewedAt
+	}
+	if tempSettlesAt.Valid {
+		// Nullable date scalar: typegen emits *Scalar, take address of converted value
+		tmpSettlesAt := types.TemporalLocalDateTime(tempSettlesAt.Time.Format("2006-01-02T15:04:05.999999999"))
+		result.SettlesAt = &tmpSettlesAt
 	}
 
 	// Set relationship IDs from scanned FK values
@@ -3394,6 +3551,16 @@ func (r *EntryRepository) UpdateMany(ctx context.Context, filter *EntryFilter, u
 		paramNum++
 		setClauses = append(setClauses, fmt.Sprintf(`reviewed_at = $%d`, paramNum))
 		values = append(values, time.Time(*update.ReviewedAt))
+	}
+	if update.SettlesAt != nil && update.SettlesAtSetNull {
+		return 0, fmt.Errorf("settles_at cannot be updated with both value and null assignment")
+	}
+	if update.SettlesAtSetNull {
+		setClauses = append(setClauses, `settles_at = NULL`)
+	} else if update.SettlesAt != nil {
+		paramNum++
+		setClauses = append(setClauses, fmt.Sprintf(`settles_at = $%d`, paramNum))
+		values = append(values, *update.SettlesAt)
 	}
 	// Handle relationship foreign key: account
 	if update.AccountID != nil {

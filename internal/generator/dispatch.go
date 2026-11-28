@@ -1890,10 +1890,14 @@ func (r run) rustQueueTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 // @audience table or grants (D156, D181): each operation checks the
 // caller's reach of its row through the repositories before the core runs.
 // So does an API with a @rowFeatureOperations set (#723): its operations
-// run through the repositories' references and attachments.
+// run through the repositories' references and attachments; and one with
+// an @accessGrantsOperations set (#735), whose route reads the grants and
+// a target's owner through them.
 func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error {
 	graphs := slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsGraphOperations() })
-	rows := slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsRowFeatureOperations() })
+	rows := slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool {
+		return set != nil && (set.IsRowFeatureOperations() || set.IsAccessGrantsOperations())
+	})
 	files := r.rustFiles(db)
 	held := false
 	if slices.ContainsFunc(r.Schema.OperationSets, func(set *ir.OperationSet) bool { return set != nil && set.IsBehaviorOperations() }) {
@@ -1916,7 +1920,7 @@ func (r run) rustTableTypes(db, apiDir string, deps *rustrestgen.DepsInfo) error
 				return fmt.Errorf("generator: the Rust server of %s runs the file processor's pass over the attachments of %s, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (#614)", r.Config.Name, db, db, LangRust, db)
 			}
 			if !outputs.TypesEnabled(LangRust) && rows && !r.Schema.HasTableOperations() && !graphs {
-				return fmt.Errorf("generator: the Rust server of %s serves the references and files of tables of %s through its repositories, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (#723)", r.Config.Name, db, db, LangRust, db)
+				return fmt.Errorf("generator: the Rust server of %s serves the references and files, or the active grants, of tables of %s through its repositories, which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (#723, #735)", r.Config.Name, db, db, LangRust, db)
 			}
 			if !outputs.TypesEnabled(LangRust) && !r.Schema.HasTableOperations() && !graphs {
 				return fmt.Errorf("generator: the Rust server of %s checks the caller's reach of the rows its behavior operations run on through the repositories of %s, whose rows keep to a caller and which its Rust types hold, and %s generates none; enable outputs.types.%s in %s's config (D156, D181)", r.Config.Name, db, db, LangRust, db)

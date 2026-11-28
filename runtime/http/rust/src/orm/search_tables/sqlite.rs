@@ -639,6 +639,50 @@ async fn answer(routes: Arc<SearchRoutes>, request: Request) -> Result<Response,
     Ok((StatusCode::OK, Json(json!({ "data": result }))).into_response())
 }
 
+/// Search as a tool of a generated router's MCP endpoint on a SQLite file
+/// (#617, #725), the Postgres `SearchTool`'s: [`search_mcp_tool`], each
+/// call run as the endpoint's caller over the file's repositories on a
+/// reading connection ([`call_search_tool`]).
+///
+/// [`search_mcp_tool`]: super::search_mcp_tool
+#[derive(Clone)]
+pub struct SearchTool {
+    /// The file and the database's definition.
+    pub tables: Tables,
+    /// The permissions each table's rows need; no embeddings on SQLite.
+    pub options: SearchOptions,
+}
+
+#[async_trait::async_trait]
+impl crate::mcp::EndpointTool for SearchTool {
+    fn tool(&self) -> crate::mcp::Tool {
+        serde_json::from_value(super::search_mcp_tool()).expect("the search tool is a tool")
+    }
+
+    async fn call(
+        &self,
+        principal: &Principal,
+        arguments: &Map<String, Value>,
+    ) -> Result<crate::mcp::CallOutcome, crate::mcp::ToolError> {
+        let (tables, options) = (self.tables.clone(), self.options.clone());
+        let (principal, arguments) = (principal.clone(), arguments.clone());
+        let database = Arc::clone(tables.database());
+        let searched = database
+            .read_async(move |connection| -> Result<SearchResult, Error> {
+                let repositories = Repositories::new(connection, tables.definition()?)?;
+                call_search_tool(&repositories, Some(&principal), &arguments, &options)
+            })
+            .await;
+        match searched {
+            Ok(result) => Ok(crate::mcp::CallOutcome::Result(json!(result))),
+            Err(Error::Invalid(message)) => Ok(crate::mcp::CallOutcome::Problem(
+                crate::response::problem_body(&ApiError::bad_request(message), None),
+            )),
+            Err(err) => Err(crate::mcp::ToolError::Failed(err.to_string().into())),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

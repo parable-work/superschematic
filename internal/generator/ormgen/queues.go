@@ -214,7 +214,7 @@ func (f Field) QueueScanTemp() string {
 	case f.IsInterval:
 		return "time.Duration"
 	case !f.IsArray && f.IsDateLike:
-		return "pgtype.Date"
+		return f.CalendarScanType()
 	case !f.IsRequired && !f.IsArray && f.GoType == "string" && !f.IsNullableBool:
 		return "sql.NullString"
 	case !f.IsRequired && !f.IsArray:
@@ -236,7 +236,9 @@ func (o *ORMOutput) QueuesImportReflect() bool {
 }
 
 func (o *ORMOutput) QueuesImportPgtype() bool {
-	return queuesNeed(o.Queues, func(f Field) bool { return f.QueueScanTemp() == "pgtype.Date" || f.IsGeoPoint })
+	return queuesNeed(o.Queues, func(f Field) bool {
+		return (!f.IsArray && f.IsDateLike && f.QueueScanTemp() == f.CalendarScanType()) || f.IsGeoPoint
+	})
 }
 
 // HasInterval reports whether a field of the queue is a duration, which

@@ -145,19 +145,20 @@ func typeScriptQueries(schema *ir.Schema, opts Options, types map[string]*TypeIn
 func queryColumn(f sqlutil.QueryField, column string) (ORMColumn, error) {
 	cl := f.Class
 	c := ORMColumn{
-		Member:    f.Name,
-		Field:     f.Name,
-		Column:    column,
-		JSON:      cl.JSON || cl.AnyJSON,
-		List:      cl.List,
-		UUID:      cl.UUIDLike && !cl.JSON,
-		Timestamp: cl.DateTimeLike && !cl.JSON,
-		Date:      cl.DateLike && !cl.DateTimeLike && !cl.JSON,
-		Int64:     cl.IntLike && !cl.JSON,
-		Numeric:   strings.HasPrefix(strings.ToUpper(cl.SQLType), "NUMERIC") || strings.HasPrefix(strings.ToUpper(cl.SQLType), "DECIMAL"),
-		Vector:    cl.Vector,
-		Boolean:   cl.BoolLike && !cl.JSON,
-		Required:  !f.Nullable,
+		Member:        f.Name,
+		Field:         f.Name,
+		Column:        column,
+		JSON:          cl.JSON || cl.AnyJSON,
+		List:          cl.List,
+		UUID:          cl.UUIDLike && !cl.JSON,
+		Timestamp:     cl.DateTimeLike && !cl.JSON,
+		Date:          cl.DateLike && !cl.DateTimeLike && !cl.JSON,
+		LocalDateTime: cl.LocalDateTimeLike && !cl.JSON,
+		Int64:         cl.IntLike && !cl.JSON,
+		Numeric:       strings.HasPrefix(strings.ToUpper(cl.SQLType), "NUMERIC") || strings.HasPrefix(strings.ToUpper(cl.SQLType), "DECIMAL"),
+		Vector:        cl.Vector,
+		Boolean:       cl.BoolLike && !cl.JSON,
+		Required:      !f.Nullable,
 	}
 	if paths := codecPaths(c); len(paths) > 1 {
 		return c, fmt.Errorf("%s would decode as %s, and the codec reads a value one way", f.Name, strings.Join(paths, " and as "))
@@ -179,6 +180,7 @@ func (c ORMColumn) QueryFlags() string {
 	flag(c.UUID, "uuid")
 	flag(c.Timestamp, "timestamp")
 	flag(c.Date, "date")
+	flag(c.LocalDateTime, "localDateTime")
 	flag(c.Int64, "int64")
 	flag(c.Numeric, "numeric")
 	flag(c.Vector, "vector")

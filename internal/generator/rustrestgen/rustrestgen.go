@@ -131,6 +131,13 @@ type EndpointInfo struct {
 	// repositories' references and attachments (src/rowfeatures.rs), and
 	// its namespace's trait has no method for it.
 	RowFeature *RowFeatureInfo
+
+	// AccessGrants is the active grants' route the endpoint is (#735), nil
+	// for every other: the router's handler lists the grants the caller may
+	// see through the repositories of the API's database
+	// (src/accessgrants.rs), and its namespace's trait has no method for
+	// it.
+	AccessGrants *AccessGrantsInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -485,15 +492,6 @@ type APIOutput struct {
 	// loader of the service's @envVars type and, for a crate with Deps,
 	// its EnvConfig (D57); lib.rs then declares it.
 	HasEnvConfig bool
-	// PostgresFeatures are the features of the databases the API reads
-	// that a Rust server wires on Postgres alone (D193, #725): a @party
-	// table, the conversations and the run requests (D157), and the agent
-	// orchestration's tables (D158), each "Type: feature". The runtime
-	// serves them on SQLite too (#618); a Deps whose database lists sqlite
-	// first is refused them until the server's wiring builds them there.
-	// Recurrence and a calendar source (D152) are served on SQLite too
-	// (#615).
-	PostgresFeatures []string
 	// ReadsAcrossTables is whether a database the API reads has a calendar
 	// source (D152) or a @searchable table (D155): the crate's dependency
 	// on its Rust types then turns on their repositories, whose definition
@@ -927,7 +925,6 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		output.IdempotencyTable = api.IdempotencyTable
 	}
 	output.TypesCrateIdent = strings.ReplaceAll(output.TypesCrate, "-", "_")
-	output.PostgresFeatures = postgresFeaturesOf(databases)
 	output.databases = map[string]*ir.Schema{}
 	for name, dep := range opts.Dependencies {
 		if dep != nil && dep.Kind == ir.SchemaKindDB {
@@ -1039,6 +1036,13 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 		// has no method for it either.
 		if info.Behavior == nil && info.Table == nil && info.Graph == nil {
 			if info.RowFeature, err = rowFeatureInfo(endpoint, info); err != nil {
+				return nil, err
+			}
+		}
+		// The active grants' handler lists them through the repositories
+		// (#735): its namespace has no method for it either.
+		if info.Behavior == nil && info.Table == nil && info.Graph == nil && info.RowFeature == nil {
+			if info.AccessGrants, err = accessGrantsInfo(endpoint, info); err != nil {
 				return nil, err
 			}
 		}
@@ -1232,6 +1236,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
 		{"graphs.tmpl", GraphsFile, output.HasGraphOperations()},
 		{"rowfeatures.tmpl", RowFeaturesFile, output.HasRowFeatureOperations()},
+		{"accessgrants.tmpl", AccessGrantsFile, output.HasAccessGrantOperations()},
 		{"files.tmpl", FilesFile, output.HasFileProcessing()},
 		{"providers.tmpl", ProvidersFile, output.Providers != nil},
 		{"wiring.tmpl", WiringFile, output.HasWiring()},

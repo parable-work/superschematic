@@ -9,6 +9,9 @@ package {{ toPackageName .SchemaName }}
 import (
 	"context"
 	"encoding/json"
+{{- if .Deps.Providers.CallerKeys }}
+	"net/http"
+{{- end }}
 
 {{- range .Deps.Providers.Modules }}
 	{{ .Alias }} "{{ .Module }}"
@@ -102,3 +105,24 @@ func bindProvider(ctx context.Context, principal access.Principal, role session.
 {{- end }}
 	return ctx
 }
+{{- if .Deps.Providers.CallerKeys }}
+
+// ExtensionKeysOf are the keys the providers cfg names call the app with
+// (#744): one per slot whose provider lists CALLER_KEY and whose
+// <SLOT>_CALLER_KEY cfg sets, with the provider's name and role.
+func ExtensionKeysOf(cfg EnvConfig) []providers.ExtensionKey {
+	return providers.ExtensionKeysOf(providers.Options{
+		Slots:       ProviderSlots,
+		Config:      ProviderConfig(cfg),
+		Definitions: ProviderDefinitions(),
+	})
+}
+
+// CallerAuthenticator is the auth step of {{ .SchemaName }}'s routes around inner
+// (#744): a request whose Bearer token is one of ExtensionKeysOf(cfg) runs
+// as that provider, with its role alone, and any other goes on to inner,
+// the grants' or the implementation's. The entrypoints wrap it outermost.
+func CallerAuthenticator(cfg EnvConfig, inner func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return providers.ExtensionAuthenticator(ExtensionKeysOf(cfg), inner)
+}
+{{- end }}

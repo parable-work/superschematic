@@ -233,3 +233,62 @@ func TestASecretSettingIsAnEnvironmentsWhenItsProviderReadsIt(t *testing.T) {
 		})
 	}
 }
+
+// TestAProviderThatCallsTheAppNeedsItsCallerKey (#744): a provider whose
+// manifest lists CALLER_KEY calls the app with a key of its own, held in
+// the slot's <SLOT>_CALLER_KEY, a Secret<string>, a secret of the
+// environment as any secret setting is. An environment whose slot names
+// such a provider is refused when the API declares no such field or
+// declares it no secret; one whose provider of the slot lists no
+// CALLER_KEY asks for none.
+func TestAProviderThatCallsTheAppNeedsItsCallerKey(t *testing.T) {
+	build := func(env map[string]ir.EnvValue, edit func(*stack.Service)) (*ir.Stack, []stack.Service) {
+		s, services := providerShop(false, map[string]map[string]ir.EnvValue{"Staging": env})
+		api := service(services, "shop-api")
+		// relay-b calls the app, relaying its replies with its key.
+		for _, p := range api.Providers {
+			if p.Name == "relay-b" {
+				p.Config = append(p.Config, ir.ProviderConfigKey{Key: ir.ProviderCallerKey, Secret: true})
+				p.Role = []string{"messages.relay"}
+			}
+		}
+		api.Config.Fields = append(api.Config.Fields, stack.ConfigField{Name: "SMS_CALLER_KEY", Secret: true})
+		if edit != nil {
+			edit(api)
+		}
+		return s, services
+	}
+	relayA := map[string]ir.EnvValue{"SMS": literal("relay-a"), "SMS_URL": literal("u")}
+	relayB := map[string]ir.EnvValue{"SMS": literal("relay-b"), "SMS_URL": literal("u"), "SMS_ACCOUNT": literal("AC1")}
+	s, services := build(relayB, nil)
+	if got := secretsOf(mustResolve(t, assemble(t), s, services, "Staging"), "SMS_"); got != "SMS_CALLER_KEY,SMS_TOKEN" {
+		t.Errorf("Staging's secrets of slot SMS = [%s], want its caller key and its token", got)
+	}
+	s, services = build(relayA, nil)
+	if got := secretsOf(mustResolve(t, assemble(t), s, services, "Staging"), "SMS_"); got != "SMS_TOKEN" {
+		t.Errorf("a slot whose provider calls no app asks for [%s], want its token alone", got)
+	}
+
+	for name, tc := range map[string]struct {
+		edit func(*stack.Service)
+		want string
+	}{
+		"no field": {
+			edit: func(api *stack.Service) { dropField(api, "SMS_CALLER_KEY") },
+			want: "names provider relay-b, which reads setting CALLER_KEY (the key it calls the app with, #744) from config field SMS_CALLER_KEY, and shop-api declares no such field; declare SMS_CALLER_KEY?: Secret<string>",
+		},
+		"a field that is no secret": {
+			edit: func(api *stack.Service) {
+				dropField(api, "SMS_CALLER_KEY")
+				api.Config.Fields = append(api.Config.Fields, stack.ConfigField{Name: "SMS_CALLER_KEY"})
+			},
+			want: "names provider relay-b, whose setting CALLER_KEY (the key it calls the app with, #744) is a secret, and config field SMS_CALLER_KEY of shop-api is no secret",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, services := build(relayB, tc.edit)
+			_, errs := resolve(t, assemble(t), s, services, "Staging")
+			mustFail(t, errs, stack.CodeProvider, tc.want)
+		})
+	}
+}

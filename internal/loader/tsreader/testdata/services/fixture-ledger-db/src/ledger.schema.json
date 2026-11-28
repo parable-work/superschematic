@@ -7,6 +7,7 @@
     "Identity.Name": { "name": "Identity.Name", "languagePrimitive": "string" },
     "Temporal.DateTime": { "name": "Temporal.DateTime", "languagePrimitive": "string" },
     "Temporal.Date": { "name": "Temporal.Date", "languagePrimitive": "string" },
+    "Temporal.LocalDateTime": { "name": "Temporal.LocalDateTime", "languagePrimitive": "string" },
     "Generic.Int64": { "name": "Generic.Int64", "languagePrimitive": "number" },
     "Generic.JSON": { "name": "Generic.JSON", "languagePrimitive": "string" }
   },
@@ -60,6 +61,7 @@
         { "name": "tags", "typeRef": { "name": "string", "isArray": true }, "required": true },
         { "name": "metadata", "typeRef": { "name": "Generic.JSON" } },
         { "name": "reviewedAt", "typeRef": { "name": "Temporal.DateTime" } },
+        { "name": "settlesAt", "typeRef": { "name": "Temporal.LocalDateTime" } },
         { "name": "createdAt", "typeRef": { "name": "Temporal.DateTime" }, "required": true },
         { "name": "createdBy", "typeRef": { "name": "Identity.UUID" }, "required": true },
         { "name": "updatedAt", "typeRef": { "name": "Temporal.DateTime" }, "required": true },

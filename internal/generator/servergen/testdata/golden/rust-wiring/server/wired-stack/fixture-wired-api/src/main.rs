@@ -141,6 +141,7 @@ async fn run() -> Result<(), Failure> {
         inbound: fixture_wired_api_wired.inbound.clone(),
         span: logging::api_span("fixture-wired-api"),
     };
+    let fixture_wired_api_caller_providers = Arc::clone(&fixture_wired_api_deps.providers);
     let fixture_wired_api_handlers = fixture_wired_api_impl::create(fixture_wired_api_deps)
         .await
         .map_err(|err| format!("implementation of fixture-wired-api: {err}"))?;
@@ -149,6 +150,16 @@ async fn run() -> Result<(), Failure> {
     let fixture_wired_api_handlers = fixture_wired_api_wired
         .handlers(fixture_wired_api_handlers)
         .map_err(|err| format!("authenticator of fixture-wired-api: {err}"))?;
+    // A provider that calls the app with its key, its slot's CALLER_KEY,
+    // runs as the provider with its role alone, before any other
+    // authenticator (#744).
+    let fixture_wired_api_handlers = fixture_wired_api_api::Handlers {
+        authenticator: fixture_wired_api_api::providers::caller_authenticator(
+            &fixture_wired_api_caller_providers,
+            fixture_wired_api_handlers.authenticator,
+        ),
+        ..fixture_wired_api_handlers
+    };
     let fixture_wired_api_implementations =
         fixture_wired_api_api::Implementations::new(fixture_wired_api_handlers);
     // The routes of its database's runtime parts (#620, #622, #617), beside

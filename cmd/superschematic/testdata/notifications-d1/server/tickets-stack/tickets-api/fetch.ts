@@ -110,7 +110,9 @@ async function build(): Promise<Handle> {
   const ticketsApiRuntimeOptions = await construct('tickets-api', 'runtime options', () => ticketsApiApi.runtimeOptionsOf(ticketsApiImpl)(ticketsApiDepsBase));
   const ticketsApiDeps: ticketsApiApi.Deps = await construct('tickets-api', 'runtime', () => ticketsApiApi.withRuntime(ticketsApiDepsBase, ticketsApiRuntimeOptions));
   const ticketsApiImplementations = await construct('tickets-api', 'implementation', () => ticketsApiImpl.create(ticketsApiDeps));
-  const ticketsApiAuthenticate = await construct('tickets-api', 'authenticator', () => ticketsApiImpl.authenticate(ticketsApiDeps));
+  // A provider that calls the app with its key, its slot's CALLER_KEY,
+  // runs as the provider with its role alone, before any other (#744).
+  const ticketsApiAuthenticate = await construct('tickets-api', 'authenticator', async () => ticketsApiApi.callerAuthenticator(ticketsApiConfig, await ticketsApiImpl.authenticate(ticketsApiDeps)));
   // The routes of its runtime pieces beside the router's (runtime.ts),
   // which answer before it: the agent routes a run's sandbox instance
   // calls, and the approvals' approve and deny (D158); the relays'

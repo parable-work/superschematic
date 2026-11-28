@@ -8,6 +8,7 @@ import type {
   IdentityUUID,
   TemporalDate,
   TemporalDateTime,
+  TemporalLocalDateTime,
 } from './scalars';
 import type {
   EntryKind,
@@ -43,6 +44,7 @@ export interface Entry {
   tags: string[];
   metadata?: GenericJSON | null;
   reviewedAt?: TemporalDateTime | null;
+  settlesAt?: TemporalLocalDateTime | null;
   createdAt: TemporalDateTime;
   createdBy: IdentityUUID;
   updatedAt: TemporalDateTime;

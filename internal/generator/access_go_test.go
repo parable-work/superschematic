@@ -31,6 +31,7 @@ var goAccessCases = []string{
 	"an expired or revoked grant is refused on the very next call",
 	"a reveal opens the value for a holder of its permission and writes an access-log row",
 	"a calendar feed shows only the rows its token's principal reads, busy or in full, and a rotated or revoked one is refused",
+	"the active grants list for an administrator, the target owner and the holder, and are refused to anyone else",
 }
 
 // TestGoAccessEndToEnd builds fixture-access-go-db and
@@ -843,6 +844,105 @@ func TestAccess(t *testing.T) {
 		}
 		if status, _, _ := send(http.MethodGet, "/api/calendar/feed/grant_unknown.ics", ""); status != http.StatusUnauthorized {
 			t.Errorf("an unknown feed: %d", status)
+		}
+	})
+
+	t.Run("the active grants list for an administrator, the target owner and the holder, and are refused to anyone else", func(t *testing.T) {
+		accessAdmin := adminID + ":access.admin"
+		folder, err := db.GetFolderRepository().CreateOne(system, &dbtypes.Folder{Name: "Shared out", Owner: id(t, ownerID)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		holderA, holderB := uuidOf(0xe1), uuidOf(0xe2)
+		grant := func(holder, targetType, targetID string, ends *time.Time) (string, string) {
+			t.Helper()
+			row, token, err := orm.IssueGrant(system, db, access.IssueGrantInput{Holder: holder, HolderKind: "party", Role: "tenant", TargetType: targetType, TargetID: targetID, EndsAt: ends})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return row.Id.String(), token
+		}
+		onFolderA, tokenA := grant(holderA, "Folder", folder.Id.String(), nil)
+		onFolderB, _ := grant(holderB, "Folder", folder.Id.String(), nil)
+		onContractA, _ := grant(holderA, "Contract", contractA.Id.String(), nil)
+		// Ended ones, which no lister sees: revoked, and past its date.
+		revoked, _ := grant(holderA, "Folder", folder.Id.String(), nil)
+		if err := orm.RevokeGrant(ctx, db, revoked, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		past := time.Now().Add(-time.Minute)
+		expired, _ := grant(holderA, "Folder", folder.Id.String(), &past)
+		sorted := func(ids ...string) []string {
+			sort.Strings(ids)
+			return ids
+		}
+		list := func(caller, query string) ([]string, []map[string]any) {
+			t.Helper()
+			r := as(caller).do(http.MethodGet, "/grants/active"+query, nil)
+			items, isList := r.body["data"].([]any)
+			if r.status != http.StatusOK || !isList {
+				t.Fatalf("GET /grants/active%s as %q: %d %s, want a 200 list", query, caller, r.status, r.raw)
+			}
+			var ids []string
+			var grants []map[string]any
+			for _, item := range items {
+				grant := item.(map[string]any)
+				grants = append(grants, grant)
+				ids = append(ids, fmt.Sprint(grant["id"]))
+			}
+			sort.Strings(ids)
+			if ids == nil {
+				ids = []string{}
+			}
+			return ids, grants
+		}
+		onFolder := "?targetType=Folder&targetId=" + folder.Id.String()
+		// The administrator: every active grant the query keeps.
+		got, _ := list(accessAdmin, onFolder)
+		equal(t, "the administrator's grants on the folder", got, sorted(onFolderA, onFolderB))
+		got, _ = list(accessAdmin, "?holder="+holderA)
+		equal(t, "the administrator's grants of a holder", got, sorted(onFolderA, onContractA))
+		every, _ := list(accessAdmin, "")
+		for _, want := range []string{onFolderA, onFolderB, onContractA} {
+			if !slices.Contains(every, want) {
+				t.Errorf("every active grant %q holds no %s", every, want)
+			}
+		}
+		for _, ended := range []string{revoked, expired} {
+			if slices.Contains(every, ended) {
+				t.Errorf("every active grant %q holds the ended %s", every, ended)
+			}
+		}
+		// The target's owner: the grants on the row it owns, and no other.
+		got, _ = list(owner, onFolder)
+		equal(t, "the owner's grants on its folder", got, sorted(onFolderA, onFolderB))
+		got, _ = list(owner, onFolder+"&holder="+holderB)
+		equal(t, "the owner's grants on its folder of one holder", got, sorted(onFolderB))
+		is(t, "the owner on a contract it does not own", as(owner).status(http.MethodGet, "/grants/active?targetType=Contract&targetId="+contractA.Id.String(), nil), http.StatusForbidden)
+		is(t, "the owner with no query", as(owner).status(http.MethodGet, "/grants/active", nil), http.StatusForbidden)
+		// The holder, by its grant's token: its own grants, and no other's.
+		got, _ = list(tokenA, "?holder="+holderA)
+		equal(t, "the holder's own grants", got, sorted(onFolderA, onContractA))
+		got, _ = list(tokenA, "?holder="+holderA+"&targetType=Contract")
+		equal(t, "the holder's own grants on contracts", got, sorted(onContractA))
+		is(t, "the holder asking for another's", as(tokenA).status(http.MethodGet, "/grants/active?holder="+holderB, nil), http.StatusForbidden)
+		is(t, "the holder asking for the folder's", as(tokenA).status(http.MethodGet, "/grants/active"+onFolder, nil), http.StatusForbidden)
+		// Anyone else is refused, and a request with no caller is 401.
+		is(t, "another user on the folder", as(other).status(http.MethodGet, "/grants/active"+onFolder, nil), http.StatusForbidden)
+		is(t, "another user on a holder", as(other).status(http.MethodGet, "/grants/active?holder="+holderA, nil), http.StatusForbidden)
+		is(t, "no caller", as("").status(http.MethodGet, "/grants/active", nil), http.StatusUnauthorized)
+		// A grant is listed without its token's hash or its revocation.
+		_, shown := list(accessAdmin, "?holder="+holderB)
+		if len(shown) != 1 || shown[0]["holder"] != id(t, holderB).String() || shown[0]["holderKind"] != "party" || shown[0]["role"] != "tenant" || shown[0]["targetType"] != "Folder" || shown[0]["targetId"] != folder.Id.String() {
+			t.Errorf("the grant shown: %v", shown)
+		}
+		for _, grant := range shown {
+			if _, hash := grant["tokenHash"]; hash {
+				t.Errorf("a grant shows its token's hash: %v", grant)
+			}
+			if _, revocation := grant["revokedAt"]; revocation {
+				t.Errorf("a grant shows its revocation: %v", grant)
+			}
 		}
 	})
 }

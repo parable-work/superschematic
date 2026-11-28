@@ -778,6 +778,9 @@ func (w *walker) walkClass(node *astNode) {
 	if routes == nil {
 		routes = triageOperationsDecorator(decorators)
 	}
+	if routes == nil {
+		routes = accessGrantsOperationsDecorator(decorators)
+	}
 	if classHasMethods(node) || routes != nil {
 		if !w.kindSpec().AllowsOperationSets {
 			if routes != nil {
@@ -1812,6 +1815,13 @@ func (w *walker) walkOperationSet(node *astNode, name string, decorators []decor
 	if set.IsTriageOperations() {
 		w.checkTriageOperationsClass(node, set, bases)
 		// No operations, as the data forms write it; the loader adds them.
+		set.Operations = []*ir.FieldDef{}
+		w.schema.OperationSets = append(w.schema.OperationSets, set)
+		return
+	}
+	if set.IsAccessGrantsOperations() {
+		w.checkAccessGrantsOperationsClass(node, set, bases)
+		// No operations, as the data forms write it; the loader adds it.
 		set.Operations = []*ir.FieldDef{}
 		w.schema.OperationSets = append(w.schema.OperationSets, set)
 		return

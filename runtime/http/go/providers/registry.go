@@ -205,6 +205,41 @@ func From(options Options) (*Providers, error) {
 	return &Providers{slots: slots, entries: entries, logger: logger, bind: bind}, nil
 }
 
+// ExtensionKeysOf are the keys the providers options.Config configures
+// call the app with (#744): one per slot whose provider lists CallerKey
+// and whose <SLOT>_CALLER_KEY the config sets, a secret, with the
+// provider's name and role, sorted by slot. A server wraps its routes'
+// auth step in ExtensionAuthenticator over them, outermost. It reads what
+// From reads and checks nothing itself: a server builds Deps.Providers
+// with From beside it, which refuses a config that names an unknown
+// provider or holds the key as no secret.
+func ExtensionKeysOf(options Options) []ExtensionKey {
+	byName := map[string]Definition{}
+	for _, d := range options.Definitions {
+		byName[d.Name] = d
+	}
+	var keys []ExtensionKey
+	for _, slot := range slices.Sorted(maps.Keys(options.Slots)) {
+		named := options.Config[slot]
+		if !named.set || named.secret {
+			continue
+		}
+		d, ok := byName[named.text]
+		if !ok || d.Implements != options.Slots[slot] {
+			continue
+		}
+		if _, calls := d.Config[CallerKey]; !calls {
+			continue
+		}
+		key := options.Config[ConfigField(slot, CallerKey)]
+		if !key.set || !key.secret {
+			continue
+		}
+		keys = append(keys, ExtensionKey{Key: NewSecret(key.text), Provider: d.Name, Role: slices.Clone(d.Role)})
+	}
+	return keys
+}
+
 // Configured are the slots the environment fills, of iface or, for "", of
 // every interface, sorted by slot.
 func (p *Providers) Configured(iface Interface) []ConfiguredProvider {

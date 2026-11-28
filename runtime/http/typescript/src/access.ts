@@ -204,6 +204,15 @@ async function grantTargets(db: object, type: string, ids: readonly unknown[]): 
   return new Map(rows.map(row => [idKey(row[key]), row]));
 }
 
+/**
+ * The row of type whose key is id, read as the system actor, or undefined
+ * when there is none or orm has no keyed table of type: what the active
+ * grants' route reads to tell a target's owner (#735).
+ */
+export async function grantTarget(orm: object, type: string, id: unknown): Promise<Values | undefined> {
+  return (await grantTargets(system(orm), type, [id]))?.get(idKey(id));
+}
+
 /** A repository a read of roles goes through: the UserRole table's. */
 interface RoleRepository {
   findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;

@@ -544,6 +544,9 @@ type API struct {
 	// AttachmentsOf its Deps.
 	RowFeatures bool
 	Attachments bool
+	// AccessGrants is true when the API lists the active grants, which
+	// are read through the ORM of its database (#735).
+	AccessGrants bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -580,6 +583,13 @@ type API struct {
 	// (D159, D184), which the entrypoint reads from its config with the
 	// API package's ProvidersOf.
 	Providers bool
+
+	// CallerKeys is true for a server's API whose routes take a provider's
+	// key, a provider its config lists calling the app (#744): the API
+	// package's CallerAuthenticator wraps the auth step of its routes,
+	// outermost, around the grants' or its AuthMiddleware, or is the step
+	// of an API with neither.
+	CallerKeys bool
 
 	// Wiring is the runtime the entrypoint wires over the API's database
 	// (D190, D192, D187, D180), nil for none (go_wiring.go).
@@ -940,7 +950,12 @@ func Plan(in Input) (*Server, error) {
 			apis[i].Tables = o.HasTableEndpoints()
 			apis[i].Graphs = o.HasGraphEndpoints()
 			apis[i].RowFeatures = o.HasRowFeatureEndpoints()
+			apis[i].AccessGrants = o.HasAccessGrantEndpoints()
 			apis[i].Attachments = o.RowFeatureBucket() != ""
+			// A provider that calls the app with its key runs as itself on
+			// the API's routes (#744); an API whose identity service
+			// establishes its callers takes no key yet.
+			apis[i].CallerKeys = apis[i].Providers && o.Deps.Providers.CallerKeys && !o.Auth.Identity
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)

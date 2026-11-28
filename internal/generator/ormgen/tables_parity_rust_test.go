@@ -307,6 +307,7 @@ async fn script(pool: &deadpool_postgres::Pool, create_sql: &str, out: &str) -> 
         tags: Vec::new(),
         metadata: None,
         reviewed_at: None,
+        settles_at: None,
     };
     call("createEntry");
     let e1 = entries

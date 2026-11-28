@@ -40,6 +40,12 @@ export function smsRelayA(options: SmsRelayAOptions = {}) {
       URL: { description: "The relay's base URL." },
       TOKEN: { secret: true, description: "The relay's API token, which also signs its callbacks." },
       SENDER: { optional: true, description: "The number messages are sent from; the relay's default when unset." },
+      CALLER_KEY: {
+        secret: true,
+        optional: true,
+        description:
+          "The key the relay calls the app with, to read the deliveries it sent (#744): the API resolves a request bearing it to this provider's principal, which may relay messages and nothing else. An environment that lets the relay call nothing leaves it unset.",
+      },
     },
     role: ['messages.relay'],
     create(settings, context): ChannelAdapter {

@@ -113,6 +113,16 @@
 // file of another row, is 404 not_found; a refusal of the declaration's
 // rules is the 422 of its code.
 {{- end }}
+{{- if .HasAccessGrants }}
+//
+// The operation of its @accessGrantsOperations set (#735) lists the grants
+// of {{ .Deps.Database }} active now and has no implementation method: the route runs
+// the runtime's accessGrantsOperation, with its entry of
+// accessGrantsOperations, through options.orm. A caller who holds the
+// set's permission lists every active grant the query keeps, the owner of
+// the row the query's targetType and targetId name the grants on it, and a
+// holder its own; any other request is 403 forbidden.
+{{- end }}
 {{- if .HasTriage }}
 //
 // The operations of its @triageOperations set (#746) are each an operation
@@ -348,6 +358,21 @@ export const rowFeatureOperations = {
 {{- end }}
 } as const satisfies Partial<Record<OperationName, RowFeatureOperation>>;
 {{- end }}
+{{- if .HasAccessGrants }}
+
+/**
+ * What the active grants' route runs (#735): the permission whose holder
+ * lists every active grant, and the member that holds the owner of each
+ * table's rows, whose owner lists the grants on a row.
+ */
+export const accessGrantsOperations = {
+{{- range .Endpoints }}
+{{- if .AccessGrants }}
+  {{ .Key }}: {{ .AccessGrants.Literal }},
+{{- end }}
+{{- end }}
+} as const satisfies Partial<Record<OperationName, AccessGrantsOperation>>;
+{{- end }}
 {{- if .HasTriage }}
 
 /**
@@ -419,6 +444,12 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
    * The repositories of {{ .Deps.Database }} (Deps.orm), whose references and
    * attachments run the references and files (#723), as the request's
    * caller.
+   */
+  orm: {{ .Deps.ORM }};
+{{- else if .HasAccessGrants }}
+  /**
+   * The repositories of {{ .Deps.Database }} (Deps.orm), whose @accessGrants table
+   * the active grants (#735) are read from.
    */
   orm: {{ .Deps.ORM }};
 {{- end }}
@@ -709,6 +740,20 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
     router,
     operationSpecs.{{ .Key }},
     (ctx, request) => rowFeatureOperation(options.orm, rowFeatureOperations.{{ .Key }}, ctx, request{{ if .RowFeature.TakesBucket }}, options.attachmentsBucket{{ end }}),
+    {{ $runtime }},
+    {
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
+    }
+  );
+{{- else if .AccessGrants }}
+  // The active grants (#735): the runtime's handler lists the grants the caller may see,
+  // through the repositories' @accessGrants table.
+  mountOperation(
+    router,
+    operationSpecs.{{ .Key }},
+    (ctx, request) => accessGrantsOperation(options.orm, accessGrantsOperations.{{ .Key }}, ctx, request),
     {{ $runtime }},
     {
       bodyLimitBytes: bodyLimits.{{ .Key }},
