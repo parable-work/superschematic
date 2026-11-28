@@ -97,6 +97,10 @@ pub const CODE_ATTEMPTS: i64 = 5;
 /// The channel kind of the in-app inbox, which every notice reaches.
 pub const INAPP: &str = "inapp";
 
+/// The prefix of a subject that names a role's holders: a Comments mention
+/// of role:<name> (#713), which a route's `{ payload }` recipient reaches.
+pub const ROLE_SUBJECT: &str = "role:";
+
 /// The urgencies of an event (D153), from the most pressing.
 pub const URGENT: &str = "urgent";
 /// Sent now, or at the end of the recipient's quiet hours.

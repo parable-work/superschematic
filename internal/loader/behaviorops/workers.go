@@ -37,7 +37,9 @@ func EventPayloadType(typeName, use, kind string) string {
 
 // WorkerEvents are the events the behavior worker worker of td hands to the
 // API's Workers (D104): for each table use of td whose behavior's
-// declaration lists events, in list order, each event in declaration order,
+// declaration lists events, or whose config turns on a table's events
+// (registry.UseEvents: Comments' events, #713), in list order, each event
+// in declaration order,
 // with the Workers method that takes it and the API types of the event and
 // its payload. A use whose behavior reg does not hold is left out, which
 // the verification pass refuses.
@@ -49,7 +51,7 @@ func WorkerEvents(worker string, td *ir.TypeDef, reg *registry.Registry) []ir.Be
 			continue
 		}
 		use := behaviorlayout.UseMember(ref)
-		for _, event := range behavior.Events {
+		for _, event := range registry.UseEvents(behavior, ref.Config) {
 			out = append(out, ir.BehaviorWorkerEvent{
 				Use:         ref.UseID(),
 				Member:      use,
@@ -172,6 +174,8 @@ func planEvents(worker *ir.Worker, db *ir.Schema, td *ir.TypeDef, reg *registry.
 		if !ok {
 			return nil, fmt.Errorf("behaviorops: @behaviorWorker %s: %s's %s is the behavior %s, which is not registered", worker.Name, td.Name, ref.UseID(), ref.Name)
 		}
+		// A table's use emits its config's events too (Comments', #713).
+		declaration.Events = registry.UseEvents(declaration, ref.Config)
 		base := Base(td.Name, event.Member)
 		n, done := narrowed[event.Use]
 		if !done {

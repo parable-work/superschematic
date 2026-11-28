@@ -142,6 +142,8 @@ func checkTypeBehaviors(schema *ir.Schema, td *ir.TypeDef, bases map[string]bool
 				checkEnginePresenceConfig(td, ref, r)
 			case budgetBehavior:
 				checkEngineBudgetConfig(td, ref, r)
+			case commentsBehavior:
+				checkEngineCommentsConfig(td, ref, r)
 			}
 		}
 		if ref.FieldAnchored() || ref.Implements {
@@ -491,7 +493,7 @@ func checkTableStorage(schema *ir.Schema, td *ir.TypeDef, uses map[string]regist
 		if registry.TableArmsDeadlines(ref.Name, behavior.ArmsDeadlines) && !slices.Contains(arming, ref.Name) {
 			arming = append(arming, ref.Name)
 		}
-		if len(behavior.Events) > 0 && !slices.Contains(emitting, ref.Name) {
+		if len(registry.UseEvents(behavior, ref.Config)) > 0 && !slices.Contains(emitting, ref.Name) {
 			emitting = append(emitting, ref.Name)
 		}
 		if behavior.HearsChanges && !slices.Contains(hearing, ref.Name) {

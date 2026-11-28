@@ -146,6 +146,8 @@ export interface ReviewCommentsMessages {
   author?: string | null;
   /** The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved. */
   forSubject?: string | null;
+  /** The channel kind its author's call came over (D157): sms, email or another a channel adapter names, as a reply or an inbound message runs as its sender; absent for a call over the API. */
+  via?: string | null;
   /** composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted. */
   state?: string | null;
   /** The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted. */
@@ -353,6 +355,8 @@ export interface TicketCommentsMessages {
   author?: string | null;
   /** The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved. */
   forSubject?: string | null;
+  /** The channel kind its author's call came over (D157): sms, email or another a channel adapter names, as a reply or an inbound message runs as its sender; absent for a call over the API. */
+  via?: string | null;
   /** composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted. */
   state?: string | null;
   /** The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted. */

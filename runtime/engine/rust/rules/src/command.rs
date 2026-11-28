@@ -56,6 +56,12 @@ pub struct Caller {
     /// nothing, which proves nothing.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assurance: Option<Assurance>,
+    /// The channel kind the call came over (D157, #606): `sms`, `email` or
+    /// another a channel adapter names, for a reply or an inbound message
+    /// the host runs as its sender, which Comments records as a message's
+    /// `via`. `None` for a call over the host's own API, which names none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
 }
 
 /// How the host authenticated a caller for one call (D200). The core
@@ -132,6 +138,13 @@ impl Caller {
     /// The caller with the assurance its host reports for the call (D200).
     pub fn with_assurance(mut self, assurance: Assurance) -> Self {
         self.assurance = Some(assurance);
+        self
+    }
+
+    /// The caller as it came over a channel kind (D157, #606): a reply's or
+    /// an inbound message's sender.
+    pub fn over(mut self, channel: impl Into<String>) -> Self {
+        self.channel = Some(channel.into());
         self
     }
 }

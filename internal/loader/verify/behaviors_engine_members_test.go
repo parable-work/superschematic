@@ -11,8 +11,8 @@ import (
 // configSchema accepts, is refused, one problem per member, naming the
 // table form, as the engine refuses each: Constants' oneWay; StateRules'
 // by, per state in the canonical config's order, then status; Approvals'
-// resetOn then pinned, per gate, then status. An engine type's configs
-// without them load.
+// resetOn then pinned, per gate, then status; Comments' events (#713). An
+// engine type's configs without them load.
 func TestEngineTypesRefuseTheTableMembers(t *testing.T) {
 	note := func(behaviors ...map[string]any) func(doc, _ map[string]any) {
 		return func(doc, _ map[string]any) {
@@ -40,6 +40,9 @@ func TestEngineTypesRefuseTheTableMembers(t *testing.T) {
 	approvals := func(config map[string]any) map[string]any {
 		return map[string]any{"name": "Approvals", "config": config}
 	}
+	comments := func(config map[string]any) map[string]any {
+		return map[string]any{"name": "Comments", "config": config}
+	}
 	frozen := func(by ...any) map[string]any {
 		rule := map[string]any{"frozen": []any{"title"}}
 		if len(by) > 0 {
@@ -61,6 +64,7 @@ func TestEngineTypesRefuseTheTableMembers(t *testing.T) {
 		resetOn        = "type Note: @behavior Approvals names resetOn on the gate of %q, which a table's Approvals takes (implements Approvals<Note, C>, D104); an engine type's gates follow resetOnChange, so leave it out"
 		pinned         = "type Note: @behavior Approvals names pinned on the gate of %q, which a table's Approvals takes (implements Approvals<Note, C>, D104); an engine type's sign-off names no version, so leave it out"
 		approvalStatus = "type Note: @behavior Approvals names status, the Workflow field a table's Approvals reads (implements Approvals<Note, C>, D104); an engine type's Approvals reads its one Workflow, so leave status out"
+		events         = "type Note: @behavior Comments names events, which a table's Comments takes (implements Comments<Note, { events: true }>, #713); an engine type's Comments records its operation events in the engine's log, so leave it out"
 	)
 	quoted := func(format, state string) string { return strings.Replace(format, "%q", `"`+state+`"`, 1) }
 	for _, tc := range []struct {
@@ -78,6 +82,7 @@ func TestEngineTypesRefuseTheTableMembers(t *testing.T) {
 			"sent": gate(map[string]any{"resetOn": []any{}, "pinned": false}), "read": gate(map[string]any{"pinned": true}),
 		}})), []string{quoted(pinned, "read"), quoted(resetOn, "sent"), quoted(pinned, "sent")}},
 		{"Approvals' status", note(approvals(map[string]any{"gates": map[string]any{"sent": gate(nil)}, "status": "status"})), []string{approvalStatus}},
+		{"Comments' events", note(comments(map[string]any{"events": true})), []string{events}},
 		{"all three", note(
 			constants(map[string]any{"oneWay": map[string]any{"count": "up"}}),
 			staterules(map[string]any{"states": map[string]any{"sent": frozen("author")}}),

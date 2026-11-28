@@ -39,9 +39,9 @@ use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{finish, Client, Runner};
 use super::{
     row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
-    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error,
-    FieldKeys, FindOptions, Found, Marks, PageOptions, RowPage, Session, Table, UpsertManyOptions,
-    UpsertOptions, Upserted, Values, WriteOptions,
+    CoreDelete, CoreOperation, CoreRead, CoreTableOperation, CoreUpdate, Definition, Dialect,
+    Error, FieldKeys, FindOptions, Found, Marks, PageOptions, RowPage, Session, Table,
+    UpsertManyOptions, UpsertOptions, Upserted, Values, WriteOptions,
 };
 use crate::auth::Principal;
 use crate::error::{chain, ApiError};
@@ -79,6 +79,13 @@ pub trait Rules: Send + Sync {
     ) -> Result<Value, Error> {
         let _ = connection;
         Err(super::no_table_operations(&operation))
+    }
+    /// Reads the live row a read names through the core as its caller
+    /// (#713), and answers the use's fields it computes through its reads.
+    /// Rules written before they could read one refuse it.
+    fn read(&self, connection: &Connection, read: CoreRead<'_>) -> Result<Value, Error> {
+        let _ = connection;
+        Err(super::no_reads(&read))
     }
 }
 
@@ -543,6 +550,13 @@ where
             .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
     }
 
+    /// Reads the live row whose key is `key` through the behaviors' core as
+    /// the repositories' caller (#713), and answers the fields of the use
+    /// under `member` each reader reads its own of.
+    pub fn view(&self, member: &str, key: &Key) -> Result<Values, Error> {
+        self.repository.view(member, &wire(key)?)
+    }
+
     /// Reseals under the current field key every envelope another key
     /// sealed, `batch` rows at a time, deleted rows among them, and answers
     /// how many rows it resealed (D85).
@@ -722,6 +736,14 @@ impl Repository<'_> {
             self.runner()
                 .operation(member, operation, key, params, options),
         )
+    }
+
+    /// Reads the row whose key is `key` through the behaviors' core as the
+    /// repositories' caller (#713), and answers the fields of the use under
+    /// `member` each reader reads its own of. A key no live row holds is
+    /// [`Error::NotFound`].
+    pub fn view(&self, member: &str, key: &Value) -> Result<Values, Error> {
+        finish(self.runner().view(member, key))
     }
 
     /// Runs `operation` of the behavior under `member` on the table as a
@@ -908,6 +930,10 @@ impl Client for SqliteClient<'_> {
     ) -> Result<Value, Error> {
         self.rules(&operation.table.name)?
             .table_operation(self.connection, operation)
+    }
+
+    async fn core_read(&self, read: CoreRead<'_>) -> Result<Value, Error> {
+        self.rules(&read.table.name)?.read(self.connection, read)
     }
 }
 

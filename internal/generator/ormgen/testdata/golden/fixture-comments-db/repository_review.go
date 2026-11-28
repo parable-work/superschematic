@@ -228,6 +228,43 @@ type ReviewCommentsReopenParams struct {
 	Thread int64 `json:"thread"`
 }
 
+// ReviewCommentsMarkReadParams are the parameters of comments's markRead.
+type ReviewCommentsMarkReadParams struct {
+	// Thread is the id of a top-level message: the marker moved is the caller's
+	// on its thread's replies, whether the caller follows it or not. The
+	// conversation's when absent.
+	Thread *int64 `json:"thread,omitempty"`
+	// UpTo is the greatest id of the messages read: a bound, which need not name
+	// a message.
+	UpTo int64 `json:"upTo"`
+}
+
+// ReviewCommentsMarkReadResult is what comments's markRead returns.
+type ReviewCommentsMarkReadResult struct {
+	// ReadUpTo is the marker: the greatest stand of the messages read; 0 when
+	// none is.
+	ReadUpTo int64 `json:"readUpTo"`
+	// Unread is how many posted or interrupted messages of others in the listing
+	// stand above the marker.
+	Unread int64 `json:"unread"`
+}
+
+// ReviewCommentsFollowParams are the parameters of comments's follow.
+type ReviewCommentsFollowParams struct {
+	// On is true to follow, false to stop.
+	On bool `json:"on"`
+	// Thread is the id of the thread's top-level message.
+	Thread int64 `json:"thread"`
+}
+
+// ReviewCommentsFollowResult is what comments's follow returns.
+type ReviewCommentsFollowResult struct {
+	// Following is whether the caller follows it now.
+	Following bool `json:"following"`
+	// Thread is the id of the thread's top-level message.
+	Thread int64 `json:"thread"`
+}
+
 // ReviewCommentsListMessagesParams are the parameters of comments's
 // listMessages.
 type ReviewCommentsListMessagesParams struct {
@@ -407,6 +444,21 @@ type ReviewCommentsOperations interface {
 	// Reopen reopens a resolved thread: its top-level message's author may, or a
 	// caller holding resolvePermission.
 	Reopen(ctx context.Context, id types.IdentityUUID, params ReviewCommentsReopenParams) (*ReviewCommentsCommentMessage, error)
+	// MarkRead moves the caller's read marker past the messages it has read: on
+	// the conversation's top-level messages, or with thread on that thread's
+	// replies. upTo is the greatest message id the caller has shown; every
+	// posted or interrupted message of the listing with an id up to it is read,
+	// and a streamed reply that comes to stand later is not. The marker never
+	// moves back. Only the caller reads it back, so it appends no event, and a
+	// caller who may read the instance may call it.
+	MarkRead(ctx context.Context, id types.IdentityUUID, params ReviewCommentsMarkReadParams) (*ReviewCommentsMarkReadResult, error)
+	// Follow follows a thread, so each reply that comes to stand in it records a
+	// delivery for the caller and the inbox lists it, or with on false stops. A
+	// caller follows each thread it posts in and each it is mentioned in without
+	// asking, again after it stopped. Following counts the thread's replies from
+	// the latest message of the conversation. Only the caller reads it back, so
+	// it appends no event, and a caller who may read the instance may call it.
+	Follow(ctx context.Context, id types.IdentityUUID, params ReviewCommentsFollowParams) (*ReviewCommentsFollowResult, error)
 	// ListMessages lists a page of the conversation's top-level messages, or
 	// with thread a page of that thread's replies, composing and deleted ones
 	// included, a composing one with its draft so far as its body, in ascending
@@ -429,6 +481,12 @@ type ReviewCommentsOperations interface {
 	// interrupted message is pinned: a deleted one loses its pin, and a
 	// composing one cannot take one.
 	ListPinned(ctx context.Context, id types.IdentityUUID, params ReviewCommentsListPinnedParams) (*ReviewCommentsListPinnedResult, error)
+	// View reads the row id names through the behaviors' core as the caller
+	// WithBehaviorCaller names (the core's read, #713), in a transaction, and
+	// returns comments's fields each reader reads its own of, by name (unread),
+	// each as its JSON. It writes nothing, and returns ErrNotFound when no live
+	// row holds id.
+	View(ctx context.Context, id types.IdentityUUID) (map[string]json.RawMessage, error)
 }
 
 // Comments returns the operations of Review's comments.
@@ -619,6 +677,42 @@ func (o reviewCommentsOperations) Reopen(ctx context.Context, id types.IdentityU
 	})
 }
 
+// MarkRead runs comments's markRead on the row id names, in a transaction,
+// and returns its result. It returns ErrNotFound when no live row holds id,
+// and any other refusal of the core's as the *rules.Refusal it is.
+func (o reviewCommentsOperations) MarkRead(ctx context.Context, id types.IdentityUUID, params ReviewCommentsMarkReadParams) (*ReviewCommentsMarkReadResult, error) {
+	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*ReviewCommentsMarkReadResult, error) {
+		var out *ReviewCommentsMarkReadResult
+		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Review", id.String(), "Comments", "markRead", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
+		if err != nil {
+			return out, behaviorNotFound(err, "Review", id)
+		}
+		out = &ReviewCommentsMarkReadResult{}
+		if err := json.Unmarshal(raw, out); err != nil {
+			return nil, fmt.Errorf("orm: the result of Review's comments markRead, %s: %w", raw, err)
+		}
+		return out, nil
+	})
+}
+
+// Follow runs comments's follow on the row id names, in a transaction, and
+// returns its result. It returns ErrNotFound when no live row holds id, and
+// any other refusal of the core's as the *rules.Refusal it is.
+func (o reviewCommentsOperations) Follow(ctx context.Context, id types.IdentityUUID, params ReviewCommentsFollowParams) (*ReviewCommentsFollowResult, error) {
+	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (*ReviewCommentsFollowResult, error) {
+		var out *ReviewCommentsFollowResult
+		raw, err := rules.RunOperation(ctx, rulesHost(tx), "Review", id.String(), "Comments", "follow", params, behaviorCaller(ctx), o.r.operationOptions(ctx))
+		if err != nil {
+			return out, behaviorNotFound(err, "Review", id)
+		}
+		out = &ReviewCommentsFollowResult{}
+		if err := json.Unmarshal(raw, out); err != nil {
+			return nil, fmt.Errorf("orm: the result of Review's comments follow, %s: %w", raw, err)
+		}
+		return out, nil
+	})
+}
+
 // ListMessages runs comments's listMessages on the row id names, in a
 // transaction, and returns its result. It returns ErrNotFound when no live
 // row holds id, and any other refusal of the core's as the *rules.Refusal it
@@ -710,6 +804,21 @@ func (o reviewCommentsOperations) ListPinned(ctx context.Context, id types.Ident
 			return nil, fmt.Errorf("orm: the result of Review's comments listPinned, %s: %w", raw, err)
 		}
 		return out, nil
+	})
+}
+
+// View reads the row id names through the behaviors' core as the caller
+// WithBehaviorCaller names (the core's read, #713), in a transaction, and
+// returns comments's fields each reader reads its own of, by name (unread),
+// each as its JSON. It writes nothing, and returns ErrNotFound when no live
+// row holds id.
+func (o reviewCommentsOperations) View(ctx context.Context, id types.IdentityUUID) (map[string]json.RawMessage, error) {
+	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (map[string]json.RawMessage, error) {
+		read, err := rules.RunRead(ctx, rulesHost(tx), "Review", id.String(), behaviorCaller(ctx))
+		if err != nil {
+			return nil, behaviorNotFound(err, "Review", id)
+		}
+		return viewOf(read, "Review", "Comments")
 	})
 }
 

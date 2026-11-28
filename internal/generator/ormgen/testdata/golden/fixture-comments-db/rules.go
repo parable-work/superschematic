@@ -4,6 +4,7 @@ package orm
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -92,6 +93,14 @@ const rulesLayoutJSON = `{
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -146,6 +155,12 @@ const rulesLayoutJSON = `{
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -579,6 +594,9 @@ const rulesLayoutJSON = `{
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],
@@ -671,6 +689,14 @@ const rulesLayoutJSON = `{
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -725,6 +751,12 @@ const rulesLayoutJSON = `{
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -1158,6 +1190,9 @@ const rulesLayoutJSON = `{
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],
@@ -1216,6 +1251,21 @@ func behaviorCaller(ctx context.Context) rules.Caller {
 // rulesHost is the host the core runs on in tx.
 func rulesHost(tx pgx.Tx) rules.Host {
 	return rules.Host{Layout: RulesLayout, Store: rulespostgres.NewStore(tx)}
+}
+
+// viewOf is the fields of the use useID of a typeName row the core's read
+// answered (rules.RunRead, #713), by name, each as its JSON; none when the
+// use computes none.
+func viewOf(read map[string]json.RawMessage, typeName, useID string) (map[string]json.RawMessage, error) {
+	out := map[string]json.RawMessage{}
+	fields, ok := read[useID]
+	if !ok || len(fields) == 0 {
+		return out, nil
+	}
+	if err := json.Unmarshal(fields, &out); err != nil {
+		return nil, fmt.Errorf("orm: the read of %s's %s, %s: %w", typeName, useID, fields, err)
+	}
+	return out, nil
 }
 
 // behaviorNotFound is err as a repository returns it: the core's not_found

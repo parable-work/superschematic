@@ -17,6 +17,7 @@ export function maskSecretsTicketCommentsMessages(value: TicketCommentsMessages)
     quotes: value.quotes,
     author: value.author !== undefined ? value.author : null,
     forSubject: value.forSubject !== undefined ? value.forSubject : null,
+    via: value.via !== undefined ? value.via : null,
     state: value.state !== undefined ? value.state : null,
     body: value.body,
     blocks: value.blocks,

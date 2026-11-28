@@ -39,6 +39,7 @@ pub(super) struct Message {
     pub quotes: Option<i64>,
     pub author: String,
     pub for_subject: Option<String>,
+    pub via: Option<String>,
     pub state: String,
     pub body: String,
     pub blocks: Value,
@@ -69,6 +70,7 @@ impl Message {
             quotes: int("quotes"),
             author: text("author").unwrap_or_default(),
             for_subject: text("forSubject"),
+            via: text("via"),
             state: text("state").unwrap_or_else(|| POSTED.to_owned()),
             body: text("body").unwrap_or_default(),
             blocks: list(row.value("blocks")),
@@ -396,6 +398,9 @@ pub(super) fn record(
     out.insert("author".into(), Value::from(message.author.as_str()));
     if let Some(acted_for) = &message.for_subject {
         out.insert("for".into(), Value::from(acted_for.as_str()));
+    }
+    if let Some(via) = &message.via {
+        out.insert("via".into(), Value::from(via.as_str()));
     }
     out.insert("state".into(), Value::from(message.state.as_str()));
     out.insert(

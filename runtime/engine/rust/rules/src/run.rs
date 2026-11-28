@@ -1965,9 +1965,16 @@ impl<'a> Run<'a> {
                         })
                 })
                 .or_else(|| {
+                    // Its own use's events about its row move no version of
+                    // it: the host writes them to the table's event queue in
+                    // the change set's transaction (Comments' mentioned and
+                    // replied, #713); another row's or another use's are
+                    // not its own.
+                    let use_id = frame.uses[index].spec.id();
                     pending
                         .events
-                        .first()
+                        .iter()
+                        .find(|event| event.row != own || event.use_id != use_id)
                         .map(|event| format!("emit({})", event.kind))
                 })
                 .or_else(|| {

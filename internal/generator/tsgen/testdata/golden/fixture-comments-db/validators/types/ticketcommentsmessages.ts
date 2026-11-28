@@ -84,6 +84,8 @@ export function validateTicketCommentsMessages(value: TicketCommentsMessages | n
 
   expectString(errors, "forSubject", value.forSubject);
 
+  expectString(errors, "via", value.via);
+
   expectString(errors, "state", value.state);
 
   if (value.body !== null && value.body !== undefined) {
@@ -194,6 +196,7 @@ const TicketCommentsMessagesKnownFields = new Set<string>([
   'quotes',
   'author',
   'forSubject',
+  'via',
   'state',
   'body',
   'blocks',

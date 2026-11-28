@@ -3515,6 +3515,29 @@ class TableRepository {
   }
 
   /**
+   * Reads the row of key through the core as options.caller (the core's
+   * read, D104's step 4, #713) and resolves to the fields of the use useId
+   * it computes through its reads: a reader's own (Comments' unread). The
+   * caller must reach the row as a read does, and the read writes nothing.
+   */
+  private async view(useId: string, key: unknown, options: RulesTableCallOptions = {}): Promise<Readonly<Record<string, unknown>>> {
+    try {
+      await this.requireReach(key, false);
+    } catch (error) {
+      throw this.keptNotFound(error, key);
+    }
+    return this.atomically(async repo => {
+      const command = { caller: options.caller ?? repo.caller(), now: Date.now(), action: { kind: 'read' as const, key: repo.wireKey(key) } };
+      try {
+        const result = (await execute(repo.rulesHost(), repo.def.name, command)).result as Readonly<Record<string, Readonly<Record<string, unknown>>>> | null | undefined;
+        return result?.[useId] ?? {};
+      } catch (error) {
+        throw repo.notFound(error, key);
+      }
+    });
+  }
+
+  /**
    * Runs an operation of one of the table's uses on the table as a whole
    * (D104), a command without a row, in a transaction, as options.caller,
    * and resolves to its result: a read-only one writes nothing, and a
@@ -3598,6 +3621,8 @@ class TableRepository {
           ? (params: unknown, options?: RulesTableCallOptions) => this.operateTable(use.id, operation.name, params, options)
           : (key: unknown, params: unknown, options?: RulesCallOptions) => this.operate(use.id, operation.name, operation.writes, key, params, options);
       }
+      // A reader's own fields, read through the core as the caller (#713).
+      if (use.view?.length) operations.view = (key: unknown, options?: RulesTableCallOptions) => this.view(use.id, key, options);
       Object.defineProperty(this, member, { value: Object.freeze(operations), enumerable: true });
     }
   }

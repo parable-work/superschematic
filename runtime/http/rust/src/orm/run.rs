@@ -14,9 +14,9 @@ use serde_json::Value;
 
 use super::plan::{row_key_text, DeletePlan, Plan, Statement};
 use super::{
-    Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Dialect, Error,
-    FindOptions, Found, MergeResult, PageOptions, RowPage, Table, UpsertManyOptions, UpsertOptions,
-    UpsertStatus, Upserted, Values, WriteOptions,
+    Column, CoreCreate, CoreDelete, CoreOperation, CoreRead, CoreTableOperation, CoreUpdate,
+    Dialect, Error, FindOptions, Found, MergeResult, PageOptions, RowPage, Table,
+    UpsertManyOptions, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
 };
 
 /// The alias a Postgres upsert returns whether it inserted a row as,
@@ -83,6 +83,10 @@ pub(crate) trait Client {
         &self,
         operation: CoreTableOperation<'_>,
     ) -> impl Future<Output = Result<Value, Error>>;
+
+    /// Reads a row through the core as the caller (#713), and answers the
+    /// use's fields it computes through its reads.
+    fn core_read(&self, read: CoreRead<'_>) -> impl Future<Output = Result<Value, Error>>;
 }
 
 /// The repository of one table over a client.
@@ -628,6 +632,22 @@ impl<C: Client> Runner<'_, C> {
     ) -> Result<Value, Error> {
         let command = self.plan.core_table_operation(member, operation, params)?;
         self.client.core_table_operation(command).await
+    }
+
+    /// Reads the row of `key` through the core as the caller (#713), and
+    /// answers the fields of the use under `member` each reader reads its
+    /// own of.
+    pub(crate) async fn view(&self, member: &str, key: &Value) -> Result<Values, Error> {
+        let read = self.plan.core_read(member, key)?;
+        match self
+            .client
+            .core_read(read)
+            .await
+            .map_err(|err| self.core_miss(err, key))?
+        {
+            Value::Object(fields) => Ok(fields),
+            _ => Ok(Values::new()),
+        }
     }
 
     /// Folds the row `from` into the row `into` (D147), as the Go ORM's and

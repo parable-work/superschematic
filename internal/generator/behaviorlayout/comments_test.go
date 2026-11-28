@@ -16,10 +16,12 @@ const commentsFixture = "../../loader/tsreader/testdata/services/fixture-comment
 // the row's key column (a post writes its author's follow and marker, and
 // its deliveries), and its shared table conversations is keyed by the
 // row's key alone, with the version each write is held to; its operations
-// are the ones a table runs, the streamed replies', read state's, code
-// anchors' and the namespace's left out; and Comments keeps no queue,
+// are the ones a table runs, read state's among them (markRead and follow,
+// #713), the streamed replies', code anchors' and the namespace's left
+// out; the reader's unread is the use's view; and Comments keeps no queue,
 // since the streamed replies whose idle deadlines it arms are left out
-// (registry.TableArmsDeadlines).
+// (registry.TableArmsDeadlines), and it emits no events without the
+// config's events.
 func TestLayoutOfComments(t *testing.T) {
 	layout := layoutOfFixture(t, commentsFixture, "fixture-comments-db")
 	for _, name := range []string{"Ticket", "Review"} {
@@ -54,8 +56,11 @@ func TestLayoutOfComments(t *testing.T) {
 		for _, op := range use.Operations {
 			operations = append(operations, op.Name)
 		}
-		if want := []string{"post", "edit", "deleteMessage", "purge", "react", "unreact", "pin", "unpin", "resolve", "reopen", "listMessages", "getMessage", "listEdits", "listReactions", "listPinned"}; !slices.Equal(operations, want) {
+		if want := []string{"post", "edit", "deleteMessage", "purge", "react", "unreact", "pin", "unpin", "resolve", "reopen", "markRead", "follow", "listMessages", "getMessage", "listEdits", "listReactions", "listPinned"}; !slices.Equal(operations, want) {
 			t.Errorf("%s's operations = %v, want %v", name, operations, want)
+		}
+		if !slices.Equal(use.View, []string{"unread"}) {
+			t.Errorf("%s's view = %v, want [unread]", name, use.View)
 		}
 		if td.Deadlines != nil || td.Changes != nil || td.Events != nil {
 			t.Errorf("%s's queues = %+v %+v %+v, want none", name, td.Deadlines, td.Changes, td.Events)

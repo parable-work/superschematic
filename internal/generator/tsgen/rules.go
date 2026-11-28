@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/behaviorlayout"
@@ -75,20 +76,32 @@ var repositoryMembers = []string{
 // use's id, the anchor field or the behavior's name; Member, the
 // repository's member its operations sit under (behaviorlayout.UseMember:
 // the anchor field, or timers for implements Timers); Behavior, its
-// registered name; its operations on a row, which take the row's key; and
-// its operations on the table as a whole (D104), which take none.
+// registered name; its operations on a row, which take the row's key; its
+// operations on the table as a whole (D104), which take none; and the
+// fields its view reads through the core as the caller (#713).
 type ORMUse struct {
 	ID              string
 	Member          string
 	Behavior        string
 	Operations      []ORMOperation
 	TableOperations []ORMOperation
+	View            []string
 }
 
 // HasOperations reports whether the use has an operation of either kind,
 // so the repository holds a member for it.
 func (u ORMUse) HasOperations() bool {
 	return len(u.Operations) > 0 || len(u.TableOperations) > 0
+}
+
+// ViewFields is the use's view's fields as the type argument of UseView
+// writes them: "unread" | "other".
+func (u ORMUse) ViewFields() string {
+	quoted := make([]string, len(u.View))
+	for i, field := range u.View {
+		quoted[i] = strconv.Quote(field)
+	}
+	return strings.Join(quoted, " | ")
 }
 
 // ORMOperation is a use's operation as orm.ts types it: its name, its
@@ -193,7 +206,7 @@ func typeScriptRules(schema *ir.Schema, reg *registry.Registry) (*ormRules, erro
 			if narrowed.Preconditions != nil {
 				out.preconditions[name] = append(out.preconditions[name], ORMPrecondition{ID: use.ID, Behavior: use.Behavior, Type: renderNarrowed(narrowed.Preconditions, aliases, "  ")})
 			}
-			ormUse := ORMUse{ID: use.ID, Member: member, Behavior: use.Behavior}
+			ormUse := ORMUse{ID: use.ID, Member: member, Behavior: use.Behavior, View: use.View}
 			for _, op := range use.Operations {
 				var doc string
 				for _, declared := range declaration.Operations {

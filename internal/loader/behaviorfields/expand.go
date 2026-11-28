@@ -391,12 +391,13 @@ func Hearing(td *ir.TypeDef, reg *registry.Registry) []string {
 }
 
 // Emitting are the behaviors of td's table uses whose declarations list
-// events (registry.BehaviorDeclaration.Events), each once in list order
-// (D104): what its event queue's marker names.
+// events (registry.BehaviorDeclaration.Events), or whose configs turn on a
+// table's events (registry.UseEvents: Comments' events, #713), each once
+// in list order (D104): what its event queue's marker names.
 func Emitting(td *ir.TypeDef, reg *registry.Registry) []string {
 	var out []string
 	for _, use := range td.TableBehaviors() {
-		if behavior, ok := reg.Behavior(use.Name); ok && len(behavior.Events) > 0 && !slices.Contains(out, use.Name) {
+		if behavior, ok := reg.Behavior(use.Name); ok && len(registry.UseEvents(behavior, use.Config)) > 0 && !slices.Contains(out, use.Name) {
 			out = append(out, use.Name)
 		}
 	}

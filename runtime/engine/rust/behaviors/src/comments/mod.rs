@@ -207,6 +207,13 @@ fn strings(raw: Option<&Value>, name: &str) -> Result<Option<Vec<String>>> {
 impl CommentsConfig {
     /// The config as the configSchema has checked it.
     pub fn parse(raw: &Value) -> Result<Self> {
+        // A table's Comments emits mentioned and replied for the notifier
+        // (#713); the engine's records its operation events in its log.
+        if raw.get("events").is_some_and(|events| !events.is_null()) {
+            return Err(Error::config(
+                "Comments: events is a table's (implements Comments<T, { events: true }>, #713); an engine type's Comments records its operation events in the engine's log, so leave it out",
+            ));
+        }
         let text = |name: &str| raw.get(name).and_then(Value::as_str).map(str::to_owned);
         let blocks = match raw.get("blocks") {
             None | Some(Value::Null) => None,

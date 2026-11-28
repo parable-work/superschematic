@@ -4921,6 +4921,45 @@ pub struct TaskCommentsReopenParams {
     pub thread: i64,
 }
 
+/// TaskCommentsMarkReadParams types the parameters of Task's's markRead.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskCommentsMarkReadParams {
+    /// The id of a top-level message: the marker moved is the caller's on its thread's replies, whether the caller follows it or not. The conversation's when absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<i64>,
+    /// The greatest id of the messages read: a bound, which need not name a message.
+    #[serde(rename = "upTo")]
+    pub up_to: i64,
+}
+
+/// TaskCommentsMarkReadResult types what Task's's markRead returns.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskCommentsMarkReadResult {
+    /// The marker: the greatest stand of the messages read; 0 when none is.
+    #[serde(rename = "readUpTo")]
+    pub read_up_to: i64,
+    /// How many posted or interrupted messages of others in the listing stand above the marker.
+    pub unread: i64,
+}
+
+/// TaskCommentsFollowParams types the parameters of Task's's follow.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskCommentsFollowParams {
+    /// true to follow, false to stop.
+    pub on: bool,
+    /// The id of the thread's top-level message.
+    pub thread: i64,
+}
+
+/// TaskCommentsFollowResult types what Task's's follow returns.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TaskCommentsFollowResult {
+    /// Whether the caller follows it now.
+    pub following: bool,
+    /// The id of the thread's top-level message.
+    pub thread: i64,
+}
+
 /// TaskCommentsListMessagesParams types the parameters of Task's's listMessages.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TaskCommentsListMessagesParams {
@@ -12684,6 +12723,30 @@ pub mod postgres {
                 .await
         }
 
+        /// Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.
+        pub async fn mark_read(
+            &self,
+            key: &IdentityUUID,
+            params: &TaskCommentsMarkReadParams,
+            options: &WriteOptions,
+        ) -> Result<TaskCommentsMarkReadResult, orm::Error> {
+            self.0
+                .operation("comments", "markRead", key, params, options)
+                .await
+        }
+
+        /// Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.
+        pub async fn follow(
+            &self,
+            key: &IdentityUUID,
+            params: &TaskCommentsFollowParams,
+            options: &WriteOptions,
+        ) -> Result<TaskCommentsFollowResult, orm::Error> {
+            self.0
+                .operation("comments", "follow", key, params, options)
+                .await
+        }
+
         /// Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start.
         pub async fn list_messages(
             &self,
@@ -12742,6 +12805,14 @@ pub mod postgres {
             self.0
                 .operation("comments", "listPinned", key, params, options)
                 .await
+        }
+
+        /// Reads the live row whose key is `key` through the behaviors'
+        /// core as the repositories' caller (the core's read, #713), and
+        /// answers `comments`'s fields each reader reads its own of
+        /// (`unread`), by name. It writes nothing.
+        pub async fn view(&self, key: &IdentityUUID) -> Result<orm::Values, orm::Error> {
+            self.0.view("comments", key).await
         }
     }
 

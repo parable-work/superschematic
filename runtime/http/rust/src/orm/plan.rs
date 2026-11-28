@@ -9,7 +9,7 @@ use std::fmt::Display;
 use serde_json::Value;
 
 use super::{
-    audience_conditions, invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation,
+    audience_conditions, invalid, Bound, Column, CoreCreate, CoreDelete, CoreOperation, CoreRead,
     CoreTableOperation, CoreUpdate, Definition, Dialect, Error, Fence, FieldCell, FieldKeys,
     FindOptions, Marks, OrderBy, PageOptions, Session, Table, UniqueKey, Values, WriteOptions,
 };
@@ -2539,6 +2539,27 @@ impl<'a> Plan<'a> {
             .audit("updatedAt")
             .map(|updated_at| vec![updated_at.unquoted().to_owned()])
             .unwrap_or_default()
+    }
+
+    /// A read of a row through the core as the caller (#713): the fields of
+    /// the use under `member` each reader reads its own of.
+    pub(crate) fn core_read<'p>(&self, member: &'p str, key: &Value) -> Result<CoreRead<'p>, Error>
+    where
+        'a: 'p,
+    {
+        let table = self.table;
+        if table.behaviors.is_none() {
+            return Err(invalid(format!(
+                "{} composes no behaviors (D103), so it has no view under {member}",
+                table.name
+            )));
+        }
+        Ok(CoreRead {
+            table,
+            key: self.wire_key(key)?,
+            member,
+            caller: self.session.caller(),
+        })
     }
 
     /// An operation of one of the table's behaviors on the table as a

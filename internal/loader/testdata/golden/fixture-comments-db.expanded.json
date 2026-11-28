@@ -609,6 +609,13 @@
           }
         },
         {
+          "name": "via",
+          "description": "The channel kind its author's call came over (D157): sms, email or another a channel adapter names, as a reply or an inbound message runs as its sender; absent for a call over the API.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
           "name": "state",
           "description": "composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted.",
           "typeRef": {
@@ -1401,6 +1408,13 @@
         {
           "name": "forSubject",
           "description": "The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
+          "name": "via",
+          "description": "The channel kind its author's call came over (D157): sms, email or another a channel adapter names, as a reply or an inbound message runs as its sender; absent for a call over the API.",
           "typeRef": {
             "name": "string"
           }

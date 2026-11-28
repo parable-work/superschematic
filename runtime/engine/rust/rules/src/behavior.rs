@@ -330,7 +330,8 @@ impl TableDecl {
 /// their uses and the creates it makes.
 ///
 /// A writing operation beside its row (a declaration's `"beside": true`)
-/// writes only its use's sub-tables and shared tables: the row's version,
+/// writes only its use's sub-tables and shared tables, and may emit its
+/// use's events about its row (#713): the row's version,
 /// its own fields and its owned fields stay as they are, no other use's
 /// guard is asked, no after-change hook runs, and no precondition but its
 /// own use's is taken, since only its use's guard reads one. What it keeps

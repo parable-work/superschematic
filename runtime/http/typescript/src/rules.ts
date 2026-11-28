@@ -182,6 +182,8 @@ export interface CoreCaller {
   readonly agent?: string;
   /** How the host verified the caller for this call (D200), which an Approvals requirement's proof reads. */
   readonly assurance?: { readonly signedInAt?: number; readonly userVerified?: boolean };
+  /** The channel kind the call came over (D157, #606): sms, email or another a channel adapter names, for a reply or an inbound message run as its sender, which Comments records as a message's via; absent for a call over the API. */
+  readonly channel?: string;
 }
 
 /** What a command does, tagged by kind. Open: execute refuses a kind it does not know as internal. */
@@ -191,6 +193,8 @@ export type CoreAction =
   | { readonly kind: 'create'; readonly id?: string | null; readonly own?: Readonly<Record<string, unknown>>; readonly params?: Readonly<Record<string, unknown>> }
   | { readonly kind: 'update'; readonly key: string; readonly patch: Readonly<Record<string, unknown>> }
   | { readonly kind: 'delete'; readonly key: string }
+  /** A read of a row through the core as the caller (D104's step 4, #713): each use's fields it computes through its reads, by use id, as the result; it runs no guard and writes nothing. */
+  | { readonly kind: 'read'; readonly key: string }
   | { readonly kind: 'operation'; readonly key: string; readonly useId: string; readonly operation: string; readonly params?: unknown }
   /** An operation of a use on the table as a whole (D104), one its declaration's scope schema gives: no row, so no key, and no preconditions. */
   | { readonly kind: 'tableOperation'; readonly useId: string; readonly operation: string; readonly params?: unknown }
@@ -554,6 +558,8 @@ export interface RulesUse {
   readonly tables?: readonly RulesSubTable[];
   /** The tables the behavior keeps for the table as a whole (D103's step 4); absent for none. */
   readonly shared?: readonly RulesSharedTable[];
+  /** The fields each reader reads its own of (Comments' unread), which the use's view reads through the core as the caller (#713); absent for none. */
+  readonly view?: readonly string[];
 }
 
 /**
@@ -2534,6 +2540,17 @@ export interface RulesCallOptions<Preconditions = Readonly<Record<string, unknow
  */
 export type UseOperations<Ops extends Record<string, { readonly params: unknown; readonly result: unknown }>, Key = string, Preconditions = Readonly<Record<string, unknown>>> = {
   readonly [Name in keyof Ops]: (key: Key, params: Ops[Name]['params'], options?: RulesCallOptions<Preconditions>) => Promise<Ops[Name]['result']>;
+};
+
+/**
+ * The view a use whose behavior declares fields each reader reads its own of
+ * (Comments' unread) adds under the use's member, beside its operations
+ * (#713): view(key, options) reads the row through the core's read as the
+ * caller and resolves to those fields, as the generated orm.ts names them,
+ * UseView<'unread', string>. It writes nothing.
+ */
+export type UseView<Fields extends string, Key = string> = {
+  readonly view: (key: Key, options?: RulesTableCallOptions) => Promise<{ readonly [Name in Fields]?: unknown }>;
 };
 
 /** What a behavior's operation of the table as a whole on a repository takes beside its parameters (D104): no preconditions, which only a row's command presents. */

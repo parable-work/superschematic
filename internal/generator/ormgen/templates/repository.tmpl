@@ -5185,6 +5185,10 @@ type {{ .Interface }} interface {
 	{{ .GoName }}(ctx context.Context, id {{ $repo.PrimaryKeyType }}, params {{ .Params }}) ({{ .ResultReturn }}, error)
 	{{- end }}
 	{{- end }}
+	{{- if .View }}
+{{ docComment "\t" .ViewDoc }}
+	View(ctx context.Context, id {{ $repo.PrimaryKeyType }}) (map[string]json.RawMessage, error)
+	{{- end }}
 }
 
 // {{ .GoName }} returns the operations of {{ $repo.TypeName }}'s {{ .Member }}.
@@ -5252,6 +5256,19 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.Primary
 	})
 }
 {{- end }}
+{{- end }}
+{{- if .View }}
+
+{{ docComment "" .ViewDoc }}
+func (o {{ .Value }}) View(ctx context.Context, id {{ $repo.PrimaryKeyType }}) (map[string]json.RawMessage, error) {
+	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (map[string]json.RawMessage, error) {
+		read, err := rules.RunRead(ctx, rulesHost(tx), {{ printf "%q" $repo.TypeName }}, {{ $repo.WireKey "id" }}, behaviorCaller(ctx))
+		if err != nil {
+			return nil, behaviorNotFound(err, {{ printf "%q" $repo.TypeName }}, id)
+		}
+		return viewOf(read, {{ printf "%q" $repo.TypeName }}, {{ printf "%q" .ID }})
+	})
+}
 {{- end }}
 {{- end }}
 {{- with .Deadline }}

@@ -4791,7 +4791,7 @@ pub fn parse_task_comments_follows(value: Value, unknown_fields: rt::UnknownFiel
 }
 
 /// The fields `TaskCommentsMessages` declares, by their wire names.
-pub const TASK_COMMENTS_MESSAGES_FIELDS: &[&str] = &["task", "message", "thread", "quotes", "author", "forSubject", "state", "body", "blocks", "mentions", "createdAt", "postedAt", "stand", "editedAt", "edits", "pinned", "clientId", "resolvedBy", "resolvedFor", "resolvedAt", "draftLength", "lastAppendAt"];
+pub const TASK_COMMENTS_MESSAGES_FIELDS: &[&str] = &["task", "message", "thread", "quotes", "author", "forSubject", "via", "state", "body", "blocks", "mentions", "createdAt", "postedAt", "stand", "editedAt", "edits", "pinned", "clientId", "resolvedBy", "resolvedFor", "resolvedAt", "draftLength", "lastAppendAt"];
 
 /// Validates a JSON value as `TaskCommentsMessages`. A null value passes; the errors
 /// are empty when the value is valid.
@@ -4835,6 +4835,10 @@ pub fn validate_task_comments_messages(value: &Value) -> ValidationErrors {
     {
         let field = value.get("forSubject");
         rt::expect_string(&mut errors, "forSubject", field);
+    }
+    {
+        let field = value.get("via");
+        rt::expect_string(&mut errors, "via", field);
     }
     {
         let field = value.get("state");

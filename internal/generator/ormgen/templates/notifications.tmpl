@@ -136,7 +136,7 @@ func (h notifierHost) System(ctx context.Context) context.Context {
 func (h notifierHost) Acting(ctx context.Context, principal access.Principal, permissions []string) context.Context {
 	ctx = h.As(ctx, principal)
 {{- if .Rules }}
-	return WithBehaviorCaller(ctx, rules.Caller{Subject: principal.Subject, Permissions: permissions})
+	return WithBehaviorCaller(ctx, rules.Caller{Subject: principal.Subject, Permissions: permissions, Channel: notifications.ChannelOf(ctx)})
 {{- else }}
 	_ = permissions
 	return ctx

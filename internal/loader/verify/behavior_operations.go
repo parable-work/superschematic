@@ -329,6 +329,7 @@ func warnQueuesUnrun(schema *ir.Schema, set *ir.OperationSet, td *ir.TypeDef, db
 			for _, event := range behavior.Events {
 				kinds = append(kinds, event.Kind)
 			}
+			kinds = append(kinds, registry.TableEventKinds(name)...)
 			who = append(who, name+": "+strings.Join(kinds, ", "))
 		}
 		kept = append(kept, "events ("+strings.Join(who, "; ")+")")

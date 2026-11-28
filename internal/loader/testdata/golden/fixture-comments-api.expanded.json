@@ -381,6 +381,61 @@
       ],
       "origin": "behavior"
     },
+    "TicketCommentsFollowInput": {
+      "name": "TicketCommentsFollowInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments follow.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "on",
+          "comment": "true to follow, false to stop.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "thread",
+          "comment": "The id of the thread's top-level message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsFollowResult": {
+      "name": "TicketCommentsFollowResult",
+      "owner": "fixture-comments-api",
+      "comment": "What Ticket's comments follow returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "following",
+          "comment": "Whether the caller follows it now.",
+          "typeRef": {
+            "name": "boolean"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "thread",
+          "comment": "The id of the thread's top-level message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
     "TicketCommentsGetMessageInput": {
       "name": "TicketCommentsGetMessageInput",
       "owner": "fixture-comments-api",
@@ -795,6 +850,61 @@
           "comment": "The subject of the caller who reacted.",
           "typeRef": {
             "name": "string"
+          },
+          "required": true,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsMarkReadInput": {
+      "name": "TicketCommentsMarkReadInput",
+      "owner": "fixture-comments-api",
+      "comment": "The parameters of Ticket's comments markRead.",
+      "role": "APIInput",
+      "fields": [
+        {
+          "name": "thread",
+          "comment": "The id of a top-level message: the marker moved is the caller's on its thread's replies, whether the caller follows it or not. The conversation's when absent.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "validateMin": 1,
+          "origin": "behavior"
+        },
+        {
+          "name": "upTo",
+          "comment": "The greatest id of the messages read: a bound, which need not name a message.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "validateMin": 1,
+          "origin": "behavior"
+        }
+      ],
+      "origin": "behavior"
+    },
+    "TicketCommentsMarkReadResult": {
+      "name": "TicketCommentsMarkReadResult",
+      "owner": "fixture-comments-api",
+      "comment": "What Ticket's comments markRead returns.",
+      "role": "EmbeddedStruct",
+      "fields": [
+        {
+          "name": "readUpTo",
+          "comment": "The marker: the greatest stand of the messages read; 0 when none is.",
+          "typeRef": {
+            "name": "Generic.Int64"
+          },
+          "required": true,
+          "origin": "behavior"
+        },
+        {
+          "name": "unread",
+          "comment": "How many posted or interrupted messages of others in the listing stand above the marker.",
+          "typeRef": {
+            "name": "Generic.Int64"
           },
           "required": true,
           "origin": "behavior"
@@ -1624,6 +1734,114 @@
           },
           "httpMethod": "POST",
           "restPath": "ticket/{id}/comments/reopen",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsMarkRead",
+          "comment": "Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.",
+          "docs": {
+            "title": "Ticket comments: mark read",
+            "description": "Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.",
+            "capability": "ticket.comments.mark-read",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_mark_read",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsMarkReadResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsMarkReadInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "markRead",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/mark-read",
+          "origin": "behavior"
+        },
+        {
+          "name": "commentsFollow",
+          "comment": "Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.",
+          "docs": {
+            "title": "Ticket comments: follow",
+            "description": "Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.",
+            "capability": "ticket.comments.follow",
+            "lifecycle": "active",
+            "visibility": "public",
+            "mappingStatus": "mapped"
+          },
+          "mcp": {
+            "handle": "ticket_comments_follow",
+            "hidden": false,
+            "invocationPolicy": "auto"
+          },
+          "typeRef": {
+            "name": "TicketCommentsFollowResult"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "comment": "The key of the Ticket row the operation runs on.",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "TicketCommentsFollowInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "behaviorOperation": {
+            "database": "fixture-comments-db",
+            "type": "Ticket",
+            "key": "id",
+            "use": "Comments",
+            "behavior": "Comments",
+            "operation": "follow",
+            "writes": true,
+            "permissions": [
+              "tickets.moderate"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "ticket/{id}/comments/follow",
           "origin": "behavior"
         },
         {

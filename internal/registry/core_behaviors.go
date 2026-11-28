@@ -169,29 +169,27 @@ var tableLeavesOut = map[string]map[string]string{
 		"listDependents": "the rows a row blocks are a query over every table's blockers, which the behaviors' core cannot enumerate, so the engine serves it alone",
 	},
 	// What a table's Comments leaves out in a build: streamed replies wait
-	// for a table's API to serve signals, and read state for it to answer a
-	// reader's own fields, each of which development mode's server does on
-	// the core; and code anchors, which the core's comments module leaves
-	// out too (LEFT_OUT_OPERATIONS; D77, D103's step 4).
+	// for a table's API to serve signals, which development mode's server
+	// does on the core; and code anchors, which the core's comments module
+	// leaves out too (LEFT_OUT_OPERATIONS; D77, D103's step 4). Read state
+	// and follows are a table's since #713: markRead and follow are
+	// operations, and a reader's unread is the use's view.
 	"Comments": {
 		"begin":       commentsStreamed,
 		"appendDraft": commentsStreamed,
 		"finish":      commentsStreamed,
 		"interrupt":   commentsStreamed,
-		"markRead":    commentsReadState,
-		"follow":      commentsReadState,
 		"moveAnchor":  commentsAnchors,
 	},
 }
 
 // Why a table's Comments leaves out each part a build cannot serve yet
-// (D103's step 4): the core runs streamed replies and read state, which a
-// table's generated API does not serve; and the core's own words for what
-// it runs no command for yet.
+// (D103's step 4): the core runs streamed replies, which a table's
+// generated API does not serve; and the core's own words for what it runs
+// no command for yet.
 const (
 	commentsStreamed   = "a streamed reply (begin, appendDraft, finish, interrupt and the config's composeTimeoutMs and maxDrafts) waits for a table's generated API to serve the core's signals (D77's primitive 2), which development mode's event stream does"
-	commentsReadState  = "read state (markRead, follow and the reader's unread field) waits for a table's generated API to answer a reader's own fields through the core's read, which development mode does (D77's primitive 3)"
-	commentsDeliveries = "the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3)"
+	commentsDeliveries = "claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace, which waits for Comments' operations of the namespace on the core (D77's primitive 3); a table's Comments hands its deliveries to the notifier as events instead, with events: true (#713), and the inbox is the notifier's (D153)"
 	commentsAnchors    = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)"
 )
 
