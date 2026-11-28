@@ -631,7 +631,7 @@ type PackageDir struct {
 	// Dir is the directory, in slash form.
 	Dir string
 	// Kind is the package kind the graph records, a lower-case word that
-	// is none of the core's: types, sdk, api and orm.
+	// is none of the core's: types, sdk, api, orm and provider (D159).
 	Kind string
 }
 
@@ -649,8 +649,8 @@ func (r *Registry) RegisterPackageDir(d PackageDir) error {
 	default:
 		return fmt.Errorf("registry: package directory %q: language %q is none of go, rust, python and typescript", d.Dir, d.Language)
 	}
-	if !packageKind.MatchString(d.Kind) || slices.Contains([]string{"types", "sdk", "api", "orm"}, d.Kind) {
-		return fmt.Errorf("registry: package directory %q: kind %q must be a lower-case word other than types, sdk, api and orm", d.Dir, d.Kind)
+	if !packageKind.MatchString(d.Kind) || slices.Contains([]string{"types", "sdk", "api", "orm", "provider"}, d.Kind) {
+		return fmt.Errorf("registry: package directory %q: kind %q must be a lower-case word other than types, sdk, api, orm and provider", d.Dir, d.Kind)
 	}
 	if d.Dir == "" || path.IsAbs(d.Dir) || path.Clean(d.Dir) != d.Dir || strings.HasPrefix(d.Dir, "..") {
 		return fmt.Errorf("registry: package directory %q must be a clean relative path in slash form", d.Dir)

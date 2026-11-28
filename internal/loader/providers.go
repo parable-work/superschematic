@@ -55,7 +55,7 @@ func loadProviders(servicePath string, schema *ir.Schema, cfg *schemaconfig.Sche
 		// providers it read then.
 		schema.Providers = nil
 		for _, entry := range cfg.Providers {
-			p, err := readListedProvider(servicePath, entry)
+			p, err := ReadListedProvider(servicePath, entry)
 			if err != nil {
 				return fmt.Errorf("%s: providers: %s: %w", schema.Name, entry, err)
 			}
@@ -69,11 +69,11 @@ func loadProviders(servicePath string, schema *ir.Schema, cfg *schemaconfig.Sche
 	return checkProviderSlots(schema)
 }
 
-// readListedProvider reads the provider entry names, one of the providers
+// ReadListedProvider reads the provider entry names, one of the providers
 // the config of the service at servicePath lists: its directory, or the
 // package of its npm name in the service's node_modules (#608), whose
 // package.json then declares the provider under that name.
-func readListedProvider(servicePath, entry string) (*ir.RuntimeProvider, error) {
+func ReadListedProvider(servicePath, entry string) (*ir.RuntimeProvider, error) {
 	dir, err := schemaconfig.ResolveProvider(servicePath, entry)
 	if err != nil {
 		return nil, err
