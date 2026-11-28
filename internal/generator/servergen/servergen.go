@@ -584,6 +584,12 @@ type API struct {
 	// Wiring is the runtime the entrypoint wires over the API's database
 	// (D190, D192, D187, D180), nil for none (go_wiring.go).
 	Wiring *apigen.DepsWiring
+
+	// MCP is true for a server's API that serves its MCP endpoint (D81,
+	// #660), and MCPConfirmationKey the expression of its config that
+	// holds the key the endpoint signs confirmations with (go_mcp.go).
+	MCP                bool
+	MCPConfirmationKey string
 }
 
 // Call is a client in an API's Deps.
@@ -1096,6 +1102,7 @@ func Plan(in Input) (*Server, error) {
 		}
 		// A job or a worker serves no request, so it turns no client away.
 		api.ClientVersions = o.HasEnvConfig() && o.EnvConfig.ClientVersions && !s.Background()
+		planMCP(api, o, s)
 	}
 	s.APIs = apis
 	s.planWiring(in)

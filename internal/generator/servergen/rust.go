@@ -306,6 +306,13 @@ type RustWorker struct {
 	// API is the alias main.rs uses the API crate under, which a behavior
 	// worker's queues and handlers are named through.
 	API string
+
+	// Runtime is set for a worker of a queue a runtime part of the API's
+	// database handles (#620, #622, #617): main.rs builds Deps and runs the
+	// queue through the API crate's Wired (RunFunc), with no
+	// create_workers, no queue of its own and no Message.
+	Runtime string
+	RunFunc string
 }
 
 // Emits reports whether the behavior worker runs an event queue whose
@@ -539,6 +546,10 @@ type RustAPI struct {
 	// carry (D93, D116); empty for an API whose endpoint confirms no tool.
 	MCPConfirmationKey string
 
+	// Wiring is how main.rs builds the runtime parts of the API's database
+	// (#620, #622, #617, #610), nil for an API whose database has none.
+	Wiring *RustWiring
+
 	// MinClientVersions is the expression of its config that holds the
 	// oldest version of each client it serves, which its router options
 	// carry (D143); empty for an API whose config does not say
@@ -649,13 +660,8 @@ func (a *RustAPI) RouterOptionsLet() string {
 		}
 		fields = append(fields, field)
 	}
-	if a.MCPConfirmationKey != "" {
-		root, call := "EndpointOptions::default()", ".with_confirmation_key("+a.MCPConfirmationKey+".as_str()),"
-		field := indent + indent + "mcp: " + root + call
-		if len(field) > rustWidth {
-			field = indent + indent + "mcp: " + root + "\n" + indent + indent + indent + call
-		}
-		fields = append(fields, field)
+	if a.MCPConfirmationKey != "" || a.WiresMcp() {
+		fields = append(fields, a.McpOptions(indent+indent))
 	}
 	if a.MinClientVersions != "" {
 		fields = append(fields, indent+indent+"min_client_versions: "+a.MinClientVersions+".clone(),")
@@ -829,6 +835,9 @@ func PlanRust(in RustInput) (*RustServer, error) {
 		var w rustrestgen.WorkerInfo
 		if i := slices.IndexFunc(o.Workers, named); i >= 0 {
 			w = o.Workers[i]
+		} else if i := slices.IndexFunc(o.RuntimeWorkers, named); i >= 0 {
+			// A queue of a runtime part runs through it (#620, #622).
+			w = o.RuntimeWorkers[i]
 		} else if i := slices.IndexFunc(o.BehaviorWorkers, named); i >= 0 {
 			// A behavior worker runs its table's behavior queues (D103).
 			w = o.BehaviorWorkers[i]
@@ -855,6 +864,10 @@ func PlanRust(in RustInput) (*RustServer, error) {
 			GraceSeconds: grace,
 			Behavior:     w.Behavior,
 			Queues:       w.BehaviorQueues,
+			Runtime:      w.Runtime,
+		}
+		if w.Runtime != "" {
+			s.Worker.RunFunc = w.RunFunc()
 		}
 		s.Package = n.RustWorkerCrate(in.Stack, in.Server)
 	case in.Deriver != nil:
@@ -1142,15 +1155,24 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				api.RouterOptions = taken.take(stem + "_router_options")
 			}
 		}
+		if o.HasWiring() && !bare {
+			planRustWiring(o, api, taken, stem, background)
+			if api.WiresMcp() && api.RouterOptions == "" {
+				api.RouterOptions = taken.take(stem + "_router_options")
+			}
+		}
 		if s.Worker != nil {
 			if api.Database == nil {
 				return nil, fmt.Errorf("stack %s: worker %s of %s opens no pool on %s, whose queue it claims", in.Stack, in.Server, o.SchemaName, o.Deps.Database)
 			}
 			s.Worker.Database = api.Database
 			s.Worker.API = api.Alias
-			if !behaviorWorker {
+			if !behaviorWorker && s.Worker.Runtime == "" {
 				types := api.Alias + "::" + rustrestgen.DatabaseTypesModule + "::"
 				s.Worker.Message, s.Worker.Descriptor = types+s.Worker.Queue, types+s.Worker.QueueConst
+			}
+			if s.Worker.Runtime != "" && api.Wiring == nil {
+				return nil, fmt.Errorf("stack %s: worker %s of %s runs %s through a runtime part of %s, which the API's crate builds none of", in.Stack, in.Server, o.SchemaName, s.Worker.Queue, o.Deps.Database)
 			}
 		}
 		s.APIs = append(s.APIs, api)
@@ -1730,7 +1752,7 @@ func (s *RustServer) RuntimeUses() []string {
 		uses = append(uses, rustutil.UseLine(runtime+"::identity", identity))
 	}
 	uses = append(uses, rustutil.UseLine(runtime+"::logging", []string{"self", "tracing"}))
-	if slices.ContainsFunc(s.APIs, func(a *RustAPI) bool { return a.MCPConfirmationKey != "" }) {
+	if slices.ContainsFunc(s.APIs, func(a *RustAPI) bool { return a.MCPConfirmationKey != "" || a.WiresMcp() }) {
 		uses = append(uses, rustutil.UseLine(runtime+"::mcp", []string{"EndpointOptions"}))
 	}
 	uses = append(uses, s.memoryStoreUses(runtime)...)
@@ -1795,8 +1817,9 @@ func (s *RustServer) backgroundUses(runtime string) []string {
 		uses = append(uses, rustutil.UseLine(runtime+"::postgres", []string{"self", "Pool"}))
 	}
 	switch {
-	case s.Worker == nil || s.Worker.Behavior != nil:
-		// A behavior worker's queues are its API crate's to open (D103).
+	case s.Worker == nil || s.Worker.Behavior != nil || s.Worker.Runtime != "":
+		// A behavior worker's queues are its API crate's to open (D103),
+		// and a runtime part's its Wired's (#620).
 	case s.Worker.OnSQLite():
 		uses = append(uses, "use "+runtime+"::queue::QueueDefinition;")
 	default:

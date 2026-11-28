@@ -15,6 +15,19 @@ import (
 // All scalar types are aliases to the scalar library.
 // This enables zero-cast interoperability between different type libraries.
 
+// File.MediaType - IANA media type (MIME type): type/subtype with optional parameters, normalized to lowercase (e.g., image/png, text/csv;charset=utf-8)
+type FileMediaType = scalars.FileMediaType
+
+// ParseFileMediaType parses a string and returns a File.MediaType scalar.
+func ParseFileMediaType(s string) (FileMediaType, error) {
+	parsed, err := scalars.ParseFileMediaType(s)
+	if err != nil {
+		var zero FileMediaType
+		return zero, err
+	}
+	return FileMediaType(parsed), nil
+}
+
 // Finance.Money - Monetary amount in smallest currency unit (e.g., cents for USD)
 type FinanceMoney = scalars.FinanceMoney
 
@@ -223,6 +236,19 @@ func ParseTemporalHours(s string) (TemporalHours, error) {
 	return TemporalHours(parsed), nil
 }
 
+// Temporal.LocalDateTime - Date and time of day with no zone or offset (a wall-clock reading), normalized to 'YYYY-MM-DDTHH:MM:SS'. Accepts 'T', 't' or a space between the date and the time, and a time without seconds. Refuses a value that carries a zone or an offset.
+type TemporalLocalDateTime = scalars.TemporalLocalDateTime
+
+// ParseTemporalLocalDateTime parses a string and returns a Temporal.LocalDateTime scalar.
+func ParseTemporalLocalDateTime(s string) (TemporalLocalDateTime, error) {
+	parsed, err := scalars.ParseTemporalLocalDateTime(s)
+	if err != nil {
+		var zero TemporalLocalDateTime
+		return zero, err
+	}
+	return TemporalLocalDateTime(parsed), nil
+}
+
 // Temporal.Milliseconds - Signed integer count of milliseconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix_millis.
 type TemporalMilliseconds = scalars.TemporalMilliseconds
 
@@ -257,6 +283,22 @@ func ParseTemporalMinutes(s string) (TemporalMinutes, error) {
 		return zero, err
 	}
 	return TemporalMinutes(parsed), nil
+}
+
+// Temporal.Period - ISO 8601 duration: an amount of calendar time in years, months, weeks, days, hours, minutes and seconds (e.g., P2D, P1M, PT30M)
+type TemporalPeriod = scalars.TemporalPeriod
+
+// TemporalPeriodPattern is the validation pattern for Temporal.Period.
+var TemporalPeriodPattern = scalars.TemporalPeriodPattern
+
+// ParseTemporalPeriod parses a string and returns a Temporal.Period scalar.
+func ParseTemporalPeriod(s string) (TemporalPeriod, error) {
+	parsed, err := scalars.ParseTemporalPeriod(s)
+	if err != nil {
+		var zero TemporalPeriod
+		return zero, err
+	}
+	return TemporalPeriod(parsed), nil
 }
 
 // Temporal.Seconds - Signed integer count of seconds: an amount of elapsed time, never a point in time. An epoch timestamp is Temporal.DateTime with x-temporal-format: unix.

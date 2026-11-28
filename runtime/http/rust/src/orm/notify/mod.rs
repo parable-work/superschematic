@@ -64,6 +64,8 @@
 mod notifier;
 #[cfg(feature = "postgres")]
 mod replies;
+#[cfg(feature = "postgres")]
+mod routes;
 
 #[cfg(feature = "postgres")]
 pub use notifier::{
@@ -73,6 +75,8 @@ pub use notifier::{
 };
 #[cfg(feature = "postgres")]
 pub use replies::{approval_replies, ReplyAction, ReplyContext};
+#[cfg(feature = "postgres")]
+pub use routes::NotifierRoutes;
 
 use crate::auth::covers;
 use crate::uuid62::{parse_uuid, uuid_to_base62};

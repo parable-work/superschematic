@@ -84,8 +84,8 @@ type APIOutputConfig struct {
 	ScaffoldsOutputDir string `json:"scaffoldsOutputDir,omitempty"`
 
 	// MCP serves the API's visible @mcp operations as MCP tools at POST
-	// /api/mcp (D81). A TypeScript API and a Rust one (D116) serve it;
-	// ParseOutputs refuses it on a Go API.
+	// /api/mcp (D81). A TypeScript API, a Rust one (D116) and a Go one
+	// (#660) serve it.
 	MCP bool `json:"mcp,omitempty"`
 
 	// MCPConfirmationKey is the @envVars Secret<string> the MCP endpoint
@@ -96,10 +96,6 @@ type APIOutputConfig struct {
 	// tool that asks needs it; ParseOutputs refuses it without mcp.
 	MCPConfirmationKey string `json:"mcpConfirmationKey,omitempty"`
 }
-
-// APIMCPLanguages says which API servers serve outputs.api.mcp (D81,
-// D116), for the refusal of the other.
-const APIMCPLanguages = "a TypeScript API and a Rust API serve the MCP endpoint; Go follows"
 
 // SQLOutputConfig configures the DB kind's sql output. The DDL and the ORM
 // are implied by the kind; this block places and owns the generated
@@ -393,11 +389,6 @@ func ParseOutputs(raw map[string]any, reg *Registry) (*Outputs, error) {
 	}
 	if err := errors.Join(missingTypes...); err != nil {
 		return nil, err
-	}
-	// The TypeScript router and the Rust router serve the MCP endpoint
-	// (D81, D116); the Go router does not yet.
-	if outputs.APIEnabled() && outputs.API.MCP && outputs.API.Language == APILanguageGo {
-		return nil, fmt.Errorf("outputs.api.mcp is on and the API's language is %s: %s; set outputs.api.language to TYPESCRIPT or RUST, or remove mcp (D81)", outputs.API.Language, APIMCPLanguages)
 	}
 	// The MCP endpoint's confirmation key names a secret as the encryption
 	// key does (D93).

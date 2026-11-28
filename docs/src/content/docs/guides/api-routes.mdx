@@ -2307,8 +2307,61 @@ connection, since its access-log row is a write.
 
 `Logged` wraps the authenticator the server's `Handlers` take, and records
 a call once the router has its caller, before its permissions are
-checked. A row rule's path and `@decrypted({ permission })` are served by
-the generated table operations, as in TypeScript.
+checked. A generated Rust server wraps the implementation's authenticator
+in both itself, for a database with grants or an access log
+([the generated Rust server's wiring](#the-generated-rust-servers-wiring)).
+A row rule's path and `@decrypted({ permission })` are served by the
+generated table operations, as in TypeScript.
+
+### The generated Rust server's wiring
+
+A generated Rust server builds the runtime parts of its API's database
+itself, on Postgres (#620, #622, #617, #610): the notifier, the agent
+dispatcher, the inbound path, the calendar and search routes and MCP
+tools, the grants' authenticator and the access log, those the database
+has. The API crate's `src/wiring.rs` builds them over the database's pool,
+the API's config and its providers, in the order they take each other,
+and hands each to the implementation's `Wire`, whose methods' defaults are
+the generated wiring. The implementation declares `create_wiring`, which
+the scaffold writes, and changes or adds to a part in the method of it:
+
+```rust
+use schemas_work_api_api::{BoxError, Wire, WiringDeps};
+use superschematic_http_runtime::orm::agents::Agents;
+use superschematic_http_runtime::orm::notify::Notifier;
+
+pub async fn create_wiring(deps: &WiringDeps) -> Result<Arc<dyn Wire>, BoxError> {
+    Ok(Arc::new(Wiring { endpoint: deps.config.agent_endpoint.clone() }))
+}
+
+pub struct Wiring { endpoint: String }
+
+impl Wire for Wiring {
+    fn agent_endpoint(&self) -> String { self.endpoint.clone() }
+    fn agents(&self, agents: Agents) -> Result<Agents, BoxError> {
+        Ok(agents.with_tool("read_task", read_task()))
+    }
+    fn notifier(&self, notifier: Notifier) -> Result<Notifier, BoxError> {
+        Ok(notifier.with_reply("ticket.overdue", "done", Arc::new(MarkDone)))
+    }
+}
+```
+
+| The server | What it builds |
+| --- | --- |
+| `Deps` | `notifier`, `agents` and `inbound`, the parts the database has |
+| its routes | the agent routes under the endpoint's path, the inbox (`GET /api/inbox`, `POST /api/inbox/{id}/read` and `/ack`), the relays' routes (`POST /webhooks/{slot}/inbound` and `/status`), `/api/calendar` and `/api/search`, beside the API's router |
+| its authenticator | the implementation's inside `GrantAuthenticator` and `Logged`, as `Wire::authenticator` answers |
+| its MCP endpoint | the dispatcher's `mcp_gate` as its call gate, and the `calendar` and `search` tools |
+| a worker of a part's queue | the notifier's dispatch queue, the dispatcher's requests, the run requests and a `@searchable` queue run through the part, with no method of `Workers` |
+
+The dispatcher's endpoint defaults to the server's own agent routes on the
+loopback address and `$PORT`. An implementation that admits an agent
+run's token on the API's own routes answers
+`agents.authenticator(Some(implementation))` from `Wire::authenticator`.
+An implementation that predates the parts is refused by the build, which
+says what to add. A database that lists `sqlite` first has no generated
+wiring, as the loader refuses its parts there.
 
 The Rust outputs refuse, at build time, the platform features they do not
 serve yet: `@party`, `@conversations`, `@runRequests` and `@agents` on a
@@ -3672,7 +3725,7 @@ reads no file, on Bun, Node.js and Workers alike. It still exports
 `openapi.json` as `<package>/openapi.json`. A server that serves several
 APIs answers both routes from the first API's router.
 
-With `outputs.api.mcp` on, a TypeScript or a Rust API also serves its MCP
+With `outputs.api.mcp` on, a TypeScript, a Rust or a Go API also serves its MCP
 tools at `POST /api/mcp`
 ([An API's MCP endpoint](/superschematic/reference/mcp-tools/#an-apis-mcp-endpoint)).
 A tool whose `@mcp` says `invocationPolicy: "ask"` runs there only once

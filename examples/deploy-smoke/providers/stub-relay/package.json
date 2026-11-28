@@ -1,0 +1,17 @@
+{
+  "name": "@smoke/stub-relay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "A stub SMS channel adapter for the deploy smoke: it sends to no one and reports each message delivered, and reads the inbound texts a check posts to it as its relay would (D159).",
+  "type": "module",
+  "main": "./src/index.ts",
+  "license": "Apache-2.0",
+  "superschematic": {
+    "provider": {
+      "name": "stub-relay",
+      "implements": "channel",
+      "operations": ["send", "health", "inbound"],
+      "role": ["messages.relay"]
+    }
+  }
+}

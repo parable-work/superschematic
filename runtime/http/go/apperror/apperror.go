@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/parable-work/superschematic/runtime/http/go/requestctx"
 	"github.com/parable-work/superschematic/runtime/http/go/response"
 	"github.com/parable-work/superschematic/runtime/schema/go/validate"
 	"go.uber.org/zap"
@@ -122,6 +123,13 @@ type StructuredBodyError interface {
 func Respond(w http.ResponseWriter, logger *zap.Logger, err error) {
 	if logger == nil {
 		logger = zap.NewNop()
+	}
+
+	// A route's check that reached the implementation (D98) is no failure:
+	// it answers 204, and the implementation never ran.
+	if errors.Is(err, requestctx.ErrRouteReached) {
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
 	var structuredErr StructuredBodyError

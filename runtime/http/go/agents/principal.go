@@ -545,8 +545,8 @@ type ToolAutonomy struct {
 // MCPGate holds a call of a generated API's MCP tool to the run's
 // autonomy policy by its @autonomy (internalWrite without one), for a
 // caller an agent run's token resolved to; any other caller's runs (nil).
-// A Go server serves no MCP endpoint yet (D81, D116), so nothing calls it
-// there: it is the gate for the day one does, as Rust's mcp_gate is.
+// A generated Go API's MCP endpoint calls it through MCPCallGate (#621,
+// #660), as Rust's endpoint calls mcp_gate.
 func (a *Agents) MCPGate(ctx context.Context, principal *RunPrincipal, tool string, autonomy *ToolAutonomy, args map[string]any) (*GateOutcome, error) {
 	if principal == nil || principal.Run == "" {
 		return nil, nil
