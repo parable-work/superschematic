@@ -75,7 +75,7 @@ func TestFetchArchivesDownloadsChecksAndKeeps(t *testing.T) {
 		{dir + "/lib/", ""},
 		{dir + "/lib/libsuperscalar_ffi.a", "scalar"},
 		{dir + "/lib/libsuperschematic_versiongraph.a", "graph"},
-		{dir + "/include/superschematic_engine.h", "header"},
+		{dir + "/include/superschematic_rules.h", "header"},
 	})
 	srv, hits := releasePage(t, map[string][]byte{dir + ".tar.gz": data})
 	r := Release{Version: "1.2.3", Archives: map[string]string{"linux-x64": sum}}
@@ -88,7 +88,7 @@ func TestFetchArchivesDownloadsChecksAndKeeps(t *testing.T) {
 	if got != filepath.Join(cache, sum) {
 		t.Errorf("FetchArchives = %s, want the cache's directory named for the digest", got)
 	}
-	for name, want := range map[string]string{"lib/libsuperscalar_ffi.a": "scalar", "lib/libsuperschematic_versiongraph.a": "graph", "include/superschematic_engine.h": "header"} {
+	for name, want := range map[string]string{"lib/libsuperscalar_ffi.a": "scalar", "lib/libsuperschematic_versiongraph.a": "graph", "include/superschematic_rules.h": "header"} {
 		if data, err := os.ReadFile(filepath.Join(got, name)); err != nil || string(data) != want {
 			t.Errorf("%s holds %q, %v; want %q", name, data, err, want)
 		}
