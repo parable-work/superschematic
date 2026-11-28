@@ -65,13 +65,13 @@ name: ci
 # go-lint, so they report in minutes and not behind the go job's tests.
 #
 # The two longest jobs run in shards, a job each: go's five
-# (scripts/go-test-shard.sh) and engine-rust's five
-# (scripts/engine_rust_shards.py). Each script says what its shards run and
-# gives what no shard names to the last, rest, so the shards together run
-# what the one job ran; scripts/test_engine_rust_shards.py holds the
-# matrices below to the scripts' shards. rust and typescript run in two
-# parts each, their steps divided between them in this file, and the
-# engine workspace's lints in engine-rust-lint.
+# (scripts/go-test-shard.sh) and rules-rust's (scripts/rules_rust_shards.py).
+# Each script says what its shards run and gives what no shard names to the
+# last, rest, so the shards together run what the one job ran;
+# scripts/test_rules_rust_shards.py holds the matrices below to the scripts'
+# shards. rust and typescript run in two parts each, their steps divided
+# between them in this file, and the rules workspace's lints in
+# rules-rust-lint.
 #
 # A pull request reads the caches main's runs saved, a merge's and the
 # release candidate's, and saves none of the large ones (the Rust builds,
@@ -162,7 +162,7 @@ jobs:
         # release-pr.yml refuses to bump a tree whose sites disagree; catch
         # drift (a hand-edited package.json) on the pull request instead.
         run: python3 scripts/bump_version.py check
-      - name: The scripts' tests (bump_version.py, npm_local_specs.py, prebuilt_deps.py, engine_rust_shards.py)
+      - name: The scripts' tests (bump_version.py, npm_local_specs.py, prebuilt_deps.py, rules_rust_shards.py)
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
   go:
@@ -206,7 +206,7 @@ jobs:
 
       - name: Restore the Go build cache
         # One cache for the jobs that compile the root module and the
-        # modules over it: this job's shards, go-lint and engine-rust. The
+        # modules over it: this job's shards, go-lint and rules-rust. The
         # rest shard saves it, since it builds every module, and only
         # outside a pull request: on main those are a merge's run and the
         # release candidate's, whose caches every pull request reads. A
@@ -523,7 +523,7 @@ jobs:
     # test to have run, and behind that job's tests a gofmt or lint failure
     # showed after forty minutes. gofmt runs first, before anything is
     # built. The drift checks link superscalar's static archive, so the job
-    # stages it as engine-rust does; the checkout is restored and never
+    # stages it as rules-rust does; the checkout is restored and never
     # saved from here, since this job builds the archive alone and finishes
     # before the jobs that build the whole dependency.
     name: go-lint (gofmt / golangci-lint / catalog, schema-file types, provider schemas and behavior declarations drift)
@@ -1237,7 +1237,7 @@ jobs:
             runtime/schema/rust
             runtime/migrate/rust
           key: ${{ matrix.part }}
-          # Outside a pull request alone (engine-rust says why).
+          # Outside a pull request alone (rules-rust says why).
           save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: Start Valkey
@@ -1335,29 +1335,27 @@ jobs:
           cargo test
           cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
 
-  engine-rust:
-    # The workspace has the work queue's crate (runtime/engine-workqueue/rust)
-    # and the commerce crate (runtime/engine-commerce/rust) as members, so
-    # --workspace builds, lints and tests them too, and the behaviors'
-    # core's crates (D103): the core, its behaviors, its reference host, its
-    # wasm binding and the Rust adapter (rules-adapter).
+  rules-rust:
+    # The behaviors' core's Rust workspace (runtime/engine/rust, D103): the
+    # core, its behaviors, its reference host, its wasm bindings, the Rust
+    # adapter (rules-adapter), development and runtime mode (rules-handler,
+    # rules-dev, rules-runtime) and the Postgres layer they share (pg). The
+    # engine's crates, which this job ran beside them as engine-rust, went
+    # with the engine (D103, #587).
     #
-    # The tests run in shards, a job each: scripts/engine_rust_shards.py
+    # The tests run in shards, a job each: scripts/rules_rust_shards.py
     # says what a shard runs, and why. The rest shard also builds the two
     # binaries rules-runtime's tests run, whose tests are its own, and
     # saves the Rust cache, since it builds the most. fmt and clippy are
-    # engine-rust-lint's.
-    name: engine-rust (${{ matrix.shard }})
+    # rules-rust-lint's.
+    name: rules-rust (${{ matrix.shard }})
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        shard: [replay, transcript, core, behaviors, rest]
-    # As one job this took 26 to 29 minutes on most runs, and a slow runner
-    # took it past a thirty-minute limit in its last doc-tests, with no
-    # test failing. A shard is well inside the limit.
-    timeout-minutes: 45
+        shard: [transcript, rest]
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -1393,17 +1391,17 @@ jobs:
           key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
 
       - name: Check out the superscalar sources
-        # The engine reads schemas through runtime/schema/rust-ir, which
-        # depends on superscalar's core by path ([paths] scalar_rust).
-        # Nothing of superscalar is built here but that crate.
+        # The behaviors read scalars through superscalar's core by path
+        # ([paths] scalar_rust). Nothing of superscalar is built here but
+        # that crate, and the rest shard's archive below.
         run: scripts/superscalar-dep.sh --checkout
 
       - name: Start Postgres
-        # The engine's and the storage's tests run on SQLite, and on this
-        # Postgres too through SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL, each
-        # test in a schema of its own; without the variable they skip the
-        # Postgres pass. The image ships contrib's unaccent, which Search's
-        # full-text index uses and the engine creates as the superuser.
+        # The adapter's, development mode's and runtime mode's tests run on
+        # SQLite, and on this Postgres too through
+        # SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, each in a schema of its
+        # own; without the variable they skip the Postgres pass. pg's
+        # connection test reads SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL.
         run: |
           docker run --detach --name superschematic-pg \
             --env POSTGRES_PASSWORD=superschematic \
@@ -1452,21 +1450,17 @@ jobs:
           go build -o "$GITHUB_WORKSPACE/bin/superschematic-core" ./internal/cmd/superschematic-core
           (cd runtime/migrate/go && CGO_ENABLED=0 go build -o "$GITHUB_WORKSPACE/bin/superschematic-migrate" ./cmd/superschematic-migrate)
 
-      # The test kit's replay of the scenario corpus
-      # (runtime/engine/testdata/scenarios) runs here too, on both
-      # databases, and of the HTTP corpus through the engine's routes and
-      # its axum router; it fails when the corpus is missing. Each replays
-      # its files on threads of their own, one per core. The tests of two
-      # engines on one database (testkit/tests/replicas_*.rs) run here too;
-      # their soaks, `make engine-rust-soak`, do not. The behaviors' Rust
-      # adapter runs its store tests and replays the core's transcripts
-      # (runtime/engine/testdata/rules) on rusqlite and on this Postgres
-      # through SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, in schemas of its own;
-      # the test kit replays the hand-written core-pool.json whole, and
-      # workqueue-lease.json's expireHolder steps among its 637 (D104).
-      # Runtime mode publishes through the binaries the step above built,
-      # in process and through a job, and holds its lists in SQL to
-      # development mode's answers.
+      # The reference host replays the recorded scenarios
+      # (runtime/engine/testdata/scenarios) and the hand-written ones
+      # (runtime/engine/testdata/rules/scenarios), the hand-written
+      # core-pool.json whole and workqueue-lease.json's expireHolder steps
+      # among its 637 (D104), and holds the core's transcripts
+      # (runtime/engine/testdata/rules) to what it writes. The Rust adapter
+      # runs its store tests and replays the transcripts on rusqlite and on
+      # this Postgres through SUPERSCHEMATIC_RULES_TEST_DATABASE_URL, in
+      # schemas of its own, as development mode does. Runtime mode publishes
+      # through the binaries the step above built, in process and through a
+      # job, and holds its lists in SQL to development mode's answers.
       - name: test (this shard, on SQLite and Postgres)
         env:
           SHARD: ${{ matrix.shard }}
@@ -1474,7 +1468,7 @@ jobs:
           SUPERSCHEMATIC_RULES_TEST_DATABASE_URL: postgres://postgres:superschematic@localhost:5432/postgres?sslmode=disable
           SUPERSCHEMATIC_BIN: ${{ github.workspace }}/bin/superschematic-core
           SUPERSCHEMATIC_MIGRATE_BIN: ${{ github.workspace }}/bin/superschematic-migrate
-        run: python3 scripts/engine_rust_shards.py run "$SHARD"
+        run: python3 scripts/rules_rust_shards.py run "$SHARD"
 
       # Schedules' calendar as a project's Cargo graph may build it, jiff's
       # tzdb-zoneinfo turned on by feature unification: a zone is still the
@@ -1485,14 +1479,14 @@ jobs:
         working-directory: runtime/engine/rust
         run: cargo test -p superschematic-rules-behaviors --features jiff/tzdb-zoneinfo --test calendar_zones
 
-  engine-rust-lint:
-    # The engine workspace's format and lints, apart from its tests
-    # (engine-rust): clippy checks the workspace six times over, which a
+  rules-rust-lint:
+    # The rules workspace's format and lints, apart from its tests
+    # (rules-rust): clippy checks the workspace six times over, which a
     # test shard need not wait for, and its builds are not the tests', so
     # this job keeps a Rust cache of its own. It needs the superscalar
-    # sources (the engine reads schemas through runtime/schema/rust-ir)
-    # and no database.
-    name: engine-rust-lint (fmt / clippy on every feature combination)
+    # sources (the behaviors read scalars through its core) and no
+    # database.
+    name: rules-rust-lint (fmt / clippy on every feature combination)
     if: github.event.pull_request.draft != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1508,7 +1502,7 @@ jobs:
           rustup default "$RUST_VERSION"
 
       - name: Cache Rust dependencies
-        # Saved outside a pull request alone (engine-rust says why).
+        # Saved outside a pull request alone (rules-rust says why).
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
@@ -1526,13 +1520,13 @@ jobs:
       - name: Check out the superscalar sources
         run: scripts/superscalar-dep.sh --checkout
 
-      # The same lints as `make engine-rust`, inline: the Makefile runs
-      # the superscalar and version-graph scripts when it is parsed. Clippy
-      # runs on every feature combination (each database alone, both, and
-      # neither, and the axum router over one database, as a Rust server
-      # takes it), so a build that takes one database still compiles, with
-      # the test addon's bridge (all features) and without it (the
-      # defaults, as an addon ships).
+      # The same lints as `make rules-rust`, inline: the Makefile runs the
+      # superscalar and version-graph scripts when it is parsed. Clippy runs
+      # with every feature, with the defaults and with none, with each
+      # database alone (the adapter's sqlite; the adapter's, development
+      # mode's and runtime mode's postgres) and with development mode's
+      # server over no database, so a build that takes one database still
+      # compiles.
       - name: fmt / clippy (every feature combination)
         working-directory: runtime/engine/rust
         run: |
@@ -1540,9 +1534,9 @@ jobs:
           cargo clippy --workspace --all-targets --all-features -- -D warnings
           cargo clippy --workspace --all-targets -- -D warnings
           cargo clippy --workspace --all-targets --no-default-features -- -D warnings
-          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings
-          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings
-          cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres,superschematic-engine/axum,superschematic-engine-testkit/axum -- -D warnings
+          cargo clippy --workspace --all-targets --features superschematic-rules-adapter/sqlite -- -D warnings
+          cargo clippy --workspace --all-targets --features superschematic-rules-adapter/postgres,superschematic-rules-dev/postgres,superschematic-rules-runtime/postgres -- -D warnings
+          cargo clippy --workspace --all-targets --features superschematic-rules-dev/server -- -D warnings
 
   engine-go:
     name: engine-go (the engine's C ABI, Go binding, corpus replay and link check)
@@ -1673,19 +1667,24 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
-          cache-dependency-path: runtime/rules/go/go.sum
+          cache-dependency-path: |
+            runtime/rules/go/go.sum
+            runtime/engine/testdata/linkcheck/go.sum
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
-          workspaces: runtime/engine/rust
-          # Outside a pull request alone (engine-rust says why).
+          workspaces: |
+            runtime/engine/rust
+            runtime/versiongraph/rust
+          # Outside a pull request alone (rules-rust says why).
           save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: Restore the superscalar checkout
-        # The archive's crate is a member of the engine's workspace, which
-        # cargo loads whole, and the engine reaches superscalar's core by
-        # path; scripts/rules-archive.sh checks it out when it is missing.
+        # The archive's crate is a member of the rules workspace, which
+        # cargo loads whole, and the behaviors reach superscalar's core by
+        # path; scripts/rules-archive.sh checks it out when it is missing,
+        # and the link check builds superscalar's archive from it.
         # Restored and never saved from here (the rust job says why).
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -1740,6 +1739,17 @@ jobs:
           export CGO_LDFLAGS="$(scripts/rules-archive.sh --print)"
           cd runtime/rules/go
           go build ./... && go vet ./... && go test -race -count=1 ./...
+
+      - name: Link check (one binary over superscalar's, the version graph's and the rules' archives)
+        # Builds the three archives a generated Go server can link, checks
+        # each defines its own C functions alone, then builds
+        # runtime/engine/testdata/linkcheck, which imports the three
+        # bindings, and runs it. It ran in the engine's Go job, beside the
+        # engine's archive, until the engine went (D103, #587).
+        env:
+          GOTOOLCHAIN: go${{ env.GO_VERSION }}
+          CGO_ENABLED: "1"
+        run: scripts/engine-link-check.sh
 
       - name: golangci-lint (runtime/rules/go)
         uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
@@ -1957,8 +1967,8 @@ jobs:
       - typescript
       - python
       - rust
-      - engine-rust
-      - engine-rust-lint
+      - rules-rust
+      - rules-rust-lint
       - engine-go
       - rules-go
       - versiongraph

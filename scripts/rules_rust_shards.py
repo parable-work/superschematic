@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
-"""The Rust engine workspace's tests in shards, for CI's engine-rust job.
+"""The rules workspace's tests in shards, for CI's rules-rust job.
 
-  python3 scripts/engine_rust_shards.py run <shard>     # run a shard's tests
-  python3 scripts/engine_rust_shards.py print <shard>   # print its cargo commands
-  python3 scripts/engine_rust_shards.py shards          # print the shards' names
+  python3 scripts/rules_rust_shards.py run <shard>     # run a shard's tests
+  python3 scripts/rules_rust_shards.py print <shard>   # print its cargo commands
+  python3 scripts/rules_rust_shards.py shards          # print the shards' names
 
-`cargo test --workspace --all-features` in runtime/engine/rust runs the
-workspace's test binaries one after another, half an hour of them on a CI
-runner. The engine-rust job runs the shards in jobs of their own instead,
-and this script says which tests a shard runs, so that the shards together
-run what the one command runs (`make engine-rust` still runs the one
-command).
+`cargo test --workspace --all-features` in runtime/engine/rust, the
+behaviors' core's workspace (D103), runs the workspace's test binaries one
+after another. The rules-rust job runs the shards in jobs of their own
+instead, and this script says which tests a shard runs, so that the shards
+together run what the one command runs (`make rules-rust` still runs the
+one command). The engine's crates, whose tests took most of the half hour
+the one command took on a CI runner and four of the five shards it was
+split into, went with the engine (D103, #587).
 
 A shard is a set of integration test target names (a crate's tests/*.rs),
 not a set of crates. Every command keeps --workspace --all-features, so a
@@ -36,17 +38,15 @@ from pathlib import Path
 WORKSPACE = Path(__file__).resolve().parent.parent / "runtime" / "engine" / "rust"
 
 # The shards that name their targets, by fnmatch patterns over the
-# integration test target names. The test kit's replay of the scenario
-# corpus, one test of seven minutes; the behaviors' core's transcripts; the
-# test kit's tests of the core behaviors, with its replay of the HTTP
-# corpus; the test kit's tests of the rest. Balanced on the engine-rust
-# job's own timings: seven, five, six and a half and five minutes of
-# tests, and four for rest.
+# integration test target names: the transcripts, which the reference host
+# writes and the adapter and development mode replay on SQLite and on
+# Postgres (rules-testkit's, rules-adapter's and rules-dev's
+# tests/transcript.rs), about five of the six minutes the workspace's tests
+# take, most of it development mode's replay on Postgres. rest runs the
+# others, the unit tests and the doc-tests, a minute of them, beside the
+# build of the two binaries runtime mode's tests run.
 NAMED = {
-    "replay": ["replay"],
     "transcript": ["transcript"],
-    "core": ["core_*", "http_replay"],
-    "behaviors": ["behavior_*", "commerce_*", "replicas_*", "workqueue_*"],
 }
 
 # The shard of everything else.
@@ -71,7 +71,7 @@ def test_targets(metadata):
             if unknown:
                 raise ValueError(
                     f"{package['name']}: target {target['name']} is of kind {', '.join(sorted(unknown))}, "
-                    "which no shard selects; say in scripts/engine_rust_shards.py which shard runs it"
+                    "which no shard selects; say in scripts/rules_rust_shards.py which shard runs it"
                 )
             if "test" in target["kind"]:
                 names.add(target["name"])
@@ -130,13 +130,13 @@ def main(argv):
     try:
         todo = commands(argv[1], test_targets(workspace_metadata()))
     except ValueError as error:
-        print(f"engine_rust_shards: {error}", file=sys.stderr)
+        print(f"rules_rust_shards: {error}", file=sys.stderr)
         return 1
     except subprocess.CalledProcessError:
         # cargo said why above. Without the superscalar checkout it cannot
         # read the workspace at all.
         print(
-            "engine_rust_shards: cargo metadata failed; the workspace needs the superscalar sources "
+            "rules_rust_shards: cargo metadata failed; the workspace needs the superscalar sources "
             "(scripts/superscalar-dep.sh --checkout)",
             file=sys.stderr,
         )
