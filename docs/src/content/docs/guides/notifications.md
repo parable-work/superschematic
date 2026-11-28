@@ -149,15 +149,32 @@ Each recipient gets a notice in the inbox, numbered among their own
 (`#142`), and a delivery on the first channel their preferences name. A
 preference row maps an event kind and an urgency (each or `*`) to channel
 kinds in order, quiet hours, a time zone and a digest rule. A row with no
-principal is the default, seed data the app writes. `quietStart` and
-`quietEnd` are `Temporal.Time`, `timeZone` is a `Temporal.TimeZone` and
-`digest` is a `Temporal.RecurrenceRule`, so a write that names no time of
-day, zone or rule is refused.
+principal is the default. `quietStart` and `quietEnd` are
+`Temporal.Time`, `timeZone` is a `Temporal.TimeZone` and `digest` is a
+`Temporal.RecurrenceRule`, so a write that names no time of day, zone or
+rule is refused.
+
+The defaults are seed rows of the schema
+([`@seedRows`](/superschematic/reference/migrations/#seeded-rows)), which
+the migrations write and never overwrite: a person's own row, or an edit
+an administrator makes to the default, stays. No unique constraint holds
+the preference rows, so the seed names the fields that identify one:
+
+```ts
+@seedRows<NoticePreference>(
+  [{ principal: null, eventKind: "*", urgency: "*", channels: ["sms", "email"],
+     quietStart: "22:00", quietEnd: "07:00", timeZone: "Europe/Paris", digest: "FREQ=DAILY;BYHOUR=8;BYMINUTE=0" }],
+  { key: ["principal", "eventKind", "urgency"] },
+)
+@notifier("preferences")
+export abstract class NoticePreference {}
+```
+
+A person's own preference is a row the app writes:
 
 ```ts
 await orm.asSystem().noticePreference.createOne({
-  principal: null, eventKind: "*", urgency: "*", channels: ["sms", "email"],
-  quietStart: "22:00", quietEnd: "07:00", timeZone: "Europe/Paris", digest: "FREQ=DAILY;BYHOUR=8;BYMINUTE=0",
+  principal: ben, eventKind: "*", urgency: "normal", channels: ["email"], timeZone: "Europe/Paris",
 });
 ```
 
@@ -217,7 +234,19 @@ the same repository write the operation's route makes. The channel kind's
 trust row caps what a reply may use: `{ channelKind: "sms", level: "low",
 permissions: [] }` lets a text acknowledge and nothing else, since a
 sender id can be spoofed. A kind with no row is low. An address entered by
-hand acknowledges alone. Every reply is a row of the replies table: its
+hand acknowledges alone. The trust rows are seed rows too, keyed by the
+unique channel kind:
+
+```ts
+@seedRows<ChannelTrust>([
+  { channelKind: "sms", level: "low", permissions: [] },
+  { channelKind: "email", level: "standard", permissions: null },
+])
+@notifier("channelTrust")
+export abstract class ChannelTrust {}
+```
+
+Every reply is a row of the replies table: its
 channel, its sender, what read the text (`keyword`), what it ran, and its
 undo. Every action is echoed back with `UNDO 142`.
 
@@ -286,10 +315,10 @@ export const createRuntimeOptions: RuntimeOptionsConstructor = deps => ({
 });
 ```
 
-The seed rows of the preferences and the channels' trust, and password
-reset's routes, stay the app's. A Go or a Rust server builds no notifier
-of its own yet, and one over a database that lists sqlite first neither:
-an app builds it there as below.
+Password reset's routes stay the app's; the preferences' and the
+channels' defaults are the schema's seed rows. A Go or a Rust server
+builds no notifier of its own yet, and one over a database that lists
+sqlite first neither: an app builds it there as below.
 
 ## On SQLite and D1
 

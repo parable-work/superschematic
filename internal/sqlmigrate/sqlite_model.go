@@ -199,6 +199,9 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 	for _, s := range out.RoleSeeds {
 		m.Roles = append(m.Roles, modelRole(s, s.SQLiteInsertSQL(qs), s.SQLiteUpdateSQL(qs)))
 	}
+	for _, s := range out.SeedRows {
+		m.Rows = append(m.Rows, &SeedRow{Table: s.Table, Key: s.Key, Origin: s.Origin, Insert: s.SQLiteInsertSQL(qs)})
+	}
 	m.sort()
 	return m, nil
 }

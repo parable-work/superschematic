@@ -70,6 +70,26 @@ type Model struct {
 	// Roles are the roles a UserRole table's @seedRoles keeps in it
 	// (D88), by table and name.
 	Roles []*RoleSeed `json:"roles,omitempty"`
+
+	// Rows are the rows each table's @seedRows seeds it with (#625), by
+	// table and key.
+	Rows []*SeedRow `json:"rows,omitempty"`
+}
+
+// SeedRow is a row @seedRows declares: a row of a table the model seeded
+// the table with. A plan inserts a new one, by its table and key, and
+// never updates or deletes one: once it is in the table it is the app's to
+// edit, so a seed whose other values change has no step.
+type SeedRow struct {
+	Table string `json:"table"`
+	// Key is the row's key fields' values by field, as a JSON object.
+	Key string `json:"key"`
+	// Origin is the table's type.
+	Origin string `json:"origin,omitempty"`
+	// Insert adds the row unless the table holds a row of its key, or
+	// another unique constraint refuses it: one statement in the model's
+	// dialect, without a trailing semicolon.
+	Insert string `json:"insert"`
 }
 
 // RoleSeed is a role @seedRoles declares: a row of a UserRole table the

@@ -123,9 +123,12 @@ async function world(options: { now?: () => Date; expand?: (input: Record<string
     await sys.channelIdentity.createOne({ kind: 'phone', address: phone, principal: who, trust: 'verified', verifiedAt: new Date() });
     await sys.channelIdentity.createOne({ kind: 'email', address: email, principal: who, trust: 'verified', verifiedAt: new Date() });
   }
-  await sys.noticePreference.createOne({ principal: null, eventKind: '*', urgency: '*', channels: ['sms', 'email'] });
-  await sys.channelTrust.createOne({ channelKind: 'sms', level: 'low', permissions: [] });
-  await sys.channelTrust.createOne({ channelKind: 'email', level: 'standard', permissions: null });
+  // Everyone's preference and each channel kind's trust are the schema's
+  // seed rows (#625), which create.sql wrote: the test writes none.
+  const trust = (await sys.channelTrust.findMany({})).rows.map(r => `${r.channelKind}:${r.level}:${JSON.stringify(r.permissions ?? null)}`).sort();
+  if (trust.join(' ') !== 'email:standard:null sms:low:[]') throw new Error(`the seeded trust is ${trust.join(' ')}`);
+  const defaults = (await sys.noticePreference.findMany({ principal: { isNull: true } })).rows;
+  if (defaults.length !== 1 || defaults[0].channels.join(',') !== 'sms,email') throw new Error(`the seeded preferences are ${JSON.stringify(defaults)}`);
   await sys.noticeRoute.createOne({
     name: 'Overdue tickets page their people',
     eventKind: 'ticket.overdue',

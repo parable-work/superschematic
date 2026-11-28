@@ -206,6 +206,8 @@ func (d sqliteDialect) render(c *change) (rendered, error) {
 		return one(sqliteStep(c, c.role.Insert)), nil
 	case opUpdateRole:
 		return one(sqliteStep(c, c.role.Update)), nil
+	case opSeedRow:
+		return one(sqliteStep(c, c.row.Insert)), nil
 	case opDropTable:
 		// The tables of a reference cycle go in one step (dropTables).
 		// Every other table that references one of them is gone by then.

@@ -94,7 +94,7 @@ func mayBeJSONShape(td *ir.TypeDef) bool {
 		return false
 	}
 	if len(td.Implements) > 0 || len(td.Behaviors) > 0 || len(td.Indexes) > 0 || len(td.RawSQL) > 0 || td.SQLName != "" ||
-		len(td.SeedRoles) > 0 || len(td.EnqueueOnChange) > 0 || len(td.StateMachines) > 0 || len(td.Fences) > 0 ||
+		len(td.SeedRoles) > 0 || td.SeedRows != nil || len(td.EnqueueOnChange) > 0 || len(td.StateMachines) > 0 || len(td.Fences) > 0 ||
 		len(td.Events) > 0 || len(td.CalendarSources) > 0 {
 		return false
 	}

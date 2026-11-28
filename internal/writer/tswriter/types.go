@@ -284,6 +284,9 @@ func (e *emitter) emitClass(def *ir.TypeDef) {
 	if len(def.SeedRoles) > 0 {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("seedRoles"), seedRolesArgs(def.SeedRoles))
 	}
+	if def.SeedRows != nil {
+		fmt.Fprintf(&e.body, "@%s<%s>(%s)\n", e.use("seedRows"), def.Name, seedRowsArgs(def.SeedRows))
+	}
 	if def.VersionGraph != nil {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("versionGraph"), e.versionGraphArgs(def.VersionGraph))
 	}
