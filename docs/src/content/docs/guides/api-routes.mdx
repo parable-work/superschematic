@@ -2017,11 +2017,10 @@ already running, so its triggers count on no other to finish their work:
 | `trg_<table>_audience_update` | after each update whose resolved columns are not what its audience resolves to | the same; its condition stops it once they are, whether or not a connection turns recursive triggers on |
 | `trg_<table>_audience_cascade` | on a table another inherits from, after an update that changes a row's resolved columns | sets each inheriting child's from the parent; a table that inherits from itself sets every inheriting row below the parent through a recursive query, and then the children of each in other tables |
 
-Go's repositories on SQLite keep to an audience and grants by the same
-condition, and record the access log
-([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)).
-Rust's do not yet, so a service that lists `sqlite` is refused with Rust's
-types, naming the language.
+Go's and Rust's repositories on SQLite keep to an audience and grants by
+the same condition, and record the access log
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite),
+[In the Rust server](#in-the-rust-server)).
 
 ### Grants
 
@@ -2239,9 +2238,8 @@ database's `CrossTables()` keep each table's rows to the caller by the
 same conditions. The notifier, the parties and the agents run on SQLite
 too (#618), through the SQLite database's `Notifications()` and
 `Orchestration()`, so a Go server over a database that lists `sqlite`
-first is refused none of them. A service that enables the Rust types on SQLite is refused
-an audience, grants and the access log, naming the decorator and the
-table.
+first is refused none of them. The Rust repositories serve an audience,
+grants and the access log on SQLite too (#611).
 
 ### In the Rust server
 
@@ -2279,6 +2277,12 @@ row its answer names when the caller does not see it. So the crate
 depends on the database's Rust types and their Postgres repositories, and
 the build refuses one whose `Deps` names none.
 
+The SQLite repositories keep to the same access on a SQLite file (#611),
+`sqlite::Repositories::new(&connection)?.with_access(...)`, with the
+TypeScript repositories' conditions there
+([On SQLite and D1](#on-sqlite-and-d1)): an audience is the JSON array of
+ids the file's triggers keep, which a read reaches through `json_each`.
+
 The grants and the access log are in the runtime's `access` module:
 
 | TypeScript | Rust |
@@ -2286,6 +2290,20 @@ The grants and the access log are in the runtime's `access` module:
 | `issueGrant`, `revokeGrant`, `activeGrants` | `issue_grant`, `revoke_grant`, `active_grants` |
 | `grantAuthenticator({ orm, inner })` | `GrantAuthenticator::new(tables)?.with_inner(inner)` |
 | `accessLog: accessLogOf(orm)` | `Logged::new(authenticator, Arc::new(access_log_of(&tables)?.unwrap()))` |
+
+On a SQLite file they are in `access::sqlite`, over the SQLite
+repositories and the file's `orm::sqlite::Tables`:
+
+| Postgres (`access`) | SQLite (`access::sqlite`) |
+| --- | --- |
+| `issue_grant(&repositories, &input).await` | `issue_grant(&repositories, &input)`, in the connection's transaction |
+| `revoke_grant(&client, definition, id, at).await` | `revoke_grant(&connection, definition, id, at)` |
+| `active_grants(&client, definition, &filter).await` | `active_grants(&connection, definition, &filter)` |
+| `GrantAuthenticator::new(tables)` | `GrantAuthenticator::new(tables)`, which reads a token's grant on a reading connection of the file on every call; `authenticate_grant(&connection, definition, token, now)` is its read |
+| `access_log_of(&tables)` | `access_log_of(&tables)`, each entry a write transaction of its own; `record_access(&connection, definition, &entry, at)` writes one in yours |
+
+A table operation that may reveal a value runs on the file's writing
+connection, since its access-log row is a write.
 
 `Logged` wraps the authenticator the server's `Handlers` take, and records
 a call once the router has its caller, before its permissions are
@@ -2297,8 +2315,10 @@ serve yet: `@party`, `@conversations`, `@runRequests` and `@agents` on a
 table of a DB service with Rust types, and on a Rust server `@autonomy`
 and a provider with no Rust crate. References and attachments and the
 runtime providers are served (D185), and so are Recurrence, the calendar
-and search across tables, on Postgres (D188): a Rust server whose database
-lists `sqlite` first is refused Recurrence and a calendar source. Events,
+and search across tables, on Postgres (D188) and on SQLite (#615): a Rust
+server whose database lists `sqlite` first serves Recurrence on the file,
+and `orm::calendar::sqlite` and `orm::search_tables::sqlite` read the
+calendar and search it there. Events,
 the notifier's tables and the channel identities are served on Postgres
 too (D191), through the runtime's `orm::notify`.
 
@@ -2306,8 +2326,8 @@ too (D191), through the runtime's `orm::notify`.
 
 | Not built | Until then |
 | --- | --- |
-| the Rust repositories' audience on SQLite | the TypeScript and Go repositories serve it there, and a service that lists `sqlite` and declares an audience builds no Rust types |
-| the Rust repositories' grants and access log on SQLite | the TypeScript and Go repositories serve them there, a service that lists `sqlite` and declares either builds no Rust types, and the Rust server serves them on Postgres |
+| a generated Rust server over a database that lists `sqlite` first that wires the grants' authenticator and the access log | build `access::sqlite::GrantAuthenticator` and `Logged` over the file's tables in the implementation |
+| a generated Rust server over a database that lists `sqlite` first that mounts the calendar's and the search's routes and runs the search queue's worker | merge `orm::calendar::sqlite::calendar_routes` and `orm::search_tables::sqlite::search_routes` into the router, and call `index_search` in a worker of the queue |
 | a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists only the active grants, and a declared query of them | `activeGrants` in the TypeScript runtime, or a `@tableOperation` over a view of every grant |
