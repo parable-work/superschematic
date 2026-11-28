@@ -24,6 +24,7 @@ var goAccessCases = []string{
 	"a private row never appears to another user in a list, a read or a search",
 	"the reads, counts and writes of the repositories keep to the caller",
 	"a named row is visible to its owner and to the principals it names",
+	"a member of a nested team sees a row named for the outer team, and stops seeing it once removed",
 	"a document inherits its folder's audience, and follows it when the folder's changes",
 	"an agent run sees what whom it acts for sees, and writes no read-only row",
 	"a row rule follows a path through the table's relations",
@@ -388,7 +389,7 @@ func TestAccess(t *testing.T) {
 	ctx := context.Background()
 	db := openDatabase(t)
 	router := chi.NewRouter()
-	router.Use(session.GrantAuthenticator(db, callers, nil))
+	router.Use(session.TeamAuthenticator(db, session.GrantAuthenticator(db, callers, nil)))
 	if err := api.RegisterRoutes(router, api.Config{DB: db, Logger: zap.NewNop()}); err != nil {
 		t.Fatal(err)
 	}
@@ -550,6 +551,57 @@ func TestAccess(t *testing.T) {
 		}
 		if slices.Contains(texts(as(other).items("/documents"), "title"), "Shared notes") {
 			t.Error("another lists it")
+		}
+	})
+
+	t.Run("a member of a nested team sees a row named for the outer team, and stops seeing it once removed", func(t *testing.T) {
+		// The named one is in the inner team, which is in the outer team; the
+		// outer team is in the inner one too, a cycle the read of a caller's
+		// teams ends.
+		outer, err := db.GetTeamRepository().CreateOne(system, &dbtypes.Team{Name: "Outer"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		inner, err := db.GetTeamRepository().CreateOne(system, &dbtypes.Team{Name: "Inner"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		membership, err := db.GetTeamMemberRepository().CreateOne(system, &dbtypes.TeamMember{Team: *inner.Id, Member: id(t, namedID)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, m := range []dbtypes.TeamMember{{Team: *outer.Id, Member: *inner.Id}, {Team: *inner.Id, Member: *outer.Id}} {
+			if _, err := db.GetTeamMemberRepository().CreateOne(system, &m); err != nil {
+				t.Fatal(err)
+			}
+		}
+		doc, err := db.GetDocumentRepository().CreateOne(asOwner, &dbtypes.Document{Title: "For the outer team", Audience: "named", AudienceNamed: []dbtypes.IdentityUUID{*outer.Id}, AgentAccess: "readOnly"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		path := "/documents/" + doc.Id.String()
+		is(t, "the member's read", as(named).status(http.MethodGet, path, nil), http.StatusOK)
+		if !slices.Contains(texts(as(named).items("/documents"), "title"), "For the outer team") {
+			t.Error("the member does not list it")
+		}
+		is(t, "an agent run's for the member", as("agent="+runID+"/"+namedID+reads).status(http.MethodGet, path, nil), http.StatusOK)
+		is(t, "a read of one in no team", as(other).status(http.MethodGet, path, nil), http.StatusNotFound)
+		if slices.Contains(texts(as(other).items("/documents"), "title"), "For the outer team") {
+			t.Error("one in no team lists it")
+		}
+		teams, err := db.Teams(ctx, []string{namedID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(teams) != 2 {
+			t.Errorf("the member's teams are %v, want the inner and the outer once each", teams)
+		}
+		if err := db.GetTeamMemberRepository().DeleteOne(system, *membership.Id); err != nil {
+			t.Fatal(err)
+		}
+		is(t, "the read once removed", as(named).status(http.MethodGet, path, nil), http.StatusNotFound)
+		if slices.Contains(texts(as(named).items("/documents"), "title"), "For the outer team") {
+			t.Error("the member removed still lists it")
 		}
 	})
 

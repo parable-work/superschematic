@@ -155,6 +155,16 @@ func WriteORMWithProfile(output *ORMOutput, outputDir string, prof *profile.Prof
 	} else if err := os.Remove(audienceResolveFile); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove audience_resolve.go: %w", err)
 	}
+	// teams.go reads a caller's teams (#735); a database with none has none,
+	// so a file an earlier build wrote goes.
+	teamsFile := filepath.Join(outputDir, "teams.go")
+	if output.Access != nil && output.Access.Teams != "" {
+		if err := generateFile(generator, "teams.tmpl", teamsFile, output); err != nil {
+			return fmt.Errorf("failed to write teams.go: %w", err)
+		}
+	} else if err := os.Remove(teamsFile); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove teams.go: %w", err)
+	}
 	// access_sqlite.go holds the same access on SQLite (D182, #611), for a
 	// database whose repositories keep to a caller and that lists sqlite.
 	accessSQLiteFile := filepath.Join(outputDir, "access_sqlite.go")

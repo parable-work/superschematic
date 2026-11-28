@@ -54,7 +54,7 @@ import (
 {{- if $w.Builds }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/notify"
 {{- end }}
-{{- if or $w.Grants $w.CrossTables $w.Agents }}
+{{- if or $w.Grants $w.Teams $w.CrossTables $w.Agents }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/session"
 {{- end }}
 {{- if .RuntimeWorkers }}
@@ -294,7 +294,18 @@ func ProcessPendingFiles(ctx context.Context, deps Deps, wiring Wiring) (filepro
 {{- else }}
 // as it is: the database keeps no grants.
 {{- end }}
+{{- if $w.Teams }}
+// The caller it establishes then gets its teams, read on every call
+// (#735), so an audience that names a team admits each of its members.
 func Authenticator(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring, inner func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+	return session.TeamAuthenticator(db, authenticator(deps, db, wiring, inner))
+}
+
+// authenticator is Authenticator but the caller's teams.
+func authenticator(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring, inner func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+{{- else }}
+func Authenticator(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring, inner func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+{{- end }}
 {{- if and $w.Agents $w.Grants }}
 	if deps.Agents != nil {
 		return deps.Agents.Authenticator(db, inner, wiring.Authenticator)

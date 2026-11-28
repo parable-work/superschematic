@@ -52,6 +52,11 @@ pub struct Principal {
     /// with grants reaches, of a table, only the rows one of them reaches.
     /// `None` for a user, who reaches rows through roles and row rules.
     pub grants: Option<Vec<GrantReach>>,
+    /// The teams the principal belongs to (#735), directly or through
+    /// another team, by their ids, which [`crate::access::TeamAuthenticator`]
+    /// reads on every call: an audience that names one admits the
+    /// principal. `None` for a principal in no team.
+    pub teams: Option<Vec<String>>,
     /// The credential the call came with, for the access log (D114, D156):
     /// an API key's or a grant's id; `None` for a session.
     pub credential: Option<Credential>,
@@ -145,6 +150,7 @@ impl fmt::Debug for Principal {
             .field("kind", &self.kind)
             .field("acting_for", &self.acting_for)
             .field("grants", &self.grants)
+            .field("teams", &self.teams)
             .field("credential", &self.credential)
             .finish()
     }

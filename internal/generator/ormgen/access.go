@@ -57,6 +57,12 @@ type AccessModel struct {
 	// rows that inherit from one parent: audience_resolve.go's
 	// ResolveAudience runs it.
 	Resolves []AudienceResolve
+
+	// Teams and SQLiteTeams are the statement that reads the teams ids are
+	// members of, through every nesting, over the @teamMembers table (#735,
+	// sqlutil.TeamsSQL), on Postgres and on SQLite; empty for a database
+	// with no teams. teams.go runs them.
+	Teams, SQLiteTeams string
 }
 
 // AudienceResolve is a table whose @audience names a queue, by its type,
@@ -104,9 +110,9 @@ type AccessStep struct {
 // accessOf is the access model of schema's tables, nil for a database
 // with no @audience table, no @accessGrants table and no @accessLog.
 func accessOf(schema *ir.Schema, tables []sqlutil.TableModel, repositories []Repository, projections []ProjectionRepository) (*AccessModel, error) {
-	grants, log := schema.AccessGrantsTable(), schema.AccessLogTable()
+	grants, log, members := schema.AccessGrantsTable(), schema.AccessLogTable(), schema.TeamMembersTable()
 	audiences := schema.AudienceTables()
-	if grants == nil && log == nil && len(audiences) == 0 {
+	if grants == nil && log == nil && members == nil && len(audiences) == 0 {
 		return nil, nil
 	}
 	model := &AccessModel{Held: grants != nil || len(audiences) > 0}
@@ -120,6 +126,20 @@ func accessOf(schema *ir.Schema, tables []sqlutil.TableModel, repositories []Rep
 	}
 	if log != nil {
 		model.Log = log.Name
+	}
+	if members != nil {
+		for i := range tables {
+			if tables[i].Type != members.Name {
+				continue
+			}
+			var err error
+			if model.Teams, err = sqlutil.TeamsSQL(tables[i]); err != nil {
+				return nil, err
+			}
+			if model.SQLiteTeams, err = sqlutil.SQLiteTeamsSQL(tables[i]); err != nil {
+				return nil, err
+			}
+		}
 	}
 	served := map[string]bool{}
 	for _, repo := range repositories {

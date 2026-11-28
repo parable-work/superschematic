@@ -177,6 +177,16 @@ pub use self::grants::*;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
+/// A caller's teams (#735): the authenticator that puts them on the
+/// principal, read on every call, on Postgres and on a SQLite file
+/// (`access::teams::sqlite`).
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub mod teams;
+#[cfg(any(feature = "postgres", feature = "sqlite"))]
+pub use self::teams::{team_subjects, TeamAuthenticator, TeamReader};
+#[cfg(feature = "postgres")]
+pub use self::teams::{teams_of, PostgresTeams};
+
 /// What the grants and the table access log read and write in either
 /// dialect: a grant's token and its row, a role's reaches, whether a
 /// grant's own columns end it, the principal it establishes, and an access

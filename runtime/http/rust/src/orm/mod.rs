@@ -380,9 +380,16 @@ pub struct Table {
     pub audience: Option<Audience>,
     /// What the table is to per-record access (D156): `grants`, the table
     /// of grants; `log`, the access log; `roles`, the UserRole table whose
-    /// rows a grant's role names. None for every other.
+    /// rows a grant's role names; `teamMembers`, the membership of the
+    /// `@team` table's teams (#735). None for every other.
     #[serde(default)]
     pub access: Option<String>,
+    /// On the `@teamMembers` table (#735), the statement that reads the
+    /// teams the ids of its one parameter are members of, through every
+    /// nesting, in the definition's dialect: on Postgres a `UUID[]`, on
+    /// SQLite a JSON array of their text. [`crate::access::teams_of`] runs it.
+    #[serde(default)]
+    pub teams: Option<String>,
     /// The table's `@calendarSource` declarations (D152), which
     /// [`calendar::read_calendar`] merges; none for most tables, and on
     /// Postgres alone (D188).
@@ -582,6 +589,9 @@ pub const ACCESS_LOG: &str = "log";
 /// What [`Table::access`] names: the UserRole table a grant's role is a
 /// row of (D156).
 pub const ACCESS_ROLES: &str = "roles";
+/// What [`Table::access`] names: the membership of the `@team` table's
+/// teams (#735), whose [`Table::teams`] reads a caller's teams.
+pub const ACCESS_TEAM_MEMBERS: &str = "teamMembers";
 
 /// A fence of a table, a @fenced field (D119): a counter every write of a
 /// column it covers sets to the stored value plus one, which a trigger
@@ -1663,6 +1673,9 @@ pub struct AccessCaller {
     /// The grants the caller calls through: a caller with grants reaches,
     /// of a table, only the rows one of them reaches.
     pub grants: Option<Vec<GrantReach>>,
+    /// The teams the caller belongs to, by their ids (#735): an audience
+    /// that names one admits it.
+    pub teams: Option<Vec<String>>,
 }
 
 impl AccessCaller {
@@ -1682,12 +1695,13 @@ impl AccessCaller {
             kind: principal.kind,
             acting_for: principal.acting_for.clone(),
             grants: principal.grants.clone(),
+            teams: principal.teams.clone(),
         }
     }
 
-    /// The ids an audience admits the caller by (D156): its subject, and
-    /// for an agent run whom it acts for, each a UUID, hyphenated; a
-    /// subject that is no UUID admits by none.
+    /// The ids an audience admits the caller by (D156): its subject, for
+    /// an agent run whom it acts for, and the teams it belongs to (#735),
+    /// each a UUID, hyphenated; a subject that is no UUID admits by none.
     pub fn audience_ids(&self) -> Vec<String> {
         let acting_for = match self.kind {
             PrincipalKind::Agent => self.acting_for.as_ref().map(|a| a.subject.as_str()),
@@ -1696,6 +1710,7 @@ impl AccessCaller {
         [self.subject.as_deref(), acting_for]
             .into_iter()
             .flatten()
+            .chain(self.teams.iter().flatten().map(String::as_str))
             .filter_map(parse_uuid)
             .map(|uuid| uuid.hyphenated().to_string())
             .collect()

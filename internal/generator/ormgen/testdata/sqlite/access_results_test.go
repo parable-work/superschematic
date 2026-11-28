@@ -58,6 +58,7 @@ func accessAnswer(value any, err error) any {
 type accessFixture struct {
 	db        DatabaseInterface
 	authority access.GrantAuthority
+	teams     access.TeamAuthority
 	contract  func(ctx context.Context, id, name string) error
 }
 
@@ -187,6 +188,59 @@ func accessScript(t *testing.T, f accessFixture) []accessCall {
 	title := "rewritten by an agent"
 	_, err = db.GetDocumentRepository().UpdateOne(agent, inPrivate, &DocumentUpdate{Title: &title})
 	record("an agent run rewrites a readOnly document", nil, err)
+
+	// Teams (#735): carol is in the inner team, which is in the outer team,
+	// and the outer team is in the inner one, a cycle the read of her teams
+	// ends. A folder named for the outer team is hers to see while she is a
+	// member, and bob's never.
+	team := func(name string) types.IdentityUUID {
+		t.Helper()
+		created, err := db.GetTeamRepository().CreateOne(ctx, &types.Team{Name: name})
+		if err != nil {
+			t.Fatalf("create the team %s: %v", name, err)
+		}
+		return *created.Id
+	}
+	outer, inner := team("outer"), team("inner")
+	membership, err := db.GetTeamMemberRepository().CreateOne(ctx, &types.TeamMember{Team: inner, Member: accessID(t, carol)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range []types.TeamMember{{Team: outer, Member: inner}, {Team: inner, Member: outer}} {
+		if _, err := db.GetTeamMemberRepository().CreateOne(ctx, &m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	forTheTeam, err := db.GetFolderRepository().CreateOne(ctx, &types.Folder{Name: "for the team", Owner: accessID(t, ada), Audience: "named", AudienceNamed: []types.IdentityUUID{outer}, AgentAccess: "followRole"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	withTeams := func(who uuid.UUID) context.Context {
+		t.Helper()
+		teams, err := f.teams.Teams(ctx, []string{who.String()})
+		if err != nil {
+			t.Fatalf("the teams of %s: %v", who, err)
+		}
+		return as(access.Principal{Subject: who.String(), Kind: access.KindUser, Teams: teams})
+	}
+	carolTeams, err := f.teams.Teams(ctx, []string{carol.String()})
+	record("carol's teams, through the cycle", len(carolTeams), err)
+	got, err = db.GetFolderRepository().GetOne(withTeams(carol), *forTheTeam.Id, nil)
+	if err == nil {
+		record("carol gets the folder named for her outer team", got.Name, nil)
+	} else {
+		record("carol gets the folder named for her outer team", nil, err)
+	}
+	_, err = db.GetFolderRepository().GetOne(withTeams(bob), *forTheTeam.Id, nil)
+	record("bob, in no team, gets the folder named for the team", nil, err)
+	if err := db.GetTeamMemberRepository().DeleteOne(ctx, *membership.Id); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.GetFolderRepository().GetOne(withTeams(carol), *forTheTeam.Id, nil)
+	record("carol gets the folder once out of the inner team", nil, err)
+	if err := db.GetFolderRepository().DeleteOne(ctx, *forTheTeam.Id); err != nil {
+		t.Fatal(err)
+	}
 
 	// A folder opened to everyone opens the documents that inherit from it.
 	everyone := "everyone"
@@ -320,7 +374,7 @@ func TestAccessOnSQLiteAndPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer lite.Close()
-	onSQLite := accessScript(t, accessFixture{db: lite, authority: lite, contract: func(ctx context.Context, id, name string) error {
+	onSQLite := accessScript(t, accessFixture{db: lite, authority: lite, teams: lite, contract: func(ctx context.Context, id, name string) error {
 		_, err := lite.ExecContext(ctx, `INSERT INTO contract (id, "name") VALUES (?1, ?2)`, id, name)
 		return err
 	}})
@@ -354,7 +408,11 @@ func TestAccessOnSQLiteAndPostgres(t *testing.T) {
 		"an unknown token":                                                 "grant refused",
 		"the active grants after the expiring one ended":                   1,
 		"carol reads the folders by their keys":                            1,
-		"the access log":                                                   []string{"agentRead listDocuments <nil> <nil>", "reveal getContract Contract terms"},
+		"carol's teams, through the cycle":                                 2,
+		"carol gets the folder named for her outer team":                   "for the team",
+		"bob, in no team, gets the folder named for the team":              "not found",
+		"carol gets the folder once out of the inner team":                 "not found",
+		"the access log": []string{"agentRead listDocuments <nil> <nil>", "reveal getContract Contract terms"},
 	}
 	for _, call := range onSQLite {
 		if w, ok := want[call.name]; ok && !reflect.DeepEqual(call.answer, w) {
@@ -400,7 +458,7 @@ func TestAccessOnSQLiteAndPostgres(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer postgres.Close()
-	onPostgres := accessScript(t, accessFixture{db: postgres, authority: postgres, contract: func(ctx context.Context, id, name string) error {
+	onPostgres := accessScript(t, accessFixture{db: postgres, authority: postgres, teams: postgres, contract: func(ctx context.Context, id, name string) error {
 		_, err := pool.Exec(ctx, `INSERT INTO contract (id, "name") VALUES ($1, $2)`, id, name)
 		return err
 	}})
