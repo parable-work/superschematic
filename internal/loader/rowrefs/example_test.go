@@ -34,4 +34,26 @@ func TestReferencesFilesExampleLoads(t *testing.T) {
 			t.Errorf("issues-db's %s is %+v", queue, td)
 		}
 	}
+
+	// issues-api serves the issue's conversation and the references,
+	// backlinks and files of issues and notes as generated operations
+	// (#723), the files in its one bucket.
+	api, err := loader.LoadService(filepath.Join(dir, "..", "issues-api"), loader.WithRegistry(registry.New(naming.Default())), loader.WithDependencyLoader(func(string) (*ir.Schema, error) { return db, nil }))
+	if err != nil {
+		t.Fatalf("load issues-api: %v", err)
+	}
+	served := map[string][]string{}
+	for _, set := range api.OperationSets {
+		for _, op := range set.Operations {
+			if marker := op.RowFeatureOperation; marker != nil {
+				served[set.Name] = append(served[set.Name], op.Name)
+				if ir.RowFeatureOperationTakesBucket(op.Name) && marker.Bucket != "issues-files" {
+					t.Errorf("%s.%s reads the bucket %q, want issues-files", set.Name, op.Name, marker.Bucket)
+				}
+			}
+		}
+	}
+	if len(served["IssueOperations"]) != len(ir.RowFeatureOperationNames) || len(served["NoteOperations"]) != len(ir.RowFeatureOperationNames)-1 {
+		t.Errorf("issues-api serves %v", served)
+	}
 }

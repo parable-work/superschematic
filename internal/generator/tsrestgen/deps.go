@@ -272,6 +272,9 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 	if err := o.checkGraphDeps(deps); err != nil {
 		return err
 	}
+	if err := o.checkRowFeatureDeps(deps); err != nil {
+		return err
+	}
 	if err := o.checkBehaviorWorkers(deps); err != nil {
 		return err
 	}
