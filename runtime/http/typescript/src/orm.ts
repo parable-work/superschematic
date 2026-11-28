@@ -3520,7 +3520,7 @@ class TableRepository {
    * it computes through its reads: a reader's own (Comments' unread). The
    * caller must reach the row as a read does, and the read writes nothing.
    */
-  private async view(useId: string, key: unknown, options: RulesTableCallOptions = {}): Promise<Readonly<Record<string, unknown>>> {
+  private async operateView(useId: string, key: unknown, options: RulesTableCallOptions = {}): Promise<Readonly<Record<string, unknown>>> {
     try {
       await this.requireReach(key, false);
     } catch (error) {
@@ -3622,7 +3622,7 @@ class TableRepository {
           : (key: unknown, params: unknown, options?: RulesCallOptions) => this.operate(use.id, operation.name, operation.writes, key, params, options);
       }
       // A reader's own fields, read through the core as the caller (#713).
-      if (use.view?.length) operations.view = (key: unknown, options?: RulesTableCallOptions) => this.view(use.id, key, options);
+      if (use.view?.length) operations.view = (key: unknown, options?: RulesTableCallOptions) => this.operateView(use.id, key, options);
       Object.defineProperty(this, member, { value: Object.freeze(operations), enumerable: true });
     }
   }

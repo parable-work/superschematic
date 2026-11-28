@@ -64,6 +64,8 @@ export interface Caller {
   readonly agent?: string;
   /** How the host verified the caller for this call (D200), which an Approvals requirement's proof reads. */
   readonly assurance?: { readonly signedInAt?: number; readonly userVerified?: boolean };
+  /** The channel kind the call came over (D157, #606), which Comments records as a message's via; absent for a call over the API. */
+  readonly channel?: string;
 }
 
 /** What a command does (superschematic_rules::Action), tagged by kind. Open: a host matches it with a fallback. */

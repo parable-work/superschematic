@@ -41,8 +41,8 @@ func TestWriteRustAPIGoldenComments(t *testing.T) {
 	slices.Sort(behaviors)
 	var want []string
 	for _, route := range []string{
-		"delete-message deleteMessage", "edit edit", "get-message getMessage", "list-edits listEdits",
-		"list-messages listMessages", "list-pinned listPinned", "list-reactions listReactions", "pin pin",
+		"delete-message deleteMessage", "edit edit", "follow follow", "get-message getMessage", "list-edits listEdits",
+		"list-messages listMessages", "list-pinned listPinned", "list-reactions listReactions", "mark-read markRead", "pin pin",
 		"post post", "purge purge", "react react", "reopen reopen", "resolve resolve", "unpin unpin", "unreact unreact",
 	} {
 		path, operation, _ := strings.Cut(route, " ")

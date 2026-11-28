@@ -149,6 +149,12 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/ticket/{id}/comments/edit",
 			Handler: createTicketCommentsCommentsEditHandler(cfg.DB),
 		},
+		// Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.
+		{
+			Method:  "POST",
+			Path:    "/ticket/{id}/comments/follow",
+			Handler: createTicketCommentsCommentsFollowHandler(cfg.DB),
+		},
 		// Reads one message of the conversation, a deleted one included; a composing one's body is its draft so far, from which a reader follows the draft signals.
 		{
 			Method:  "POST",
@@ -178,6 +184,12 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Method:  "POST",
 			Path:    "/ticket/{id}/comments/list-reactions",
 			Handler: createTicketCommentsCommentsListReactionsHandler(cfg.DB),
+		},
+		// Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.
+		{
+			Method:  "POST",
+			Path:    "/ticket/{id}/comments/mark-read",
+			Handler: createTicketCommentsCommentsMarkReadHandler(cfg.DB),
 		},
 		// Pins a posted or interrupted message, top-level or a reply. Needs pinPermission when the config names one.
 		{
@@ -359,6 +371,70 @@ func createTicketCommentsCommentsEditHandler(db orm.DatabaseInterface) gohttp.Ha
 		// Run the operation through the ORM, as the request's caller (D103)
 		var result types.TicketCommentsCommentMessage
 		if err := runBehaviorOperation(r.Context(), db.GetTicketRepository().Comments().Edit, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTicketCommentsCommentsFollowHandler creates a handler for POST /api/ticket/{id}/comments/follow
+//
+// Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.
+//
+// It runs Ticket's Comments follow, a Comments (D103), through the
+// ORM of fixture-comments-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createTicketCommentsCommentsFollowHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.TicketCommentsFollowInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.TicketCommentsFollowResult
+		if err := runBehaviorOperation(r.Context(), db.GetTicketRepository().Comments().Follow, Id, input, &result); err != nil {
 			respondBehaviorError(w, r, err)
 			return
 		}
@@ -679,6 +755,70 @@ func createTicketCommentsCommentsListReactionsHandler(db orm.DatabaseInterface) 
 		// Run the operation through the ORM, as the request's caller (D103)
 		var result types.TicketCommentsListReactionsResult
 		if err := runBehaviorOperation(r.Context(), db.GetTicketRepository().Comments().ListReactions, Id, input, &result); err != nil {
+			respondBehaviorError(w, r, err)
+			return
+		}
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createTicketCommentsCommentsMarkReadHandler creates a handler for POST /api/ticket/{id}/comments/mark-read
+//
+// Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it.
+//
+// It runs Ticket's Comments markRead, a Comments (D103), through the
+// ORM of fixture-comments-db, which runs it through the behaviors' core in a
+// transaction: no implementation method serves it.
+func createTicketCommentsCommentsMarkReadHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.TicketCommentsMarkReadInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Run the operation through the ORM, as the request's caller (D103)
+		var result types.TicketCommentsMarkReadResult
+		if err := runBehaviorOperation(r.Context(), db.GetTicketRepository().Comments().MarkRead, Id, input, &result); err != nil {
 			respondBehaviorError(w, r, err)
 			return
 		}

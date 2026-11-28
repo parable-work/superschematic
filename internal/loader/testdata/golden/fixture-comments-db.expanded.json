@@ -736,6 +736,14 @@
           ],
           "unique": true,
           "origin": "behavior"
+        },
+        {
+          "keys": [
+            "blocks"
+          ],
+          "method": "gin",
+          "ops": "jsonb_path_ops",
+          "origin": "behavior"
         }
       ],
       "origin": "behavior",
@@ -1539,6 +1547,14 @@
             "message"
           ],
           "unique": true,
+          "origin": "behavior"
+        },
+        {
+          "keys": [
+            "blocks"
+          ],
+          "method": "gin",
+          "ops": "jsonb_path_ops",
           "origin": "behavior"
         }
       ],

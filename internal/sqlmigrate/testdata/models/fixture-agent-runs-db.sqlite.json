@@ -4584,6 +4584,12 @@
           "type": "TEXT"
         },
         {
+          "name": "via",
+          "nullable": true,
+          "origin": "TaskCommentsMessages.via",
+          "type": "TEXT"
+        },
+        {
           "name": "state",
           "nullable": true,
           "origin": "TaskCommentsMessages.state",

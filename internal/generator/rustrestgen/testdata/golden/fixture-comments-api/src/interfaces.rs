@@ -30,6 +30,17 @@ pub struct TicketCommentsCommentsEditArgs {
     pub input: types::TicketCommentsEditInput,
 }
 
+/// The arguments of ticket-comments.commentsFollow (`POST /api/ticket/{id}/comments/follow`),
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
+#[derive(Debug, Clone)]
+pub struct TicketCommentsCommentsFollowArgs {
+    /// The `id` path parameter.
+    pub id: types::IdentityUUID,
+    /// The request body.
+    pub input: types::TicketCommentsFollowInput,
+}
+
 /// The arguments of ticket-comments.commentsGetMessage (`POST /api/ticket/{id}/comments/get-message`),
 /// decoded and checked by the router. `check` makes the same checks on
 /// arguments a caller builds.
@@ -83,6 +94,17 @@ pub struct TicketCommentsCommentsListReactionsArgs {
     pub id: types::IdentityUUID,
     /// The request body.
     pub input: types::TicketCommentsListReactionsInput,
+}
+
+/// The arguments of ticket-comments.commentsMarkRead (`POST /api/ticket/{id}/comments/mark-read`),
+/// decoded and checked by the router. `check` makes the same checks on
+/// arguments a caller builds.
+#[derive(Debug, Clone)]
+pub struct TicketCommentsCommentsMarkReadArgs {
+    /// The `id` path parameter.
+    pub id: types::IdentityUUID,
+    /// The request body.
+    pub input: types::TicketCommentsMarkReadInput,
 }
 
 /// The arguments of ticket-comments.commentsPin (`POST /api/ticket/{id}/comments/pin`),

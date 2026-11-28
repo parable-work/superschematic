@@ -22,8 +22,8 @@ var commentsFixtures = behaviorFixtures{"fixture-comments-api", "fixture-comment
 // repository's operation under Comments(): the operations a table runs,
 // every writing one beside the row.
 var commentsRoutes = []string{
-	"delete-message DeleteMessage", "edit Edit", "get-message GetMessage", "list-edits ListEdits",
-	"list-messages ListMessages", "list-pinned ListPinned", "list-reactions ListReactions", "pin Pin",
+	"delete-message DeleteMessage", "edit Edit", "follow Follow", "get-message GetMessage", "list-edits ListEdits",
+	"list-messages ListMessages", "list-pinned ListPinned", "list-reactions ListReactions", "mark-read MarkRead", "pin Pin",
 	"post Post", "purge Purge", "react React", "reopen Reopen", "resolve Resolve", "unpin Unpin", "unreact Unreact",
 }
 

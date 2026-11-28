@@ -39,6 +39,21 @@ pub const TICKET_COMMENTS_COMMENTS_EDIT: OperationInfo = OperationInfo {
     service: None,
 };
 
+/// ticket-comments.commentsFollow (`POST /api/ticket/{id}/comments/follow`), which the behaviors'
+/// core runs: Ticket's Comments follow, a Comments (D103).
+pub const TICKET_COMMENTS_COMMENTS_FOLLOW: OperationInfo = OperationInfo {
+    namespace: "ticket-comments",
+    name: "commentsFollow",
+    method: "POST",
+    path: "/api/ticket/{id}/comments/follow",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
 /// ticket-comments.commentsGetMessage (`POST /api/ticket/{id}/comments/get-message`), which the behaviors'
 /// core runs: Ticket's Comments getMessage, a Comments (D103).
 pub const TICKET_COMMENTS_COMMENTS_GET_MESSAGE: OperationInfo = OperationInfo {
@@ -106,6 +121,21 @@ pub const TICKET_COMMENTS_COMMENTS_LIST_REACTIONS: OperationInfo = OperationInfo
     name: "commentsListReactions",
     method: "POST",
     path: "/api/ticket/{id}/comments/list-reactions",
+    requires_auth: true,
+    permissions: &[],
+    require_ownership: false,
+    manual: false,
+    rate_limit: None,
+    service: None,
+};
+
+/// ticket-comments.commentsMarkRead (`POST /api/ticket/{id}/comments/mark-read`), which the behaviors'
+/// core runs: Ticket's Comments markRead, a Comments (D103).
+pub const TICKET_COMMENTS_COMMENTS_MARK_READ: OperationInfo = OperationInfo {
+    namespace: "ticket-comments",
+    name: "commentsMarkRead",
+    method: "POST",
+    path: "/api/ticket/{id}/comments/mark-read",
     requires_auth: true,
     permissions: &[],
     require_ownership: false,
@@ -238,11 +268,13 @@ pub const TICKET_COMMENTS_COMMENTS_UNREACT: OperationInfo = OperationInfo {
 pub const ALL: &[OperationInfo] = &[
     TICKET_COMMENTS_COMMENTS_DELETE_MESSAGE,
     TICKET_COMMENTS_COMMENTS_EDIT,
+    TICKET_COMMENTS_COMMENTS_FOLLOW,
     TICKET_COMMENTS_COMMENTS_GET_MESSAGE,
     TICKET_COMMENTS_COMMENTS_LIST_EDITS,
     TICKET_COMMENTS_COMMENTS_LIST_MESSAGES,
     TICKET_COMMENTS_COMMENTS_LIST_PINNED,
     TICKET_COMMENTS_COMMENTS_LIST_REACTIONS,
+    TICKET_COMMENTS_COMMENTS_MARK_READ,
     TICKET_COMMENTS_COMMENTS_PIN,
     TICKET_COMMENTS_COMMENTS_POST,
     TICKET_COMMENTS_COMMENTS_PURGE,

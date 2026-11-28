@@ -49,11 +49,13 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | --- | --- | --- | --- |
 | `POST` | `/api/ticket/{id}/comments/delete-message` | `ticket-comments.commentsDeleteMessage` (behavior: Ticket.Comments, a Comments) | authenticated |
 | `POST` | `/api/ticket/{id}/comments/edit` | `ticket-comments.commentsEdit` (behavior: Ticket.Comments, a Comments) | authenticated |
+| `POST` | `/api/ticket/{id}/comments/follow` | `ticket-comments.commentsFollow` (behavior: Ticket.Comments, a Comments) | authenticated |
 | `POST` | `/api/ticket/{id}/comments/get-message` | `ticket-comments.commentsGetMessage` (behavior: Ticket.Comments, a Comments) | authenticated |
 | `POST` | `/api/ticket/{id}/comments/list-edits` | `ticket-comments.commentsListEdits` (behavior: Ticket.Comments, a Comments) | authenticated |
 | `POST` | `/api/ticket/{id}/comments/list-messages` | `ticket-comments.commentsListMessages` (behavior: Ticket.Comments, a Comments) | authenticated |
 | `POST` | `/api/ticket/{id}/comments/list-pinned` | `ticket-comments.commentsListPinned` (behavior: Ticket.Comments, a Comments) | authenticated |
 | `POST` | `/api/ticket/{id}/comments/list-reactions` | `ticket-comments.commentsListReactions` (behavior: Ticket.Comments, a Comments) | authenticated |
+| `POST` | `/api/ticket/{id}/comments/mark-read` | `ticket-comments.commentsMarkRead` (behavior: Ticket.Comments, a Comments) | authenticated |
 | `POST` | `/api/ticket/{id}/comments/pin` | `ticket-comments.commentsPin` (behavior: Ticket.Comments, a Comments) | authenticated |
 | `POST` | `/api/ticket/{id}/comments/post` | `ticket-comments.commentsPost` (behavior: Ticket.Comments, a Comments) | authenticated |
 | `POST` | `/api/ticket/{id}/comments/purge` | `ticket-comments.commentsPurge` (behavior: Ticket.Comments, a Comments) | authenticated |

@@ -936,6 +936,14 @@ export const fixtureSearchDbRules: RulesLayout = {
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -990,6 +998,12 @@ export const fixtureSearchDbRules: RulesLayout = {
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -1423,6 +1437,9 @@ export const fixtureSearchDbRules: RulesLayout = {
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],

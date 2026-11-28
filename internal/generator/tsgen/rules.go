@@ -64,7 +64,7 @@ var repositoryMembers = []string{
 	"keyColumns", "upsertWhere", "upsertRow", "upsertBatches", "heldRow", "rowsOfKeys", "resealed", "rulesHost",
 	"caller", "columnNamed", "ownedColumns", "coreOwn", "createColumns", "updateColumns",
 	"operationColumns", "nowColumns", "wireKey", "createThroughCore", "updateThroughCore", "deleteThroughCore",
-	"notFound", "keptNotFound", "operate", "operateTable", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
+	"notFound", "keptNotFound", "operate", "operateTable", "operateView", "bindUses", "refuseOwnedUpdate", "refuseUpsert", "upsertInputs", "actor",
 	"clearActor", "runDeadline", "runChange", "runEvent", "refusePreconditions",
 	"viewer", "sees", "held", "accessConditions", "filterConditions", "reachFilter", "requireReach", "requireCreatedReach", "refuseHeldUpsert",
 	"wakeChanges",

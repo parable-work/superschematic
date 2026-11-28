@@ -4,6 +4,7 @@ package orm
 
 import (
 	"context"
+	"encoding/json"
 
 	types "example.com/schemas/types/go/fixture-comments-db"
 	"github.com/jackc/pgx/v5"
