@@ -21,8 +21,8 @@ github.com/klauspost/cpuid/v2 v2.2.10 h1:tBs3QSyvjDyFTq3uoc/9xFpCuOsJQFNPiAhYdw2
 github.com/klauspost/cpuid/v2 v2.2.10/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
 github.com/microsoft/TypeScript/tsc v0.0.0-20260708042240-1e4744d68260 h1:D4pdLG7ngZHrPuvD0xACXHZW/H+XW6JmN4L+3VoZ0qM=
 github.com/microsoft/TypeScript/tsc v0.0.0-20260708042240-1e4744d68260/go.mod h1:gV4G6M8xxLNqQSRHiFOgKHlY+5YJgYPM6QwFLWllC+8=
-github.com/parable-work/superscalar/go v0.0.0-20261119204639-51d50302d5dd h1:k6BkApxxbKIi8UL83mx3fLHR17dtN7FJg2O3Y7Fxtmo=
-github.com/parable-work/superscalar/go v0.0.0-20261119204639-51d50302d5dd/go.mod h1:Km4/TsGNBp2Xk5+HuqjJzkbvTiY/x8eVoKFfjbNsliA=
+github.com/parable-work/superscalar/go v0.0.0-20261127170532-5fe84bd97aa3 h1:yqJNXPIo8XXDEr9hRWjemz+Ij+jA0QK/xNq4emCYoOA=
+github.com/parable-work/superscalar/go v0.0.0-20261127170532-5fe84bd97aa3/go.mod h1:Km4/TsGNBp2Xk5+HuqjJzkbvTiY/x8eVoKFfjbNsliA=
 github.com/parable-work/typescript-shim v0.0.0-20261028220021-9c62d2c703d9 h1:NbvbZAgxT6fQTQootSAMRZM9UxNyQYJ2IMUtEd/78pE=
 github.com/parable-work/typescript-shim v0.0.0-20261028220021-9c62d2c703d9/go.mod h1:DvdT3HZb6BacDrFNLlrPMofQF0LZ1T80IfNeg6uPHVo=
 github.com/pb33f/ordered-map/v2 v2.3.1 h1:5319HDO0aw4DA4gzi+zv4FXU9UlSs3xGZ40wcP1nBjY=

@@ -369,7 +369,7 @@ pub struct MessageAttachments {
     pub name: String,
     /// Its media type.
     #[serde(rename = "mediaType")]
-    pub media_type: String,
+    pub media_type: FileMediaType,
     /// Its length in bytes.
     pub size: FileSizeBytes,
     /// The SHA-256 of its bytes, 64 lowercase hex digits: declared by the upload, checked when it completes.
@@ -674,7 +674,7 @@ pub struct ReportAttachments {
     pub name: String,
     /// Its media type.
     #[serde(rename = "mediaType")]
-    pub media_type: String,
+    pub media_type: FileMediaType,
     /// Its length in bytes.
     pub size: FileSizeBytes,
     /// The SHA-256 of its bytes, 64 lowercase hex digits: declared by the upload, checked when it completes.

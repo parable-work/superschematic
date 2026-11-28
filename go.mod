@@ -6,7 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/invopop/jsonschema v0.14.0
 	github.com/microsoft/typescript-go/shim v0.0.0
-	github.com/parable-work/superscalar/go v0.0.0-20261119204639-51d50302d5dd
+	github.com/parable-work/superscalar/go v0.0.0-20261127170532-5fe84bd97aa3
 	github.com/parable-work/superschematic/ir v0.0.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
