@@ -42,6 +42,13 @@ var (
 // Rust types and its Postgres DDL.
 func loadWiredFixture(t *testing.T) fixture {
 	t.Helper()
+	return loadWiredFixtureOn(t, "postgres")
+}
+
+// loadWiredFixtureOn is loadWiredFixture with the database's SQL dialects
+// dialects, the first the one its server and workers open (D116, #725).
+func loadWiredFixtureOn(t *testing.T, dialects ...any) fixture {
+	t.Helper()
 	reg, err := publicregistry.Assemble(publicregistry.DefaultNaming(), &stacktest.Extension{})
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +68,7 @@ func loadWiredFixture(t *testing.T) fixture {
 	enabled := map[string]any{"enabled": true}
 	f.configs[wiredDB].Outputs = map[string]any{
 		"types": map[string]any{"go": enabled, "rust": enabled},
-		"sql":   map[string]any{"dialects": []any{"postgres"}},
+		"sql":   map[string]any{"dialects": dialects},
 	}
 	return f
 }

@@ -363,5 +363,5 @@ of the file ([in Rust](/superschematic/guides/notifications/#in-rust)), a
 message's files go through the SQLite attachments, and `run_queue()`
 claims the run requests on the file. `party_principal` and
 `identity_lapsed` take an `orm::store::Db` of either dialect. A generated
-Rust server over a database that lists `sqlite` first does not wire the
-path yet (#725).
+Rust server over a database that lists `sqlite` first wires the path over
+the file, and its run requests' worker claims there (#725).
