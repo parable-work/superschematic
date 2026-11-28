@@ -171,11 +171,13 @@ func CalendarRoutes(options CalendarRoutesOptions) http.Handler {
 			if body.Days != nil && *body.Days > 0 && *body.Days <= 3660 {
 				days = *body.Days
 			}
+			at := now()
 			feed, err := IssueFeed(h.As(ctx, caller.Principal), h, IssueCalendarFeed{
-				Holder: caller.Principal.Subject,
-				Role:   *body.Role,
-				Scope:  CalendarFeedScope{Detail: CalendarDetail(body.Detail), Sources: body.Sources},
-				EndsAt: now().Add(time.Duration(days * float64(24*time.Hour))),
+				Holder:   caller.Principal.Subject,
+				Role:     *body.Role,
+				Scope:    CalendarFeedScope{Detail: CalendarDetail(body.Detail), Sources: body.Sources},
+				StartsAt: at,
+				EndsAt:   at.Add(time.Duration(days * float64(24*time.Hour))),
 			})
 			if err != nil {
 				serverError(w, err)
