@@ -10848,6 +10848,16 @@ type TastingFilter struct {
 	// conditions (D90). A filter of no condition keeps every row, and so
 	// does an empty AnyOf.
 	AnyOf []TastingFilter
+	// holdsHelpers keeps the rows whose helpers, a list of ids, holds it:
+	// a row rule's condition (#735), which TastingHoldingHelpers sets.
+	holdsHelpers *types.IdentityUUID
+}
+
+// TastingHoldingHelpers is the filter of the Tasting rows whose
+// helpers, a list of ids, holds id: the condition a row rule names the
+// list by (#735), which no request's filter can.
+func TastingHoldingHelpers(id types.IdentityUUID) *TastingFilter {
+	return &TastingFilter{holdsHelpers: &id}
 }
 
 // TastingUpdate provides fields that can be updated
@@ -11743,6 +11753,11 @@ func (f *TastingFilter) conditions(args *[]interface{}, paramOffset int) []strin
 				conditions = append(conditions, `tasting.ref_id IS NOT NULL`)
 			}
 		}
+	}
+	if f.holdsHelpers != nil {
+		paramNum++
+		conditions = append(conditions, fmt.Sprintf(`$%d = ANY(tasting.helpers)`, paramNum))
+		*args = append(*args, f.holdsHelpers.ToUUID())
 	}
 	if f.Recipe != nil {
 		before := len(*args)

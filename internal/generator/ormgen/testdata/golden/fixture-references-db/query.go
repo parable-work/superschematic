@@ -658,9 +658,29 @@ type NoteFilter struct {
 	// conditions (D90). A filter of no condition keeps every row, and so
 	// does an empty AnyOf.
 	AnyOf []NoteFilter
+	// holdsAudienceNamed keeps the rows whose audienceNamed, a list of ids, holds it:
+	// a row rule's condition (#735), which NoteHoldingAudienceNamed sets.
+	holdsAudienceNamed *types.IdentityUUID
+	// holdsEffectiveAudience keeps the rows whose effectiveAudience, a list of ids, holds it:
+	// a row rule's condition (#735), which NoteHoldingEffectiveAudience sets.
+	holdsEffectiveAudience *types.IdentityUUID
 	// scope holds each table a condition through a relation reads to the
 	// caller of the operation that reads it (D156, D180); nil outside one.
 	scope accessScope
+}
+
+// NoteHoldingAudienceNamed is the filter of the Note rows whose
+// audienceNamed, a list of ids, holds id: the condition a row rule names the
+// list by (#735), which no request's filter can.
+func NoteHoldingAudienceNamed(id types.IdentityUUID) *NoteFilter {
+	return &NoteFilter{holdsAudienceNamed: &id}
+}
+
+// NoteHoldingEffectiveAudience is the filter of the Note rows whose
+// effectiveAudience, a list of ids, holds id: the condition a row rule names the
+// list by (#735), which no request's filter can.
+func NoteHoldingEffectiveAudience(id types.IdentityUUID) *NoteFilter {
+	return &NoteFilter{holdsEffectiveAudience: &id}
 }
 
 // NoteUpdate provides fields that can be updated
@@ -1070,6 +1090,16 @@ func (f *NoteFilter) conditions(args *[]interface{}, paramOffset int) []string {
 				conditions = append(conditions, `note.effective_agents IS NOT NULL`)
 			}
 		}
+	}
+	if f.holdsAudienceNamed != nil {
+		paramNum++
+		conditions = append(conditions, fmt.Sprintf(`$%d = ANY(note.audience_named)`, paramNum))
+		*args = append(*args, f.holdsAudienceNamed.ToUUID())
+	}
+	if f.holdsEffectiveAudience != nil {
+		paramNum++
+		conditions = append(conditions, fmt.Sprintf(`$%d = ANY(note.effective_audience)`, paramNum))
+		*args = append(*args, f.holdsEffectiveAudience.ToUUID())
 	}
 
 	// AllOf's filters' conditions are the filter's own, ANDed (D99), each

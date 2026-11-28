@@ -5,6 +5,7 @@ import type { RequestContext } from './operation.js';
 import type { MergeableRepository, PlainRepository } from './orm.js';
 import { decodeCursor, encodeCursor, refusedCursor, type Page, type PageRequest } from './page.js';
 import { HttpProblem, badRequest, conflict, forbidden, notFound, unauthorized } from './problem.js';
+import { HOLDS } from './row-rule.js';
 import { revealed } from './secret.js';
 import { uuidValue } from './uuid.js';
 
@@ -110,9 +111,10 @@ export interface TableOperation {
   readonly search?: string;
   /**
    * The row rule (D108): the row's members that name who may reach it,
-   * each a member that holds a subject, a UUID, a to-one relation's key,
-   * text or createdBy, or a path to one through the table's relations
-   * (D156), dotted. Absent reaches every row the route admits.
+   * each a member that holds a subject, a UUID, a list of UUIDs (#735), a
+   * to-one relation's key, text or createdBy, or a path to one through the
+   * table's relations (D156), dotted. Absent reaches every row the route
+   * admits.
    */
   readonly by?: readonly string[];
   /** The permission whose holder the row rule does not hold back. */
@@ -146,8 +148,10 @@ interface ColumnShape {
   readonly required?: boolean;
   /** The target type of a to-one relation, whose key the column holds. */
   readonly relation?: string;
-  /** The column holds a UUID. */
+  /** The column holds a UUID, or with list a list of them. */
   readonly uuid?: boolean;
+  /** The column holds a list. */
+  readonly list?: boolean;
   /** The audit field the column is, which the repository stamps. */
   readonly audit?: string;
   /** The operations of the column's filter. */
@@ -376,7 +380,9 @@ function reachOf(operation: TableOperation, repository: RepositoryShape, ctx: Re
   const named: Values[] = [];
   for (const { steps, column } of members) {
     if (column.uuid === true && uuidValue(subject) === undefined) continue;
-    let filter: Values = { [column.name]: { eq: subject } };
+    // A list of ids holds the caller where it holds its id (#735), a
+    // condition of the rule's alone.
+    let filter: Values = { [column.name]: column.list === true ? { [HOLDS]: subject } : { eq: subject } };
     for (const step of [...steps].reverse()) filter = { [step]: filter };
     named.push(filter);
   }
@@ -404,7 +410,7 @@ function pathOf(operation: TableOperation, repository: RepositoryShape, member: 
     at = next;
   }
   const column = columnsOf(at).find(candidate => candidate.name === last);
-  if (!column?.filter?.includes('eq')) {
+  if (!column?.filter?.includes('eq') && !(column?.list === true && column.uuid === true)) {
     throw new Error(`table operation: the row rule of ${operation.type} names ${member}, which its repository keeps no equality filter for; rebuild the database's types`);
   }
   return { steps, column };
@@ -609,7 +615,8 @@ export function tableCreate(orm: object, operation: TableOperation, ctx: Request
       if (column?.uuid === true && uuidValue(subject) === undefined) {
         throw forbidden(`${operation.type}: its ${member} names who it is for by id, and the caller has none`);
       }
-      input[member] = subject;
+      // A list of ids the rule names holds the caller alone (#735).
+      input[member] = column?.list === true ? [subject] : subject;
     }
     const created = await repository.createOne(input);
     // The state the body names for the row to start in (D109): the row is

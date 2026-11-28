@@ -63,6 +63,10 @@ export abstract class Issue {
   deletedAt: Nullable<Temporal.DateTime>;
   deletedBy: Nullable<Identity.UUID>;
 
+  // Who watches the issue, by id: the API's row rule reaches the issues
+  // whose list holds the caller (#735).
+  watchers: Nullable<Identity.UUID[]>;
+
   comments: HasMany<Comment>;
 }
 

@@ -132,7 +132,9 @@ func Describe(ctx context.Context, runner, url string, doc Document) (*Result, e
 //     one computed, one of a column that is not NOT NULL (a projection's
 //     view's column of a required field is), or one of a table an outer
 //     join may leave out, which the query does not vouch for with notNull
-//     or a -- @notNull comment.
+//     or a -- @notNull comment;
+//   - it reads an @audience table, or a projection's view of one, through
+//     a reference no :audience mark holds (#735, AudienceProblem).
 func Judge(queries []sqlutil.QueryModel, result *Result) (*Lock, []string) {
 	described := map[string]Description{}
 	for _, d := range result.Statements {
@@ -141,6 +143,10 @@ func Judge(queries []sqlutil.QueryModel, result *Result) (*Lock, []string) {
 	lock := &Lock{Version: LockVersion}
 	var problems []string
 	for _, q := range queries {
+		if problem := AudienceProblem(q); problem != "" {
+			problems = append(problems, problem)
+			continue
+		}
 		var entry *LockedQuery
 		for i, st := range q.Statements() {
 			d, ok := described[statementID(q, i)]
@@ -177,6 +183,16 @@ func Judge(queries []sqlutil.QueryModel, result *Result) (*Lock, []string) {
 		}
 	}
 	return lock, problems
+}
+
+// AudienceProblem is why q may not run, or "": it reads an @audience
+// table, or a projection's view of one, through a reference no :audience
+// mark holds (#735), so it would read every row of it whoever calls.
+func AudienceProblem(q sqlutil.QueryModel) string {
+	if len(q.Unmarked) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("query %s reads the @audience rows of %s with no :audience mark; write :audience(<alias>) in its WHERE (or a JOIN's ON) for each, which the ORM replaces with the caller's audience", q.Name, strings.Join(q.Unmarked, ", "))
 }
 
 func judgeParams(where string, q sqlutil.QueryModel, args []sqlutil.QueryField, params []Type) []string {

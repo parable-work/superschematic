@@ -576,6 +576,13 @@ func (c ColumnModel) IsArray() bool {
 	return c.Def != nil && c.Def.TypeRef.IsArray
 }
 
+// IsIDList reports whether the column holds a list of ids: a list of a
+// UUID-like scalar in a native array, which a row rule may name and holds
+// the caller in where the list holds its id (#735).
+func (c ColumnModel) IsIDList() bool {
+	return c.IsArray() && c.Class.UUIDLike && c.Class.List && !c.Class.JSON && !c.Def.TypeRef.IsArrayOfArrays
+}
+
 // RelationModel is a one-to-many relation of a table.
 type RelationModel struct {
 	Field  string

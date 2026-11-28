@@ -531,6 +531,13 @@ export const {{.QueriesConst}}: Readonly<Record<string, QueryDefinition>> = {
 {{- if .ReturnsOne}}
     returns: {{jsonString .Returns}},
 {{- end}}
+{{- with .Audience}}
+    audience: [
+{{- range .}}
+      { effective: {{jsonString .Effective}}, agents: {{jsonString .Agents}}{{if .Probe}}, probe: {{jsonString .Probe}}{{end}} },
+{{- end}}
+    ],
+{{- end}}
   },
 {{- end}}
 };

@@ -210,6 +210,29 @@ func (o *ORMOutput) RequiresSchemaRuntime() bool {
 	return o.HasEncryptedFields || o.Access != nil || o.RowFeatures != nil || o.CrossTables != nil || o.Notifications != nil
 }
 
+// IDList is a table's list of ids a row rule may name (#735): its field,
+// its Go name and its column qualified by the table. The filter keeps the
+// rows whose list holds an id by $n = ANY(column) on Postgres and an EXISTS
+// over json_each on SQLite, where the list is a JSON array of the ids'
+// text.
+type IDList struct {
+	Field     string
+	GoField   string
+	Qualified string
+}
+
+// PostgresHolds is the condition of the rows whose list holds the
+// parameter $%d.
+func (l IDList) PostgresHolds() string {
+	return "$%d = ANY(" + l.Qualified + ")"
+}
+
+// SQLiteHolds is the condition of the rows whose list holds the parameter
+// ?%d.
+func (l IDList) SQLiteHolds() string {
+	return "EXISTS (SELECT 1 FROM json_each(" + l.Qualified + ") WHERE json_each.value = ?%d)"
+}
+
 // attachManyRelations gives each repository the one-to-many relations its
 // filter reaches through (D108, D180), each named as a read includes it
 // (sqlutil.ToMany), then suffix (go.orm_relation_filter_suffix, D163).

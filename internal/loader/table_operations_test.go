@@ -73,6 +73,12 @@ func TestTableOperationsAreFilledFromTheirDeclarations(t *testing.T) {
 		"createNote": {Kind: "create", Database: db, Type: "Note", Parents: issue, Input: "input", By: []string{"owner"}},
 		"updateNote": {Kind: "update", Database: db, Type: "Note", Key: "id", Input: "input", By: []string{"owner"}},
 		"deleteNote": {Kind: "delete", Database: db, Type: "Note", Key: "id", By: []string{"createdBy"}, OverridePermission: "notes.admin"},
+		// A rule may name a list of ids, on the row or at a path's end (#735).
+		"listWatchedIssues":   {Kind: "list", Database: db, Type: "Issue", By: []string{"watchers"}},
+		"getWatchedIssue":     {Kind: "read", Database: db, Type: "Issue", Key: "id", By: []string{"watchers"}},
+		"createWatchedIssue":  {Kind: "create", Database: db, Type: "Issue", Parents: team, Input: "input", By: []string{"watchers"}},
+		"updateWatchedIssue":  {Kind: "update", Database: db, Type: "Issue", Key: "id", Input: "input", By: []string{"watchers"}},
+		"listWatchedComments": {Kind: "list", Database: db, Type: "Comment", By: []string{"issue.watchers"}},
 	}
 	seen := 0
 	for _, set := range api.OperationSets {
@@ -270,10 +276,14 @@ func TestTableOperationsAreHeldToTheirTable(t *testing.T) {
 		}, []string{"Notes.getNote: by names createdAt, which the repository stamps at a write and says nothing of who the row is for; name createdBy, or a member of the row (id, issueId, owner, sharedWith, text, createdBy)"}},
 		{"a rule that names who last wrote the row", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
 			op("getIssue").TableOperation.By = []string{"updatedBy"}
-		}, []string{"Issues.getIssue: by names updatedBy, which the repository stamps at a write and says nothing of who the row is for; name createdBy, or a member of the row (id, teamId, title, body, status, assigneeId, createdBy)"}},
+		}, []string{"Issues.getIssue: by names updatedBy, which the repository stamps at a write and says nothing of who the row is for; name createdBy, or a member of the row (id, teamId, title, body, status, assigneeId, createdBy, watchers)"}},
 		{"a rule that names a number", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
 			op("getIssue").TableOperation.By = []string{"priority"}
-		}, []string{"Issues.getIssue: by names priority, which holds no subject a row rule compares the caller with: text, a UUID, a to-one relation's key or createdBy, none of them secret or a behavior's (id, teamId, title, body, status, assigneeId, createdBy)"}},
+		}, []string{"Issues.getIssue: by names priority, which holds no subject a row rule compares the caller with: text, a UUID, a list of UUIDs, a to-one relation's key or createdBy, none of them secret or a behavior's (id, teamId, title, body, status, assigneeId, createdBy, watchers)"}},
+		{"a rule that names a list of ids, and a path that ends at one", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
+			op("getIssue").TableOperation.By = []string{"watchers", "createdBy"}
+			op("deleteComment").TableOperation.By = []string{"issue.watchers"}
+		}, nil},
 		{"a create whose rule names the key", func(_ *ir.Schema, op func(string) *ir.FieldDef) {
 			op("createNote").TableOperation.By = []string{"id"}
 		}, []string{

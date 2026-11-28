@@ -59,6 +59,9 @@ func TestWriteTypesGolden(t *testing.T) {
 		// Declared queries (D86): orm.ts's queries, and their params' and
 		// rows' types.
 		{service: "fixture-queries-db"},
+		// Declared queries over @audience tables (#735): each query's
+		// :audience marks, which the runtime fills for the caller.
+		{service: "fixture-audience-queries-db"},
 		// Tables whose fields are behaviors (D103): orm.ts's owned
 		// columns, the layout document and each field's operations.
 		{service: "fixture-workflow-db", behaviors: true},

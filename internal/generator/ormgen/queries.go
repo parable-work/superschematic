@@ -18,7 +18,9 @@ import (
 // its column would (a UUID through ToUUID, a time as a time.Time); a row is
 // read by its columns' names, each field scanned as a table's would be. A
 // query that returns one row answers it, and one that returns one or none
-// a pointer to it (D95).
+// a pointer to it (D95). A query's :audience marks (#735) are filled for
+// the context's caller by queryAudience before the order's and the page's
+// fill, their parameters after every other.
 
 // Query is a declared query as queries.go writes it.
 type Query struct {
@@ -45,6 +47,11 @@ type Query struct {
 	Page  *QueryPage
 	// Returns is what a call answers: "many", "one" or "optional" (D95).
 	Returns string
+	// Audience are the statement's :audience marks (#735), by the n of
+	// their %A{n}, and AudienceVar the variable that holds them; the
+	// statement of a query with marks stays a format string.
+	Audience    []sqlutil.QueryAudienceMark
+	AudienceVar string
 }
 
 // Result is the Go type a call of the query that is not paged returns
@@ -124,6 +131,17 @@ func (o *ORMOutput) HasQueries() bool {
 	return len(o.Queries) > 0
 }
 
+// HasAudienceQueries reports whether a declared query marks an audience
+// (#735), which queries.go fills through queryAudience.
+func (o *ORMOutput) HasAudienceQueries() bool {
+	for _, q := range o.Queries {
+		if len(q.Audience) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // queriesOf is what queries.go writes for schema's queries.
 func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames map[string]bool, dependencies map[string]*ir.Schema, shapes codegen.GoOptionalShapes) ([]Query, error) {
 	models, err := sqlutil.QueriesOf(schema, dependencies)
@@ -150,10 +168,14 @@ func queriesOf(schema *ir.Schema, scalars map[string]scalarLookup, unionNames ma
 			query.MethodDoc = docComment("", method+" runs the query "+q.Name+": "+doc)
 		}
 		text := q.Text
-		if q.OrderBy == nil {
+		if q.OrderBy == nil && len(q.Audience) == 0 {
 			text = strings.ReplaceAll(text, "%%", "%")
 		}
 		query.SQL = strconv.Quote(text)
+		if len(q.Audience) > 0 {
+			query.Audience = q.Audience
+			query.AudienceVar = lowerFirstRune(q.Name) + "Audience"
+		}
 		for _, a := range q.Args {
 			f := extractField(a.Def, schema, scalars, unionNames, shapes)
 			bind, err := queryBind(f, a.Class, "params."+codegen.ToPascalCase(a.Name))

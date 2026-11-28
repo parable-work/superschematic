@@ -5,14 +5,16 @@ import { join } from 'node:path';
 import type { SqlDatabase, SqlPreparedStatement, SqlValue } from './d1.js';
 import { audienceConditions, type Clauses, type Orm, type OrmDefinition } from './orm.js';
 import { sqliteOrm, sqliteOrmPool } from './orm-sqlite.js';
+import { HOLDS } from './row-rule.js';
 import { openSqlite } from './sqlite.js';
 
 /*
 The repositories' pool over a SqlDatabase (D182): how it binds a value as
 SQLite stores it, runs one statement or one transaction at a time, runs a
 transaction as BEGIN IMMEDIATE on openSqlite's connection and as its
-statements alone on D1, the audience condition in SQLite's words, and a
-row's times, which come from the database's clock alone.
+statements alone on D1, the audience condition in SQLite's words, a
+row's times, which come from the database's clock alone, and a row rule's
+list of ids, which json_each reads (#735).
 */
 
 /** A SqlDatabase that records each statement and its values, as D1 would run them, answering no rows. */
@@ -257,6 +259,51 @@ describe("a row's times on SQLite", () => {
       expect(rows[0]!.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     } finally {
       setSystemTime();
+      db.close();
+    }
+  });
+});
+
+/** The clock table with watchers, a list of ids, which a row rule may name (#735). */
+const watchColumns = '"id", "title", "created_at", "updated_at", "watchers"';
+const clockNote = clockDefinition.tables.note!;
+const watchDefinition: OrmDefinition = {
+  ...clockDefinition,
+  tables: {
+    note: {
+      ...clockNote,
+      columns: [...clockNote.columns, { name: 'watchers', column: 'watchers', field: 'watchers', qualified: 'note.watchers', list: true, uuid: true }],
+      statements: { ...clockNote.statements, columns: watchColumns },
+    },
+  },
+};
+
+interface WatchRepositories {
+  readonly note: {
+    findMany(filter: Record<string, unknown>): Promise<{ rows: { title: string; watchers: string[] | null }[] }>;
+  };
+}
+
+describe("a row rule's list of ids on SQLite", () => {
+  test("keeps the rows whose JSON array holds the id, through json_each, a condition no request's filter names", async () => {
+    const db = openSqlite(join(dir, 'watchers.sqlite'));
+    try {
+      await db.exec('CREATE TABLE note (id TEXT NOT NULL PRIMARY KEY, title TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, watchers TEXT)');
+      const kim = '00000000-0000-4000-8000-0000000000a2';
+      const lee = '00000000-0000-4000-8000-0000000000a3';
+      const insert = (id: string, title: string, watchers: string | null) =>
+        sqliteOrmPool(db).query({ text: "INSERT INTO note VALUES (?1, ?2, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z', ?3)", values: [id, title, watchers] });
+      await insert('00000000-0000-4000-8000-000000000001', 'both', JSON.stringify([kim, lee]));
+      await insert('00000000-0000-4000-8000-000000000002', 'lee', JSON.stringify([lee]));
+      await insert('00000000-0000-4000-8000-000000000003', 'none', null);
+      const orm = sqliteOrm<WatchRepositories>(db, watchDefinition) as Orm<WatchRepositories>;
+      const titles = async (filter: Record<string, unknown>) => (await orm.note.findMany(filter)).rows.map(row => row.title).sort();
+      expect(await titles({ watchers: { [HOLDS]: kim } })).toEqual(['both']);
+      expect(await titles({ watchers: { [HOLDS]: lee } })).toEqual(['both', 'lee']);
+      expect(await titles({ watchers: { [HOLDS]: '00000000-0000-4000-8000-0000000000a1' } })).toEqual([]);
+      // A request's filter is JSON, whose member names no symbol: a list keeps no condition of its own.
+      expect(await titles(JSON.parse(JSON.stringify({ watchers: { [HOLDS]: kim } })))).toEqual(['both', 'lee', 'none']);
+    } finally {
       db.close();
     }
   });

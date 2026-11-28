@@ -240,6 +240,9 @@ func TestWriteORMGolden(t *testing.T) {
 		// Declared queries (D86): queries.go runs them, a query over the
 		// line_list projection's view among them (D95).
 		{"fixture-queries-db", []string{"repository_account.go", "repository_category.go", "repository_line_item.go", "repository_transfer_group.go", "projections.go", "queries.go"}},
+		// Declared queries over @audience tables (#735): queries.go fills
+		// each :audience mark for the context's caller.
+		{"fixture-audience-queries-db", []string{"access.go", "projections.go", "queries.go", "repository_document.go", "repository_folder.go"}},
 		// Tables whose fields are behaviors (D103): rules.go embeds their
 		// layout, and each repository runs its writes and its fields'
 		// operations through the core.

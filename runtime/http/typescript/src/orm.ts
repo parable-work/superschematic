@@ -3,6 +3,7 @@ import { FieldEncryptionError } from './fieldcrypt-error.js';
 import type { FieldCell, FieldKeyring, FieldKeys } from './fieldcrypt.js';
 import { columnKey, decodeRow, decodeValue, encodeParam, type RowField } from './pgcodec.js';
 import { queriesOf, type QueryDefinition } from './queries.js';
+import { HOLDS } from './row-rule.js';
 import { execute, postgresRulesStore, prepareCreate, sqliteRulesStore, runChange, runCreate, runDeadline, runDelete, runTableOperation, runUpdate, spendEvent, RulesRefusal, type ChangeRun, type CoreCaller, type DeadlineRun, type EventRun, type RulesCallOptions, type RulesCore, type RulesColumn, type RulesHost, type RulesLayout, type RulesTable, type RulesTableCallOptions, type RunChangeOptions, type RunDeadlineOptions, type RunEventOptions } from './rules.js';
 import { parseArray } from './pgtext.js';
 import { formatDuration, parseDuration } from './queue-core.js';
@@ -2032,6 +2033,14 @@ class TableRepository implements PlainRepository<Values> {
     for (const column of ordered) {
       const ops = column.filter;
       const member = filter[column.name] as Values | null | undefined;
+      // A row rule's list of ids (#735): the rows whose list holds the
+      // caller's id, a condition the rule alone writes (HOLDS).
+      const holds = member === undefined || member === null ? undefined : (member as Record<symbol, unknown>)[HOLDS];
+      if (holds !== undefined && holds !== null && column.list && column.uuid) {
+        const placeholder = fill(c.placeholder, ++n);
+        args.push(uuidToDb(holds));
+        conditions.push(this.orm.dialect === 'sqlite' ? `EXISTS (SELECT 1 FROM json_each(${column.qualified}) WHERE json_each.value = ${placeholder})` : `${placeholder}::uuid = ANY(${column.qualified})`);
+      }
       if (!ops || ops.length === 0 || member === undefined || member === null) continue;
       const q = column.qualified;
       // A JSON column compares JSON values, by the dialect's own conditions
@@ -3812,10 +3821,11 @@ function repositories(orm: OrmDefinition, runner: Runner, acting: Acting, keys: 
   return out;
 }
 
-/** The ORM's queries member over runner, on a database that declares queries (D86). */
-function declaredQueries(orm: OrmDefinition, runner: Runner): { queries?: unknown } {
+/** The ORM's queries member over runner, on a database that declares queries (D86), their :audience marks held to whom viewer names (#735). */
+function declaredQueries(orm: OrmDefinition, runner: Runner, viewer: Viewer): { queries?: unknown } {
   if (!orm.queries) return {};
-  return { queries: queriesOf(orm.queries, (text, values) => run(runner, text, values), orm.defaultLimit) };
+  const sees = (): typeof ALL | AccessCaller => (viewer === CALLER ? currentAccess() ?? ALL : viewer);
+  return { queries: queriesOf(orm.queries, (text, values) => run(runner, text, values), orm.defaultLimit, sees) };
 }
 
 function userOf(id: string | null | undefined): string | undefined {
@@ -3861,7 +3871,7 @@ function txOf<R>(orm: OrmDefinition, base: RunnerBase, client: OrmQueryable, act
   return withRowFeatures(orm, viewer, {
     [ORM_DIALECT]: orm.dialect ?? 'postgres',
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
-    ...declaredQueries(orm, runner),
+    ...declaredQueries(orm, runner, viewer),
     get actingUser() {
       return actingUser(acting);
     },
@@ -3954,7 +3964,7 @@ function ormWith<R>(pool: OrmPool, orm: OrmDefinition, runtime: OrmRuntime, acti
   return withRowFeatures(orm, viewer, {
     [ORM_DIALECT]: orm.dialect ?? 'postgres',
     ...repositories(orm, runner, acting, keys, rules, behaviorCaller, viewer),
-    ...declaredQueries(orm, runner),
+    ...declaredQueries(orm, runner, viewer),
     get actingUser() {
       return actingUser(acting);
     },

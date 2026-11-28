@@ -52,10 +52,14 @@ import {
   parseCreateNoteInputJson,
   parseCreateTeamInputFromJSON,
   parseCreateTeamInputJson,
+  parseCreateWatchedIssueInputFromJSON,
+  parseCreateWatchedIssueInputJson,
   parseUpdateIssueInputFromJSON,
   parseUpdateIssueInputJson,
   parseUpdateNoteInputFromJSON,
   parseUpdateNoteInputJson,
+  parseUpdateWatchedIssueInputFromJSON,
+  parseUpdateWatchedIssueInputJson,
 } from '@schemas/fixture-tracker-api-types/validators';
 import type { FixtureTrackerDbOrm } from '@schemas/fixture-tracker-db-types/orm';
 import type { Implementations } from './interfaces';
@@ -81,7 +85,12 @@ export type OperationName =
   | 'getTeam'
   | 'summarizeTeam'
   | 'listIssues'
-  | 'createIssue';
+  | 'createIssue'
+  | 'createWatchedIssue'
+  | 'listWatchedComments'
+  | 'listWatchedIssues'
+  | 'getWatchedIssue'
+  | 'updateWatchedIssue';
 
 /** The operation table: what the schema declares about each route. */
 export const operationSpecs = {
@@ -335,6 +344,65 @@ export const operationSpecs = {
     auth: { public: false, required: true, permissions: ['issues.write'] },
     manual: false,
   },
+  createWatchedIssue: {
+    name: 'createWatchedIssue',
+    namespace: 'watching',
+    method: 'POST',
+    path: '/api/teams/{teamId}/watching/issues',
+    pathParams: [{ name: 'teamId', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    input: { parse: (value: unknown) => parseCreateWatchedIssueInputFromJSON(parseCreateWatchedIssueInputJson(value)), required: true },
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  listWatchedComments: {
+    name: 'listWatchedComments',
+    namespace: 'watching',
+    method: 'GET',
+    path: '/api/watching/comments',
+    pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    page: { defaultLimit: 20, maxLimit: 100 },
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  listWatchedIssues: {
+    name: 'listWatchedIssues',
+    namespace: 'watching',
+    method: 'GET',
+    path: '/api/watching/issues',
+    pathParams: [],
+    queryParams: [],
+    bodyParams: [],
+    page: { defaultLimit: 20, maxLimit: 100 },
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  getWatchedIssue: {
+    name: 'getWatchedIssue',
+    namespace: 'watching',
+    method: 'GET',
+    path: '/api/watching/issues/{id}',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  updateWatchedIssue: {
+    name: 'updateWatchedIssue',
+    namespace: 'watching',
+    method: 'PATCH',
+    path: '/api/watching/issues/{id}',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    input: { parse: (value: unknown) => parseUpdateWatchedIssueInputFromJSON(parseUpdateWatchedIssueInputJson(value)), required: true },
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
 } as const satisfies Record<OperationName, OperationSpec & { readonly filter?: FilterSpec; readonly page?: PageSpec }>;
 
 /**
@@ -365,6 +433,11 @@ export const tableOperations = {
   getTeam: { kind: 'read', type: 'Team', repository: 'team', key: 'id', view: ['id', 'key', 'name'] },
   listIssues: { kind: 'list', type: 'Issue', repository: 'issue', parents: ['teamId'], view: ['id', 'teamId', 'title', 'body', 'status', 'priority', 'estimate', 'dueOn', 'assigneeId', 'createdAt', 'createdBy', 'updatedAt'], search: 'q' },
   createIssue: { kind: 'create', type: 'Issue', repository: 'issue', parents: ['teamId'], view: ['id', 'teamId', 'title', 'body', 'status', 'priority', 'estimate', 'dueOn', 'assigneeId', 'createdAt', 'createdBy', 'updatedAt'], body: ['title', 'body', 'priority', 'estimate', 'dueOn', 'assigneeId'] },
+  createWatchedIssue: { kind: 'create', type: 'Issue', repository: 'issue', parents: ['teamId'], view: ['id', 'teamId', 'title'], body: ['title'], by: ['watchers'] },
+  listWatchedComments: { kind: 'list', type: 'Comment', repository: 'comment', view: ['id', 'issueId', 'body', 'createdAt'], by: ['issue.watchers'] },
+  listWatchedIssues: { kind: 'list', type: 'Issue', repository: 'issue', view: ['id', 'teamId', 'title'], by: ['watchers'] },
+  getWatchedIssue: { kind: 'read', type: 'Issue', repository: 'issue', key: 'id', view: ['id', 'teamId', 'title'], by: ['watchers'] },
+  updateWatchedIssue: { kind: 'update', type: 'Issue', repository: 'issue', key: 'id', view: ['id', 'teamId', 'title'], body: ['title'], by: ['watchers'] },
 } as const satisfies Partial<Record<OperationName, TableOperation>>;
 
 export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions, OpenAPIOptions {
@@ -704,6 +777,82 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       bodyLimitBytes: bodyLimits.createIssue,
       rateLimitPerMinute: rateLimits.createIssue,
       timeoutSeconds: timeouts.createIssue,
+    }
+  );
+  // A create of Issue (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.createWatchedIssue,
+    (ctx, request) => tableCreate(options.orm, tableOperations.createWatchedIssue, ctx, request),
+    options,
+    {
+      bodyLimitBytes: bodyLimits.createWatchedIssue,
+      rateLimitPerMinute: rateLimits.createWatchedIssue,
+      timeoutSeconds: timeouts.createWatchedIssue,
+    }
+  );
+  // A list of Comment (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.listWatchedComments,
+    (ctx, request) => {
+      const page = readPage(ctx.query, operationSpecs.listWatchedComments.page);
+      return tableList(options.orm, tableOperations.listWatchedComments, ctx, request, page);
+    },
+    options,
+    {
+      bodyLimitBytes: bodyLimits.listWatchedComments,
+      rateLimitPerMinute: rateLimits.listWatchedComments,
+      timeoutSeconds: timeouts.listWatchedComments,
+    }
+  );
+  // A list of Issue (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.listWatchedIssues,
+    (ctx, request) => {
+      const page = readPage(ctx.query, operationSpecs.listWatchedIssues.page);
+      return tableList(options.orm, tableOperations.listWatchedIssues, ctx, request, page);
+    },
+    options,
+    {
+      bodyLimitBytes: bodyLimits.listWatchedIssues,
+      rateLimitPerMinute: rateLimits.listWatchedIssues,
+      timeoutSeconds: timeouts.listWatchedIssues,
+    }
+  );
+  // A read of Issue (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.getWatchedIssue,
+    (ctx, request) => tableRead(options.orm, tableOperations.getWatchedIssue, ctx, request),
+    options,
+    {
+      bodyLimitBytes: bodyLimits.getWatchedIssue,
+      rateLimitPerMinute: rateLimits.getWatchedIssue,
+      timeoutSeconds: timeouts.getWatchedIssue,
+    }
+  );
+  // An update of Issue (D106): the runtime's handler runs it through the
+  // repositories in one transaction, as the request's caller, and answers
+  // the row's view.
+  mountOperation(
+    router,
+    operationSpecs.updateWatchedIssue,
+    (ctx, request) => tableUpdate(options.orm, tableOperations.updateWatchedIssue, ctx, request),
+    options,
+    {
+      bodyLimitBytes: bodyLimits.updateWatchedIssue,
+      rateLimitPerMinute: rateLimits.updateWatchedIssue,
+      timeoutSeconds: timeouts.updateWatchedIssue,
     }
   );
   return router;

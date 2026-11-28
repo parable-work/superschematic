@@ -297,6 +297,14 @@ func (f *NoteFilter) sqliteConditions(args *[]any) []string {
 			}
 		}
 	}
+	if f.holdsAudienceNamed != nil {
+		*args = append(*args, sqliteUUIDText(*f.holdsAudienceNamed))
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM json_each(note.audience_named) WHERE json_each.value = ?%d)`, len(*args)))
+	}
+	if f.holdsEffectiveAudience != nil {
+		*args = append(*args, sqliteUUIDText(*f.holdsEffectiveAudience))
+		conditions = append(conditions, fmt.Sprintf(`EXISTS (SELECT 1 FROM json_each(note.effective_audience) WHERE json_each.value = ?%d)`, len(*args)))
+	}
 	// AllOf's filters' conditions are the filter's own, ANDed (D99).
 	for i := range f.AllOf {
 		f.AllOf[i].scope = f.scope

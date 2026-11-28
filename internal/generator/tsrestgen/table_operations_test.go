@@ -119,6 +119,7 @@ func TestGenerateTableOperations(t *testing.T) {
 	commentView := []string{"id", "issueId", "body", "createdAt"}
 	teamView := []string{"id", "key", "name"}
 	noteView := []string{"id", "issueId", "owner", "sharedWith", "text", "createdAt", "createdBy"}
+	watchedView := []string{"id", "teamId", "title"}
 	want := map[string]*TableRoute{
 		"listTeams":        {Operation: "Teams.listTeams", Kind: "list", Type: "Team", Repository: "team", View: teamView},
 		"getTeam":          {Operation: "Teams.getTeam", Kind: "read", Type: "Team", Repository: "team", Key: "id", View: teamView},
@@ -142,6 +143,12 @@ func TestGenerateTableOperations(t *testing.T) {
 		"listComments":  {Operation: "Comments.listComments", Kind: "list", Type: "Comment", Repository: "comment", Parents: []string{"issueId"}, View: commentView},
 		"createComment": {Operation: "Comments.createComment", Kind: "create", Type: "Comment", Repository: "comment", Parents: []string{"issueId"}, View: commentView, Body: []string{"body"}},
 		"deleteComment": {Operation: "Comments.deleteComment", Kind: "delete", Type: "Comment", Repository: "comment", Key: "id", Parents: []string{"issueId"}, View: commentView},
+		// A row rule may name a list of ids, on the row or at a path's end (#735).
+		"listWatchedIssues":   {Operation: "Watching.listWatchedIssues", Kind: "list", Type: "Issue", Repository: "issue", View: watchedView, By: []string{"watchers"}},
+		"getWatchedIssue":     {Operation: "Watching.getWatchedIssue", Kind: "read", Type: "Issue", Repository: "issue", Key: "id", View: watchedView, By: []string{"watchers"}},
+		"createWatchedIssue":  {Operation: "Watching.createWatchedIssue", Kind: "create", Type: "Issue", Repository: "issue", Parents: []string{"teamId"}, View: watchedView, Body: []string{"title"}, By: []string{"watchers"}},
+		"updateWatchedIssue":  {Operation: "Watching.updateWatchedIssue", Kind: "update", Type: "Issue", Repository: "issue", Key: "id", View: watchedView, Body: []string{"title"}, By: []string{"watchers"}},
+		"listWatchedComments": {Operation: "Watching.listWatchedComments", Kind: "list", Type: "Comment", Repository: "comment", View: commentView, By: []string{"issue.watchers"}},
 	}
 	byName := endpointsByName(output)
 	if len(byName) != len(want) {
@@ -407,6 +414,7 @@ var tableCases = []string{
 	"a list's filters, search, sort and cursor hold together",
 	"the routes' guards hold: no caller, no permission, a public route",
 	"a row rule keeps each caller to the rows that name them, and its override permission lifts it",
+	"a row rule on a list of ids keeps out who is not in it, and a create puts the caller in it alone",
 	"an operation written by hand reaches the implementation",
 }
 

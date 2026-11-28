@@ -99,8 +99,17 @@ func (q *Queries) run(ctx context.Context, name, sql string, args []any) (pgx.Ro
 {{- range .Queries }}
 {{- $q := . }}
 
-// {{ .Const }} is the statement of the query {{ .Name }}{{ if .Order }}, its %s the fragment of the order its parameter picks{{ end }}.
+// {{ .Const }} is the statement of the query {{ .Name }}{{ if .Order }}, its %s the fragment of the order its parameter picks{{ end }}{{ if .Audience }}, each %A{n} its audience mark n{{ end }}.
 const {{ .Const }} = {{ .SQL }}
+{{- if .Audience }}
+
+// {{ .AudienceVar }} are the :audience marks of the query {{ .Name }} (#735), by the n of their %A{n}: each table's audience through its alias.
+var {{ .AudienceVar }} = []accessTable{
+{{- range .Audience }}
+	{effective: {{ goRawString .Effective }}, agents: {{ goRawString .Agents }}{{ if .Probe }}, probe: {{ goRawString .Probe }}{{ end }}},
+{{- end }}
+}
+{{- end }}
 {{- with .Order }}
 
 // {{ .Const }} are the orders of the query {{ $q.Name }}: each value of its parameter and its fragment.
@@ -150,7 +159,7 @@ func (q *Queries) {{ .Method }}(ctx context.Context, params {{ .Params }}) ({{ .
 	if !ok {
 		return {{ .Zero }}, fmt.Errorf("query {{ .Name }} orders by {{ .Order.Values }}, not %q", order)
 	}
-	rows, err := q.run(ctx, {{ printf "%q" .Name }}, fmt.Sprintf({{ .Const }}, fragment), args)
+	rows, err := q.run(ctx, {{ printf "%q" .Name }}, fmt.Sprintf({{ if .Audience }}queryAudience(ctx, {{ .Const }}, {{ .AudienceVar }}, &args){{ else }}{{ .Const }}{{ end }}, fragment), args)
 	if err != nil {
 		return {{ .Zero }}, err
 	}
@@ -170,7 +179,7 @@ func (q *Queries) {{ .Method }}(ctx context.Context, params {{ .Params }}) ({{ .
 {{- end }}
 		statement = {{ .Page.AfterConst }}
 	}
-	rows, err := q.run(ctx, {{ printf "%q" .Name }}, fmt.Sprintf(statement, limit+1), args)
+	rows, err := q.run(ctx, {{ printf "%q" .Name }}, fmt.Sprintf({{ if .Audience }}queryAudience(ctx, statement, {{ .AudienceVar }}, &args){{ else }}statement{{ end }}, limit+1), args)
 	if err != nil {
 		return nil, err
 	}
@@ -186,7 +195,7 @@ func (q *Queries) {{ .Method }}(ctx context.Context, params {{ .Params }}) ({{ .
 	}
 	return out, nil
 {{- else }}
-	rows, err := q.run(ctx, {{ printf "%q" .Name }}, {{ .Const }}, args)
+	rows, err := q.run(ctx, {{ printf "%q" .Name }}, {{ if .Audience }}strings.ReplaceAll(queryAudience(ctx, {{ .Const }}, {{ .AudienceVar }}, &args), "%%", "%"){{ else }}{{ .Const }}{{ end }}, args)
 	if err != nil {
 		return {{ .Zero }}, err
 	}
@@ -234,6 +243,46 @@ func scan{{ .Method }}(rows pgx.Rows) ([]{{ .Row }}, error) {
 		return nil, fmt.Errorf("query {{ .Name }}: %w", err)
 	}
 	return out, nil
+}
+{{- end }}
+
+{{- if .HasAudienceQueries }}
+
+// queryAudience is text, a query's format string, with each %A{n} replaced
+// by the audience conditions of marks[n] for ctx's caller (#735), as a
+// repository's read keeps to them, each value appended to args after
+// every other; TRUE outside any operation and for the system actor, which
+// read every row. A %% is left for the statement's fill.
+func queryAudience(ctx context.Context, text string, marks []accessTable, args *[]any) string {
+	caller, held := PrincipalOf(ctx)
+	var b strings.Builder
+	for i := 0; i < len(text); i++ {
+		if text[i] != '%' || i+1 >= len(text) {
+			b.WriteByte(text[i])
+			continue
+		}
+		if text[i+1] == '%' {
+			b.WriteString("%%")
+			i++
+			continue
+		}
+		if text[i+1] == 'A' && i+2 < len(text) && text[i+2] == '{' {
+			if end := strings.IndexByte(text[i+3:], '}'); end >= 0 {
+				if n, err := strconv.Atoi(text[i+3 : i+3+end]); err == nil && n < len(marks) {
+					condition := "TRUE"
+					if held {
+						paramNum := len(*args)
+						condition = audienceCondition(marks[n], caller, args, &paramNum, false)
+					}
+					b.WriteString(strings.ReplaceAll(condition, "%", "%%"))
+					i += 3 + end
+					continue
+				}
+			}
+		}
+		b.WriteByte(text[i])
+	}
+	return b.String()
 }
 {{- end }}
 

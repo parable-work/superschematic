@@ -1,5 +1,6 @@
 import { decodeRow, encodeParam, type RowField } from './pgcodec.js';
-import { NotFoundError, PageKeyError, TooManyRowsError, fill, type RowPage } from './orm.js';
+import type { AccessCaller } from './caller.js';
+import { NotFoundError, PageKeyError, TooManyRowsError, audienceConditions, fill, type RowPage } from './orm.js';
 
 /*
 A DB service's declared queries (D86): @query<Params, Row>({ sql, ... })
@@ -24,7 +25,22 @@ A query that returns 'one' answers its one row, and throws NotFoundError
 when the statement reads none, as getOne does, and TooManyRowsError when it
 reads more than one; one that returns 'optional' answers its row or null,
 and throws TooManyRowsError the same (D95).
+
+A query that reads an @audience table marks where its audience goes,
+:audience(d) for the alias d (#735), which the statement holds as %A{n}:
+each is replaced, before the order's and the page's fill, by the
+audience's conditions for whom the ORM's reads keep to (audienceConditions),
+the caller of the operation being run, or no condition outside one and
+for the system actor. Their parameters are numbered after every other,
+the page key's among them.
 */
+
+/** A query's :audience mark (#735): the conditions' columns through its alias, and for a projection's view the view's key in its source's rows of the WHERE %s. */
+export interface QueryAudienceDefinition {
+  readonly effective: string;
+  readonly agents: string;
+  readonly probe?: string;
+}
 
 /** A query's dynamic sort: the parameter that picks it, each value's fixed ORDER BY fragment, and a null parameter's pick. */
 export interface QueryOrderDefinition {
@@ -52,6 +68,8 @@ export interface QueryDefinition {
   readonly page?: QueryPageDefinition;
   /** What a call answers: unset, the rows; 'one', the one row; 'optional', the row or null (D95). */
   readonly returns?: 'one' | 'optional';
+  /** The statement's :audience marks, by the n of their %A{n} (#735). */
+  readonly audience?: readonly QueryAudienceDefinition[];
 }
 
 /** The options of a paged query. */
@@ -67,13 +85,34 @@ export type QueryRun = (text: string, values: unknown[]) => Promise<{ rows: Reco
 
 type Values = Record<string, unknown>;
 
-/** The functions of a database's queries, by name, each over run. */
-export function queriesOf(defs: Readonly<Record<string, QueryDefinition>>, run: QueryRun, defaultLimit: number): Record<string, (params?: Values, page?: QueryPageOptions<Values>) => Promise<unknown>> {
+/** Whom a query's :audience marks keep to now (#735): every row, or a caller. */
+export type QuerySees = () => 'all' | AccessCaller;
+
+/** The functions of a database's queries, by name, each over run, its marks held to whom sees names. */
+export function queriesOf(defs: Readonly<Record<string, QueryDefinition>>, run: QueryRun, defaultLimit: number, sees: QuerySees = () => 'all'): Record<string, (params?: Values, page?: QueryPageOptions<Values>) => Promise<unknown>> {
   const out: Record<string, (params?: Values, page?: QueryPageOptions<Values>) => Promise<unknown>> = {};
   for (const [name, def] of Object.entries(defs)) {
-    out[name] = (params?: Values, page?: QueryPageOptions<Values>) => runQuery(name, def, run, defaultLimit, params ?? {}, page ?? {});
+    out[name] = (params?: Values, page?: QueryPageOptions<Values>) => runQuery(name, def, run, defaultLimit, params ?? {}, page ?? {}, sees);
   }
   return out;
+}
+
+/**
+ * text, a query's format string, with each %A{n} replaced by the audience
+ * conditions of its mark for whom the reads keep to, each value appended
+ * to args (#735): TRUE for every row. A %% is left for fill.
+ */
+function marked(def: QueryDefinition, text: string, args: unknown[], sees: QuerySees): string {
+  const marks = def.audience;
+  if (!marks || marks.length === 0) return text;
+  const caller = sees();
+  return text.replace(/%%|%A\{(\d+)\}/gu, (verb, n: string | undefined) => {
+    if (n === undefined) return verb;
+    const mark = marks[Number(n)];
+    if (!mark) throw new Error(`orm: the statement names audience mark ${n}, which the query does not declare`);
+    if (caller === 'all') return 'TRUE';
+    return audienceConditions(mark, caller, args, args.length).join(' AND ').replaceAll('%', '%%');
+  });
 }
 
 function encode(name: string, field: RowField, value: unknown, what: string): unknown {
@@ -92,7 +131,7 @@ function decode<T>(name: string, def: QueryDefinition, row: Values): T {
   }
 }
 
-async function runQuery(name: string, def: QueryDefinition, run: QueryRun, defaultLimit: number, params: Values, page: QueryPageOptions<Values>): Promise<unknown> {
+async function runQuery(name: string, def: QueryDefinition, run: QueryRun, defaultLimit: number, params: Values, page: QueryPageOptions<Values>, sees: QuerySees): Promise<unknown> {
   const args = def.params.map(p => encode(name, p, params[p.name], 'parameter'));
   if (def.orderBy) {
     const order = def.orderBy;
@@ -100,11 +139,11 @@ async function runQuery(name: string, def: QueryDefinition, run: QueryRun, defau
     if (typeof value !== 'string' || !Object.hasOwn(order.options, value)) {
       throw new Error(`orm: query ${name} orders by ${Object.keys(order.options).join(', ')}, not ${JSON.stringify(value)}`);
     }
-    const { rows } = await run(fill(def.text, order.options[value]), args);
+    const { rows } = await run(fill(marked(def, def.text, args, sees), order.options[value]), args);
     return answer(name, def, rows.map(row => decode(name, def, row)));
   }
   if (!def.page) {
-    const { rows } = await run(fill(def.text), args);
+    const { rows } = await run(fill(marked(def, def.text, args, sees)), args);
     return answer(name, def, rows.map(row => decode(name, def, row)));
   }
   if (page.limit !== undefined && page.limit < 0) throw new Error(`orm: a page of query ${name} holds 1 or more rows, not ${page.limit}`);
@@ -120,7 +159,7 @@ async function runQuery(name: string, def: QueryDefinition, run: QueryRun, defau
     }
     text = def.page.after;
   }
-  const { rows } = await run(fill(text, limit + 1), args);
+  const { rows } = await run(fill(marked(def, text, args, sees), limit + 1), args);
   const decoded = rows.map(row => decode<Values>(name, def, row));
   if (decoded.length <= limit) return { rows: decoded, next: null } satisfies RowPage<Values, Values>;
   const kept = decoded.slice(0, limit);

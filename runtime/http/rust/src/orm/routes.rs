@@ -28,7 +28,7 @@ use std::collections::BTreeMap;
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
-use super::plan::Plan;
+use super::plan::{Plan, ROW_RULE_HOLDS};
 use super::run::{Client, Runner};
 use super::{
     Column, Constraint, ConstraintKind, Definition, Error, PageOptions, Refusal, Table, Values,
@@ -98,7 +98,8 @@ pub struct TableOperation {
     #[serde(default)]
     pub search: Option<String>,
     /// The row rule (D108): the row's members that name who may reach it,
-    /// or a path to one through the table's relations (D156), dotted.
+    /// a list of ids among them (#735), or a path to one through the
+    /// table's relations (D156), dotted.
     #[serde(default)]
     pub by: Vec<String>,
     /// The permission whose holder the row rule does not hold back.
@@ -435,7 +436,7 @@ fn path_of<'d>(
     }
     let column = at
         .column(&last)
-        .filter(|column| column.filter.iter().any(|op| op == "eq"))
+        .filter(|column| column.filter.iter().any(|op| op == "eq") || (column.list && column.uuid))
         .ok_or_else(|| {
             ApiError::internal(format!(
                 "table operation: the row rule of {} names {member}, which its repository keeps no equality filter for; rebuild the database's types",
@@ -478,7 +479,9 @@ fn reach_of(
         if column.uuid && parse_uuid(subject).is_none() {
             continue;
         }
-        let mut filter = condition(&column.name, "eq", Value::from(subject));
+        // A list of ids holds the caller where it holds its id (#735).
+        let op = if column.list { ROW_RULE_HOLDS } else { "eq" };
+        let mut filter = condition(&column.name, op, Value::from(subject));
         for step in steps.iter().rev() {
             let mut outer = Values::new();
             outer.insert(step.clone(), Value::Object(filter));
@@ -917,7 +920,13 @@ impl<C: Client> Routes<'_, C> {
                 // none.
                 return Err(ApiError::forbidden("Access denied"));
             }
-            input.insert(member.clone(), Value::from(subject));
+            // A list of ids the rule names holds the caller alone (#735).
+            let value = if column.is_some_and(|column| column.list) {
+                Value::Array(vec![Value::from(subject)])
+            } else {
+                Value::from(subject)
+            };
+            input.insert(member.clone(), value);
         }
         let created = match self.runner.create_one(&input).await {
             Ok(created) => created,

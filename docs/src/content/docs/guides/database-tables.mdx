@@ -2944,6 +2944,12 @@ version's DDL too, so a renamed column a query reads fails the plan,
 naming the query. [Declared queries](/superschematic/reference/declared-queries/)
 covers the options, the codec, nullability and the lock.
 
+A query that reads an `@audience` table marks where its audience goes,
+`:audience(d)` for the alias `d` it reads the table through (#735), and
+the ORM fills the mark with the caller's audience
+([An audience in a declared query](/superschematic/guides/api-routes/#an-audience-in-a-declared-query)).
+Verification refuses a query that reads one with no mark.
+
 ## Change tables that hold data
 
 `create.sql` builds the database from nothing. `drop.sql` drops the

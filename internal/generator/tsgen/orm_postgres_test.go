@@ -43,7 +43,7 @@ type repositoryCase struct {
 // and updates only if changed under a trigger, and its options of a find, a
 // transaction and a raw query (D89); fixture-finances-db's reads (D90), a
 // filter through a relation, anyOf, select and include, and a projection's
-// repository, and allOf and a projection's searchText (D99); fixture-queries-db's declared queries (D86);
+// repository, and allOf and a projection's searchText (D99); fixture-queries-db's declared queries (D86), and fixture-audience-queries-db's over @audience tables (#735);
 // fixture-vault-db's Encrypted<T> fields (D85), sealed, opened,
 // refused and resealed; fixture-actor-db's acting user, the caller of the
 // operation being run and the system actor (D87); and fixture-vectors-db's
@@ -140,6 +140,13 @@ var repositoryCases = []repositoryCase{
 		"dashboardTotals returns its one row, which an empty filter still reads, on the pool and in a transaction",
 		"a query that returns one row fails on none, as getOne does, and on more than one",
 		"a query that returns one row or none answers null for none, and fails on more than one",
+	}},
+	{fixture: "fixture-audience-queries-db", files: []string{"audience_queries.test.ts"}, tests: []string{
+		"two callers get each their own rows of one query, an anonymous one everyone's and the system every one",
+		"an agent run sees what it or whom it acts for may, and its access lets it read",
+		"a join holds each table it marks to the caller",
+		"a paged query numbers the audience after its page key, page by page",
+		"a query over a projection's view keeps to its source's audience, in a transaction too",
 	}},
 	{fixture: "fixture-actor-db", files: []string{"actor.test.ts"}, tests: []string{
 		"an ORM opened with no user acts as the caller of the operation it runs in, and as no one outside one",
