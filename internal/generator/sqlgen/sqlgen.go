@@ -675,7 +675,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 		SearchChildTriggers: searchChildTriggers,
 		RoleSeeds:           roleSeeds,
 		SeedRows:            seedRows,
-		Projections:        projections,
+		Projections:         projections,
 		Timestamp:           opts.Clock.RFC3339(),
 		RawSQL:              rawSQL,
 
