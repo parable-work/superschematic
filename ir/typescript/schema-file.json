@@ -622,145 +622,6 @@
           "if": {
             "properties": {
               "name": {
-                "const": "Branches"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "config": {
-                "additionalProperties": false,
-                "properties": {
-                  "kinds": {
-                    "additionalProperties": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "order": {
-                          "description": "The kind's integer field that orders siblings, as @graphMember's order.",
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "parent": {
-                          "additionalProperties": false,
-                          "description": "Containment, as @graphMember's parent: key is the kind's field, of a UUID scalar, that holds the parent row's entity key, and of is the parent's kind, this one included. Deleting a parent removes its descendants.",
-                          "properties": {
-                            "key": {
-                              "minLength": 1,
-                              "type": "string"
-                            },
-                            "of": {
-                              "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "key",
-                            "of"
-                          ],
-                          "type": "object"
-                        },
-                        "retentionDays": {
-                          "description": "How many days of the kind's history the sweep keeps, as @versioned's retentionDays; all of it when absent.",
-                          "maximum": 2147483647,
-                          "minimum": 1,
-                          "type": "integer"
-                        },
-                        "singleton": {
-                          "description": "At most one live row of the kind, as @graphMember's singleton.",
-                          "type": "boolean"
-                        },
-                        "type": {
-                          "description": "The type of the schema document, besides the instance type, whose fields are the kind's content.",
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "units": {
-                          "additionalProperties": {
-                            "enum": [
-                              "atomic",
-                              "keyed",
-                              "jsonSchema",
-                              "excluded"
-                            ],
-                            "type": "string"
-                          },
-                          "description": "A field's conflict unit, as @conflictUnit sets it: atomic (the default), keyed (each top-level key of a JSON object), jsonSchema, or excluded (not content: never merged or hashed).",
-                          "propertyNames": {
-                            "minLength": 1
-                          },
-                          "type": "object"
-                        }
-                      },
-                      "required": [
-                        "type"
-                      ],
-                      "type": "object"
-                    },
-                    "description": "The graph's kinds, by name: camelCase, at most 64 characters.",
-                    "maxProperties": 64,
-                    "minProperties": 1,
-                    "propertyNames": {
-                      "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
-                    },
-                    "type": "object"
-                  },
-                  "primary": {
-                    "description": "The name of each instance's primary line; main when absent.",
-                    "maxLength": 200,
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "snapshotEvery": {
-                    "description": "How many commits past the nearest snapshot on its chain a commit is snapshotted at, as @versionGraph's snapshotEvery; 64 when absent.",
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "sweep": {
-                    "additionalProperties": false,
-                    "description": "Turns the sweep schedule on for the schema: each run discards the drafts idle past abandonAfter, then deletes the rows of refs discarded longer ago than discardGrace, prunes each kind's history past its retentionDays and writes missing snapshots.",
-                    "properties": {
-                      "abandonAfter": {
-                        "description": "Discards a draft with no write for this many milliseconds; none when absent.",
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "discardGrace": {
-                        "description": "How long a discarded ref's rows are kept, in milliseconds; seven days when absent.",
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "intervalMs": {
-                        "description": "How often it runs, in milliseconds; at least 1000.",
-                        "minimum": 1000,
-                        "type": "integer"
-                      },
-                      "pruneBatch": {
-                        "description": "At most this many history images of each kind pruned per run; no limit when absent.",
-                        "minimum": 1,
-                        "type": "integer"
-                      }
-                    },
-                    "required": [
-                      "intervalMs"
-                    ],
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "kinds"
-                ],
-                "type": "object"
-              }
-            },
-            "required": [
-              "config"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "name": {
                 "const": "Budget"
               }
             }
@@ -1900,98 +1761,6 @@
           "if": {
             "properties": {
               "name": {
-                "const": "Links"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "config": {
-                "additionalProperties": false,
-                "properties": {
-                  "links": {
-                    "additionalProperties": {
-                      "additionalProperties": false,
-                      "else": {
-                        "not": {
-                          "required": [
-                            "max"
-                          ]
-                        }
-                      },
-                      "if": {
-                        "properties": {
-                          "many": {
-                            "const": true
-                          }
-                        },
-                        "required": [
-                          "many"
-                        ]
-                      },
-                      "properties": {
-                        "many": {
-                          "description": "The link holds a list of targets, in the order they were linked, rather than one.",
-                          "type": "boolean"
-                        },
-                        "max": {
-                          "description": "For a many-valued link, the most targets it holds, from 1 to 100.",
-                          "maximum": 100,
-                          "minimum": 1,
-                          "type": "integer"
-                        },
-                        "pinned": {
-                          "description": "What the link records of the target, reporting the target's latest beside it and whether the target has moved past it: true or revision, its revision, whose schema must compose Revisions; release, its release, whose schema must compose Branches; false or absent, nothing.",
-                          "enum": [
-                            true,
-                            false,
-                            "revision",
-                            "release"
-                          ]
-                        },
-                        "required": {
-                          "description": "Every create gives the link, which can then be moved to another target but not unlinked, and the delete of its target is refused. A many-valued link holds at least one target, and only the delete of its last is refused.",
-                          "type": "boolean"
-                        },
-                        "schema": {
-                          "description": "The schema of the instance the link points at.",
-                          "pattern": "^[A-Za-z][A-Za-z0-9_-]{0,127}$",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "schema"
-                      ],
-                      "then": {
-                        "required": [
-                          "max"
-                        ]
-                      },
-                      "type": "object"
-                    },
-                    "description": "The links an instance may hold, by name: camelCase, at most 64 characters.",
-                    "minProperties": 1,
-                    "propertyNames": {
-                      "pattern": "^[a-z][A-Za-z0-9]{0,63}$"
-                    },
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "links"
-                ],
-                "type": "object"
-              }
-            },
-            "required": [
-              "config"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "name": {
                 "const": "Numbering"
               }
             }
@@ -2545,89 +2314,6 @@
                 "type": "object"
               }
             }
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "name": {
-                "const": "Queue"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "config": {
-                "additionalProperties": false,
-                "properties": {
-                  "claim": {
-                    "additionalProperties": false,
-                    "description": "The Workflow states an instance is claimed from, and the state a claim moves it to.",
-                    "properties": {
-                      "from": {
-                        "description": "The states an instance can be claimed in; a transition from each to the claimed state must exist.",
-                        "items": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "minItems": 1,
-                        "type": "array",
-                        "uniqueItems": true
-                      },
-                      "to": {
-                        "description": "The state a claim moves the instance to.",
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "from",
-                      "to"
-                    ],
-                    "type": "object"
-                  },
-                  "excludeStale": {
-                    "description": "Pinned links of the type's Links config: an instance one of which is pinned to a revision or a release its target has moved past is not claimed, and is no candidate until a change of it, a new link say, lets it back in.",
-                    "items": {
-                      "pattern": "^[a-z][A-Za-z0-9]{0,63}$",
-                      "type": "string"
-                    },
-                    "maxItems": 16,
-                    "minItems": 1,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "match": {
-                    "description": "The type's own top-level scalar fields claimNext and countClaimable may filter on, by equality with a value or membership in a list of values.",
-                    "items": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "maxItems": 16,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "maxCandidates": {
-                    "description": "The most instances one claimNext tries before it gives up; 100 when absent.",
-                    "maximum": 1000,
-                    "minimum": 1,
-                    "type": "integer"
-                  },
-                  "priorityField": {
-                    "description": "An integer field of the type that orders claimNext: higher first, an instance without a value last. Absent, oldest first.",
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "claim"
-                ],
-                "type": "object"
-              }
-            },
-            "required": [
-              "config"
-            ]
           }
         },
         {
@@ -3616,83 +3302,6 @@
           "if": {
             "properties": {
               "name": {
-                "const": "Search"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "config": {
-                "additionalProperties": false,
-                "properties": {
-                  "fields": {
-                    "description": "The type's own top-level fields to index, by JSON key, each a string or a scalar whose values are strings; at most 16. Their order is the order a snippet's field is chosen in when two match equally, and the order an embedder's text joins them in.",
-                    "items": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "maxItems": 16,
-                    "minItems": 1,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "vectors": {
-                    "additionalProperties": false,
-                    "description": "Keeps a vector per instance, which an outside embedder computes from the indexed fields' text, for vector and hybrid search. A version that changes the model or the dimensions makes every vector stale.",
-                    "properties": {
-                      "dimensions": {
-                        "description": "How many numbers a vector holds.",
-                        "maximum": 4096,
-                        "minimum": 1,
-                        "type": "integer"
-                      },
-                      "model": {
-                        "description": "A label for the embedding model the vectors come from, which the engine only compares: an embedder computes with it, and a query vector may name it.",
-                        "maxLength": 200,
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "permission": {
-                        "description": "The permission an embedder needs to settle vectors.",
-                        "minLength": 1,
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "dimensions",
-                      "model",
-                      "permission"
-                    ],
-                    "type": "object"
-                  },
-                  "weights": {
-                    "additionalProperties": {
-                      "exclusiveMinimum": 0,
-                      "maximum": 1000,
-                      "type": "number"
-                    },
-                    "description": "A weight per indexed field, which multiplies that field's part of a match's score; 1 for a field it does not name.",
-                    "propertyNames": {
-                      "minLength": 1
-                    },
-                    "type": "object"
-                  }
-                },
-                "required": [
-                  "fields"
-                ],
-                "type": "object"
-              }
-            },
-            "required": [
-              "config"
-            ]
-          }
-        },
-        {
-          "if": {
-            "properties": {
-              "name": {
                 "const": "Seats"
               }
             }
@@ -4311,7 +3920,6 @@
             "Approvals",
             "Assignment",
             "Blueprint",
-            "Branches",
             "Budget",
             "Calendar",
             "Comments",
@@ -4320,13 +3928,11 @@
             "Derived",
             "Holds",
             "Lease",
-            "Links",
             "Numbering",
             "Payments",
             "Pool",
             "Presence",
             "Provenance",
-            "Queue",
             "Reactions",
             "Reconcile",
             "Recurrence",
@@ -4334,7 +3940,6 @@
             "Revisions",
             "Rollups",
             "Schedules",
-            "Search",
             "Seats",
             "StateRules",
             "Stock",

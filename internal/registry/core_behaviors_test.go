@@ -15,15 +15,15 @@ import (
 )
 
 // coreBehaviorNames are the behaviors New registers, sorted.
-var coreBehaviorNames = []string{"Aliased", "Approvals", "Assignment", "Blueprint", "Branches", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Links", "Numbering",
-	"Payments", "Pool", "Presence", "Provenance", "Queue", "Reactions", "Reconcile", "Recurrence", "Retries", "Revisions", "Rollups", "Schedules", "Search", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
+var coreBehaviorNames = []string{"Aliased", "Approvals", "Assignment", "Blueprint", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Numbering",
+	"Payments", "Pool", "Presence", "Provenance", "Reactions", "Reconcile", "Recurrence", "Retries", "Revisions", "Rollups", "Schedules", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
 
 // workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
 // implements, commerceBehaviorNames the ones @superschematic/engine-commerce
 // does (D70), and rulesOnlyBehaviorNames the ones the behaviors' core alone
 // does (RulesPackage, D104); the engine implements the rest.
 var (
-	workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Queue", "Retries"}
+	workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Retries"}
 	commerceBehaviorNames  = []string{"Calendar", "Holds", "Payments", "Stock"}
 	rulesOnlyBehaviorNames = []string{"Aliased", "Pool", "Reconcile", "Recurrence", "Schedules", "Seats"}
 )
@@ -63,19 +63,24 @@ func TestCoreBehaviors(t *testing.T) {
 	comments, _ := reg.Behavior("Comments")
 	revisions, _ := reg.Behavior("Revisions")
 	dependencies, _ := reg.Behavior("Dependencies")
-	links, _ := reg.Behavior("Links")
 	rollups, _ := reg.Behavior("Rollups")
-	search, _ := reg.Behavior("Search")
 	reactions, _ := reg.Behavior("Reactions")
-	if !workflow.ConfigRequired() || comments.ConfigRequired() || revisions.ConfigRequired() || dependencies.ConfigRequired() || !links.ConfigRequired() ||
-		!rollups.ConfigRequired() || !search.ConfigRequired() || !reactions.ConfigRequired() {
-		t.Errorf("ConfigRequired: Workflow %v, Comments %v, Revisions %v, Dependencies %v, Links %v, Rollups %v, Search %v, Reactions %v; want true, false, false, false, true, true, true, true",
-			workflow.ConfigRequired(), comments.ConfigRequired(), revisions.ConfigRequired(), dependencies.ConfigRequired(), links.ConfigRequired(),
-			rollups.ConfigRequired(), search.ConfigRequired(), reactions.ConfigRequired())
+	if !workflow.ConfigRequired() || comments.ConfigRequired() || revisions.ConfigRequired() || dependencies.ConfigRequired() ||
+		!rollups.ConfigRequired() || !reactions.ConfigRequired() {
+		t.Errorf("ConfigRequired: Workflow %v, Comments %v, Revisions %v, Dependencies %v, Rollups %v, Reactions %v; want true, false, false, false, true, true",
+			workflow.ConfigRequired(), comments.ConfigRequired(), revisions.ConfigRequired(), dependencies.ConfigRequired(),
+			rollups.ConfigRequired(), reactions.ConfigRequired())
 	}
-	if !slices.Equal(dependencies.Requires, []string{"Workflow"}) || len(links.Requires) != 0 || len(rollups.Requires) != 0 || !slices.Equal(reactions.Requires, []string{"Workflow"}) {
-		t.Errorf("requires: Dependencies %v, Links %v, Rollups %v, Reactions %v; want [Workflow], none, none and [Workflow]",
-			dependencies.Requires, links.Requires, rollups.Requires, reactions.Requires)
+	if !slices.Equal(dependencies.Requires, []string{"Workflow"}) || len(rollups.Requires) != 0 || !slices.Equal(reactions.Requires, []string{"Workflow"}) {
+		t.Errorf("requires: Dependencies %v, Rollups %v, Reactions %v; want [Workflow], none and [Workflow]",
+			dependencies.Requires, rollups.Requires, reactions.Requires)
+	}
+	// D103 folds Links, Search, Queue and Branches into schema features,
+	// and their declarations went with the engine (D103, #587).
+	for name := range FoldedBehaviors {
+		if _, ok := reg.Behavior(name); ok {
+			t.Errorf("the core registers %s, which D103 folds into a schema feature", name)
+		}
 	}
 	if len(rollups.Operations) != 0 || len(rollups.Fields) != 1 || rollups.Fields[0].Name != "values" {
 		t.Errorf("Rollups: operations %v, fields %v; want none and values", rollups.Operations, rollups.Fields)
@@ -96,37 +101,20 @@ func TestCoreBehaviors(t *testing.T) {
 			}
 		}
 	}
-	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Comments.messages", "Comments.lastMessageAt", "Comments.threads", "Comments.composing", "Comments.unread", "Dependencies.blocked", "Derived.stale", "Lease.active", "Links.targets", "Rollups.values",
+	if want := []string{"Budget.meters", "Calendar.timeZone", "Calendar.hours", "Calendar.closures", "Comments.messages", "Comments.lastMessageAt", "Comments.threads", "Comments.composing", "Comments.unread", "Dependencies.blocked", "Derived.stale", "Lease.active", "Rollups.values",
 		"Stock.low"}; !slices.Equal(volatile, want) {
 		t.Errorf("volatile fields = %v, want %v", volatile, want)
 	}
 	if names := fieldNames(workflow.Fields); !slices.Equal(names, []string{"status", "enteredAt"}) {
 		t.Errorf("Workflow fields = %v, want status and enteredAt", names)
 	}
-	var scopes []string
-	for _, op := range links.Operations {
-		scopes = append(scopes, op.Name+":"+op.Scope)
-	}
-	if want := []string{"link:", "unlink:", "listLinked:schema"}; !slices.Equal(scopes, want) {
-		t.Errorf("Links operations and scopes = %v, want %v", scopes, want)
-	}
-	// Search's operations are all schema-level; only the embedder's
-	// settleEmbeddings writes.
-	var searchOps []string
-	for _, op := range search.Operations {
-		searchOps = append(searchOps, fmt.Sprintf("%s:%s:%v", op.Name, op.Scope, op.Writes))
-	}
-	if want := []string{"search:schema:false", "similar:schema:false", "staleEmbeddings:schema:false", "settleEmbeddings:schema:true"}; !slices.Equal(searchOps, want) || len(search.Fields) != 0 {
-		t.Errorf("Search operations = %v and fields %v, want %v and no field", searchOps, search.Fields, want)
-	}
 	lease, _ := reg.Behavior("Lease")
 	assignment, _ := reg.Behavior("Assignment")
-	queue, _ := reg.Behavior("Queue")
-	if lease.ConfigRequired() || assignment.ConfigRequired() || !queue.ConfigRequired() {
-		t.Errorf("ConfigRequired: Lease %v, Assignment %v, Queue %v; want false, false, true", lease.ConfigRequired(), assignment.ConfigRequired(), queue.ConfigRequired())
+	if lease.ConfigRequired() || assignment.ConfigRequired() {
+		t.Errorf("ConfigRequired: Lease %v, Assignment %v; want false, false", lease.ConfigRequired(), assignment.ConfigRequired())
 	}
-	if len(lease.Requires) != 0 || len(assignment.Requires) != 0 || !slices.Equal(queue.Requires, []string{"Workflow", "Lease"}) {
-		t.Errorf("requires: Lease %v, Assignment %v, Queue %v; want none, none and [Workflow Lease]", lease.Requires, assignment.Requires, queue.Requires)
+	if len(lease.Requires) != 0 || len(assignment.Requires) != 0 {
+		t.Errorf("requires: Lease %v, Assignment %v; want none, none", lease.Requires, assignment.Requires)
 	}
 	presence, _ := reg.Behavior("Presence")
 	blueprint, _ := reg.Behavior("Blueprint")
@@ -166,37 +154,6 @@ func TestCoreBehaviors(t *testing.T) {
 	if stateRules.Package != EnginePackage || !stateRules.ConfigRequired() || !slices.Equal(stateRules.Requires, []string{"Workflow"}) || len(stateRules.Fields) != 0 ||
 		len(stateRules.Operations) != 0 || len(stateRules.PreconditionSchema) != 0 || len(stateRules.CreateParamsSchema) != 0 {
 		t.Errorf("StateRules = %+v, want the engine's, a config, Workflow required, and no field, operation or parameter", stateRules)
-	}
-	// Branches makes each instance a version graph's root: one field, the
-	// release pointer's version, no requirement, and sixteen operations, all
-	// of instance scope, of which the nine that write the graph write and
-	// the seven that read it read.
-	branches, _ := reg.Behavior("Branches")
-	if branches.Package != EnginePackage || !branches.ConfigRequired() || len(branches.Requires) != 0 || len(branches.Fields) != 1 || branches.Fields[0].Name != "release" ||
-		len(branches.PreconditionSchema) != 0 || len(branches.CreateParamsSchema) != 0 {
-		t.Errorf("Branches = %+v, want the engine's, a config, the field release, and no requirement or parameter", branches)
-	}
-	var branchOps []string
-	for _, op := range branches.Operations {
-		if op.Scope != "" {
-			t.Errorf("Branches.%s has scope %q, want instance", op.Name, op.Scope)
-		}
-		branchOps = append(branchOps, fmt.Sprintf("%s:%v", op.Name, op.Writes))
-		// branch takes no fromRef to branch from the primary line, which is
-		// how an instance older than its schema's Branches gets one.
-		if op.Name == "branch" {
-			var params struct {
-				Required   []string                   `json:"required"`
-				Properties map[string]json.RawMessage `json:"properties"`
-			}
-			if err := json.Unmarshal(op.ParamsSchema, &params); err != nil || !slices.Equal(params.Required, []string{"name"}) || params.Properties["fromRef"] == nil {
-				t.Errorf("Branches.branch params = %s, want fromRef optional beside a required name", op.ParamsSchema)
-			}
-		}
-	}
-	if want := []string{"branch:true", "save:true", "commit:true", "seal:true", "merge:true", "rebase:true", "revert:true", "releaseCommit:true", "discard:true",
-		"refs:false", "releases:false", "compose:false", "materialize:false", "released:false", "diff:false", "history:false"}; !slices.Equal(branchOps, want) {
-		t.Errorf("Branches operations = %v, want %v", branchOps, want)
 	}
 	// Comments' operations (D77): every writing one on an instance is
 	// beside it and logged but appendDraft, whose draft only signals carry,
@@ -321,7 +278,7 @@ func TestCoreBehaviors(t *testing.T) {
 	// which read; claimNext, countClaimable and expireHolder are schema-level.
 	reads := []string{"countClaimable", "checkReserve"}
 	schemaLevel := []string{"claimNext", "countClaimable", "expireHolder"}
-	for _, b := range []Behavior{lease, assignment, queue, presence, budget, retries} {
+	for _, b := range []Behavior{lease, assignment, presence, budget, retries} {
 		for _, op := range b.Operations {
 			if op.Writes == slices.Contains(reads, op.Name) || (op.Scope == OperationScopeSchema) != slices.Contains(schemaLevel, op.Name) {
 				t.Errorf("%s.%s: writes %v, scope %q", b.Name, op.Name, op.Writes, op.Scope)
@@ -355,18 +312,14 @@ func TestCoreBehaviors(t *testing.T) {
 			"already_reacted", "not_reacted", "too_many_reactions", "already_pinned", "not_pinned", "already_resolved", "not_resolved", "block_not_allowed", "ref_not_found",
 			"attachment_not_allowed", "no_block", "not_code", "anchor_unchanged", "not_idle", "too_many_drafts", "draft_too_long", "not_configured", "unknown_delivery", "token_stale", "not_claimed"}},
 		{dependencies, []string{"blocked", "already_blocking", "cycle", "gated"}},
-		{links, []string{"no_revision", "no_release", "required_link", "required_target", "too_many", "not_linked"}},
 		{rollups, []string{"not_held"}},
 		{revisions, []string{"no_review", "not_pending"}},
 		{retries, []string{"exhausted", "limits_fixed", "not_configured", "backing_off", "throttled"}},
 		{lease, []string{"held_by_another", "held_by_caller", "not_leased", "not_holder", "lapsed", "token_stale", "token_required", "max_expiries", "hold_limit_fixed", "not_configured"}},
 		{assignment, []string{"assigned_to_another", "already_assigned", "not_assigned", "not_configured"}},
-		{queue, []string{"not_claimable", "blocked", "stale_link", "claim_required"}},
 		{presence, []string{"no_principal", "not_principal", "principal_fixed"}},
 		{budget, []string{"over_limit", "not_leased", "scope_moved", "scope_reserved", "below_committed", "exceeds_reservation", "not_configured"}},
 		{blueprint, []string{"stamped", "no_dependencies", "not_constant", "no_revision", "unreadable", "invalid_steps"}},
-		{branches, []string{"version_conflict", "name_taken", "ref_sealed", "primary_merge_only", "nothing_to_commit", "entity_not_found", "invalid_tree",
-			"merge_into_itself", "no_parent", "not_tagged", "walk_ceiling", "primary_line"}},
 		{stateRules, []string{"missing_fields", "frozen_fields", "required_fields"}},
 		{stock, []string{"not_requested", "unavailable", "held", "over_max", "below_held"}},
 		{calendar, []string{"not_requested", "unavailable", "held", "outside_hours", "closed", "off_grid", "too_short", "too_long", "too_soon", "too_far",
@@ -448,23 +401,6 @@ func TestCoreBehaviors(t *testing.T) {
 		{dependencies, `{"satisfiedBy": []}`, "behavior Dependencies config: "},
 		{dependencies, `{"satisfiedBy": ["done"]}`, "behavior Dependencies config: "},
 		{dependencies, `{"satisfiedBy": ["success", "success"]}`, "behavior Dependencies config: "},
-		{links, `{"links": {"spec": {"schema": "documents", "pinned": true}, "parent": {"schema": "tasks", "required": true}}}`, ""},
-		{links, `{"links": {"spec": {"schema": "documents", "pinned": "revision"}, "recipe": {"schema": "recipes", "pinned": "release"}, "note": {"schema": "notes", "pinned": false}}}`, ""},
-		{links, `{"links": {"spec": {"schema": "documents", "pinned": "tag"}}}`, "behavior Links config: "},
-		{links, ``, "behavior Links config: "},
-		{links, `{"links": {}}`, "behavior Links config: "},
-		{links, `{"links": {"Spec": {"schema": "documents"}}}`, "behavior Links config: "},
-		{links, `{"links": {"spec_doc": {"schema": "documents"}}}`, "behavior Links config: "},
-		{links, `{"links": {"spec": {}}}`, "behavior Links config: "},
-		{links, `{"links": {"spec": {"schema": "the documents"}}}`, "behavior Links config: "},
-		{links, `{"links": {"spec": {"schema": "documents", "weak": true}}}`, "behavior Links config: "},
-		{links, `{"links": {"spec": {"schema": "documents"}}, "cascade": true}`, "behavior Links config: "},
-		{links, `{"links": {"reviewers": {"schema": "people", "many": true, "max": 5, "required": true}, "watchers": {"schema": "people", "many": false}}}`, ""},
-		{links, `{"links": {"reviewers": {"schema": "people", "many": true}}}`, "behavior Links config: "},
-		{links, `{"links": {"reviewers": {"schema": "people", "many": true, "max": 0}}}`, "behavior Links config: "},
-		{links, `{"links": {"reviewers": {"schema": "people", "many": true, "max": 101}}}`, "behavior Links config: "},
-		{links, `{"links": {"reviewers": {"schema": "people", "max": 5}}}`, "behavior Links config: "},
-		{links, `{"links": {"reviewers": {"schema": "people", "many": false, "max": 5}}}`, "behavior Links config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count"}}}`, ""},
 		{rollups, `{"rollups": {"byStatus": {"schema": "tasks", "link": "project", "function": "countBy", "field": "Workflow.status"},
 			"estimate": {"schema": "tasks", "link": "project", "function": "sum", "field": "estimate"},
@@ -493,22 +429,6 @@ func TestCoreBehaviors(t *testing.T) {
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "count", "outcomes": ["success"]}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "all", "outcomes": []}}}`, "behavior Rollups config: "},
 		{rollups, `{"rollups": {"tasks": {"schema": "tasks", "link": "project", "function": "any", "outcomes": ["done"]}}}`, "behavior Rollups config: "},
-		{search, `{"fields": ["title", "body"], "weights": {"title": 3, "body": 0.5}}`, ""},
-		{search, `{"fields": ["title"]}`, ""},
-		{search, ``, "behavior Search config: "},
-		{search, `{"fields": []}`, "behavior Search config: "},
-		{search, `{"fields": ["title", "title"]}`, "behavior Search config: "},
-		{search, `{"fields": [""]}`, "behavior Search config: "},
-		{search, `{"fields": ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8", "f9", "f10", "f11", "f12", "f13", "f14", "f15", "f16", "f17"]}`, "behavior Search config: "},
-		{search, `{"fields": ["title"], "weights": {"title": 0}}`, "behavior Search config: "},
-		{search, `{"fields": ["title"], "weights": {"title": "high"}}`, "behavior Search config: "},
-		{search, `{"fields": ["title"], "vectors": true}`, "behavior Search config: "},
-		{search, `{"fields": ["title"], "vectors": {"dimensions": 384, "model": "minilm-l6", "permission": "notes.embed"}}`, ""},
-		{search, `{"fields": ["title"], "vectors": {"dimensions": 384, "model": "minilm-l6"}}`, "behavior Search config: "},
-		{search, `{"fields": ["title"], "vectors": {"dimensions": 0, "model": "minilm-l6", "permission": "notes.embed"}}`, "behavior Search config: "},
-		{search, `{"fields": ["title"], "vectors": {"dimensions": 4097, "model": "minilm-l6", "permission": "notes.embed"}}`, "behavior Search config: "},
-		{search, `{"fields": ["title"], "vectors": {"dimensions": 384, "model": "", "permission": "notes.embed"}}`, "behavior Search config: "},
-		{search, `{"fields": ["title"], "vectors": {"dimensions": 384, "model": "minilm-l6", "permission": "notes.embed", "provider": "x"}}`, "behavior Search config: "},
 		{reactions, `{"rules": [{"when": {"enters": "doing"}, "then": {"link": "project", "transition": "active"}}, {"when": {"allTerminal": {"schema": "tasks", "link": "project"}}, "then": {"transition": "done"}}]}`, ""},
 		{reactions, ``, "behavior Reactions config: "},
 		{reactions, `{"rules": []}`, "behavior Reactions config: "},
@@ -555,26 +475,6 @@ func TestCoreBehaviors(t *testing.T) {
 		{variants, `{"field": "result", "by": "kind", "types": {"verify": ["VerifyResult"]}}`, "behavior Variants config: "},
 		{variants, `{"field": "", "by": "kind", "types": {"verify": "VerifyResult"}}`, "behavior Variants config: "},
 		{variants, `{"field": "result", "by": "kind", "types": {"verify": "VerifyResult"}, "otherwise": "AnyResult"}`, "behavior Variants config: "},
-		{branches, `{"kinds": {"step": {"type": "Step"}}}`, ""},
-		{branches, `{"kinds": {"step": {"type": "Step", "order": "position", "units": {"timings": "keyed", "notes": "excluded"}, "retentionDays": 365},
-			"ingredient": {"type": "Ingredient", "parent": {"key": "stepKey", "of": "step"}}, "cover": {"type": "Cover", "singleton": true}},
-			"primary": "trunk", "snapshotEvery": 16, "sweep": {"intervalMs": 60000, "discardGrace": 86400000, "pruneBatch": 500, "abandonAfter": 604800000}}`, ""},
-		{branches, ``, "behavior Branches config: "},
-		{branches, `{"kinds": {}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"Step": {"type": "Step"}}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step_row": {"type": "Step"}}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {}}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": ""}}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step", "parent": {"key": "stepKey"}}}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step", "units": {"timings": "merged"}}}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step", "retentionDays": 0}}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step", "author": "editor"}}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step"}}, "primary": ""}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step"}}, "snapshotEvery": 0}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {"intervalMs": 500}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step"}}, "sweep": {"intervalMs": 60000, "abandonAfter": 0}}`, "behavior Branches config: "},
-		{branches, `{"kinds": {"step": {"type": "Step"}}, "schemaEpoch": 1}`, "behavior Branches config: "},
 		{stateRules, `{"states": {"sent": {"required": ["customer", "amount"], "frozen": ["amount"]}, "paid": {"frozen": "all"}}, "permission": "invoices.amend"}`, ""},
 		{stateRules, `{"states": {"draft": {"required": ["title"]}}}`, ""},
 		{stateRules, ``, "behavior StateRules config: "},
@@ -618,18 +518,6 @@ func TestCoreBehaviors(t *testing.T) {
 		{assignment, `{"permission": "jobs.assign"}`, ""},
 		{assignment, `{"permission": ""}`, "behavior Assignment config: "},
 		{assignment, `{"actorKinds": ["person"]}`, "behavior Assignment config: "},
-		{queue, `{"claim": {"from": ["queued"], "to": "running"}}`, ""},
-		{queue, `{"claim": {"from": ["queued", "paused"], "to": "running"}, "priorityField": "priority", "match": ["topic"], "maxCandidates": 50}`, ""},
-		{queue, ``, "behavior Queue config: "},
-		{queue, `{"claim": {"from": [], "to": "running"}}`, "behavior Queue config: "},
-		{queue, `{"claim": {"from": ["queued"]}}`, "behavior Queue config: "},
-		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "maxCandidates": 0}`, "behavior Queue config: "},
-		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "maxCandidates": 1001}`, "behavior Queue config: "},
-		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "kinds": ["build"]}`, "behavior Queue config: "},
-		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "excludeStale": ["spec"]}`, ""},
-		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "excludeStale": []}`, "behavior Queue config: "},
-		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "excludeStale": ["spec", "spec"]}`, "behavior Queue config: "},
-		{queue, `{"claim": {"from": ["queued"], "to": "running"}, "excludeStale": ["Spec"]}`, "behavior Queue config: "},
 		{presence, `{"ttlMs": 30000, "principalField": "subject"}`, ""},
 		{presence, `{"ttlMs": 30000, "principalField": "subject", "onMissed": {"transition": "missing", "from": ["idle"]},
 			"onBeat": {"transition": "idle", "from": ["missing"]}, "releaseLeases": ["jobs"], "sweepMs": 1000}`, ""},
