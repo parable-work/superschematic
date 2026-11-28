@@ -69,6 +69,8 @@ export interface IdentityPrincipal {
   /** The API key's id (D114), and empty for a session's principal. */
   readonly apiKeyId: string;
   readonly transport: Transport;
+  /** When the session signed in, its createdAt in epoch milliseconds (D200); absent for an API key's principal, which signs no one in. */
+  readonly signedInAt?: number;
 }
 
 // The operations' inputs and results, by the contract's field names
@@ -607,6 +609,7 @@ export class IdentityService {
       sessionId: session.id,
       apiKeyId: '',
       transport,
+      signedInAt: session.createdAt.getTime(),
     };
   }
 

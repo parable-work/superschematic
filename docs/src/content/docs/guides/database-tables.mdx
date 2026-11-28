@@ -3204,7 +3204,11 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
   most `proofWithinMs` before the sign-off; `user-verification`, a passkey
   with user verification on the sign-off itself. The authenticator reports
   the caller's `assurance` (`{ signedInAt?, userVerified? }` on the
-  principal); a principal without one proves nothing.
+  principal); a principal without one proves nothing. The identity
+  runtime's session principal reports `signedInAt`, the time the session
+  signed in, in TypeScript, Go and Rust; an API key's principal reports
+  none. No authenticator reports `userVerified` yet, since the identity
+  runtime has no passkeys, so `user-verification` is never met.
 - **Whom it excludes.** `excludeCreator` as above, by the caller's subject
   or whom it counts as. `excludeCreatorPerson: true` also refuses the
   person the creator acted for, the subject the table's own `createdFor`
@@ -3214,7 +3218,12 @@ one keeps its row, with `consumed_at`, for `listSignOffs`.
   guard, so a signer a later write lists stops counting.
 - **The permission again** (`recheckPermission: true`). Each guard reads
   each signer's permission now, so a signer who lost it stops counting;
-  without it the permission is read at the sign-off.
+  without it the permission is read at the sign-off. The repositories read
+  it from the identity runtime's tables in the same database: a person
+  holds the permissions of every role granted to them, and none while
+  disabled or waiting for approval. A signer who is no user of that
+  database, an Agent among them, holds none, and so does every signer of a
+  database without the identity tables.
 - **When it applies** (`when`). A list of conditions on own fields, all of
   which must hold: `{ field, test, values, negate? }`, `test` one of
   `every-matches` and `any-matches` (glob patterns: `*` within a path

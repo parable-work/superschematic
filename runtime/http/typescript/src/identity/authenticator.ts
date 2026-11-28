@@ -35,6 +35,9 @@ export function principalOf(p: IdentityPrincipal): Principal {
     // A user, and the key it called with, which the access log records (D114, D156).
     kind: 'user',
     ...((p.apiKeyId ?? '') !== '' ? { credential: { kind: 'apiKey' as const, id: p.apiKeyId } } : {}),
+    // When the session signed in, which an Approvals requirement's
+    // recent-sign-in proof reads (D200); an API key proves none.
+    ...(p.signedInAt !== undefined ? { assurance: { signedInAt: p.signedInAt } } : {}),
   };
   identityPrincipals.set(principal, p);
   return principal;
