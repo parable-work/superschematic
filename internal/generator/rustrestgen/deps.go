@@ -456,9 +456,10 @@ func (o *APIOutput) DatabaseTypesDependency() *DependencyCrate {
 // whose database has a calendar source or a @searchable table, whose
 // calendar and search read the repositories' definition (D188), and of an
 // API whose behavior operations check the caller's reach of a row through
-// the repositories (BehaviorsHeld, D181); empty for any other crate.
+// the repositories (BehaviorsHeld, D181), or that builds its database's
+// runtime parts (HasWiring); empty for any other crate.
 func (o *APIOutput) DependencyFeatures(name string) string {
-	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld()) {
+	if o.Deps == nil || name != o.Deps.DatabaseTypesCrate || (!o.HasTableOperations() && !o.HasGraphOperations() && !o.HasDerivers() && !o.ReadsAcrossTables && !o.BehaviorsHeld() && !o.HasWiring()) {
 		return ""
 	}
 	return `, features = ["` + o.DatabaseDialect() + `"]`
