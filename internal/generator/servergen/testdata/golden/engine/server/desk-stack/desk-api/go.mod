@@ -19,7 +19,7 @@ require (
 	example.com/schemas/implementation/desk-api v0.0.0-00010101000000-000000000000
 	example.com/schemas/orm/desk-db v0.0.0-00010101000000-000000000000
 	example.com/schemas/types/go/desk-db v0.0.0-00010101000000-000000000000
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/parable-work/superschematic/runtime/engine/go v0.0.0-00010101000000-000000000000
 	github.com/parable-work/superschematic/runtime/http/go v0.0.0-00010101000000-000000000000

@@ -234,7 +234,7 @@ func (v *Validator) validateStringConstraints(scalar *ir.ScalarDef, value any) [
 
 	if scalar.Pattern != "" {
 		re := v.getPattern(scalar.Pattern)
-		if re != nil && !re.MatchString(s) {
+		if re == nil || !re.MatchString(s) {
 			errs = append(errs, ValidationError{
 				Validator: "pattern",
 				Message:   "invalid format",
@@ -323,9 +323,17 @@ func (v *Validator) validateFloatConstraints(scalar *ir.ScalarDef, value any) []
 }
 
 // getPattern returns a compiled regex for the given pattern string, using the
-// pre-compiled cache populated during Validator construction.
+// pre-compiled cache populated during Validator construction, or nil when
+// the pattern does not compile.
 func (v *Validator) getPattern(pattern string) *regexp.Regexp {
-	return v.patterns[pattern]
+	if re, ok := v.patterns[pattern]; ok {
+		return re
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil
+	}
+	return re
 }
 
 // isStringPrimitive returns true if the scalar primitive indicates a string type.

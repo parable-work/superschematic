@@ -41,11 +41,18 @@ func databaseDialects(servicePath string, schema, database *ir.Schema, typeScrip
 		return nil
 	}
 	dir := filepath.Join(servicePath, "..", db)
-	cfg, err := schemaconfig.ReadFile(dir, reg)
+	_, form, ok, err := schemaconfig.Locate(dir)
+	if err != nil || !ok {
+		return nil
+	}
+	var cfg *schemaconfig.SchemaConfig
+	if form == schemaconfig.FormTS {
+		cfg, err = tsreader.ReadServiceConfig(dir, reg)
+	} else {
+		cfg, err = schemaconfig.ReadFile(dir, reg)
+	}
 	if err != nil {
-		if cfg, err = tsreader.ReadServiceConfig(dir, reg); err != nil {
-			return nil
-		}
+		return nil
 	}
 	return sqlDialects(cfg)
 }

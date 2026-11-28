@@ -9,6 +9,9 @@
 // held to one contract: @superschematic/schema-config declares it,
 // gen-json-schema projects it to the embedded JSON Schema, and this package
 // enforces it.
+//
+// A service has its config in one form: Locate finds it and refuses a
+// directory that holds more than one.
 package schemaconfig
 
 import (
@@ -18,12 +21,11 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -169,28 +171,33 @@ type KindSet interface {
 	Kinds() []string
 }
 
-// ReadFile loads and validates the data-form service config: it prefers
-// schema.config.json, then schema.config.yaml. It returns os.ErrNotExist
-// (wrapped) when neither exists, letting callers fall through to the
-// TypeScript form.
+// ReadFile loads and validates the data-form service config, the one
+// Locate finds. It returns os.ErrNotExist (wrapped) when the service has
+// no config or has schema.config.ts, letting callers fall through to the
+// TypeScript form, and Locate's error when it has more than one.
 func ReadFile(servicePath string, known KindSet) (*SchemaConfig, error) {
-	jsonPath := filepath.Join(servicePath, "schema.config.json")
-	if data, err := os.ReadFile(jsonPath); err == nil {
-		return DecodeJSON(data, "schema.config.json", known)
+	path, form, ok, err := Locate(servicePath)
+	if err != nil {
+		return nil, err
 	}
-	yamlPath := filepath.Join(servicePath, "schema.config.yaml")
-	if data, err := os.ReadFile(yamlPath); err == nil {
+	if !ok || form == FormTS {
+		return nil, fmt.Errorf("service %s has no schema.config.{json,yaml}: %w", servicePath, os.ErrNotExist)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	name := form.FileName()
+	if form == FormYAML {
 		var raw any
 		if err := yaml.Unmarshal(data, &raw); err != nil {
-			return nil, fmt.Errorf("schema.config.yaml: %w", err)
+			return nil, fmt.Errorf("%s: %w", name, err)
 		}
-		jsonBytes, err := json.Marshal(raw)
-		if err != nil {
-			return nil, fmt.Errorf("schema.config.yaml: converting to JSON: %w", err)
+		if data, err = json.Marshal(raw); err != nil {
+			return nil, fmt.Errorf("%s: converting to JSON: %w", name, err)
 		}
-		return DecodeJSON(jsonBytes, "schema.config.yaml", known)
 	}
-	return nil, fmt.Errorf("service %s has no schema.config.{json,yaml}: %w", servicePath, os.ErrNotExist)
+	return DecodeJSON(data, name, known)
 }
 
 // DecodeJSON validates a config payload against the generated JSON Schema,
