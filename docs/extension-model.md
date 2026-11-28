@@ -831,8 +831,9 @@ type BehaviorRust struct {
 `Package` is optional: the npm package the behavior's registration
 names, which the `behaviors` command's `--package` keeps (below). When set
 it must be an npm package name. A core behavior a General schema composes
-with `@behavior` names the package of the engine that ran it, which D103's
-step 7 deleted (D103, #587). One that only a table composes, which the
+with `@behavior` names `registry.EnginePackage`, `@superschematic/engine`,
+the name of the engine that ran it, which D103's step 7 deleted, beside
+the work queue's and commerce's packages (D103, #587). One that only a table composes, which the
 behaviors' core alone runs (D104: `Seats`, `Reconcile`, `Schedules`,
 `Pool`), names `registry.RulesPackage`, `@superschematic/rules`, the npm
 package that ships the core; `registry.EngineImplements` is false for it
@@ -1339,7 +1340,7 @@ defined.
 `superschematic behaviors --out <dir>` copies the declaration there: one
 canonical `<name>.behavior.json` per behavior the binary registers
 (`--extension <name>` keeps one extension's, `--package <npm name>` the
-ones that package implements), and
+ones whose registration names that package), and
 `--check` fails, naming each file, on a copy that differs, is missing or
 has no behavior. It is a command of the binary rather than a tool in the
 core module, as `internal/tools/scalarcatalog` is, because an extension's

@@ -18,20 +18,14 @@ import (
 var coreBehaviorNames = []string{"Aliased", "Approvals", "Assignment", "Blueprint", "Budget", "Calendar", "Comments", "Constants", "Dependencies", "Derived", "Holds", "Lease", "Numbering",
 	"Payments", "Pool", "Presence", "Provenance", "Reactions", "Reconcile", "Recurrence", "Retries", "Revisions", "Rollups", "Schedules", "Seats", "StateRules", "Stock", "Timers", "Variants", "Workflow"}
 
-// workQueueBehaviorNames are the core behaviors @superschematic/engine-workqueue
-// implements, commerceBehaviorNames the ones @superschematic/engine-commerce
-// does (D70), and rulesOnlyBehaviorNames the ones the behaviors' core alone
-// does (RulesPackage, D104); the engine implements the rest.
-var (
-	workQueueBehaviorNames = []string{"Assignment", "Blueprint", "Budget", "Lease", "Presence", "Retries"}
-	commerceBehaviorNames  = []string{"Calendar", "Holds", "Payments", "Stock"}
-	rulesOnlyBehaviorNames = []string{"Aliased", "Pool", "Reconcile", "Recurrence", "Schedules", "Seats"}
-)
+// rulesOnlyBehaviorNames are the core behaviors the behaviors' core alone
+// implements (RulesPackage, D104), which only a table composes; the rest
+// name EnginePackage, since a General schema's @behavior composes them.
+var rulesOnlyBehaviorNames = []string{"Aliased", "Pool", "Reconcile", "Recurrence", "Schedules", "Seats"}
 
-// A registry with no extension declares the behaviors the engine, the
-// work-queue package and the commerce package implement, as the core's,
-// under bare names, each with the package that implements it, and holds
-// each config to its schema.
+// A registry with no extension declares the core's behaviors under bare
+// names, each with the package its registration names, and holds each
+// config to its schema.
 func TestCoreBehaviors(t *testing.T) {
 	reg := New(naming.Default())
 	finalizeWithCoreGenerators(t, reg)
@@ -44,16 +38,11 @@ func TestCoreBehaviors(t *testing.T) {
 			t.Errorf("%s is registered by %q, want the core", name, b.Extension)
 		}
 		want := EnginePackage
-		switch {
-		case slices.Contains(workQueueBehaviorNames, name):
-			want = WorkQueuePackage
-		case slices.Contains(commerceBehaviorNames, name):
-			want = CommercePackage
-		case slices.Contains(rulesOnlyBehaviorNames, name):
+		if slices.Contains(rulesOnlyBehaviorNames, name) {
 			want = RulesPackage
 		}
 		if b.Package != want {
-			t.Errorf("%s is implemented by %q, want %q", name, b.Package, want)
+			t.Errorf("%s names package %q, want %q", name, b.Package, want)
 		}
 		if got := EngineImplements(b); got != (want != RulesPackage) {
 			t.Errorf("EngineImplements(%s) = %v, want %v", name, got, want != RulesPackage)
@@ -669,9 +658,9 @@ func TestCommerceBehaviors(t *testing.T) {
 	holds, _ := reg.Behavior("Holds")
 	payments, _ := reg.Behavior("Payments")
 	for _, b := range []Behavior{stock, calendar, holds, payments} {
-		if b.Package != CommercePackage || !b.ConfigRequired() || len(b.PreconditionSchema) != 0 || len(b.CreateParamsSchema) != 0 {
+		if b.Package != EnginePackage || !b.ConfigRequired() || len(b.PreconditionSchema) != 0 || len(b.CreateParamsSchema) != 0 {
 			t.Errorf("%s: package %q, config required %v, precondition %s, create params %s; want %s, a config, and neither",
-				b.Name, b.Package, b.ConfigRequired(), b.PreconditionSchema, b.CreateParamsSchema, CommercePackage)
+				b.Name, b.Package, b.ConfigRequired(), b.PreconditionSchema, b.CreateParamsSchema, EnginePackage)
 		}
 	}
 	if !slices.Equal(stock.Conflicts, []string{"Calendar"}) || !slices.Equal(calendar.Conflicts, []string{"Stock"}) || len(stock.Requires) != 0 || len(calendar.Requires) != 0 {
@@ -1037,7 +1026,7 @@ func TestPoolIsTheCoresAlone(t *testing.T) {
 		t.Errorf("Pool contracts %+v", pool.Contracts)
 	}
 	budget, _ := reg.Behavior("Budget")
-	if capacity, ok := budget.Contract("Capacity"); !ok || capacity.Role != ContractRoleImplements || len(budget.Contracts) != 1 || budget.Package != WorkQueuePackage {
+	if capacity, ok := budget.Contract("Capacity"); !ok || capacity.Role != ContractRoleImplements || len(budget.Contracts) != 1 || budget.Package != EnginePackage {
 		t.Errorf("Budget contracts %+v, package %q", budget.Contracts, budget.Package)
 	}
 	var payload struct {

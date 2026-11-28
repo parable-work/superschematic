@@ -27,12 +27,11 @@ type BehaviorSpec struct {
 	// "<extension>.<Name>".
 	Extension string
 	// Package is the npm package the behavior's registration names: for a
-	// core behavior a General schema composes with @behavior, the package of
-	// the engine that ran it before D103's step 7 deleted the engine
-	// (EnginePackage, WorkQueuePackage, CommercePackage), and RulesPackage
-	// for one the behaviors' core alone implements, which only a table
-	// composes (D104), so the behaviors command can write each package's
-	// declarations into the crate that carries them (--package). Optional;
+	// core behavior a General schema composes with @behavior, EnginePackage,
+	// the name of the engine that ran it before D103's step 7 deleted the
+	// engine (D103, #587), and RulesPackage for one the behaviors' core
+	// alone implements, which only a table composes (D104). The behaviors
+	// command writes one package's declarations with --package. Optional;
 	// when set it is an npm package name.
 	Package string
 	// Rules is the Rust crate whose implementation of the core's hooks runs

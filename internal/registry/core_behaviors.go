@@ -8,12 +8,11 @@ import (
 )
 
 // coreBehaviorFiles holds the declarations of the behaviors the core
-// declares, one JSON file each (D16), under bare
-// names: every behavior @superschematic/engine ships, every one the
-// optional @superschematic/engine-workqueue package does, and the commerce
-// behaviors the optional @superschematic/engine-commerce package does
-// (D70), and the behaviors the behaviors' core alone implements
-// (RulesPackage, D104). The behaviors' core's crate
+// declares, one JSON file each (D16), under bare names: the ones a General
+// schema composes with @behavior (EnginePackage), the work queue's and the
+// commerce behaviors (D70) among them, and the ones the behaviors' core
+// alone implements, on a table (RulesPackage, D104). The behaviors' core
+// runs every one (D103). Its crate
 // (runtime/engine/rust/rules-behaviors/declarations) carries a copy of
 // every one, which `superschematic behaviors --out` writes and CI checks
 // (docs/extension-model.md section 3.16), and reads the copies of those it
@@ -25,28 +24,22 @@ import (
 //go:embed behaviors/*.behavior.json
 var coreBehaviorFiles embed.FS
 
-// The npm packages that ship the core's behaviors, which name them in a
-// behavior's spec.
+// The packages a core behavior's registration names.
 const (
-	// EnginePackage is @superschematic/engine, whose engine registers its
-	// behaviors when it opens.
+	// EnginePackage is the package of the core's behaviors that a General
+	// schema composes with @behavior. It keeps the name of the engine's npm
+	// package (D58), which ran them, beside the work queue's and commerce's,
+	// until the engine went (D103, #587); development mode runs them on the
+	// behaviors' core (D117).
 	EnginePackage = "@superschematic/engine"
-	// WorkQueuePackage is @superschematic/engine-workqueue, whose
-	// behaviors (in the engine's addon, by name) a deployment registers
-	// with the engine to run them.
-	WorkQueuePackage = "@superschematic/engine-workqueue"
-	// CommercePackage is @superschematic/engine-commerce, whose behaviors
-	// (D70: Stock, Calendar, Holds and Payments) a deployment registers
-	// with the engine to run them, as it registers the work queue's.
-	CommercePackage = "@superschematic/engine-commerce"
 	// RulesPackage is @superschematic/rules, the npm package that ships the
 	// behaviors' core (runtime/rules/typescript): the package of a behavior
-	// the core alone implements, which no engine registers (D104).
+	// the core alone implements, which only a table composes (D104).
 	RulesPackage = "@superschematic/rules"
 )
 
 // coreBehaviors are the core's behavior declarations, by file name, with
-// the package that implements each, in the order New registers them.
+// the package each names, in the order New registers them.
 var coreBehaviors = []struct{ file, pkg string }{
 	{"workflow", EnginePackage},
 	{"comments", EnginePackage},
@@ -62,16 +55,16 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"timers", EnginePackage},
 	{"derived", EnginePackage},
 	{"provenance", EnginePackage},
-	{"lease", WorkQueuePackage},
-	{"assignment", WorkQueuePackage},
-	{"presence", WorkQueuePackage},
-	{"blueprint", WorkQueuePackage},
-	{"budget", WorkQueuePackage},
-	{"retries", WorkQueuePackage},
-	{"stock", CommercePackage},
-	{"calendar", CommercePackage},
-	{"holds", CommercePackage},
-	{"payments", CommercePackage},
+	{"lease", EnginePackage},
+	{"assignment", EnginePackage},
+	{"presence", EnginePackage},
+	{"blueprint", EnginePackage},
+	{"budget", EnginePackage},
+	{"retries", EnginePackage},
+	{"stock", EnginePackage},
+	{"calendar", EnginePackage},
+	{"holds", EnginePackage},
+	{"payments", EnginePackage},
 	{"seats", RulesPackage},
 	{"reconcile", RulesPackage},
 	{"schedules", RulesPackage},
@@ -80,7 +73,8 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"aliased", RulesPackage},
 }
 
-// EngineImplements reports whether an engine implements the behavior:
+// EngineImplements reports whether a General schema's @behavior composes
+// the behavior, as the engine implemented it until it went (D103, #587):
 // every behavior but one whose package is RulesPackage, which the
 // behaviors' core alone runs, on a table (D104).
 func EngineImplements(b Behavior) bool {

@@ -495,7 +495,7 @@ func TestRegisterBehaviorContracts(t *testing.T) {
 		{"no role", "", RulesPackage, []any{map[string]any{"name": "Capacity"}}, `registry: behavior Meter contract Capacity role "" is not "implements" or "asks"`},
 		{"a contract twice", "", RulesPackage, []any{contract("Capacity", "implements"), contract("Capacity", "asks")}, `registry: behavior Meter names contract Capacity twice`},
 		{"an extension's", "acme", "", []any{contract("Capacity", "implements")}, `registry: behavior acme.Meter of extension acme names contract Capacity, which the behaviors' core asks and answers: an extension's behavior runs in its engine (D58)`},
-		{"asked by a behavior an engine runs", "", WorkQueuePackage, []any{contract("Capacity", "asks")}, `registry: behavior Meter asks contract Capacity, which only a behavior the behaviors' core alone implements (package @superschematic/rules) asks: an engine asks no contract`},
+		{"asked by a behavior an engine runs", "", EnginePackage, []any{contract("Capacity", "asks")}, `registry: behavior Meter asks contract Capacity, which only a behavior the behaviors' core alone implements (package @superschematic/rules) asks: an engine asks no contract`},
 		{"asked by a behavior of no package", "", "", []any{contract("Capacity", "asks")}, `registry: behavior Meter asks contract Capacity, which only a behavior the behaviors' core alone implements (package @superschematic/rules) asks: an engine asks no contract`},
 		{"an entry's unknown key", "", RulesPackage, []any{map[string]any{"name": "Capacity", "role": "asks", "queries": []any{"hasRoom"}}}, `unknown field "queries"`},
 	} {
@@ -513,7 +513,6 @@ func TestRegisterBehaviorContracts(t *testing.T) {
 	for _, test := range []struct {
 		pkg, role string
 	}{
-		{WorkQueuePackage, ContractRoleImplements},
 		{EnginePackage, ContractRoleImplements},
 		{RulesPackage, ContractRoleImplements},
 		{RulesPackage, ContractRoleAsks},
@@ -536,11 +535,11 @@ func TestRegisterBehaviorContracts(t *testing.T) {
 
 // Supply is a contract an engine's behaviors meet by operation names (the
 // engine's Holds invokes holdFor and the rest by name, D70), so a behavior
-// of a package an engine runs may ask it, as the commerce package's Holds
-// does (contractsEnginesMeet, D103's step 4); Capacity stays asked by the
+// of a package an engine runs may ask it, as Holds does
+// (contractsEnginesMeet, D103's step 4); Capacity stays asked by the
 // core's package alone, and an extension's behavior names neither.
 func TestRegisterBehaviorAsksSupplyFromAnEnginesPackage(t *testing.T) {
-	for _, pkg := range []string{CommercePackage, WorkQueuePackage, EnginePackage, RulesPackage} {
+	for _, pkg := range []string{EnginePackage, RulesPackage} {
 		reg := New(naming.Default())
 		decl := declaration("Claim", map[string]any{"contracts": []any{map[string]any{"name": "Supply", "role": "asks", "description": "Holds what a supply gives."}}})
 		if err := reg.RegisterBehavior(BehaviorSpec{Package: pkg, Declaration: decl}); err != nil {
@@ -553,9 +552,9 @@ func TestRegisterBehaviorAsksSupplyFromAnEnginesPackage(t *testing.T) {
 		}
 	}
 	decl := declaration("Claim", map[string]any{"contracts": []any{map[string]any{"name": "Capacity", "role": "asks"}}})
-	err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Package: CommercePackage, Declaration: decl})
+	err := New(naming.Default()).RegisterBehavior(BehaviorSpec{Package: EnginePackage, Declaration: decl})
 	if want := `registry: behavior Claim asks contract Capacity, which only a behavior the behaviors' core alone implements (package @superschematic/rules) asks: an engine asks no contract`; err == nil || err.Error() != want {
-		t.Fatalf("Capacity asked from the commerce package: err = %v, want %q", err, want)
+		t.Fatalf("Capacity asked from the engine's package: err = %v, want %q", err, want)
 	}
 	extension := declaration("acme.Claim", map[string]any{"contracts": []any{map[string]any{"name": "Supply", "role": "asks"}}})
 	err = New(naming.Default()).RegisterBehavior(BehaviorSpec{Extension: "acme", Declaration: extension})

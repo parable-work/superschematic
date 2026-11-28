@@ -48,14 +48,15 @@ crate and the compiler read one declaration.
 A copy is canonical: the declaration's keys in their documented order,
 each JSON Schema's object keys sorted, two-space indents and a final
 newline, whatever the source file's layout. Other *.behavior.json files in
-the directory are removed. With --package, only the behaviors whose
-registration names that npm package are written, so a crate carries only
-its own: the behaviors the behaviors' core alone implements, on a table,
-name @superschematic/rules, whose copies are
-runtime/engine/rust/rules-behaviors/declarations (D104). With --extension, only the behaviors that
-extension registered are written, into the crate whose hooks run them
-on the behaviors' core (its registration's Rules crate). Given both, a
-behavior must match both.
+the directory are removed. The behaviors' core's crate carries a copy of
+every core behavior (runtime/engine/rust/rules-behaviors/declarations,
+D103). With --package, only the behaviors whose registration names that
+npm package are written: of the core's, @superschematic/rules names the
+ones the behaviors' core alone implements, on a table (D104), and
+@superschematic/engine the ones a General schema composes with @behavior.
+With --extension, only the behaviors that extension registered are
+written, into the crate whose hooks run them on the behaviors' core (its
+registration's Rules crate). Given both, a behavior must match both.
 
 With --check nothing is written: the command fails, naming each file, when
 a copy differs, is missing, or has no registered behavior. CI runs it so a
@@ -75,7 +76,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.out, "out", "", "directory the <name>.behavior.json files go in (required)")
 	cmd.Flags().BoolVar(&flags.check, "check", false, "write nothing; fail when the directory's copies are not what would be written")
 	cmd.Flags().StringVar(&flags.extension, "extension", "", "only the behaviors this extension registered (its Name())")
-	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors whose registration names this npm package (@superschematic/rules for the core's that only a table composes)")
+	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors whose registration names this npm package (of the core's, @superschematic/rules for those only a table composes, @superschematic/engine for the rest)")
 	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names; behaviors has no service directory to find superschematic.toml from)")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd
