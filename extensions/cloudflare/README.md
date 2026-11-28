@@ -330,16 +330,27 @@ claiming, lets running handlers finish within the `@worker`'s grace and
 gives back the rest. Its edges are the server's: `cloudflare.drainer-workers`,
 `cloudflare.drainer-r2` and `cloudflare.drainer-hyperdrive`.
 
+Its version holds `QUEUE_WAKES` and, for each other drainer whose queues
+it may write to, `WAKE_<WORKER>`, a service binding to that drainer's
+wake relay (#600): `<worker>.wake-relay.worker`, `.version` and
+`.deployment`, a Worker named as the drainer's with `-wake` after it,
+workers.dev off, which runs the embedded `wake-relay.js` with the
+drainer's Workflow bound as `WORKFLOW`; its version waits for the
+Workflow. A drainer's Worker waits for each relay it binds, and nothing
+of it waits for another drainer's version, so drainers that wake each
+other leave the graph acyclic.
+
 | Setting | Type | |
 | --- | --- | --- |
 | `logs` | boolean | Workers Logs, on by default |
 | `cpuMs` | integer, 1 to 300000 | `limits.cpuMs` |
 | `telemetry` | boolean | trace export, the environment's by default |
-| `drainSeconds` | integer, 1 to 900 | the window each firing claims for, 50 by default |
+| `drainSeconds` | integer, 1 to 900 | the window each firing claims for: 50, or what `cpuMs` leaves after the grace, by default |
 
 It refuses, as unrealizable, a worker in another language, a Worker name
 over 63 characters, `instances` over one, `maxInstances`, and a
-window and grace over `MaxScheduledRunSeconds`.
+window and grace past the firing's CPU time, `cpuMs` or 30 seconds
+(D151, #600).
 
 ## Jobs on Cron Triggers
 
