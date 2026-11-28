@@ -118,12 +118,12 @@ const searchIndexAlias = "si"
 
 // rustSearchable is orm::search_tables::SearchableDefinition.
 type rustSearchable struct {
-	Index     string              `json:"index"`
-	Document  string              `json:"document"`
+	Index    string `json:"index"`
+	Document string `json:"document"`
 	// Config is the text search configuration the index's words are in
 	// on Postgres, when it is not simple: search_unaccent, which folds
 	// diacritics (#740).
-	Config string `json:"config,omitempty"`
+	Config    string              `json:"config,omitempty"`
 	Table     string              `json:"table"`
 	Key       string              `json:"key"`
 	KeyType   string              `json:"keyType"`
