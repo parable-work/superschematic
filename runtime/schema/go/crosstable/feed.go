@@ -98,13 +98,15 @@ func FeedScopeOf(targetType string) CalendarFeedScope {
 
 // IssueCalendarFeed is what IssueCalendarFeedOf takes: the user the feed
 // reads as, its principal's subject; the UserRole row whose permissions
-// bound what it reads; its scope; and when it expires, CalendarFeedDays
-// on when zero.
+// bound what it reads; its scope; when it starts, now when zero; and when
+// it expires, CalendarFeedDays on when zero. A route's feed starts at the
+// route's clock, which reads it by that clock too.
 type IssueCalendarFeed struct {
-	Holder string
-	Role   string
-	Scope  CalendarFeedScope
-	EndsAt time.Time
+	Holder   string
+	Role     string
+	Scope    CalendarFeedScope
+	StartsAt time.Time
+	EndsAt   time.Time
 }
 
 // IssuedCalendarFeed is a feed issued: its grant's id, the token only its
@@ -146,6 +148,7 @@ func IssueFeed(ctx context.Context, h Host, input IssueCalendarFeed) (IssuedCale
 		Role:       input.Role,
 		TargetType: input.Scope.TargetType(),
 		TargetID:   input.Holder,
+		StartsAt:   input.StartsAt,
 		EndsAt:     &ends,
 	})
 	if err != nil {
@@ -196,7 +199,7 @@ func RotateFeed(ctx context.Context, h Host, holder, id string, now time.Time) (
 	if err := grants.Revoke(ctx, id, now); err != nil {
 		return IssuedCalendarFeed{}, false, err
 	}
-	input := IssueCalendarFeed{Holder: holder, Role: grant.Role, Scope: FeedScopeOf(grant.TargetType)}
+	input := IssueCalendarFeed{Holder: holder, Role: grant.Role, Scope: FeedScopeOf(grant.TargetType), StartsAt: now}
 	if grant.EndsAt != nil {
 		input.EndsAt = *grant.EndsAt
 	}
