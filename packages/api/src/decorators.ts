@@ -630,6 +630,69 @@ export function graphOperations(
   return noopClassDecorator;
 }
 
+/** The operations a @rowFeatureOperations set serves (#723), each a route under the table's row. */
+export type RowFeatureOperationName =
+  | "references"
+  | "addReference"
+  | "removeReference"
+  | "backlinks"
+  | "attachments"
+  | "beginUpload"
+  | "completeUpload"
+  | "download"
+  | "fileAttachment"
+  | "removeAttachment";
+
+/** The options of a @rowFeatureOperations set (#723). */
+export type RowFeatureOperationsOptions = {
+  /** The operations the set serves; every one the table offers unless set. */
+  readonly operations?: readonly RowFeatureOperationName[];
+  /**
+   * The permissions an operation needs, by operation: a caller holding one
+   * of them is admitted. They replace the class's @requirePermission for
+   * that operation.
+   */
+  readonly permissions?: Readonly<Partial<Record<RowFeatureOperationName, readonly string[]>>>;
+  /**
+   * The Bucket service that holds the files, by its name: one of the API's
+   * buckets. The API's one bucket unless set; required when it lists
+   * several and the set serves a file's upload or download.
+   */
+  readonly bucket?: string;
+};
+
+/**
+ * Serves a table's references and files (D154, #723), on a class with no
+ * members: superschematic adds a route for each operation the table offers,
+ * under the table and its key (GET /api/issue/{id}/references, POST
+ * /api/issue/{id}/references, GET /api/issue/{id}/backlinks, POST
+ * /api/issue/{id}/files, POST /api/issue/{id}/files/{file}/complete and the
+ * rest), an SDK method each, and an MCP tool for the reads and for adding a
+ * reference, with generated input and result types, each run through the
+ * database's references and attachments by the generated server as the
+ * request's caller, so every read keeps to the rows the caller may read and
+ * the implementation has no method for them. A @references table offers its
+ * references, one a reference may point at its backlinks, and an
+ * @attachments table its files, which a browser uploads straight to the
+ * bucket through a URL the begin signs. The table is a class of the API's
+ * database, imported from that service's package, and an API serves a table
+ * from one such class. The class's @auth, @requirePermission and
+ * @publicRoute, its service clause, rate limit, body limit and timeout apply
+ * to every route it serves.
+ *
+ * ```ts
+ * @rowFeatureOperations(Issue, { permissions: { beginUpload: ["issues.upload"] } })
+ * @requirePermission(["issues.read"])
+ * export abstract class IssueLinks {}
+ * ```
+ */
+export function rowFeatureOperations(
+  _table: abstract new (...args: never[]) => unknown,
+  _options?: RowFeatureOperationsOptions
+): ClassDecorator {
+  return noopClassDecorator;
+}
+
 /** The options of a behavior worker (D103). */
 export type BehaviorWorkerOptions = {
   /** How many messages of each of the table's behavior queues an instance handles at a time; one unless set. An environment's settings change it. */

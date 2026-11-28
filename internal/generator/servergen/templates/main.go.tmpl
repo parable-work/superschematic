@@ -139,12 +139,16 @@ func run(logger *zap.Logger) error {
 	{{ .Var }}Router.Use({{ .AuthenticateVar }})
 {{- end }}
 	err = {{ .Package }}.RegisterRoutes({{ .Var }}Router, {{ .Package }}.Config{
-{{- if or .Public .Behaviors .Tables .Graphs }}
+{{- if or .Public .Behaviors .Tables .Graphs .RowFeatures }}
 		DB: {{ .Database.Var }},
 {{- end }}
 {{- if .Graphs }}
 		// The facades its graph operations run through (D138).
 		Graphs: {{ .Package }}.GraphsOf({{ .Database.Var }}),
+{{- end }}
+{{- if .Attachments }}
+		// The bucket its files' uploads and downloads sign their URLs of (#723).
+		Attachments: {{ .Package }}.AttachmentsOf({{ .Var }}Deps),
 {{- end }}
 {{- if and .Public (not .Identity) }}
 		AuthMiddleware: {{ if .UsesAuthenticate }}{{ .AuthenticateVar }}{{ else }}{{ .Var }}Auth{{ end }},

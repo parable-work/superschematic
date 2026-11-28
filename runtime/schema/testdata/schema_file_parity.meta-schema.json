@@ -6577,6 +6577,9 @@
           "default": false,
           "type": "boolean"
         },
+        "rowFeatureOperations": {
+          "$ref": "#/$defs/RowFeatureOperationsConfig"
+        },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
         },
@@ -6667,6 +6670,9 @@
         "public": {
           "default": false,
           "type": "boolean"
+        },
+        "rowFeatureOperations": {
+          "$ref": "#/$defs/RowFeatureOperationsConfig"
         },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
@@ -7229,6 +7235,39 @@
       "required": [
         "name",
         "permissions"
+      ],
+      "type": "object"
+    },
+    "RowFeatureOperationsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "bucket": {
+          "default": "",
+          "type": "string"
+        },
+        "operations": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "permissions": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {},
+          "type": "object"
+        },
+        "type": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
       ],
       "type": "object"
     },
