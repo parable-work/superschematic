@@ -43,7 +43,7 @@ Everything the compiler can say about itself, it prints:
 superschematic catalog capabilities   # need -> declaration -> what is generated -> what you write
 superschematic catalog scalars        # every scalar, its checks, its SQL and language types
 superschematic catalog decorators     # every decorator and wrapper, with its TypeScript declaration
-superschematic catalog behaviors      # every engine behavior, its config, what it adds
+superschematic catalog behaviors      # every behavior @behavior composes, its config, what it adds
 ```
 
 Each is written from the binary's own registry, the extensions it links
