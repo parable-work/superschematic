@@ -40,6 +40,8 @@ func applyRowFeatureOperations(args []any, set *ir.OperationSet) error {
 		return fmt.Errorf("@rowFeatureOperations contradicts @userAdministration on the same class: a class takes one of them")
 	case set.TriageOperations != nil:
 		return fmt.Errorf("@rowFeatureOperations contradicts @triageOperations on the same class: a class takes one of them")
+	case set.AccessGrantsOperations != nil:
+		return fmt.Errorf("@rowFeatureOperations contradicts @accessGrantsOperations on the same class: a class takes one of them")
 	}
 	if len(args) != 1 && len(args) != 2 {
 		return fmt.Errorf("@rowFeatureOperations takes the table whose references and files the set serves, imported from the API's database, and its options: @rowFeatureOperations(Issue, { bucket: \"issue-files\" })")

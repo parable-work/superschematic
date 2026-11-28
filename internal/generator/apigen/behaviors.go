@@ -37,10 +37,10 @@ func (o *APIOutput) HasBehaviorEndpoints() bool {
 // factories call the ORM, in Generate's order (by path, then method).
 // Without the last two they are Endpoints.
 func (o *APIOutput) HandlerEndpoints() []EndpointInfo {
-	if len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0 && len(o.RowFeatureEndpoints) == 0 {
+	if len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0 && len(o.RowFeatureEndpoints) == 0 && len(o.AccessGrantEndpoints) == 0 {
 		return o.Endpoints
 	}
-	return sortedEndpoints(o.Endpoints, o.BehaviorEndpoints, o.TableEndpoints, o.GraphEndpoints, o.RowFeatureEndpoints)
+	return sortedEndpoints(o.Endpoints, o.BehaviorEndpoints, o.TableEndpoints, o.GraphEndpoints, o.RowFeatureEndpoints, o.AccessGrantEndpoints)
 }
 
 // sortedEndpoints are the endpoints of each list, in Generate's order: by
@@ -157,6 +157,9 @@ func (e EndpointInfo) catalogPermissions() []string {
 	}
 	if graph := e.GraphOperation(); graph != nil && graph.OverridePermission != "" {
 		more = append(more, graph.OverridePermission)
+	}
+	if grants := e.AccessGrantsOperation(); grants != nil && grants.Permission != "" {
+		more = append(more, grants.Permission)
 	}
 	if len(more) == 0 {
 		return e.RequiredPerms

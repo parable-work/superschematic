@@ -77,7 +77,7 @@ func (o *APIOutput) HasTableEndpoints() bool {
 // table operations (D106) run through it, and so do its graph operations
 // (D138).
 func (o *APIOutput) TakesDatabase() bool {
-	return o.HasBehaviorEndpoints() || o.HasTableEndpoints() || o.HasGraphEndpoints() || o.HasRowFeatureEndpoints()
+	return o.HasBehaviorEndpoints() || o.HasTableEndpoints() || o.HasGraphEndpoints() || o.HasRowFeatureEndpoints() || o.HasAccessGrantEndpoints()
 }
 
 // TablesWrite reports whether a table operation of the view creates or

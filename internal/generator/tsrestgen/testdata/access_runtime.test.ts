@@ -434,4 +434,48 @@ describe('the access of fixture-access-api', () => {
     expect((await send(rotated.path)).status).toBe(401);
     expect((await send('/api/calendar/feed/grant_unknown.ics')).status).toBe(401);
   });
+
+  test('the active grants list for an administrator, the target owner and the holder, and are refused to anyone else', async () => {
+    const system = orm.asSystem();
+    const ACCESS_ADMIN = `${ADMIN_ID}:access.admin`;
+    // A folder the owner owns, and grants on it and on a contract.
+    const folder = await system.folder.createOne({ name: 'Shared out', owner: OWNER_ID } as never);
+    const holderA = uuid(0xe1);
+    const holderB = uuid(0xe2);
+    const onFolderA = await issueGrant(system, { holder: holderA, holderKind: 'party', role: 'tenant', targetType: 'Folder', targetId: folder.id });
+    const onFolderB = await issueGrant(system, { holder: holderB, holderKind: 'party', role: 'tenant', targetType: 'Folder', targetId: folder.id });
+    const onContractA = await issueGrant(system, { holder: holderA, holderKind: 'party', role: 'tenant', targetType: 'Contract', targetId: contractA.id });
+    // Ended ones, which no lister sees: revoked, and past its date.
+    const revoked = await issueGrant(system, { holder: holderA, holderKind: 'party', role: 'tenant', targetType: 'Folder', targetId: folder.id });
+    await revokeGrant(orm, revoked.grant.id as string);
+    await issueGrant(system, { holder: holderA, holderKind: 'party', role: 'tenant', targetType: 'Folder', targetId: folder.id, endsAt: new Date(Date.now() - 60_000) });
+    const ids = (grants: any[]) => grants.map(grant => grant.id).sort();
+    const of = (...issued: any[]) => issued.map(each => each.grant.id).sort();
+    const list = (query: string, as: string) => ok('GET', `/api/grants/active${query}`, as);
+
+    // The administrator: every active grant the query keeps.
+    expect(ids(await list(`?targetType=Folder&targetId=${folder.id}`, ACCESS_ADMIN))).toEqual(of(onFolderA, onFolderB));
+    expect(ids(await list(`?holder=${holderA}`, ACCESS_ADMIN))).toEqual(of(onFolderA, onContractA));
+    const every = ids(await list('', ACCESS_ADMIN));
+    expect(every).toEqual(expect.arrayContaining(of(onFolderA, onFolderB, onContractA)));
+    expect(every).not.toContain(revoked.grant.id);
+    // The target's owner: the grants on the row it owns, and no other.
+    expect(ids(await list(`?targetType=Folder&targetId=${folder.id}`, OWNER))).toEqual(of(onFolderA, onFolderB));
+    expect(ids(await list(`?targetType=Folder&targetId=${folder.id}&holder=${holderB}`, OWNER))).toEqual(of(onFolderB));
+    expect(await status('GET', `/api/grants/active?targetType=Contract&targetId=${contractA.id}`, OWNER)).toBe(403);
+    expect(await status('GET', '/api/grants/active', OWNER)).toBe(403);
+    // The holder, by its grant's token: its own grants, and no other's.
+    expect(ids(await list(`?holder=${holderA}`, onFolderA.token))).toEqual(of(onFolderA, onContractA));
+    expect(ids(await list(`?holder=${holderA}&targetType=Contract`, onFolderA.token))).toEqual(of(onContractA));
+    expect(await status('GET', `/api/grants/active?holder=${holderB}`, onFolderA.token)).toBe(403);
+    expect(await status('GET', `/api/grants/active?targetType=Folder&targetId=${folder.id}`, onFolderA.token)).toBe(403);
+    // Anyone else is refused, and a request with no caller is 401.
+    expect(await status('GET', `/api/grants/active?targetType=Folder&targetId=${folder.id}`, OTHER)).toBe(403);
+    expect(await status('GET', `/api/grants/active?holder=${holderA}`, OTHER)).toBe(403);
+    expect((await call('GET', '/api/grants/active')).status).toBe(401);
+    // A grant is listed without its token's hash or its revocation.
+    const shown = (await list(`?holder=${holderB}`, ACCESS_ADMIN))[0];
+    expect(shown).toMatchObject({ holder: holderB, holderKind: 'party', role: 'tenant', targetType: 'Folder', targetId: folder.id });
+    expect('tokenHash' in shown || 'revokedAt' in shown).toBe(false);
+  });
 });

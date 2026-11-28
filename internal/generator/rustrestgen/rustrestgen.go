@@ -131,6 +131,13 @@ type EndpointInfo struct {
 	// repositories' references and attachments (src/rowfeatures.rs), and
 	// its namespace's trait has no method for it.
 	RowFeature *RowFeatureInfo
+
+	// AccessGrants is the active grants' route the endpoint is (#735), nil
+	// for every other: the router's handler lists the grants the caller may
+	// see through the repositories of the API's database
+	// (src/accessgrants.rs), and its namespace's trait has no method for
+	// it.
+	AccessGrants *AccessGrantsInfo
 }
 
 // PageInfo is a paged operation's @paginated (D60) as the crate renders it.
@@ -1032,6 +1039,13 @@ func Generate(schema *ir.Schema, api *apigen.APIOutput, opts Options) (*APIOutpu
 				return nil, err
 			}
 		}
+		// The active grants' handler lists them through the repositories
+		// (#735): its namespace has no method for it either.
+		if info.Behavior == nil && info.Table == nil && info.Graph == nil && info.RowFeature == nil {
+			if info.AccessGrants, err = accessGrantsInfo(endpoint, info); err != nil {
+				return nil, err
+			}
+		}
 		if !info.RouterServed() {
 			namespaceSet[info.Namespace] = struct{}{}
 		}
@@ -1222,6 +1236,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 		{"tables.tmpl", TablesFile, output.HasTableOperations()},
 		{"graphs.tmpl", GraphsFile, output.HasGraphOperations()},
 		{"rowfeatures.tmpl", RowFeaturesFile, output.HasRowFeatureOperations()},
+		{"accessgrants.tmpl", AccessGrantsFile, output.HasAccessGrantOperations()},
 		{"files.tmpl", FilesFile, output.HasFileProcessing()},
 		{"providers.tmpl", ProvidersFile, output.Providers != nil},
 		{"wiring.tmpl", WiringFile, output.HasWiring()},

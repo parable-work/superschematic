@@ -547,6 +547,11 @@ type RustAPI struct {
 	RowFeatures       bool
 	AttachmentsBucket *RustBucket
 
+	// AccessGrants is true when the API lists the active grants (#735):
+	// Implementations::new then takes Database's pool too, through whose
+	// repositories the router's handler reads them.
+	AccessGrants bool
+
 	// Idempotency is true when the API has @idempotent operations (D140):
 	// Implementations::new then takes Database's pool too, over which it
 	// builds the store of their keys.
@@ -1072,6 +1077,12 @@ func PlanRust(in RustInput) (*RustServer, error) {
 				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose row feature operations run on %s (#723), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.RowFeatureDatabase())
 			}
 			api.RowFeatures = true
+		}
+		if o.HasAccessGrantOperations() && !background {
+			if api.Database == nil || api.Database.Service != o.AccessGrantsDatabase() {
+				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose active grants are read from %s (#735), and opens no pool on it", in.Stack, s.Kind, in.Server, o.SchemaName, o.AccessGrantsDatabase())
+			}
+			api.AccessGrants = true
 		}
 		if o.HasIdempotent() && !background {
 			if api.Database == nil {
@@ -2001,7 +2012,7 @@ func (a *RustAPI) ImplementationsArgs() []string {
 	if a.ServiceAuthenticator != "" {
 		args = append(args, "Arc::new("+a.ServiceAuthenticator+")")
 	}
-	if a.Behaviors || a.Tables || a.Graphs || a.RowFeatures || a.Idempotency {
+	if a.Behaviors || a.Tables || a.Graphs || a.RowFeatures || a.AccessGrants || a.Idempotency {
 		args = append(args, a.Database.Var+".clone()")
 	}
 	if a.FieldKeys {

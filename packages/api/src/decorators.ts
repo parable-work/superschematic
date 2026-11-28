@@ -734,6 +734,38 @@ export function triageOperations(
   return noopClassDecorator;
 }
 
+/** The options of an @accessGrantsOperations set (#735). */
+export type AccessGrantsOperationsOptions = {
+  /**
+   * The permission whose holder lists every active grant (a grant of a
+   * permission that covers it does too); access.admin unless set.
+   */
+  readonly permission?: string;
+};
+
+/**
+ * Lists the grants active now (D156, #735), on a class with no members:
+ * superschematic adds GET /api/grants/active, whose query's holder,
+ * targetType and targetId keep the grants whose members hold them, an SDK
+ * method and an MCP tool, active_grants, with a generated AccessGrant
+ * type that holds no token's hash, each run by the generated TypeScript,
+ * Go and Rust servers over the API's database's @accessGrants table, so
+ * the implementation has no method for it. Who may list: a caller who
+ * holds the permission lists every active grant; the owner of the row
+ * targetType and targetId name (its @audience owner, else its createdBy)
+ * lists the grants on it; and a holder lists its own, with holder its own
+ * id. Any other request is refused 403. The class's @requirePermission,
+ * service clause, rate limit and timeout apply to the route too.
+ *
+ * ```ts
+ * @accessGrantsOperations({ permission: "access.admin" })
+ * export abstract class Grants {}
+ * ```
+ */
+export function accessGrantsOperations(_options?: AccessGrantsOperationsOptions): ClassDecorator {
+  return noopClassDecorator;
+}
+
 /** The options of a behavior worker (D103). */
 export type BehaviorWorkerOptions = {
   /** How many messages of each of the table's behavior queues an instance handles at a time; one unless set. An environment's settings change it. */

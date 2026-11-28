@@ -774,6 +774,13 @@ type FieldDef struct {
 	// [TriageOperation].
 	TriageOperation *TriageOperation `json:"triageOperation,omitempty" yaml:"triageOperation,omitempty" jsonschema:"-"`
 
+	// AccessGrantsOperation marks the operation the loader added for an
+	// @accessGrantsOperations set (#735): a server routes it to a
+	// generated handler that lists the active grants the caller may see.
+	// Nil for every authored operation. The data forms have no key for it.
+	// See [AccessGrantsOperation].
+	AccessGrantsOperation *AccessGrantsOperation `json:"accessGrantsOperation,omitempty" yaml:"accessGrantsOperation,omitempty" jsonschema:"-"`
+
 	// TableOperation is @tableOperation (D106): the operation reads or
 	// writes one table through its @source views, with a handler the build
 	// writes and no implementation method. Nil for every other operation.

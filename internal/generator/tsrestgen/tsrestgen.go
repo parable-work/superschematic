@@ -217,6 +217,11 @@ type EndpointInfo struct {
 	// over RouterOptions.inbound, and the implementation has no method for
 	// it.
 	Triage *TriageRoute
+	// AccessGrants is the active grants the endpoint lists (#735), nil for
+	// every other: the router mounts it with the runtime's
+	// accessGrantsOperation over RouterOptions.orm, and the implementation
+	// has no method for it.
+	AccessGrants *AccessGrantsRoute
 }
 
 // TableRoute is a table operation (D106) as the router mounts it: the
@@ -905,9 +910,10 @@ func (o *APIOutput) TableHandlers() []string {
 // RouterOptions.orm, the repositories of the API's database: a table's
 // behavior operations (D103), the table operations (D106) and a version
 // graph's operations (D138), which read the root and the graph's refs
-// through them, and a table's references and files (#723).
+// through them, a table's references and files (#723), and the active
+// grants (#735).
 func (o *APIOutput) RouterNeedsORM() bool {
-	return o.HasBehaviors() || o.HasTableOperations() || o.HasGraphs() || o.HasRowFeatures()
+	return o.HasBehaviors() || o.HasTableOperations() || o.HasGraphs() || o.HasRowFeatures() || o.HasAccessGrants()
 }
 
 // ORMOperations names what the router runs through RouterOptions.orm, with
@@ -925,6 +931,9 @@ func (o *APIOutput) ORMOperations() (what, decisions string) {
 	}
 	if o.HasRowFeatures() {
 		names, ids = append(names, "the references and files"), append(ids, "#723")
+	}
+	if o.HasAccessGrants() {
+		names, ids = append(names, "the active grants"), append(ids, "#735")
 	}
 	switch len(names) {
 	case 0:
@@ -1098,6 +1107,9 @@ func (o *APIOutput) RuntimeImport() string {
 	if o.HasPages {
 		values = append(values, "readPage")
 	}
+	if o.HasAccessGrants() {
+		values = append(values, "accessGrantsOperation")
+	}
 	if o.HasRowFeatures() {
 		values = append(values, "rowFeatureOperation")
 	}
@@ -1106,6 +1118,9 @@ func (o *APIOutput) RuntimeImport() string {
 		values = append(values, "triageOperation")
 	}
 	var types []string
+	if o.HasAccessGrants() {
+		types = append(types, "AccessGrantsOperation")
+	}
 	if o.RowFeatureBucket() != "" {
 		types = append(types, "Bucket")
 	}
@@ -1287,6 +1302,19 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		// router mounts it over RouterOptions.orm.
 		if ep.Operation != nil && ep.Operation.RowFeatureOperation != nil {
 			endpoint, err := b.rowFeatureEndpoint(ep, ep.Operation.RowFeatureOperation)
+			if err != nil {
+				return nil, err
+			}
+			endpoint.Key = keyOf(ep)
+			output.Endpoints = append(output.Endpoints, endpoint)
+			continue
+		}
+		// The active grants run through the database's repositories (#735),
+		// with the runtime's handler and no implementation method: the
+		// interfaces leave it out, and the router mounts it over
+		// RouterOptions.orm.
+		if ep.Operation != nil && ep.Operation.AccessGrantsOperation != nil {
+			endpoint, err := b.accessGrantsEndpoint(ep, ep.Operation.AccessGrantsOperation)
 			if err != nil {
 				return nil, err
 			}

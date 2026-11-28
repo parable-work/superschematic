@@ -171,7 +171,7 @@ pub struct Handlers {
 
 impl Implementations {
     /// The API's `Implementations`: the handlers the implementation's
-    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasRowFeatureOperations .HasIdempotent }}, with what the server's entrypoint builds{{ end }}.
+    /// `create` returns{{ if or .Identity .HasServiceCallers .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasRowFeatureOperations .HasAccessGrantOperations .HasIdempotent }}, with what the server's entrypoint builds{{ end }}.
 {{- if .Identity }}
     ///
     /// `authenticator` is the identity runtime's (D50), which the
@@ -204,6 +204,10 @@ impl Implementations {
     ///
     /// `db` is {{ .RowFeatureDatabase }}, through whose repositories the row feature
     /// operations run (#723): what `Deps.db` holds.
+{{- else if .HasAccessGrantOperations }}
+    ///
+    /// `db` is {{ .AccessGrantsDatabase }}, whose repositories the active grants are
+    /// read from (#735): what `Deps.db` holds.
 {{- end }}
 {{- if .HasIdempotent }}
     ///
@@ -238,21 +242,24 @@ impl Implementations {
 {{- end }}
 {{- if .HasIdempotent }}
             idempotency_store: Arc::new({{ .IdempotencyStoreType }}::new(
-                db{{ if or .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasRowFeatureOperations }}.clone(){{ end }},
+                db{{ if or .HasBehaviorOperations .HasTableOperations .HasGraphOperations .HasRowFeatureOperations .HasAccessGrantOperations }}.clone(){{ end }},
                 &crate::IDEMPOTENCY_TABLE,
             )),
 {{- end }}
 {{- if .HasBehaviorOperations }}
-            behaviors: crate::behaviors::Behaviors::new(db{{ if or .HasTableOperations .HasGraphOperations .HasRowFeatureOperations }}.clone(){{ end }}),
+            behaviors: crate::behaviors::Behaviors::new(db{{ if or .HasTableOperations .HasGraphOperations .HasRowFeatureOperations .HasAccessGrantOperations }}.clone(){{ end }}),
 {{- end }}
 {{- if .HasTableOperations }}
-            tables: crate::tables::tables(db{{ if or .HasGraphOperations .HasRowFeatureOperations }}.clone(){{ end }}{{ if .TableFieldKeys }}, field_keys{{ end }}),
+            tables: crate::tables::tables(db{{ if or .HasGraphOperations .HasRowFeatureOperations .HasAccessGrantOperations }}.clone(){{ end }}{{ if .TableFieldKeys }}, field_keys{{ end }}),
 {{- end }}
 {{- if .HasGraphOperations }}
-            graphs: crate::graphs::Graphs::new(db{{ if .HasRowFeatureOperations }}.clone(){{ end }}),
+            graphs: crate::graphs::Graphs::new(db{{ if or .HasRowFeatureOperations .HasAccessGrantOperations }}.clone(){{ end }}),
 {{- end }}
 {{- if .HasRowFeatureOperations }}
-            row_features: crate::rowfeatures::RowFeatures::new(db{{ if .RowFeatureBucket }}, attachments{{ end }}),
+            row_features: crate::rowfeatures::RowFeatures::new(db{{ if .HasAccessGrantOperations }}.clone(){{ end }}{{ if .RowFeatureBucket }}, attachments{{ end }}),
+{{- end }}
+{{- if .HasAccessGrantOperations }}
+            access_grants: crate::accessgrants::AccessGrants::new(db),
 {{- end }}
         }
     }

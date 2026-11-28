@@ -1,5 +1,6 @@
 export { Authenticated, Encrypted } from "./bases";
 export {
+  accessGrantsOperations,
   allowService,
   app,
   auth,
@@ -39,6 +40,7 @@ export {
   worker
 } from "./decorators";
 export type {
+  AccessGrantsOperationsOptions,
   AppOptions,
   AutonomyClass,
   AutonomyMode,

@@ -468,6 +468,18 @@ func GrantEnded(ctx context.Context, db grantRepositories, grant access.Grant, n
 	return grantEndedByTarget(grant, targets), nil
 }
 
+// GrantTarget reads the row of targetType whose key is targetID, as the
+// system actor: its members by their JSON names, or nil when there is no
+// such row, or targetType is no keyed table. The active grants' route
+// reads it to tell a target's owner (#735).
+func GrantTarget(ctx context.Context, db grantRepositories, targetType, targetID string) (map[string]any, error) {
+	targets, err := grantTargets(AsSystem(ctx), db, targetType, []string{targetID})
+	if err != nil {
+		return nil, err
+	}
+	return targets[targetID], nil
+}
+
 // grantEndedByTarget is why grant, which ends on its target's state, is
 // not active, given its target type's rows by id: its target is gone, or
 // its field holds the state that ends it; "" when neither.

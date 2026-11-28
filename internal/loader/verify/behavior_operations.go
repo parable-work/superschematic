@@ -54,9 +54,9 @@ func BehaviorOperationsMessage(set *ir.OperationSet, problem BehaviorOperationsP
 // operation's (D103, D138, #723, #746).
 func SetClauseMessage(set *ir.OperationSet, decorator string) string {
 	if decorator == "@auth" {
-		return fmt.Sprintf("%s: @auth on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; extend Authenticated, or put @auth on each method of %s", set.Name, set.Name)
+		return fmt.Sprintf("%s: @auth on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations, @triageOperations or @accessGrantsOperations set; extend Authenticated, or put @auth on each method of %s", set.Name, set.Name)
 	}
-	return fmt.Sprintf("%s: %s on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set; put it on each method of %s", set.Name, decorator, set.Name)
+	return fmt.Sprintf("%s: %s on a class applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations, @triageOperations or @accessGrantsOperations set; put it on each method of %s", set.Name, decorator, set.Name)
 }
 
 // CheckBehaviorOperations runs the checks of the API's @behaviorOperations
@@ -90,7 +90,7 @@ func checkBehaviorOperations(schema *ir.Schema, in Input, r *Result) {
 			sets = append(sets, set)
 			continue
 		}
-		if set.IsGraphOperations() || set.IsRowFeatureOperations() || set.IsTriageOperations() {
+		if set.IsGraphOperations() || set.IsRowFeatureOperations() || set.IsTriageOperations() || set.IsAccessGrantsOperations() {
 			// A @graphOperations set takes the clause too (D138), and so
 			// does a @rowFeatureOperations set (#723): their own checks
 			// hold it (checkGraphOperations, checkRowFeatureOperations),

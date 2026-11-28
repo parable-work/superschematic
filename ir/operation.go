@@ -77,6 +77,12 @@ type OperationSet struct {
 	// See [TriageOperationsConfig].
 	TriageOperations *TriageOperationsConfig `json:"triageOperations,omitempty" yaml:"triageOperations,omitempty"`
 
+	// AccessGrantsOperations is @accessGrantsOperations({ ... }) on a
+	// class with no methods (#735): the loader fills Operations with the
+	// route of the active grants. Nil for every other set. See
+	// [AccessGrantsOperationsConfig].
+	AccessGrantsOperations *AccessGrantsOperationsConfig `json:"accessGrantsOperations,omitempty" yaml:"accessGrantsOperations,omitempty"`
+
 	// Auth, Permissions and Public are a @behaviorOperations set's and a
 	// @graphOperations set's user clause, @auth, @requirePermission and
 	// @publicRoute on its class

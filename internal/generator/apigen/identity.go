@@ -42,21 +42,29 @@ import (
 // (UnservedTableOperations); one the loader did not fill is an error that
 // names it.
 func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
-	identity, behavior, table, graph, rowFeature := false, false, false, false, false
+	identity, behavior, table, graph, rowFeature, grants := false, false, false, false, false, false
 	for _, endpoint := range output.Endpoints {
 		identity = identity || endpoint.IdentityOperation != ""
 		behavior = behavior || endpoint.BehaviorOperation() != nil
 		table = table || endpoint.ServedTable() != nil
 		graph = graph || endpoint.GraphOperation() != nil
 		rowFeature = rowFeature || endpoint.RowFeatureOperation() != nil
+		grants = grants || endpoint.AccessGrantsOperation() != nil
 	}
-	if !identity && !behavior && !table && !graph && !rowFeature {
+	if !identity && !behavior && !table && !graph && !rowFeature && !grants {
 		return output, nil
 	}
 	// The row feature operations go to RowFeatureEndpoints, and
 	// rowfeatures.go serves them (#723).
 	if rowFeature {
 		if err := output.checkRowFeatures(); err != nil {
+			return nil, err
+		}
+	}
+	// The active grants go to AccessGrantEndpoints, and accessgrants.go
+	// serves them (#735).
+	if grants {
+		if err := output.checkAccessGrants(); err != nil {
 			return nil, err
 		}
 	}
@@ -84,6 +92,7 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 	view.TableEndpoints = nil
 	view.GraphEndpoints = nil
 	view.RowFeatureEndpoints = nil
+	view.AccessGrantEndpoints = nil
 	view.Graphs = graphs
 	for _, endpoint := range output.Endpoints {
 		switch {
@@ -95,6 +104,8 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 			view.GraphEndpoints = append(view.GraphEndpoints, endpoint)
 		case endpoint.RowFeatureOperation() != nil:
 			view.RowFeatureEndpoints = append(view.RowFeatureEndpoints, endpoint)
+		case endpoint.AccessGrantsOperation() != nil:
+			view.AccessGrantEndpoints = append(view.AccessGrantEndpoints, endpoint)
 		case endpoint.BehaviorOperation() != nil:
 			view.BehaviorEndpoints = append(view.BehaviorEndpoints, endpoint)
 		case endpoint.ServedTable() != nil && tables.byHand[endpoint.Operation]:
@@ -134,6 +145,10 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 	}
 	// And a row feature operation's (#723).
 	for _, endpoint := range view.RowFeatureEndpoints {
+		view.summarizeRoute(endpoint)
+	}
+	// And the active grants' (#735).
+	for _, endpoint := range view.AccessGrantEndpoints {
 		view.summarizeRoute(endpoint)
 	}
 	if table {

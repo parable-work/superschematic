@@ -35,6 +35,8 @@ func applyTriageOperations(args []any, set *ir.OperationSet) error {
 		return fmt.Errorf("@triageOperations contradicts @graphOperations on the same class: a class takes one of them")
 	case set.RowFeatureOperations != nil:
 		return fmt.Errorf("@triageOperations contradicts @rowFeatureOperations on the same class: a class takes one of them")
+	case set.AccessGrantsOperations != nil:
+		return fmt.Errorf("@triageOperations contradicts @accessGrantsOperations on the same class: a class takes one of them")
 	case set.UserSessions != nil:
 		return fmt.Errorf("@triageOperations contradicts @userSessions on the same class: a class takes one of them")
 	case set.UserAdministration != nil:

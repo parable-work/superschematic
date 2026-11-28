@@ -52,8 +52,12 @@ func (e *emitter) emitOperationSet(set *ir.OperationSet) {
 		e.emitTriageOperationsSet(set, owner)
 		return
 	}
+	if set.IsAccessGrantsOperations() {
+		e.emitAccessGrantsOperationsSet(set, owner)
+		return
+	}
 	if set.Auth || len(set.Permissions) > 0 || set.Public {
-		e.failf("%s: a class-level @auth, @requirePermission or @publicRoute applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set", owner)
+		e.failf("%s: a class-level @auth, @requirePermission or @publicRoute applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations, @triageOperations or @accessGrantsOperations set", owner)
 	}
 
 	auth := false
@@ -779,4 +783,38 @@ func oauthLiteral(o *ir.IdentityOAuthConfig) string {
 		return "true"
 	}
 	return "{ " + strings.Join(keys, ", ") + " }"
+}
+
+// emitAccessGrantsOperationsSet renders the active grants as a route
+// (#735): @accessGrantsOperations with its permission, and the set's
+// clause, service clause and middleware, on an abstract class with no
+// members. Its operation is the loader's, which the writer leaves out
+// (withoutExpansion), so the reader expands it again.
+func (e *emitter) emitAccessGrantsOperationsSet(set *ir.OperationSet, owner string) {
+	if len(set.Operations) > 0 {
+		e.failf("%s: an @accessGrantsOperations class has no members; write the set the loader has not filled", owner)
+	}
+	if set.Encrypted {
+		e.failf("%s: an @accessGrantsOperations class is not Encrypted", owner)
+	}
+	var options []string
+	if p := set.AccessGrantsOperations.Permission; p != "" {
+		options = append(options, "permission: "+strconv.Quote(p))
+	}
+
+	e.body.WriteString("\n")
+	e.comment("", set.Comment)
+	fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("accessGrantsOperations"), optionalObjectLiteral(options))
+	if set.Auth {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("auth"))
+	}
+	if len(set.Permissions) > 0 {
+		fmt.Fprintf(&e.body, "@%s([%s])\n", e.use("requirePermission"), quotedList(set.Permissions))
+	}
+	if set.Public {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("publicRoute"))
+	}
+	e.emitServiceCallersDecorator("", set.ServiceCallers)
+	e.emitMiddlewareDecorators("", set.Middleware)
+	fmt.Fprintf(&e.body, "export abstract class %s {}\n", e.ident(set.Name, "operation set"))
 }

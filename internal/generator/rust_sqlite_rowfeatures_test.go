@@ -38,6 +38,7 @@ var accessRustSQLiteCases = []string{
 	"a party with a grant reaches only the rows its role's paths allow",
 	"an expired or revoked grant is refused on the very next call",
 	"a reveal opens the value for a holder of its permission and writes an access-log row",
+	"the active grants list for an administrator, the target owner and the holder, and are refused to anyone else",
 }
 
 // referencesRustSQLiteCases are the cases testdata/references_rust_sqlite.rs

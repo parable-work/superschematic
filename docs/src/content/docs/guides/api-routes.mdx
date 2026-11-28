@@ -2151,6 +2151,42 @@ export class Access extends Authenticated {
 }
 ```
 
+#### The active grants as a route
+
+`@accessGrantsOperations` on a class with no members lists the grants
+active now (#735): started, not ended by their date or by their target
+reaching its end state, and not revoked.
+
+```ts
+@accessGrantsOperations({ permission: "access.admin" })
+export abstract class Grants {}
+```
+
+The build adds one operation, `activeGrants`, at `GET /api/grants/active`,
+with an SDK method, an MCP tool (`active_grants`) and the type it lists,
+`AccessGrant`: a grant's members without its token's hash or its
+revocation. The query's `holder`, `targetType` and `targetId` each keep the
+grants whose member holds the value. The route needs a caller, and its
+handler, which the TypeScript, Go and Rust servers generate, decides which
+of three listers the caller is:
+
+| Caller | Lists |
+| --- | --- |
+| holds `permission` (`access.admin` unless set), or a permission that covers it | every active grant the query keeps |
+| owns the row `targetType` and `targetId` name: the row's `@audience` owner, else its `createdBy`, read as the system | the active grants on that row, `holder` keeping them further |
+| asks with `holder` its own id, a party or an agent run by its grant's token among them | its own active grants, `targetType` and `targetId` keeping them further |
+
+Any other request is the 403 `forbidden`, before a grant is read: a query
+that names neither the caller as its holder nor a row the caller owns. A
+`targetType` with no owner (a table with neither an `@audience` owner nor
+a `createdBy`), or a row that is not there, names no row the caller owns.
+The class's `@requirePermission` gates the route too, beside the three; and
+`@publicRoute` on the class is refused. The list is every grant it keeps,
+with no page. The loader refuses the set in an API whose database has no
+`@accessGrants` table. The routes run on Postgres and on SQLite: the
+TypeScript repositories on a SQLite file or D1, the Go ORM's SQLite
+database, and the Rust SQLite repositories.
+
 ### Reveal
 
 An `Encrypted<T>` field reads masked, `[secret]`, unless a view marks it
@@ -2435,7 +2471,6 @@ too (D191), through the runtime's `orm::notify`.
 | --- | --- |
 | a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL (options in #735) | a declared query reads every row; filter it by `effective_audience` yourself |
-| a generated route that lists only the active grants, and a declared query of them (options in #735) | `activeGrants` in the TypeScript, Go and Rust runtimes, or a `@tableOperation` over a view of every grant |
 | a row rule whose path ends at a list of ids, and a team as a principal in an audience (options in #735) | a row rule on a member that holds one id; name each member in `audienceNamed` |
 | an `@audience` queue on SQLite (#734) | resolve in the writer's transaction on SQLite |
 

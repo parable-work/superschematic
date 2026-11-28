@@ -225,6 +225,12 @@ pub struct Implementations {
     /// trait has a method for it.
     pub row_features: crate::rowfeatures::RowFeatures,
 {{- end }}
+{{- if .HasAccessGrantOperations }}
+    /// What the active grants are read from (#735): the repositories of
+    /// {{ .AccessGrantsDatabase }}, through which the router's handler lists the grants
+    /// the caller may see, so no namespace trait has a method for it.
+    pub access_grants: crate::accessgrants::AccessGrants,
+{{- end }}
 }
 {{- if .WebhookProviders }}
 

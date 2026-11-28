@@ -1,5 +1,5 @@
 import { Contract, Document, Folder, Request, Unit } from "@schemas/fixture-access-go-db";
-import { Authenticated, HttpMethod, SearchQuery, docs as apiDocs, mcp, paginated, requirePermission, rest, tableOperation } from "@superschematic/api";
+import { Authenticated, HttpMethod, SearchQuery, accessGrantsOperations, docs as apiDocs, mcp, paginated, requirePermission, rest, tableOperation } from "@superschematic/api";
 import { Nullable, Validate, decrypted, source } from "@superschematic/schema";
 import { Identity } from "superscalar";
 
@@ -246,3 +246,9 @@ export class Requests extends Authenticated {
     throw new Error("schema declaration only");
   }
 }
+
+// The grants active now (#735): an administrator of access lists every
+// one, the owner of a grant's target the grants on it, and a holder its
+// own.
+@accessGrantsOperations({ permission: "access.admin" })
+export abstract class Grants {}

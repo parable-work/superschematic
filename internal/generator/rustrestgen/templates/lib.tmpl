@@ -16,6 +16,9 @@ pub mod graphs;
 {{ if .HasRowFeatureOperations -}}
 pub mod rowfeatures;
 {{ end -}}
+{{ if .HasAccessGrantOperations -}}
+pub mod accessgrants;
+{{ end -}}
 {{ if .HasFileProcessing -}}
 pub mod files;
 {{ end -}}
