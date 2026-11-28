@@ -49,6 +49,17 @@ describe('the type parsers', () => {
     expect((postgresTypeParsers[PG_TYPES.date] as (text: string) => unknown)('2026-10-25')).toBe('2026-10-25');
   });
 
+  test("a TIMESTAMP, which has no zone, is its wall reading's text and never a Date", () => {
+    const timestamp = postgresTypeParsers[PG_TYPES.timestamp] as (text: string) => unknown;
+    expect(timestamp('2026-10-31 09:00:00')).toBe('2026-10-31T09:00:00');
+    expect(timestamp('2026-10-31 09:00:00.25')).toBe('2026-10-31T09:00:00.25');
+    expect(timestamp('2026-10-31 09:00:00.500000')).toBe('2026-10-31T09:00:00.5');
+    expect(timestamp('2026-10-31 09:00:00.000')).toBe('2026-10-31T09:00:00');
+    // What is no reading is as Postgres wrote it.
+    expect(timestamp('infinity')).toBe('infinity');
+    expect((postgresTypeParsers[PG_TYPES.timestampArray] as (text: string) => unknown)('{"2026-10-31 09:00:00",NULL}')).toEqual(['2026-10-31T09:00:00', null]);
+  });
+
   test('withTypeParsers falls back to the parsers it wraps, for the binary format too, and changes nothing global', () => {
     const types = withTypeParsers(pg.types);
     expect(types.getTypeParser(PG_TYPES.int8)).toBe(postgresTypeParsers[PG_TYPES.int8]);
@@ -114,6 +125,17 @@ describe('decodeRow', () => {
       rates: ['1.5', '0'],
     });
     expect(decodeRow({ id: hyphenated }, lineItem)).toEqual({ id: base62 });
+  });
+
+  test("a wall date-time column reads as its text: Postgres's, SQLite's and the Date pg makes of one", () => {
+    const columns: readonly RowField[] = [{ name: 'startsAt', column: 'starts_at', localDateTime: true }];
+    expect(decodeRow({ starts_at: '2026-10-31 09:00:00' }, columns)).toEqual({ startsAt: '2026-10-31T09:00:00' });
+    expect(decodeRow({ starts_at: '2026-10-31T09:00:00.25' }, columns)).toEqual({ startsAt: '2026-10-31T09:00:00.25' });
+    // pg's own parser reads the wall reading in the process's zone; its
+    // local parts are the reading again, whatever that zone is.
+    expect(decodeRow({ starts_at: new Date(2026, 9, 31, 9, 0, 0, 250) }, columns)).toEqual({ startsAt: '2026-10-31T09:00:00.25' });
+    expect(decodeRow({ starts_at: new Date(2026, 9, 31, 9, 0, 0) }, columns)).toEqual({ startsAt: '2026-10-31T09:00:00' });
+    expect(decodeRow({ starts_at: null }, columns)).toEqual({ startsAt: null });
   });
 
   test("reads pg's own forms: a DATE at local midnight, a parsed INTERVAL, a POINT's text", () => {

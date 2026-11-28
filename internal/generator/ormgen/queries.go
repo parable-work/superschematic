@@ -258,7 +258,7 @@ func queryBind(f Field, class sqlutil.ColumnClass, expr string) (string, error) 
 			target = "[16]byte"
 		case class.DateTimeLike:
 			target = "time.Time"
-		case class.Decimal, class.DateLike:
+		case class.Decimal, class.DateLike, class.LocalDateTimeLike:
 			target = "string"
 			value = "string(v)"
 		case class.IntLike:
@@ -320,6 +320,9 @@ func queryRowField(query string, f Field, rf sqlutil.QueryField) (QueryRowField,
 		case class.DateLike:
 			out.Temp, out.Dest = "var "+temp+" []time.Time", "&"+temp
 			out.After = fmt.Sprintf("%s = queryConvert(%s, func(t time.Time) %s { return %s(t.Format(time.DateOnly)) })", field, temp, elem, elem)
+		case class.LocalDateTimeLike:
+			out.Temp, out.Dest = "var "+temp+" []time.Time", "&"+temp
+			out.After = fmt.Sprintf("%s = queryConvert(%s, func(t time.Time) %s { return %s(t.Format(%q)) })", field, temp, elem, elem, localDateTimeLayout)
 		case class.IntLike:
 			out.Temp, out.Dest = "var "+temp+" []int64", "&"+temp
 			out.After = fmt.Sprintf("%s = queryConvert(%s, func(n int64) %s { return %s(n) })", field, temp, elem, elem)
@@ -336,6 +339,11 @@ func queryRowField(query string, f Field, rf sqlutil.QueryField) (QueryRowField,
 	case class.DateLike && !class.DateTimeLike:
 		out.Temp, out.Dest = "var "+temp+" *time.Time", "&"+temp
 		out.After = fmt.Sprintf("if %s != nil {\n%s\n}", temp, assign(elem+"("+temp+".Format(time.DateOnly))"))
+	case class.LocalDateTimeLike:
+		// A TIMESTAMP scans as a time.Time, which is the wall reading with
+		// UTC beside it; its text is the reading alone.
+		out.Temp, out.Dest = "var "+temp+" *time.Time", "&"+temp
+		out.After = fmt.Sprintf("if %s != nil {\n%s\n}", temp, assign(elem+"("+temp+fmt.Sprintf(".Format(%q))", localDateTimeLayout)))
 	case !f.IsRequired && !f.GoPointer() && f.GoType == "string":
 		// A Nullable<string> is a Go string, whose null is the empty text.
 		out.Temp, out.Dest = "var "+temp+" *string", "&"+temp

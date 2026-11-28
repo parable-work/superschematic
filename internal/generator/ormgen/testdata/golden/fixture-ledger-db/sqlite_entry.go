@@ -440,6 +440,61 @@ func (f *EntryFilter) sqliteConditions(args *[]any) []string {
 			}
 		}
 	}
+	if f.SettlesAt != nil {
+		if f.SettlesAt.Eq != nil {
+			*args = append(*args, *f.SettlesAt.Eq)
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at = ?%d`, len(*args)))
+		}
+		if f.SettlesAt.Ne != nil {
+			*args = append(*args, *f.SettlesAt.Ne)
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at IS DISTINCT FROM ?%d`, len(*args)))
+		}
+		if f.SettlesAt.Gt != nil {
+			*args = append(*args, *f.SettlesAt.Gt)
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at > ?%d`, len(*args)))
+		}
+		if f.SettlesAt.Gte != nil {
+			*args = append(*args, *f.SettlesAt.Gte)
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at >= ?%d`, len(*args)))
+		}
+		if f.SettlesAt.Lt != nil {
+			*args = append(*args, *f.SettlesAt.Lt)
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at < ?%d`, len(*args)))
+		}
+		if f.SettlesAt.Lte != nil {
+			*args = append(*args, *f.SettlesAt.Lte)
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at <= ?%d`, len(*args)))
+		}
+		if f.SettlesAt.Between != nil {
+			*args = append(*args, f.SettlesAt.Between.Start)
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at >= ?%d`, len(*args)))
+			*args = append(*args, f.SettlesAt.Between.End)
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at <= ?%d`, len(*args)))
+		}
+		if len(f.SettlesAt.In) > 0 {
+			placeholders := make([]string, len(f.SettlesAt.In))
+			for i, value := range f.SettlesAt.In {
+				*args = append(*args, value)
+				placeholders[i] = fmt.Sprintf(`?%d`, len(*args))
+			}
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.SettlesAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.SettlesAt.NotIn))
+			for i, value := range f.SettlesAt.NotIn {
+				*args = append(*args, value)
+				placeholders[i] = fmt.Sprintf(`?%d`, len(*args))
+			}
+			conditions = append(conditions, fmt.Sprintf(`(entry.settles_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.SettlesAt.IsNull != nil {
+			if *f.SettlesAt.IsNull {
+				conditions = append(conditions, `entry.settles_at IS NULL`)
+			} else {
+				conditions = append(conditions, `entry.settles_at IS NOT NULL`)
+			}
+		}
+	}
 	if f.CreatedAt != nil {
 		if f.CreatedAt.Eq != nil {
 			*args = append(*args, sqliteTimeText(*f.CreatedAt.Eq))
@@ -687,6 +742,7 @@ var entrySQLite = &sqliteTable{
 		{name: "tags", quoted: `"tags"`, member: "tags", list: true},
 		{name: "metadata", quoted: `"metadata"`, member: "metadata", json: true},
 		{name: "reviewed_at", quoted: `"reviewed_at"`, member: "reviewedAt", timestamp: true},
+		{name: "settles_at", quoted: `"settles_at"`, member: "settlesAt"},
 		{name: "created_at", quoted: `"created_at"`, member: "createdAt", timestamp: true, auto: true},
 		{name: "created_by", quoted: `"created_by"`, member: "createdBy", uuid: true},
 		{name: "updated_at", quoted: `"updated_at"`, member: "updatedAt", timestamp: true, auto: true},
@@ -695,10 +751,10 @@ var entrySQLite = &sqliteTable{
 		{name: "deleted_by", quoted: `"deleted_by"`, member: "deletedBy", uuid: true},
 	},
 	st: sqliteStatements{
-		columns:             `"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
-		qualifiedColumns:    `"entry"."id", "entry"."account_id", "entry"."transfer_id", "entry"."amount_cents", "entry"."booked_on", "entry"."kind", "entry"."memo", "entry"."external_id", "entry"."tags", "entry"."metadata", "entry"."reviewed_at", "entry"."created_at", "entry"."created_by", "entry"."updated_at", "entry"."updated_by", "entry"."deleted_at", "entry"."deleted_by"`,
-		getOne:              `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id = ?1`,
-		getMany:             `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id IN (%s)`,
+		columns:             `"id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
+		qualifiedColumns:    `"entry"."id", "entry"."account_id", "entry"."transfer_id", "entry"."amount_cents", "entry"."booked_on", "entry"."kind", "entry"."memo", "entry"."external_id", "entry"."tags", "entry"."metadata", "entry"."reviewed_at", "entry"."settles_at", "entry"."created_at", "entry"."created_by", "entry"."updated_at", "entry"."updated_by", "entry"."deleted_at", "entry"."deleted_by"`,
+		getOne:              `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id = ?1`,
+		getMany:             `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE id IN (%s)`,
 		live:                ` AND deleted_at IS NULL`,
 		liveWhere:           ` WHERE deleted_at IS NULL`,
 		liveCondition:       `entry.deleted_at IS NULL`,
@@ -717,11 +773,11 @@ var entrySQLite = &sqliteTable{
 		insertMany:          `INSERT INTO entry (%s) VALUES %s RETURNING %s`,
 		update:              `UPDATE entry SET %s WHERE id = ?%d`,
 		versionFence:        ` AND _version = ?%d`,
-		returning:           ` RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
+		returning:           ` RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
 		updateMany:          `UPDATE entry SET %s%s`,
 		updatedAt:           `updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`,
 		updatedBy:           `updated_by = ?%d`,
-		upsert:              `INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
+		upsert:              `INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by"`,
 		softDelete:          `UPDATE entry SET deleted_at = ?1, deleted_by = ?2 WHERE id = ?3 AND deleted_at IS NULL`,
 		softDeleteIfVersion: `UPDATE entry SET deleted_at = ?1, deleted_by = ?2 WHERE id = ?3 AND _version = ?4 AND deleted_at IS NULL`,
 		softDeleteMany:      `UPDATE entry SET deleted_at = ?1, deleted_by = ?2%s`,
@@ -735,8 +791,8 @@ var entrySQLite = &sqliteTable{
 // entrySQLiteUniqueKeys are the keys an upsert of Entry is keyed by on
 // SQLite, as sqlutil writes them (UniqueKey.SQLite).
 var entrySQLiteUniqueKeys = map[EntryUniqueKey]sqliteUniqueKey{
-	EntryUniqueById:                {conflict: `(id)`, keep: `id = entry.id`, rows: `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (id) IN (VALUES %s)`, held: ``, columns: []string{`id`}},
-	EntryUniqueByAccountExternalId: {conflict: `(account_id, external_id) WHERE deleted_at IS NULL`, keep: `account_id = entry.account_id`, rows: `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (account_id, external_id) IN (VALUES %s) AND (deleted_at IS NULL)`, held: ``, columns: []string{`account_id`, `external_id`}},
+	EntryUniqueById:                {conflict: `(id)`, keep: `id = entry.id`, rows: `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (id) IN (VALUES %s)`, held: ``, columns: []string{`id`}},
+	EntryUniqueByAccountExternalId: {conflict: `(account_id, external_id) WHERE deleted_at IS NULL`, keep: `account_id = entry.account_id`, rows: `SELECT "id", "account_id", "transfer_id", "amount_cents", "booked_on", "kind", "memo", "external_id", "tags", "metadata", "reviewed_at", "settles_at", "created_at", "created_by", "updated_at", "updated_by", "deleted_at", "deleted_by" FROM entry WHERE (account_id, external_id) IN (VALUES %s) AND (deleted_at IS NULL)`, held: ``, columns: []string{`account_id`, `external_id`}},
 }
 
 // q is what the repository reads and writes through: the open
@@ -791,6 +847,9 @@ func entrySQLiteMembers(fields EntryFields) map[string]bool {
 	}
 	if fields.ReviewedAt {
 		keep["reviewedAt"] = true
+	}
+	if fields.SettlesAt {
+		keep["settlesAt"] = true
 	}
 	if fields.CreatedAt {
 		keep["createdAt"] = true
@@ -1064,7 +1123,7 @@ func (r *EntrySQLiteRepository) FindPage(ctx context.Context, filter *EntryFilte
 	}
 	column, ok := entrySortColumns[field]
 	if !ok {
-		return nil, fmt.Errorf("orm: Entry sorts by id, amountCents, bookedOn, memo, externalId, reviewedAt, createdAt and updatedAt, not %q", string(field))
+		return nil, fmt.Errorf("orm: Entry sorts by id, amountCents, bookedOn, memo, externalId, reviewedAt, settlesAt, createdAt and updatedAt, not %q", string(field))
 	}
 	var after any
 	if opts.After != nil {
@@ -1132,7 +1191,7 @@ func (r *EntrySQLiteRepository) CreateOne(ctx context.Context, input *types.Entr
 
 // CreateMany inserts the rows in the inputs' order and returns them, in one
 // transaction: a statement per run of consecutive rows that write the same
-// columns, since a VALUES list on SQLite takes no DEFAULT, of at most 2184
+// columns, since a VALUES list on SQLite takes no DEFAULT, of at most 2047
 // rows, as many as SQLite binds the parameters of (sqliteTable.insertMany).
 func (r *EntrySQLiteRepository) CreateMany(ctx context.Context, inputs []*types.Entry) ([]*types.Entry, error) {
 	out := make([]*types.Entry, 0, len(inputs))
@@ -1151,7 +1210,7 @@ func (r *EntrySQLiteRepository) CreateMany(ctx context.Context, inputs []*types.
 		records[i] = record
 	}
 	err := r.within(ctx, func(q sqliteQuerier) error {
-		written, err := entrySQLite.insertMany(ctx, q, records, 2184)
+		written, err := entrySQLite.insertMany(ctx, q, records, 2047)
 		if err != nil {
 			return err
 		}
@@ -1295,6 +1354,21 @@ func (r *EntrySQLiteRepository) sets(update *EntryUpdate, args *[]any) (sets, co
 		sets = append(sets, fmt.Sprintf(`reviewed_at = ?%d`, len(*args)))
 		compare, next = append(compare, `entry.reviewed_at`), append(next, fmt.Sprintf("?%d", len(*args)))
 	}
+	if update.SettlesAt != nil && update.SettlesAtSetNull {
+		return nil, nil, nil, fmt.Errorf("settles_at cannot be updated with both value and null assignment")
+	}
+	if update.SettlesAtSetNull {
+		sets = append(sets, `settles_at = NULL`)
+		compare, next = append(compare, `entry.settles_at`), append(next, `NULL`)
+	} else if update.SettlesAt != nil {
+		value, err := entrySQLite.arg(*update.SettlesAt, 11)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		*args = append(*args, value)
+		sets = append(sets, fmt.Sprintf(`settles_at = ?%d`, len(*args)))
+		compare, next = append(compare, `entry.settles_at`), append(next, fmt.Sprintf("?%d", len(*args)))
+	}
 	return sets, compare, next, nil
 }
 
@@ -1302,10 +1376,10 @@ func (r *EntrySQLiteRepository) sets(update *EntryUpdate, args *[]any) (sets, co
 // acting user, or nil.
 func (r *EntrySQLiteRepository) updatedBy(ctx context.Context, update *EntryUpdate) (any, error) {
 	if update != nil && update.UpdatedBy != nil {
-		return entrySQLite.arg(*update.UpdatedBy, 14)
+		return entrySQLite.arg(*update.UpdatedBy, 15)
 	}
 	if HasUserID(ctx) {
-		return entrySQLite.arg(GetUserID(ctx), 14)
+		return entrySQLite.arg(GetUserID(ctx), 15)
 	}
 	return nil, nil
 }
@@ -1381,7 +1455,7 @@ func (r *EntrySQLiteRepository) deletedBy(ctx context.Context) (any, error) {
 	if !HasUserID(ctx) {
 		return nil, ErrNoUserInContext
 	}
-	return entrySQLite.arg(GetUserID(ctx), 16)
+	return entrySQLite.arg(GetUserID(ctx), 17)
 }
 
 // DeleteOne deletes the live row whose key is id, stamping it deleted.
@@ -1513,7 +1587,7 @@ func (r *EntrySQLiteRepository) UpsertMany(ctx context.Context, inputs []*types.
 	if update.DeletedBy {
 		return nil, fmt.Errorf("orm: UpsertMany of Entry sets the fields an update sets, not deletedBy")
 	}
-	batch, err := upsertBatch("Entry", opts.Batch, 2184)
+	batch, err := upsertBatch("Entry", opts.Batch, 2047)
 	if err != nil {
 		return nil, err
 	}

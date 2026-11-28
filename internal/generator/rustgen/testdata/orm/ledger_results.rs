@@ -145,6 +145,7 @@ macro_rules! script {
             tags: Vec::new(),
             metadata: None,
             reviewed_at: None,
+            settles_at: None,
         };
         let (cash, bank, card) = (1, 2, 3);
 
@@ -324,6 +325,9 @@ macro_rules! script {
                     memo: Some("Coffee".to_owned()),
                     tags: vec!["food".to_owned()],
                     reviewed_at: Some(serde_json::from_value(json!("2026-10-25T09:15:00Z")).unwrap()),
+                    // A wall date-time is its text on both databases, the
+                    // seconds always and a fraction only when not zero.
+                    settles_at: Some("2026-10-26T09:30:00".to_owned()),
                     ..entry(11, cash, -1250, "2026-10-25")
                 })),
                 row,
@@ -341,6 +345,7 @@ macro_rules! script {
                     EntryCreate {
                         transfer_id: Some(key(cash)),
                         memo: Some("Transfer".to_owned()),
+                        settles_at: Some("2026-10-27T17:00:00.25".to_owned()),
                         ..entry(13, card, -75, "2026-10-27")
                     },
                 ])),
@@ -395,6 +400,70 @@ macro_rules! script {
                         ..Default::default()
                     }),
                     &FindOptions { skip_count: true, ..by_amount.clone() },
+                )),
+                found,
+            ),
+        ));
+        let wall = |text: &str| text.to_owned();
+        calls.push((
+            "findEntriesSettling",
+            answer(
+                $run!(entries.find_many(
+                    Some(&EntryFilter {
+                        settles_at: Some(Ordered {
+                            gte: Some(wall("2026-10-26T09:30:00")),
+                            lt: Some(wall("2026-10-27T17:00:00.25")),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    &by_amount,
+                )),
+                found,
+            ),
+        ));
+        calls.push((
+            "findEntriesSettlingBetween",
+            answer(
+                $run!(entries.find_many(
+                    Some(&EntryFilter {
+                        settles_at: Some(Ordered {
+                            between: Some((wall("2026-10-27T00:00:00"), wall("2026-10-27T23:59:59"))),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    &by_amount,
+                )),
+                found,
+            ),
+        ));
+        calls.push((
+            "findEntriesBySettling",
+            answer(
+                $run!(entries.find_many(
+                    Some(&EntryFilter {
+                        settles_at: Some(Ordered {
+                            is_null: Some(false),
+                            not_in: vec![wall("2026-10-28T00:00:00")],
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                    &FindOptions { order_by: vec![OrderBy::desc("settlesAt")], ..Default::default() },
+                )),
+                found,
+            ),
+        ));
+        calls.push((
+            "findEntriesNotSettling",
+            answer(
+                $run!(entries.find_many(
+                    Some(&EntryFilter {
+                        settles_at: Some(Ordered { ne: Some(wall("2026-10-26T09:30:00")), ..Default::default() }),
+                        ..Default::default()
+                    }),
+                    &by_amount,
                 )),
                 found,
             ),

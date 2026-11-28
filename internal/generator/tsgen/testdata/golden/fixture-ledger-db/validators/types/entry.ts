@@ -22,6 +22,8 @@ import { validateGenericJSONRequired, validateGenericJSON } from '../scalars/gen
 
 import { validateTemporalDateTimeRequired, validateTemporalDateTime } from '../scalars/temporal_date_time';
 
+import { validateTemporalLocalDateTimeRequired, validateTemporalLocalDateTime } from '../scalars/temporal_local_date_time';
+
 import { validateEntryKindRequired, validateEntryKind } from '../enums';
 
 import { parseTemporalDateTime as parseTemporalDateTimeFromLib } from 'superscalar/scalars';
@@ -152,6 +154,13 @@ export function validateEntry(value: Entry | null | undefined): ValidationResult
     }
   }
 
+  if (value.settlesAt !== null && value.settlesAt !== undefined) {
+    const [valid, fieldErrors] = validateTemporalLocalDateTime(value.settlesAt);
+    if (!valid && fieldErrors) {
+      setFieldErrors(errors, "settlesAt", fieldErrors);
+    }
+  }
+
   {
     const [valid, fieldErrors] = validateTemporalDateTimeRequired(value.createdAt);
     if (!valid && fieldErrors) {
@@ -222,6 +231,7 @@ const EntryKnownFields = new Set<string>([
   'tags',
   'metadata',
   'reviewedAt',
+  'settlesAt',
   'createdAt',
   'createdBy',
   'updatedAt',

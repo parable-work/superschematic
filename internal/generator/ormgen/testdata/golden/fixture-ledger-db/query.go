@@ -460,6 +460,7 @@ type EntryFields struct {
 	Tags        bool
 	Metadata    bool
 	ReviewedAt  bool
+	SettlesAt   bool
 	CreatedAt   bool
 	CreatedBy   bool
 	UpdatedAt   bool
@@ -513,6 +514,9 @@ func (f EntryFields) ToStringSlice() []string {
 	if f.ReviewedAt {
 		fields = append(fields, "reviewed_at")
 	}
+	if f.SettlesAt {
+		fields = append(fields, "settles_at")
+	}
 	if f.CreatedAt {
 		fields = append(fields, "created_at")
 	}
@@ -560,6 +564,7 @@ func (EntryFields) All() EntryFields {
 		Tags:        true,
 		Metadata:    true,
 		ReviewedAt:  true,
+		SettlesAt:   true,
 		CreatedAt:   true,
 		CreatedBy:   true,
 		UpdatedAt:   true,
@@ -590,6 +595,7 @@ func (EntryFields) WithoutAudit() EntryFields {
 		Tags:        true,
 		Metadata:    true,
 		ReviewedAt:  true,
+		SettlesAt:   true,
 	}
 }
 
@@ -606,6 +612,7 @@ const (
 	EntryOrderByTags        EntryOrderByField = "tags"
 	EntryOrderByMetadata    EntryOrderByField = "metadata"
 	EntryOrderByReviewedAt  EntryOrderByField = "reviewed_at"
+	EntryOrderBySettlesAt   EntryOrderByField = "settles_at"
 	EntryOrderByCreatedAt   EntryOrderByField = "created_at"
 	EntryOrderByCreatedBy   EntryOrderByField = "created_by"
 	EntryOrderByUpdatedAt   EntryOrderByField = "updated_at"
@@ -655,6 +662,7 @@ const (
 	EntrySortByMemo        EntrySortField = "memo"
 	EntrySortByExternalId  EntrySortField = "externalId"
 	EntrySortByReviewedAt  EntrySortField = "reviewedAt"
+	EntrySortBySettlesAt   EntrySortField = "settlesAt"
 	EntrySortByCreatedAt   EntrySortField = "createdAt"
 	EntrySortByUpdatedAt   EntrySortField = "updatedAt"
 )
@@ -672,10 +680,10 @@ type EntrySort struct {
 func ParseEntrySort(text string) (EntrySort, error) {
 	parsed := EntrySort{Field: EntrySortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
 	switch parsed.Field {
-	case EntrySortById, EntrySortByAmountCents, EntrySortByBookedOn, EntrySortByMemo, EntrySortByExternalId, EntrySortByReviewedAt, EntrySortByCreatedAt, EntrySortByUpdatedAt:
+	case EntrySortById, EntrySortByAmountCents, EntrySortByBookedOn, EntrySortByMemo, EntrySortByExternalId, EntrySortByReviewedAt, EntrySortBySettlesAt, EntrySortByCreatedAt, EntrySortByUpdatedAt:
 		return parsed, nil
 	}
-	return EntrySort{}, fmt.Errorf("orm: Entry sorts by id, amountCents, bookedOn, memo, externalId, reviewedAt, createdAt and updatedAt, not %q", text)
+	return EntrySort{}, fmt.Errorf("orm: Entry sorts by id, amountCents, bookedOn, memo, externalId, reviewedAt, settlesAt, createdAt and updatedAt, not %q", text)
 }
 
 // EntryUniqueKey names a unique key of Entry that UpsertOne and
@@ -1364,6 +1372,7 @@ type EntryFilter struct {
 	Tags        *ArrayStringFilter
 	Metadata    *StringFilter
 	ReviewedAt  *DateTimeFilter
+	SettlesAt   *DateFilter
 	CreatedAt   *DateTimeFilter
 	CreatedBy   *UUIDFilter
 	UpdatedAt   *DateTimeFilter
@@ -1414,6 +1423,8 @@ type EntryUpdate struct {
 	MetadataSetNull   bool
 	ReviewedAt        *types.TemporalDateTime
 	ReviewedAtSetNull bool
+	SettlesAt         *types.TemporalLocalDateTime
+	SettlesAtSetNull  bool
 	// AccountID allows updating the foreign key for account
 	AccountID *types.IdentityUUID
 	// TransferID allows updating the foreign key for transfer
@@ -1457,6 +1468,11 @@ func NewEntrySnapshotUpdate(input *types.Entry) *EntryUpdate {
 	} else {
 		update.ReviewedAt = input.ReviewedAt
 	}
+	if input.SettlesAt == nil {
+		update.SettlesAtSetNull = true
+	} else {
+		update.SettlesAt = input.SettlesAt
+	}
 	return update
 }
 
@@ -1499,6 +1515,11 @@ func (u *EntryUpdate) ApplyTo(row *types.Entry) {
 		row.ReviewedAt = nil
 	} else if u.ReviewedAt != nil {
 		row.ReviewedAt = u.ReviewedAt
+	}
+	if u.SettlesAtSetNull {
+		row.SettlesAt = nil
+	} else if u.SettlesAt != nil {
+		row.SettlesAt = u.SettlesAt
 	}
 	if u.AccountID != nil {
 		row.Account.Id = u.AccountID
@@ -1943,6 +1964,71 @@ func (f *EntryFilter) conditions(args *[]interface{}, paramOffset int) []string 
 				conditions = append(conditions, `entry.reviewed_at IS NULL`)
 			} else {
 				conditions = append(conditions, `entry.reviewed_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.SettlesAt != nil {
+		if f.SettlesAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at = $%d`, paramNum))
+			*args = append(*args, *f.SettlesAt.Eq)
+		}
+		if f.SettlesAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.SettlesAt.Ne)
+		}
+		if f.SettlesAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at > $%d`, paramNum))
+			*args = append(*args, *f.SettlesAt.Gt)
+		}
+		if f.SettlesAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at >= $%d`, paramNum))
+			*args = append(*args, *f.SettlesAt.Gte)
+		}
+		if f.SettlesAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at < $%d`, paramNum))
+			*args = append(*args, *f.SettlesAt.Lt)
+		}
+		if f.SettlesAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at <= $%d`, paramNum))
+			*args = append(*args, *f.SettlesAt.Lte)
+		}
+		if f.SettlesAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at >= $%d`, paramNum))
+			*args = append(*args, f.SettlesAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at <= $%d`, paramNum))
+			*args = append(*args, f.SettlesAt.Between.End)
+		}
+		if len(f.SettlesAt.In) > 0 {
+			placeholders := make([]string, len(f.SettlesAt.In))
+			for i, value := range f.SettlesAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`entry.settles_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.SettlesAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.SettlesAt.NotIn))
+			for i, value := range f.SettlesAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(entry.settles_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.SettlesAt.IsNull != nil {
+			if *f.SettlesAt.IsNull {
+				conditions = append(conditions, `entry.settles_at IS NULL`)
+			} else {
+				conditions = append(conditions, `entry.settles_at IS NOT NULL`)
 			}
 		}
 	}

@@ -666,12 +666,14 @@ const (
 // QueueKindOf is the kind of value a column of SQL type sqlType holds, or
 // of each element of a list of it, as a client converts it on SQLite: one
 // of the QueueKind constants, or "" for a value that crosses as it is
-// (text, a number, a date's text, a duration's text).
+// (text, a number, a date's text, a wall date-time's text, a duration's
+// text). A TIMESTAMP, which has no zone, is a wall date-time and no
+// timestamp here: RFC 3339 in UTC would give it one.
 func QueueKindOf(sqlType string) string {
 	switch queueBaseType(sqlType) {
 	case "UUID":
 		return QueueKindUUID
-	case "TIMESTAMPTZ", "TIMESTAMP", "TIMESTAMP WITH TIME ZONE", "TIMESTAMP WITHOUT TIME ZONE":
+	case "TIMESTAMPTZ", "TIMESTAMP WITH TIME ZONE":
 		return QueueKindTimestamp
 	case "BOOLEAN", "BOOL":
 		return QueueKindBoolean

@@ -1,5 +1,5 @@
 import { decodeJSONText, formatDuration, parseDuration } from './queue-core.js';
-import { intervalText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
+import { intervalText, localDateTimeText, parseArray, parseInterval, parsePoint, pointText } from './pgtext.js';
 import { uuidFromDb, uuidToDb } from './uuid.js';
 import { parseGenericDecimalStrict } from 'superscalar/scalars';
 
@@ -25,14 +25,15 @@ exact text, and in a row a Generic.Decimal's canonical text, which
 superscalar writes (D84): Postgres writes a NUMERIC(5,2)'s 1.5 as 1.50,
 which the wire form is not; a vector(n) a list of numbers, which crosses as
 pgvector's text, [0.5,-1]; a DATE its YYYY-MM-DD text, Temporal.Date's; a TIMESTAMPTZ a
-Date; a JSON column the value it holds; a POINT the location {lat, lon}, x
+Date; a TIMESTAMP, which has no zone and names no instant, its wall
+reading's text, YYYY-MM-DDTHH:MM:SS, Temporal.LocalDateTime's; a JSON column the value it holds; a POINT the location {lat, lon}, x
 the longitude and y the latitude; an INTERVAL its duration's canonical text
 (1h30m0s), a day 24 hours and a month 30 days, as the queue client and
 Go's time.Duration read one.
 
 connectPostgres opens its pools with postgresTypeParsers, per pool and
-never through pg's global types, so a raw query's BIGINT, NUMERIC and DATE
-come back as the types hold them; decodeRow reads pg's own forms too, for a
+never through pg's global types, so a raw query's BIGINT, NUMERIC, DATE and
+TIMESTAMP come back as the types hold them; decodeRow reads pg's own forms too, for a
 pool opened without them.
 
 A JSON column is read and bound by its column's type, never by the
@@ -68,6 +69,8 @@ export interface RowField {
   readonly timestamp?: boolean;
   /** The column, or each element, is a DATE, its YYYY-MM-DD text in the row. */
   readonly date?: boolean;
+  /** The column, or each element, is a TIMESTAMP, a wall date-time: its YYYY-MM-DDTHH:MM:SS text in the row, a fraction of a second after it when not zero. */
+  readonly localDateTime?: boolean;
   /** The column, or each element, is a BIGINT, a number in the row, refused past 2^53 - 1. */
   readonly int64?: boolean;
   /** The column, or each element, is a NUMERIC, a Generic.Decimal's canonical text in the row (D84): 1.50 reads as 1.5. */
@@ -93,6 +96,8 @@ export const PG_TYPES = {
   numericArray: 1231,
   date: 1082,
   dateArray: 1182,
+  timestamp: 1114,
+  timestampArray: 1115,
 } as const;
 
 /**
@@ -125,11 +130,17 @@ function parseNumericArray(text: string): (string | null)[] {
   return parseArray(text).map(element => (element === null ? null : numericText(element)));
 }
 
+function parseLocalDateTimeArray(text: string): (string | null)[] {
+  return parseArray(text).map(element => (element === null ? null : localDateTimeText(element)));
+}
+
 /**
  * The type parsers connectPostgres gives each pool, by OID, beside pg's
  * own: BIGINT a number, refused past 2^53 - 1, NUMERIC its exact text in
- * canonical form (numericText), and DATE its YYYY-MM-DD text, where pg
- * would make a Date at local midnight; and a list of each alike.
+ * canonical form (numericText), DATE its YYYY-MM-DD text, where pg
+ * would make a Date at local midnight, and TIMESTAMP its wall reading's
+ * text (localDateTimeText), where pg would make a Date of that reading in
+ * the process's own zone; and a list of each alike.
  */
 export const postgresTypeParsers: Readonly<Record<number, (value: string) => unknown>> = {
   [PG_TYPES.int8]: parseInt8,
@@ -138,6 +149,8 @@ export const postgresTypeParsers: Readonly<Record<number, (value: string) => unk
   [PG_TYPES.numericArray]: parseNumericArray,
   [PG_TYPES.date]: value => value,
   [PG_TYPES.dateArray]: parseArray,
+  [PG_TYPES.timestamp]: localDateTimeText,
+  [PG_TYPES.timestampArray]: parseLocalDateTimeArray,
 };
 
 /** What pg takes as a pool's or a query's types. */
@@ -216,6 +229,7 @@ function decodeScalar(value: unknown, codec: ValueCodec): unknown {
   }
   if (codec.numeric) return canonicalDecimal(typeof value === 'string' ? value : String(value));
   if (codec.date) return value instanceof Date ? localDate(value) : String(value).slice(0, 10);
+  if (codec.localDateTime) return value instanceof Date ? localDateTime(value) : localDateTimeText(String(value));
   if (codec.timestamp) return value instanceof Date ? value : timestampOf(String(value));
   if (codec.boolean) return value === 1 || value === '1' || value === 't' ? true : value === 0 || value === '0' || value === 'f' ? false : value;
   return value;
@@ -264,6 +278,14 @@ export function vectorText(value: unknown): string {
 function localDate(value: Date): string {
   const two = (n: number): string => String(n).padStart(2, '0');
   return `${String(value.getFullYear()).padStart(4, '0')}-${two(value.getMonth() + 1)}-${two(value.getDate())}`;
+}
+
+/** A Date pg made of a TIMESTAMP, its reading in the process's zone, as that reading's text. */
+function localDateTime(value: Date): string {
+  const two = (n: number): string => String(n).padStart(2, '0');
+  const ms = value.getMilliseconds();
+  const fraction = ms === 0 ? '' : `.${String(ms).padStart(3, '0').replace(/0+$/u, '')}`;
+  return `${localDate(value)}T${two(value.getHours())}:${two(value.getMinutes())}:${two(value.getSeconds())}${fraction}`;
 }
 
 /** A timestamp's text, as Postgres or SQLite writes it, as a Date. */

@@ -202,6 +202,7 @@ export interface EntryRow {
   tags: string[];
   metadata: T.GenericJSON | null;
   reviewedAt: T.TemporalDateTime | null;
+  settlesAt: T.TemporalLocalDateTime | null;
   createdAt: T.TemporalDateTime;
   createdBy: T.IdentityUUID;
   updatedAt: T.TemporalDateTime;
@@ -223,6 +224,7 @@ export interface EntryCreate {
   tags: string[];
   metadata?: T.GenericJSON | null;
   reviewedAt?: T.TemporalDateTime | null;
+  settlesAt?: T.TemporalLocalDateTime | null;
 }
 
 /** What an update of a row of Entry sets: each member set, null setting a column that may be null to NULL. */
@@ -237,6 +239,7 @@ export interface EntryUpdate {
   tags?: string[];
   metadata?: T.GenericJSON | null;
   reviewedAt?: T.TemporalDateTime | null;
+  settlesAt?: T.TemporalLocalDateTime | null;
   /** Who made the update, the acting user unless set. */
   updatedBy?: T.IdentityUUID;
 }
@@ -253,6 +256,7 @@ export interface EntryFilter {
   externalId?: StringFilter<string> & NullFilter;
   metadata?: JsonFilter<T.GenericJSON> & NullFilter;
   reviewedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  settlesAt?: DateFilter<T.TemporalLocalDateTime> & NullFilter;
   createdAt?: DateTimeFilter<T.TemporalDateTime>;
   createdBy?: UuidFilter<T.IdentityUUID>;
   updatedAt?: DateTimeFilter<T.TemporalDateTime>;
@@ -270,10 +274,10 @@ export interface EntryFilter {
 }
 
 /** The members findOne and findMany order rows of Entry by. */
-export type EntryOrderField = "id" | "amountCents" | "bookedOn" | "kind" | "memo" | "externalId" | "tags" | "metadata" | "reviewedAt" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "deletedAt" | "deletedBy";
+export type EntryOrderField = "id" | "amountCents" | "bookedOn" | "kind" | "memo" | "externalId" | "tags" | "metadata" | "reviewedAt" | "settlesAt" | "createdAt" | "createdBy" | "updatedAt" | "updatedBy" | "deletedAt" | "deletedBy";
 
 /** The members findPage orders rows of Entry by (D60, amended); ties break by id. */
-export type EntrySortField = "id" | "amountCents" | "bookedOn" | "memo" | "externalId" | "reviewedAt" | "createdAt" | "updatedAt";
+export type EntrySortField = "id" | "amountCents" | "bookedOn" | "memo" | "externalId" | "reviewedAt" | "settlesAt" | "createdAt" | "updatedAt";
 
 /** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
 export type EntryUniqueKey = readonly ["id"] | readonly ["account", "externalId"];
@@ -320,6 +324,7 @@ export const entryTable: TableDefinition = {
     { name: "tags", column: "tags", field: "tags", qualified: "entry.tags", list: true, required: true },
     { name: "metadata", column: "metadata", field: "metadata", qualified: "entry.metadata", json: true, filter: ["eq", "ne", "in", "notIn", "isNull"] },
     { name: "reviewedAt", column: "reviewed_at", field: "reviewedAt", qualified: "entry.reviewed_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "settlesAt", column: "settles_at", field: "settlesAt", qualified: "entry.settles_at", localDateTime: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
     { name: "createdAt", column: "created_at", field: "createdAt", qualified: "entry.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
     { name: "createdBy", column: "created_by", field: "createdBy", qualified: "entry.created_by", uuid: true, required: true, audit: "createdBy", filter: ["eq", "ne", "in", "notIn", "isNull"] },
     { name: "updatedAt", column: "updated_at", field: "updatedAt", qualified: "entry.updated_at", timestamp: true, required: true, audit: "updatedAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
@@ -328,12 +333,12 @@ export const entryTable: TableDefinition = {
     { name: "deletedBy", column: "deleted_by", field: "deletedBy", qualified: "entry.deleted_by", uuid: true, audit: "deletedBy" },
   ],
   statements: {
-    columns: "\"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\"",
-    qualifiedColumns: "\"entry\".\"id\", \"entry\".\"account_id\", \"entry\".\"transfer_id\", \"entry\".\"amount_cents\", \"entry\".\"booked_on\", \"entry\".\"kind\", \"entry\".\"memo\", \"entry\".\"external_id\", \"entry\".\"tags\", \"entry\".\"metadata\", \"entry\".\"reviewed_at\", \"entry\".\"created_at\", \"entry\".\"created_by\", \"entry\".\"updated_at\", \"entry\".\"updated_by\", \"entry\".\"deleted_at\", \"entry\".\"deleted_by\"",
+    columns: "\"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"settles_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\"",
+    qualifiedColumns: "\"entry\".\"id\", \"entry\".\"account_id\", \"entry\".\"transfer_id\", \"entry\".\"amount_cents\", \"entry\".\"booked_on\", \"entry\".\"kind\", \"entry\".\"memo\", \"entry\".\"external_id\", \"entry\".\"tags\", \"entry\".\"metadata\", \"entry\".\"reviewed_at\", \"entry\".\"settles_at\", \"entry\".\"created_at\", \"entry\".\"created_by\", \"entry\".\"updated_at\", \"entry\".\"updated_by\", \"entry\".\"deleted_at\", \"entry\".\"deleted_by\"",
     selectColumn: "\"entry\".\"%s\"",
-    getOne: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE id = $1",
+    getOne: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"settles_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE id = $1",
     getOneFields: "SELECT %s FROM entry WHERE id = $1",
-    getMany: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE id IN (%s)",
+    getMany: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"settles_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE id IN (%s)",
     live: " AND deleted_at IS NULL",
     liveWhere: " WHERE deleted_at IS NULL",
     liveCondition: "entry.deleted_at IS NULL",
@@ -351,11 +356,11 @@ export const entryTable: TableDefinition = {
     insert: "INSERT INTO entry (%s) VALUES (%s) RETURNING %s",
     insertMany: "INSERT INTO entry (%s) VALUES %s RETURNING %s",
     update: "UPDATE entry SET %s WHERE id = $%d",
-    returning: " RETURNING \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\"",
+    returning: " RETURNING \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"settles_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\"",
     updateMany: "UPDATE entry SET %s%s",
     updatedAt: "updated_at = statement_timestamp()",
     updatedBy: "updated_by = $%d",
-    upsert: "INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", (xmax = 0) AS _inserted",
+    upsert: "INSERT INTO entry (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"settles_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\", (xmax = 0) AS _inserted",
     softDelete: "UPDATE entry SET deleted_at = $1, deleted_by = $2 WHERE id = $3 AND deleted_at IS NULL",
     softDeleteMany: "UPDATE entry SET deleted_at = $1, deleted_by = $2%s",
     delete: "DELETE FROM entry WHERE id = $1",
@@ -364,8 +369,8 @@ export const entryTable: TableDefinition = {
   softDelete: true,
   search: "entry.search_text",
   uniqueKeys: {
-    "id": { conflict: "(id)", keep: "id = entry.id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (id) IN (%s)" },
-    "account,externalId": { conflict: "(account_id, external_id) WHERE deleted_at IS NULL", keep: "account_id = entry.account_id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)" },
+    "id": { conflict: "(id)", keep: "id = entry.id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"settles_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (id) IN (%s)" },
+    "account,externalId": { conflict: "(account_id, external_id) WHERE deleted_at IS NULL", keep: "account_id = entry.account_id", rows: "SELECT \"id\", \"account_id\", \"transfer_id\", \"amount_cents\", \"booked_on\", \"kind\", \"memo\", \"external_id\", \"tags\", \"metadata\", \"reviewed_at\", \"settles_at\", \"created_at\", \"created_by\", \"updated_at\", \"updated_by\", \"deleted_at\", \"deleted_by\" FROM entry WHERE (account_id, external_id) IN (%s) AND (deleted_at IS NULL)" },
   },
   relations: [
     { field: "account", column: "accountId", target: "account", probe: "entry.account_id IN (SELECT account.id FROM account%s)" },

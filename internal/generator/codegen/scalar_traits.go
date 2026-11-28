@@ -91,7 +91,9 @@ func GuessScalarTraits(typeName string) ScalarTraits {
 		traits.IsStringLike = true
 		traits.IsPathLike = true
 	}
-	if strings.Contains(normalized, "datetime") {
+	// A wall date-time (Temporal.LocalDateTime) names no instant, though
+	// its name holds "datetime".
+	if strings.Contains(normalized, "datetime") && !traits.IsLocalDateTimeLike {
 		traits.IsDateTimeLike = true
 	}
 	return traits
@@ -141,6 +143,8 @@ func inferNameTraits(traits *ScalarTraits, tokens ScalarTokens) {
 		traits.IsPathLike = true
 	case "datetime":
 		traits.IsDateTimeLike = true
+	case "localdatetime":
+		traits.IsLocalDateTimeLike = true
 	case "date":
 		traits.IsDateLike = true
 	case "time":

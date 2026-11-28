@@ -150,12 +150,14 @@ async function script(orm: FixtureLedgerDbOrm, entriesTable: typeof entryTable =
   // Entries: creates, the filters of each kind of column, the negated
   // ones, and pages across a column's nulls.
   await push('createEntry', () =>
-    entries.createOne(entry(11, cash, -1250, '2026-10-25', { memo: 'Coffee', tags: ['food'], reviewedAt: new Date('2026-10-25T09:15:00Z') }))
+    // A wall date-time is its text on every database, the seconds always
+    // and a fraction only when it is not zero.
+    entries.createOne(entry(11, cash, -1250, '2026-10-25', { memo: 'Coffee', tags: ['food'], reviewedAt: new Date('2026-10-25T09:15:00Z'), settlesAt: '2026-10-26T09:30:00' }))
   );
   await push('createEntries', () =>
     entries.createMany([
       entry(12, bank, 500, '2026-10-26', { externalId: 'x1', kind: 'credit' }),
-      entry(13, card, -75, '2026-10-27', { transferId: key(cash), memo: 'Transfer' }),
+      entry(13, card, -75, '2026-10-27', { transferId: key(cash), memo: 'Transfer', settlesAt: '2026-10-27T17:00:00.25' }),
     ])
   );
   await push('entryOfNoAccount', () => entries.createOne(entry(19, 99, 1, '2026-10-28')));
@@ -173,6 +175,12 @@ async function script(orm: FixtureLedgerDbOrm, entriesTable: typeof entryTable =
   const byAmount = { orderBy: [{ field: 'amountCents' as const }] };
   await push('findEntries', () => entries.findMany({ reviewedAt: { isNull: true }, transferId: { isNull: true }, amountCents: { in: [500, -1250] } }, byAmount));
   await push('findEntriesReviewed', () => entries.findMany({ reviewedAt: { lte: new Date('2026-10-25T11:15:00+02:00') } }, { ...byAmount, count: false }));
+  await push('findEntriesSettling', () => entries.findMany({ settlesAt: { gte: '2026-10-26T09:30:00', lt: '2026-10-27T17:00:00.25' } }, byAmount));
+  await push('findEntriesSettlingBetween', () => entries.findMany({ settlesAt: { between: ['2026-10-27T00:00:00', '2026-10-27T23:59:59'] } }, byAmount));
+  await push('findEntriesBySettling', () =>
+    entries.findMany({ settlesAt: { isNull: false, notIn: ['2026-10-28T00:00:00'] } }, { orderBy: [{ field: 'settlesAt' as const, desc: true }] })
+  );
+  await push('findEntriesNotSettling', () => entries.findMany({ settlesAt: { ne: '2026-10-26T09:30:00' } }, byAmount));
   await push('findEntriesNegated', () =>
     entries.findMany(
       {

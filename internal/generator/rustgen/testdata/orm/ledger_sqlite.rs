@@ -50,6 +50,7 @@ fn entry(account: &AccountRow, amount: i64, memo: Option<&str>) -> EntryCreate {
         tags: vec!["a".to_owned()],
         metadata: None,
         reviewed_at: None,
+        settles_at: None,
     }
 }
 

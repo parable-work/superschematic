@@ -1026,7 +1026,7 @@ func rustFilterType(kind sqlutil.FilterKind, t string) string {
 		return "orm::Equals<" + t + ">"
 	case sqlutil.FilterString:
 		return "orm::Text<" + t + ">"
-	case sqlutil.FilterInt, sqlutil.FilterFloat, sqlutil.FilterDecimal, sqlutil.FilterDateTime, sqlutil.FilterDate, sqlutil.FilterDuration:
+	case sqlutil.FilterInt, sqlutil.FilterFloat, sqlutil.FilterDecimal, sqlutil.FilterDateTime, sqlutil.FilterDate, sqlutil.FilterLocalDateTime, sqlutil.FilterDuration:
 		return "orm::Ordered<" + t + ">"
 	}
 	return ""

@@ -114,3 +114,29 @@ func TestApplyTypeStringTraits_DurationFalsePositive(t *testing.T) {
 		t.Error("nondurationthing should not set IsDurationLike")
 	}
 }
+
+// A wall date-time (Temporal.LocalDateTime) names no instant: its traits
+// say so whether they come from its definition or from its name alone,
+// which holds "datetime".
+func TestLocalDateTimeIsNoInstant(t *testing.T) {
+	def := &ir.ScalarDef{
+		Name:              "Temporal.LocalDateTime",
+		LanguagePrimitive: ir.LanguageString,
+		TypeMappings:      map[string]string{"go": "TemporalLocalDateTime", "json_schema": "string", "sql": "TIMESTAMP"},
+	}
+	for name, traits := range map[string]ScalarTraits{
+		"from its definition": BuildScalarTraits(def, BuildScalarTokens(def.Name), ""),
+		"from its name":       GuessScalarTraits(def.Name),
+	} {
+		if !traits.IsLocalDateTimeLike || traits.IsDateTimeLike || traits.IsDateLike || traits.IsTimeLike {
+			t.Errorf("%s: %+v, want a wall date-time and no instant, date or time of day", name, traits)
+		}
+	}
+	if !GuessScalarTraits("Temporal.DateTime").IsDateTimeLike || GuessScalarTraits("Temporal.DateTime").IsLocalDateTimeLike {
+		t.Error("Temporal.DateTime is an instant and no wall date-time")
+	}
+	now := DefaultNow
+	if IsDefaultNow(def.Name, &now) {
+		t.Error(`"now" is no default of a wall date-time, which has no zone to read the insert's instant in`)
+	}
+}

@@ -110,8 +110,13 @@ type ScalarTraits struct {
 	IsDateLike     bool
 	IsTimeLike     bool
 	IsDateTimeLike bool
-	IsDurationLike bool
-	IsJSONLike     bool
+	// IsLocalDateTimeLike is a wall date-time (Temporal.LocalDateTime): a
+	// date and a time of day with no zone, which names no instant. It is
+	// text in every language, as a date and a time of day are, in a
+	// TIMESTAMP column, and never IsDateTimeLike.
+	IsLocalDateTimeLike bool
+	IsDurationLike      bool
+	IsJSONLike          bool
 	// IsAnyJSON marks a scalar whose value is any JSON value, from its
 	// json_schema type mapping (ir.ScalarDef.IsAnyJSON): every JSON type is
 	// a value, and JSON null is a missing one, but for an optional single

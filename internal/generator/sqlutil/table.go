@@ -205,11 +205,14 @@ type ColumnClass struct {
 	UUIDLike     bool
 	DateTimeLike bool
 	DateLike     bool
-	StringLike   bool
-	IntLike      bool
-	FloatLike    bool
-	BoolLike     bool
-	JSONLike     bool
+	// LocalDateTimeLike is a wall date-time (Temporal.LocalDateTime): a
+	// TIMESTAMP column, whose value is text in the row, as a date's is.
+	LocalDateTimeLike bool
+	StringLike        bool
+	IntLike           bool
+	FloatLike         bool
+	BoolLike          bool
+	JSONLike          bool
 
 	// JSON is a value the column holds as JSONB: a @jsonField field or
 	// type, a map, a list of lists, or a single Generic.JSON.
@@ -255,23 +258,24 @@ func ClassifyColumn(f *ir.FieldDef, schema *ir.Schema, scalar ScalarClass, isSca
 	explicitJSONNull := isScalar && ref.Name == "Generic.JSON" && !ref.IsArray && !ref.IsMap
 	stored := isScalar && !ref.IsMap && !f.JsonField && !ref.IsArrayOfArrays
 	class := ColumnClass{
-		UUIDLike:     traits.IsUUIDLike,
-		DateTimeLike: traits.IsDateTimeLike,
-		DateLike:     traits.IsDateLike,
-		StringLike:   traits.IsStringLike || ref.Name == codegen.PrimitiveString,
-		IntLike:      traits.IsIntegerLike,
-		FloatLike:    traits.IsFloatLike || ref.Name == codegen.PrimitiveNumber,
-		BoolLike:     traits.IsBooleanLike || ref.Name == codegen.PrimitiveBoolean,
-		JSONLike:     traits.IsJSONLike || traits.IsObjectLike || ref.IsMap,
-		JSON:         f.JsonField || ref.IsMap || ref.IsArrayOfArrays || jsonPayload || explicitJSONNull || isUnion,
-		Point:        stored && strings.EqualFold(scalar.SQLType, "POINT"),
-		Interval:     stored && strings.EqualFold(scalar.SQLType, "INTERVAL"),
-		Vector:       stored && !ref.IsArray && ref.Name == ir.VectorScalarName && f.ValidateDimensions != nil,
-		Decimal:      stored && strings.EqualFold(scalar.SQLType, "NUMERIC"),
-		AnyJSON:      isScalar && traits.IsAnyJSON,
-		Enum:         isEnum,
-		Union:        isUnion,
-		Scalar:       isScalar,
+		UUIDLike:          traits.IsUUIDLike,
+		DateTimeLike:      traits.IsDateTimeLike,
+		DateLike:          traits.IsDateLike,
+		LocalDateTimeLike: traits.IsLocalDateTimeLike,
+		StringLike:        traits.IsStringLike || ref.Name == codegen.PrimitiveString,
+		IntLike:           traits.IsIntegerLike,
+		FloatLike:         traits.IsFloatLike || ref.Name == codegen.PrimitiveNumber,
+		BoolLike:          traits.IsBooleanLike || ref.Name == codegen.PrimitiveBoolean,
+		JSONLike:          traits.IsJSONLike || traits.IsObjectLike || ref.IsMap,
+		JSON:              f.JsonField || ref.IsMap || ref.IsArrayOfArrays || jsonPayload || explicitJSONNull || isUnion,
+		Point:             stored && strings.EqualFold(scalar.SQLType, "POINT"),
+		Interval:          stored && strings.EqualFold(scalar.SQLType, "INTERVAL"),
+		Vector:            stored && !ref.IsArray && ref.Name == ir.VectorScalarName && f.ValidateDimensions != nil,
+		Decimal:           stored && strings.EqualFold(scalar.SQLType, "NUMERIC"),
+		AnyJSON:           isScalar && traits.IsAnyJSON,
+		Enum:              isEnum,
+		Union:             isUnion,
+		Scalar:            isScalar,
 	}
 	class.List = ref.IsArray && !class.JSON
 	return class
@@ -291,8 +295,12 @@ const (
 	FilterBool     FilterKind = "bool"
 	FilterDateTime FilterKind = "datetime"
 	FilterDate     FilterKind = "date"
-	FilterDuration FilterKind = "duration"
-	FilterPoint    FilterKind = "point"
+	// FilterLocalDateTime is a wall date-time column's (a TIMESTAMP):
+	// its values compare as times, each bound as its text, as a date's
+	// are.
+	FilterLocalDateTime FilterKind = "localDateTime"
+	FilterDuration      FilterKind = "duration"
+	FilterPoint         FilterKind = "point"
 	// FilterJSON is a Generic.JSON column's: equality of JSON values, as
 	// JSONB compares them, and IS NULL (D79).
 	FilterJSON FilterKind = "json"
@@ -304,7 +312,7 @@ const (
 // FilterKind is the kind of the filter on a column of the class: the first
 // that holds of a list or a vector (none), a column of any JSON value
 // (Generic.JSON's JSONB equality), a POINT, an INTERVAL, a UUID, a time, a
-// date, text, an integer, a number and a boolean; any other value but JSON
+// date, a wall date-time, text, an integer, a number and a boolean; any other value but JSON
 // compares as text, and other JSON, an object's or a map's, not at all.
 func (c ColumnClass) FilterKind(isArray bool) FilterKind {
 	switch {
@@ -324,6 +332,8 @@ func (c ColumnClass) FilterKind(isArray bool) FilterKind {
 		return FilterDateTime
 	case c.DateLike:
 		return FilterDate
+	case c.LocalDateTimeLike:
+		return FilterLocalDateTime
 	case c.StringLike:
 		return FilterString
 	case c.IntLike:
@@ -360,17 +370,18 @@ const (
 // filterOps are the operations of each kind of filter, in the order a
 // filter writes their conditions.
 var filterOps = map[FilterKind][]string{
-	FilterUUID:     {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterIsNull},
-	FilterString:   {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterILike, FilterIsNull},
-	FilterInt:      {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
-	FilterFloat:    {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
-	FilterDateTime: {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
-	FilterDate:     {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
-	FilterDuration: {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIsNull},
-	FilterBool:     {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterIsNull},
-	FilterPoint:    {FilterIsNull},
-	FilterJSON:     {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterIsNull},
-	FilterDecimal:  {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterUUID:          {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterIsNull},
+	FilterString:        {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterILike, FilterIsNull},
+	FilterInt:           {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterFloat:         {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterDateTime:      {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterDate:          {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterLocalDateTime: {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
+	FilterDuration:      {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIsNull},
+	FilterBool:          {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterIsNull},
+	FilterPoint:         {FilterIsNull},
+	FilterJSON:          {FilterEq, FilterNe, FilterIn, FilterNotIn, FilterIsNull},
+	FilterDecimal:       {FilterEq, FilterNe, FilterGt, FilterGte, FilterLt, FilterLte, FilterBetween, FilterIn, FilterNotIn, FilterIsNull},
 }
 
 // FilterOps are the operations of a filter of kind, in the order its
