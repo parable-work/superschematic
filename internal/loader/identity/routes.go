@@ -14,8 +14,9 @@ import (
 
 // RouteTypes are the types and the enum the route expansion can add, in
 // the order it adds them. An API with a route set reserves every name. The
-// types of a set with apiKeys (ir.IdentityAPIKeyTypes, D114) are reserved
-// only in an API one of whose sets has it.
+// types of a set with apiKeys (ir.IdentityAPIKeyTypes, D114) and those of
+// one with oauth (ir.IdentityOAuthTypes, #695) are reserved only in an API
+// one of whose sets has it.
 var RouteTypes = []string{
 	ir.IdentitySessionTransportEnum,
 	ir.IdentityLoginInputType,
@@ -169,6 +170,41 @@ func (e *routeExpansion) sessionOperations(cfg *ir.UserSessionsConfig) []*ir.Fie
 		revoke.Auth = true
 		ops = append(ops, create, list, revoke)
 	}
+	if cfg.OAuth != nil && !cfg.NoLogin {
+		ops = append(ops, e.oauthOperations(path)...)
+	}
+	return ops
+}
+
+// oauthOperations returns the consent and connected-app routes of
+// @userSessions({ oauth }) (#695), each hidden from the tools: the consent
+// page drives the first three, and a person sees and revokes their grants
+// with the last two. The protocol endpoints (ir.IdentityOAuthTokenPath and
+// the rest) are the runtime's and no operation.
+func (e *routeExpansion) oauthOperations(path string) []*ir.FieldDef {
+	requests, grants := path+"/oauth/requests/{id}", path+"/oauth/grants"
+	get := e.operation(ir.IdentityOpGetOAuthRequest, "GET", requests, ir.IdentityOAuthRequestType,
+		"What a pending OAuth authorization request asks for: the client, its redirect's host, the permissions it asks for and those of them the caller holds. The consent page reads it.")
+	approve := e.operation(ir.IdentityOpApproveOAuthRequest, "POST", requests+"/approve", ir.IdentityOAuthDecisionType,
+		"Approves a pending OAuth authorization request with the permissions given, or every one it asks for that the caller holds: it makes the grant and the code, and answers the client's redirect with them. The caller is signed in with a session.")
+	e.input(approve, ir.IdentityApproveOAuthRequestInputType)
+	deny := e.operation(ir.IdentityOpDenyOAuthRequest, "POST", requests+"/deny", ir.IdentityOAuthDecisionType,
+		"Denies a pending OAuth authorization request, and answers the client's redirect with access_denied.")
+	e.input(deny, ir.IdentityDenyOAuthRequestInputType)
+	for _, op := range []*ir.FieldDef{get, approve, deny} {
+		e.pathArgument(op, ir.IdentityIDArgument, ir.IdentityAPIKeyKeyScalar)
+	}
+	list := e.operation(ir.IdentityOpListOAuthGrants, "GET", grants, ir.IdentityConnectedAppType,
+		"Lists the OAuth grants the caller gave that are neither revoked nor ended, newest first.")
+	list.TypeRef.IsArray = true
+	revoke := e.operation(ir.IdentityOpRevokeOAuthGrant, "DELETE", grants+"/{id}", "boolean",
+		"Revokes an OAuth grant of the caller's and every token it issued. It answers true.")
+	e.pathArgument(revoke, ir.IdentityIDArgument, ir.IdentityAPIKeyKeyScalar)
+	ops := []*ir.FieldDef{get, approve, deny, list, revoke}
+	for _, op := range ops {
+		op.Auth = true
+		op.MCP = &ir.OperationMCP{Hidden: true, HiddenReason: ir.IdentityOAuthToolReason}
+	}
 	return ops
 }
 
@@ -251,6 +287,23 @@ func (e *routeExpansion) administrationOperations(cfg *ir.UserAdministrationConf
 		e.permission(ir.IdentityPermissionUsersRead, listKeys)
 		e.permission(ir.IdentityPermissionUsersWrite, revokeKey)
 		ops = append(ops, listKeys, revokeKey)
+	}
+	if cfg.OAuth {
+		grants := user + "/oauth/grants"
+		listGrants := e.operation(ir.IdentityOpListUserOAuthGrants, "GET", grants, ir.IdentityConnectedAppType,
+			"Lists the OAuth grants a user gave that are neither revoked nor ended, newest first.")
+		listGrants.TypeRef.IsArray = true
+		e.pathArgument(listGrants, ir.IdentityIDArgument, e.userKey)
+		revokeGrant := e.operation(ir.IdentityOpRevokeUserOAuthGrant, "DELETE", grants+"/{grantId}", "boolean",
+			"Revokes an OAuth grant of a user's and every token it issued. It answers true.")
+		e.pathArgument(revokeGrant, ir.IdentityIDArgument, e.userKey)
+		e.pathArgument(revokeGrant, ir.IdentityGrantIDArgument, ir.IdentityAPIKeyKeyScalar)
+		e.permission(ir.IdentityPermissionUsersRead, listGrants)
+		e.permission(ir.IdentityPermissionUsersWrite, revokeGrant)
+		for _, op := range []*ir.FieldDef{listGrants, revokeGrant} {
+			op.MCP = &ir.OperationMCP{Hidden: true, HiddenReason: ir.IdentityOAuthToolReason}
+		}
+		ops = append(ops, listGrants, revokeGrant)
 	}
 	return ops
 }
@@ -480,6 +533,47 @@ func (e *routeExpansion) typeDef(name string) *ir.TypeDef {
 		// A key just made has authenticated nothing: no lastUsedAt.
 		fields = append(fields[:len(fields)-1], token)
 		td = output(name, "An API key just made, with its token, which is answered once.", fields...)
+	case ir.IdentityOAuthClientInfoType:
+		td = output(name, "An OAuth client as the consent page and the connected apps show it.",
+			field("id", "string", true, "The client_id: its metadata document's URL, or the id registration made."),
+			field("name", "string", true, "What the client calls itself."),
+			field("uri", "string", false, "The client's home page."),
+			field("redirectHost", "string", true, "The host of the redirect the browser goes back to: the request's on the consent page, the client's first among connected apps."),
+			field("loopbackOnly", "boolean", true, "Whether that redirect, or among connected apps every redirect of the client's, is to the person's own machine, as a command-line client's is."),
+			field("kind", "string", true, "metadataDocument, whose id's host vouches for the client, or registered."))
+	case ir.IdentityOAuthRequestType:
+		asked := permissions("The permissions the client asks for: its scope's permission names, or every one the API names when it named none.")
+		held := field("held", "string", true, "The permissions asked for that the caller holds, which consent can give.")
+		held.TypeRef.IsArray = true
+		td = output(name, "A pending OAuth authorization request, as the consent page shows it.",
+			id(ir.IdentityAPIKeyKeyScalar),
+			field("client", ir.IdentityOAuthClientInfoType, true, ""),
+			asked, held,
+			field("offlineAccess", "boolean", true, "Whether the client asks for offline_access, to refresh its tokens while the person is away."),
+			field("resource", "string", true, "The URL of the resource the client asks for."),
+			field("expiresAt", "Temporal.DateTime", true, "When the request ends unanswered."),
+			field("nonce", "string", true, "The value approve and deny send back."))
+	case ir.IdentityApproveOAuthRequestInputType:
+		subset := field("permissions", "string", false, "The permissions the grant holds, each of which the request asks for and the caller holds; every one of those when absent.")
+		subset.TypeRef.IsArray = true
+		td = input(name, "What approveOAuthRequest takes: the request's nonce and the permissions the person gives.",
+			field("nonce", "string", true, "The request's nonce, as getOAuthRequest answered it."), subset)
+	case ir.IdentityDenyOAuthRequestInputType:
+		td = input(name, "What denyOAuthRequest takes: the request's nonce.",
+			field("nonce", "string", true, "The request's nonce, as getOAuthRequest answered it."))
+	case ir.IdentityOAuthDecisionType:
+		td = output(name, "Where the browser goes after the person decides.",
+			field("redirectTo", "string", true, "The client's redirect, with code, state and iss, or with error."))
+	case ir.IdentityConnectedAppType:
+		subset := field("permissions", "string", false, "The permissions the grant was given, each held while its user holds it; absent for a grant that holds every permission of its user.")
+		subset.TypeRef.IsArray = true
+		td = output(name, "An OAuth grant as its user and an administrator see it: the client that holds it and what it may do.",
+			id(ir.IdentityAPIKeyKeyScalar),
+			field("client", ir.IdentityOAuthClientInfoType, true, ""),
+			subset,
+			field("createdAt", "Temporal.DateTime", true, "When the grant was given."),
+			field("expiresAt", "Temporal.DateTime", true, "When the grant ends."),
+			field("lastUsedAt", "Temporal.DateTime", false, "When the grant last authenticated a request; absent until it has."))
 	}
 	return td
 }

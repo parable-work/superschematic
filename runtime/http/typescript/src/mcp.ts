@@ -905,6 +905,14 @@ export interface McpOptions {
    * answers 428 approval_required until the call's approval is approved.
    */
   readonly callGate?: McpCallGate;
+  /**
+   * The WWW-Authenticate value of the endpoint's 401, for an API that is
+   * its own OAuth authorization server (#695): the identity runtime's
+   * oauthChallenge(identity), which names the protected resource metadata
+   * a client discovers the server by (RFC 9728 section 5.1). Without it the
+   * 401 carries none.
+   */
+  readonly challenge?: ((request: Request) => string | undefined) | undefined;
 }
 
 /** What the generated router says about its endpoint. */
@@ -1015,6 +1023,17 @@ export function mountMcp<E extends Env>(
   // Each request is served as its caller, whom a confirmation is bound to.
   const serve = (c: Context<E>, ctx: RequestContext) =>
     serveMcp(c.req.raw, routerTools(app, byName, runtime, mount, c, ctx, options.callGate), { ...server, caller: callerOf(ctx), requestId: ctx.requestId });
+  // The 401 tells a client where to sign in (#695): middleware before the
+  // routes, so it sees the gate's answer.
+  const challenge = options.challenge;
+  if (challenge) {
+    app.use(MCP_PATH, async (c, next) => {
+      await next();
+      if (c.res.status !== 401 || c.res.headers.has('www-authenticate')) return;
+      const value = challenge(c.req.raw);
+      if (value) c.res.headers.set('www-authenticate', value);
+    });
+  }
   for (const method of ['POST', 'GET', 'DELETE'] as const) {
     const spec: OperationSpec = {
       name: '$mcp',

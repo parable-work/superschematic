@@ -99,6 +99,7 @@ func checkIdentityRoutes(schema *ir.Schema, in Input, r *Result) {
 			}
 			checkIdentityRoutesPath(set, "@userSessions", cfg.Path, r)
 			checkIdentityRegistration(set, cfg, r)
+			checkIdentityOAuth(set, cfg, in, r)
 			if sessions != nil {
 				r.errorf("", "%s", IdentityRoutesSecond(set, sessions, "@userSessions"))
 			} else {
@@ -135,6 +136,52 @@ func checkIdentityRoutes(schema *ir.Schema, in Input, r *Result) {
 	if schema.Kind == ir.SchemaKindAPI {
 		checkIdentityRoutesAuthDB(schema, in.AuthDB, sessions, admin, sqlutil.DDLPolicyOf(in.Naming.OrDefault()), r)
 		checkSeededRoles(schema, in.AuthDB, sessions, in.Naming.OrDefault().IdentityPermissionPrefix, r)
+	}
+}
+
+// checkIdentityOAuth checks @userSessions({ oauth }) (#695): it needs the
+// login, since a person signs in to consent; its lifetimes are positive, an
+// access token's shorter than a refresh token's and a refresh token's no
+// longer than the grant's; it admits a kind of client; and the API's server
+// is a TypeScript one that serves MCP. The Go and Rust servers do not serve
+// the authorization server yet, and an API with no server output of the
+// build's is left alone.
+func checkIdentityOAuth(set *ir.OperationSet, cfg *ir.UserSessionsConfig, in Input, r *Result) {
+	oauth := cfg.OAuth
+	if oauth == nil {
+		return
+	}
+	if cfg.NoLogin {
+		r.errorf("", "%s: @userSessions: oauth needs the login, since a person signs in to consent; drop oauth or login: false", set.Name)
+	}
+	for _, ttl := range []struct {
+		key   string
+		value int64
+	}{
+		{"accessTokenTtlSeconds", oauth.AccessTokenTTLSeconds},
+		{"refreshTokenTtlSeconds", oauth.RefreshTokenTTLSeconds},
+		{"grantMaxTtlSeconds", oauth.GrantMaxTTLSeconds},
+	} {
+		if ttl.value < 0 {
+			r.errorf("", "%s: @userSessions oauth.%s must be a positive whole number of seconds", set.Name, ttl.key)
+		}
+	}
+	switch {
+	case oauth.AccessTokenTTL() >= oauth.RefreshTokenTTL():
+		r.errorf("", "%s: @userSessions oauth: an access token's lifetime (%d s) must be shorter than a refresh token's (%d s)", set.Name, oauth.AccessTokenTTL(), oauth.RefreshTokenTTL())
+	case oauth.RefreshTokenTTL() > oauth.GrantMaxTTL():
+		r.errorf("", "%s: @userSessions oauth: a refresh token's lifetime (%d s) must be no longer than a grant's (%d s)", set.Name, oauth.RefreshTokenTTL(), oauth.GrantMaxTTL())
+	}
+	if !oauth.MetadataDocuments() && !oauth.Registration() {
+		r.errorf("", "%s: @userSessions oauth.clients turns off both kinds of client, so no client could connect; keep metadataDocuments or registration", set.Name)
+	}
+	switch {
+	case in.GoServer:
+		r.errorf("", "%s: @userSessions oauth: the Go server does not serve an OAuth authorization server yet (#695); serve the API in TypeScript, or drop oauth", set.Name)
+	case in.RustOutput != "":
+		r.errorf("", "%s: @userSessions oauth: the Rust server does not serve an OAuth authorization server yet (#695); serve the API in TypeScript, or drop oauth", set.Name)
+	case in.TypeScriptServer && !in.MCPServer:
+		r.errorf("", "%s: @userSessions oauth signs clients in to the API's MCP endpoint, which this API does not serve; set outputs.api.mcp: true, or drop oauth", set.Name)
 	}
 }
 
@@ -203,8 +250,9 @@ func checkIdentityRegistration(set *ir.OperationSet, cfg *ir.UserSessionsConfig,
 
 // checkIdentityRouteNames refuses an authored type, enum or union named as
 // one of the types the route expansion adds: an API with a route set
-// reserves every one, whichever its sets use, and the types of the API
-// key routes (D114) when one of its sets has apiKeys.
+// reserves every one, whichever its sets use, the types of the API key
+// routes (D114) when one of its sets has apiKeys, and those of the OAuth
+// routes (#695) when one has oauth.
 func checkIdentityRouteNames(schema *ir.Schema, r *Result) {
 	names := identity.RouteTypes
 	for _, set := range schema.OperationSets {
@@ -213,6 +261,15 @@ func checkIdentityRouteNames(schema *ir.Schema, r *Result) {
 		}
 		if (set.UserSessions != nil && set.UserSessions.APIKeys) || (set.UserAdministration != nil && set.UserAdministration.APIKeys) {
 			names = append(append([]string{}, names...), ir.IdentityAPIKeyTypes...)
+			break
+		}
+	}
+	for _, set := range schema.OperationSets {
+		if set == nil {
+			continue
+		}
+		if (set.UserSessions != nil && set.UserSessions.OAuth != nil) || (set.UserAdministration != nil && set.UserAdministration.OAuth) {
+			names = append(append([]string{}, names...), ir.IdentityOAuthTypes...)
 			break
 		}
 	}

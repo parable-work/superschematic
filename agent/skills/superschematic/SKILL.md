@@ -205,6 +205,11 @@ path for when the store is unavailable.
   user's permissions or the subset `permissions` names. The subset
   narrows permissions, not routes: give an agent that should reach less a
   user and a role of its own.
+  For Claude's connectors (claude.ai, Desktop, mobile), which sign in by
+  OAuth alone, `@userSessions({ oauth: true })` on a TypeScript API that
+  serves MCP makes the API its own OAuth 2.1 authorization server (#695):
+  discovery, a consent page and grants narrowed as a key is. Do not put an
+  identity provider in front of it.
 - **Who may see a row is declared on its table.** A private folder, a
   shared page, a document that inherits its folder's readers:
   `@audience<Doc>({ owner: "ownerId", inheritFrom: "folder", agents:

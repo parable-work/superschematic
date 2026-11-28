@@ -55,6 +55,19 @@ pub struct Config {
     /// across origins, and the only ones the CORS layer answers.
     pub trusted_origins: Vec<String>,
     pub password: PasswordConfig,
+    /// The deployment's part of the OAuth authorization server of an API
+    /// with `@userSessions({ oauth })` (#695). The Rust server serves no
+    /// OAuth yet; it reads the member so a config that has it parses.
+    pub oauth: OAuthConfig,
+}
+
+/// The deployment's part of the OAuth authorization server (#695).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OAuthConfig {
+    /// The URL the API is reached at from outside, which the stack fills in
+    /// from the site's origin; empty means the request's own.
+    pub public_base_url: String,
 }
 
 /// The session cookie.
@@ -105,6 +118,7 @@ impl Default for Config {
             password: PasswordConfig {
                 argon2: Argon2Params::DEFAULT,
             },
+            oauth: OAuthConfig::default(),
         }
     }
 }
@@ -171,6 +185,11 @@ impl Config {
         for (i, origin) in self.trusted_origins.iter().enumerate() {
             if let Err(err) = check_origin(origin) {
                 problems.push(format!("trustedOrigins[{i}]: {err}"));
+            }
+        }
+        if !self.oauth.public_base_url.is_empty() {
+            if let Err(err) = check_public_base_url(&self.oauth.public_base_url) {
+                problems.push(format!("oauth.publicBaseUrl: {err}"));
             }
         }
         if let Err(err) = self.password.argon2.check() {
@@ -261,7 +280,7 @@ impl CookieConfig {
 fn read(value: &Value) -> Result<Config, String> {
     let mut config = Config::default();
     let object = json::object(value, "the config")?;
-    let [ttl, idle, touch, key_ttl, cookie, origins, password] = take(
+    let [ttl, idle, touch, key_ttl, cookie, origins, password, oauth] = take(
         object,
         "the config",
         [
@@ -272,8 +291,16 @@ fn read(value: &Value) -> Result<Config, String> {
             "cookie",
             "trustedOrigins",
             "password",
+            "oauth",
         ],
     )?;
+    if let Some(v) = oauth {
+        let oauth = json::object(v, "oauth")?;
+        let [base] = take(oauth, "oauth", ["publicBaseUrl"])?;
+        if let Some(v) = base {
+            config.oauth.public_base_url = json::string(v, "oauth.publicBaseUrl")?;
+        }
+    }
     if let Some(v) = ttl {
         config.session_ttl_seconds = json::int64(v, "sessionTtlSeconds")?;
     }
@@ -373,6 +400,39 @@ fn check_origin(origin: &str) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Refuses a public base URL (#695) that is not
+/// `scheme://host[:port][/path]` with no trailing slash, user, query or
+/// fragment, or that is `http` on a host other than `localhost`,
+/// `127.0.0.1` and `[::1]`, as Go's `checkPublicBaseURL` does.
+fn check_public_base_url(base: &str) -> Result<(), String> {
+    let parts = origin_parts(base).ok_or_else(|| format!("{base:?} is not a URL"))?;
+    if parts.host.is_empty() || parts.opaque {
+        return Err(format!("{base:?} is not scheme://host[:port][/path]"));
+    }
+    if parts.user {
+        return Err(format!("{base:?} has a user"));
+    }
+    if base.contains(['?', '#']) {
+        return Err(format!("{base:?} has a query or fragment"));
+    }
+    if parts.path_slash {
+        return Err(format!("{base:?} ends with a slash"));
+    }
+    let host = String::from_utf8_lossy(&parts.host);
+    let hostname = if let Some(rest) = host.strip_prefix('[') {
+        rest.split(']').next().unwrap_or_default()
+    } else {
+        host.rsplit_once(':').map_or(&*host, |(name, _)| name)
+    };
+    match parts.scheme.as_str() {
+        "https" => Ok(()),
+        "http" if matches!(hostname, "localhost" | "127.0.0.1" | "::1") => Ok(()),
+        _ => Err(format!(
+            "{base:?} is not https, or http on localhost, 127.0.0.1 or [::1]"
+        )),
+    }
 }
 
 /// Whether `name` is an RFC 6265 cookie name: a token of visible ASCII

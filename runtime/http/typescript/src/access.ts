@@ -50,7 +50,12 @@ export interface GrantRow {
 
 /** One entry of the access log. */
 export interface AccessLogEntry {
-  readonly kind: 'reveal' | 'agentRead' | 'keyCall' | 'grantCall';
+  /**
+   * What happened: reveal, agentRead, keyCall and grantCall (D156);
+   * oauthCall, a call made with an OAuth access token, and oauthGrant and
+   * oauthRevoke, an OAuth grant given and revoked (#695).
+   */
+  readonly kind: 'reveal' | 'agentRead' | 'keyCall' | 'grantCall' | 'oauthCall' | 'oauthGrant' | 'oauthRevoke';
   readonly principal?: string;
   readonly principalKind?: PrincipalKind;
   readonly actingFor?: string;
@@ -398,5 +403,6 @@ export function callEntry(principal: Principal | null, operation: string, method
   }
   if (principal.credential?.kind === 'apiKey') return { kind: 'keyCall', ...who, credential: principal.credential.id };
   if (principal.credential?.kind === 'grant') return { kind: 'grantCall', ...who, credential: principal.credential.id };
+  if (principal.credential?.kind === 'oauth') return { kind: 'oauthCall', ...who, credential: principal.credential.id };
   return undefined;
 }

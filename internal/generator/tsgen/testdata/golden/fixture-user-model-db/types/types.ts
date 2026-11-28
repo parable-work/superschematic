@@ -10,6 +10,104 @@ import type {
 } from './scalars';
 
 /**
+ * OAuthClient - An OAuth client: a metadata document's, cached, or one that registered.
+ */
+export interface OAuthClient {
+  id?: IdentityUUID | null;
+  /** The client_id the client is known by: its metadata document's URL, or the id registration made. */
+  clientId: string;
+  /** metadataDocument or registered. */
+  kind: string;
+  /** What the consent page calls the client. */
+  name: string;
+  /** The client's home page. */
+  uri?: string | null;
+  /** The redirects the client may use. */
+  redirectUris: string[];
+  createdAt: TemporalDateTime;
+  /** When the client's metadata document was last fetched. */
+  refreshedAt?: TemporalDateTime | null;
+  /** Until when the metadata document's cache headers keep it. */
+  freshUntil?: TemporalDateTime | null;
+  /** When an authorization last named the client. */
+  lastUsedAt?: TemporalDateTime | null;
+}
+
+/**
+ * OAuthCode - An OAuth authorization request: pending while its user consents, then the code its client redeems once.
+ */
+export interface OAuthCode {
+  id?: IdentityUUID | null;
+  /** The client that asked. */
+  client: OAuthClient;
+  /** The user who approved the request. */
+  user?: User | null;
+  /** The grant approval made. */
+  grant?: OAuthGrant | null;
+  /** The redirect the request named, which the code is bound to. */
+  redirectUri: string;
+  /** The PKCE challenge, S256, which the code's verifier must answer. */
+  codeChallenge: string;
+  /** The state the client sent, which the redirect carries back. */
+  state?: string | null;
+  /** The scope the client asked for, as it sent it. */
+  scope?: string | null;
+  /** The resource the request named, which the code is bound to. */
+  resource: string;
+  /** The value approve and deny send back, which ties a decision to the request the page read. */
+  nonce: string;
+  /** The SHA-256 of the code approval made, which only the client holds. */
+  codeHash?: CryptoSHA256 | null;
+  createdAt: TemporalDateTime;
+  /** When the request, or once approved its code, ends. */
+  expiresAt: TemporalDateTime;
+  /** When the code was redeemed; a second redemption revokes its grant. */
+  usedAt?: TemporalDateTime | null;
+}
+
+/**
+ * OAuthGrant - An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.
+ */
+export interface OAuthGrant {
+  id?: IdentityUUID | null;
+  /** The user the grant calls as. */
+  user: User;
+  /** The client that holds the grant. */
+  client: OAuthClient;
+  /** The permissions the grant was given, each held while its user holds it; null for every permission its user holds. */
+  permissions?: string[] | null;
+  /** The URL of the resource the grant was given for. */
+  resource: string;
+  createdAt: TemporalDateTime;
+  /** When the grant ends, however often its refresh token rotates. */
+  expiresAt: TemporalDateTime;
+  /** When the grant's token last authenticated a request, written at most once a minute. */
+  lastUsedAt?: TemporalDateTime | null;
+  /** When the grant was revoked, by its user, by an administrator, by a replayed code or refresh token, or when its user was disabled. */
+  revokedAt?: TemporalDateTime | null;
+}
+
+/**
+ * OAuthToken - An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.
+ */
+export interface OAuthToken {
+  id?: IdentityUUID | null;
+  /** The grant that issued the token. */
+  grant: OAuthGrant;
+  /** access or refresh. */
+  kind: string;
+  /** The SHA-256 of the token, which only its client holds. */
+  tokenHash: CryptoSHA256;
+  createdAt: TemporalDateTime;
+  /** When the token ends. */
+  expiresAt: TemporalDateTime;
+  /** When a refresh token rotated; a second use revokes its grant. */
+  usedAt?: TemporalDateTime | null;
+  /** When the token was revoked. */
+  revokedAt?: TemporalDateTime | null;
+}
+
+/**
  * Role - A named set of permissions users are granted.
  */
 export interface Role {

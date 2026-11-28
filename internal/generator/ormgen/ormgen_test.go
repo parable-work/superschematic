@@ -218,6 +218,7 @@ func TestWriteORMGolden(t *testing.T) {
 		// advance them, and Depot's soft deletes carry the bump.
 		{"fixture-fenced-db", []string{"repository_courier.go", "repository_delivery.go", "repository_depot.go", "repository_parcel.go", "fences.go"}},
 		{"fixture-user-model-db", []string{
+			"repository_oauth_client.go", "repository_oauth_code.go", "repository_oauth_grant.go", "repository_oauth_token.go",
 			"repository_role.go", "repository_session.go", "repository_user.go", "repository_user_api_key.go",
 			"repository_user_credential.go", "repository_user_role_grant.go",
 		}},

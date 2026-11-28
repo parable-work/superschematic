@@ -49,6 +49,9 @@ type route struct {
 	// credential marks createApiKey, hidden because it answers a credential
 	// (D114), not because it carries a password, as hidden marks.
 	credential bool
+	// consent marks an OAuth route (#695), hidden because it answers a
+	// person's consent.
+	consent bool
 }
 
 func routeOf(op *ir.FieldDef) route {
@@ -77,6 +80,7 @@ func routeOf(op *ir.FieldDef) route {
 	if op.MCP != nil {
 		r.hidden = op.MCP.Hidden && op.MCP.HiddenReason == ir.IdentityPasswordToolReason
 		r.credential = op.MCP.Hidden && op.MCP.HiddenReason == ir.IdentityAPIKeyToolReason
+		r.consent = op.MCP.Hidden && op.MCP.HiddenReason == ir.IdentityOAuthToolReason
 	}
 	return r
 }
@@ -239,6 +243,60 @@ func TestExpandRoutesAdministration(t *testing.T) {
 // table's key is. createApiKey alone is rate-limited, and hidden as a tool
 // with the reason of its own. Each set opts in for itself, and a set
 // without the login makes no key.
+// TestExpandRoutesOAuth: @userSessions({ oauth }) gets the consent and
+// connected-app routes under its path, and @userAdministration({ oauth })
+// a user's grants, each hidden from the tools; the types they use are the
+// expansion's (#695).
+func TestExpandRoutesOAuth(t *testing.T) {
+	api := routesAPI(&ir.UserSessionsConfig{OAuth: &ir.IdentityOAuthConfig{}}, &ir.UserAdministrationConfig{OAuth: true})
+	ExpandRoutes(api, routesDB(), "identity")
+
+	sessions := routesOf(t, api.OperationSets[0])
+	wantSessions := []route{
+		{name: "getOAuthRequest", method: "GET", path: "auth/oauth/requests/{id}", result: "OAuthRequest", args: "id:Identity.UUID", rule: "auth", consent: true},
+		{name: "approveOAuthRequest", method: "POST", path: "auth/oauth/requests/{id}/approve", result: "OAuthDecision", args: "input:ApproveOAuthRequestInput,id:Identity.UUID", rule: "auth", consent: true},
+		{name: "denyOAuthRequest", method: "POST", path: "auth/oauth/requests/{id}/deny", result: "OAuthDecision", args: "input:DenyOAuthRequestInput,id:Identity.UUID", rule: "auth", consent: true},
+		{name: "listOAuthGrants", method: "GET", path: "auth/oauth/grants", result: "ConnectedApp", array: true, rule: "auth", consent: true},
+		{name: "revokeOAuthGrant", method: "DELETE", path: "auth/oauth/grants/{id}", result: "boolean", args: "id:Identity.UUID", rule: "auth", consent: true},
+	}
+	if len(sessions) != 10 || !reflect.DeepEqual(sessions[5:], wantSessions) {
+		t.Errorf("@userSessions({ oauth }) operations after its five:\n got %+v\nwant %+v", sessions, wantSessions)
+	}
+	admin := routesOf(t, api.OperationSets[1])
+	wantAdmin := []route{
+		{name: "listUserOAuthGrants", method: "GET", path: "auth/admin/users/{id}/oauth/grants", result: "ConnectedApp", array: true, args: "id:Identity.UUID", rule: "identity.users.read", consent: true},
+		{name: "revokeUserOAuthGrant", method: "DELETE", path: "auth/admin/users/{id}/oauth/grants/{grantId}", result: "boolean", args: "id:Identity.UUID,grantId:Identity.UUID", rule: "identity.users.write", consent: true},
+	}
+	if len(admin) != 15 || !reflect.DeepEqual(admin[13:], wantAdmin) {
+		t.Errorf("@userAdministration({ oauth: true }) operations after its thirteen:\n got %+v\nwant %+v", admin, wantAdmin)
+	}
+	for name, fields := range map[string]string{
+		"OAuthClientInfo":          "id:string!,name:string!,uri:string,redirectHost:string!,loopbackOnly:boolean!,kind:string!",
+		"OAuthRequest":             "id:Identity.UUID!,client:OAuthClientInfo!,permissions:string[]!,held:string[]!,offlineAccess:boolean!,resource:string!,expiresAt:Temporal.DateTime!,nonce:string!",
+		"ApproveOAuthRequestInput": "nonce:string!,permissions:string[]",
+		"DenyOAuthRequestInput":    "nonce:string!",
+		"OAuthDecision":            "redirectTo:string!",
+		"ConnectedApp":             "id:Identity.UUID!,client:OAuthClientInfo!,permissions:string[],createdAt:Temporal.DateTime!,expiresAt:Temporal.DateTime!,lastUsedAt:Temporal.DateTime",
+	} {
+		if got := fieldsOf(api.Types[name]); got != fields {
+			t.Errorf("%s = %s, want %s", name, got, fields)
+		}
+	}
+	for _, name := range ir.IdentityOAuthTypes {
+		if td := api.Types[name]; td == nil || td.Origin != ir.OriginIdentity {
+			t.Errorf("the expansion added no %s", name)
+		}
+	}
+
+	// Without the login the set has no consent routes, and without oauth
+	// none at all.
+	plain := routesAPI(&ir.UserSessionsConfig{}, &ir.UserAdministrationConfig{})
+	ExpandRoutes(plain, routesDB(), "identity")
+	if len(plain.OperationSets[0].Operations) != 5 || len(plain.OperationSets[1].Operations) != 13 || plain.Types["OAuthRequest"] != nil {
+		t.Errorf("an API without oauth got OAuth routes: %d and %d operations", len(plain.OperationSets[0].Operations), len(plain.OperationSets[1].Operations))
+	}
+}
+
 func TestExpandRoutesAPIKeys(t *testing.T) {
 	db := routesDB()
 	db.Scalars["Identity.Slug"] = &ir.ScalarDef{Name: "Identity.Slug", LanguagePrimitive: ir.LanguageString}
