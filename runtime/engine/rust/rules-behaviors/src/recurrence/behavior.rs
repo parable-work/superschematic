@@ -87,8 +87,8 @@ use crate::declared;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Recurrence";
 
-/// Recurrence's declaration, the file `make behaviors` writes for the core
-/// alone (no engine implements it), read in place.
+/// Recurrence's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
 pub const DECLARATION: &str = include_str!("../../declarations/Recurrence.behavior.json");
 
 /// The sub-table of a row's occurrences, keyed by nominal wall date-time.

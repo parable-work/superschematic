@@ -4,12 +4,10 @@
 //! core is a [`superschematic_rules::Core`] built with the ones the project
 //! composes.
 //!
-//! Each behavior reads its declaration from the file the compiler registers
-//! and the engine embeds (`../behaviors/declarations`, and the work queue's
-//! `../../engine-workqueue/rust/declarations`), in place, so the engine and
-//! the core read one declaration while both exist; a behavior no engine
-//! implements (Seats, Reconcile, Schedules, Pool) reads the copy `make behaviors` writes into
-//! this crate (`declarations`). The core
+//! Each behavior reads its declaration in place, from the copy `make
+//! behaviors` writes into this crate (`declarations`) of the file the
+//! compiler registers, so the compiler and the core read one declaration
+//! (D103, #587). The core
 //! runs no JSON Schema, so a behavior holds its config and its operations'
 //! parameters to the declaration's schemas in its own code, in the words
 //! the engine gave, which its tests hold to the file.
@@ -36,12 +34,10 @@
 //! budgets that keep periods, count a rolling window and take the usage a
 //! provider reports.
 //! [`Seats`] and [`Reconcile`], in step 3 of D104's order of the work, the
-//! first behaviors only the core implements (their declarations are
-//! `rules-behaviors/declarations`', which `make behaviors` writes for the
-//! package `@superschematic/rules`): named seats on a row, which a Workflow
-//! transition's and a StateRules state's `by` name as `seat:<name>`; and the
-//! state a row's provider last reported, which moves its Workflow there along
-//! the transitions it allows.
+//! first behaviors only the core implements: named seats on a row, which a
+//! Workflow transition's and a StateRules state's `by` name as
+//! `seat:<name>`; and the state a row's provider last reported, which moves
+//! its Workflow there along the transitions it allows.
 //! [`Schedules`], the rest of step 3 for now: named schedules on a row,
 //! each a run after a delay, at an interval or on a cron line in a time
 //! zone, its next run a deadline whose fire emits the event `run`, which the
@@ -110,9 +106,8 @@
 //! runs each from its registered declaration, whose `rules` hand the
 //! vocabulary's field rules ([`Constants`], [`StateRules`]) the use's
 //! config.
-//! The engine's behaviors
-//! (`superschematic-engine-behaviors`) stay beside these until each is
-//! ported and the engine goes.
+//! The engine's behaviors, which these replace, went with the engine
+//! (D103, #587).
 //!
 //! A host builds its core with [`core`], as it passed the engine's
 //! `behaviors::core()`, and adds its own behaviors:

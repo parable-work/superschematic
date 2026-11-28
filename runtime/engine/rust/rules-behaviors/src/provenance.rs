@@ -62,9 +62,9 @@ use crate::workflow;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Provenance";
 
-/// Its declaration file, which the compiler registers and the engine
-/// embeds.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Provenance.behavior.json");
+/// Provenance's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Provenance.behavior.json");
 
 /// The sub-table of a row's records, keyed by the field's name.
 pub const RECORDS: &str = "records";

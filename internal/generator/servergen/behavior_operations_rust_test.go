@@ -110,7 +110,7 @@ func TestRustServerOfBehaviorOperations(t *testing.T) {
 	paths.RulesBehaviorsRust = filepath.Join(repoRoot, "runtime", "engine", "rust", "rules-behaviors")
 	// The checkout's workspace, whose manifest the crates inherit their
 	// package fields from, and a crate beside it the workspace names.
-	for _, dir := range []string{filepath.Join("runtime", "engine", "rust"), filepath.Join("runtime", "engine-workqueue", "rust")} {
+	for _, dir := range []string{filepath.Join("runtime", "engine", "rust"), filepath.Join("runtime", "migrate", "rust")} {
 		if err := os.MkdirAll(filepath.Join(repoRoot, dir), 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -167,7 +167,7 @@ func TestRustServerOfBehaviorOperations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"!runtime/engine/rust\n", "!runtime/engine-workqueue/rust\n"} {
+	for _, want := range []string{"!runtime/engine/rust\n", "!runtime/migrate/rust\n"} {
 		if !strings.Contains(string(ignore), want) {
 			t.Errorf("the image's context does not take in %q:\n%s", strings.TrimSpace(want), ignore)
 		}

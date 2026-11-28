@@ -140,7 +140,7 @@ documents leave it out (D37):
 | --- | --- |
 | Handle | `order_status_transition`: the table, the field and the operation in snake case, at most 48 characters, or the build refuses it |
 | `@docs` | title `Order status: transition`, capability `order.status.transition`, the behavior's description of the operation, replay mode `read_only` for an operation that does not write |
-| Invocation policy | the behavior's declaration's for the operation, as the engine's tools carry it, else the default |
+| Invocation policy | the behavior's declaration's for the operation, else the default |
 | Tool name, `methodName` | `order.status.transition`, `status.transition`: the TypeScript SDK's method path |
 | Parameters | the row's key (`id`) and the operation's parameters (`to`, an enum of the config's states), each required as the operation takes it |
 
@@ -587,7 +587,7 @@ outputs: {
 The API package then has `mcp.ts`, the tool table, and `buildRouter`
 serves it at `POST /api/mcp`. The table is built from the tool documents
 above, whether or not the config enables an SDK: one tool per operation
-whose `@mcp` is visible, as the engine lists its tools.
+whose `@mcp` is visible.
 
 | `tools/list` member | From |
 | --- | --- |
@@ -613,15 +613,15 @@ warning: LineItems.importStatement: the visible @mcp tool import_statement uploa
 A build that routes an operation at `/api/mcp` with `mcp` on is refused,
 naming the operation.
 
-The endpoint speaks the engine's transport, MCP's streamable HTTP,
-statelessly (`runtime/http/typescript/src/mcp.ts`, a copy of the engine's
-`api/mcp.rs`): on the 2025 revisions `initialize`, `ping`, `tools/list` and
+The endpoint speaks MCP's streamable HTTP transport, statelessly
+(`runtime/http/typescript/src/mcp.ts`, copied from the engine's endpoint,
+which went with the engine, D103, #587): on the 2025 revisions `initialize`, `ping`, `tools/list` and
 `tools/call`, alone or in a batch, each request answered as one `message`
 event of a `text/event-stream` body and a notification with 202; on
 2026-07-28, `server/discover`, `ping`, `tools/list` and `tools/call`, each
 answered as one JSON body; `GET` and `DELETE` answer 405. The runtime's
-tests replay the engine's MCP corpus (`runtime/engine/testdata/http/mcp.json`)
-through it.
+tests replay the MCP corpus the engine recorded
+(`runtime/engine/testdata/http/mcp.json`) through it.
 
 The endpoint authenticates as the API's other routes do: the identity
 service of the user model, or the router's `authenticate`, from a
@@ -682,8 +682,8 @@ timeout apply to the call as to a request:
   it is, whose 400 at `filter[field]` is the tool error.
 
 A tool whose `@mcp` says `invocationPolicy: "ask"` reads
-`"invocationPolicy": "ask"` in its `_meta`, as on the engine's endpoint,
-and the endpoint runs it only once the person confirms the call (below).
+`"invocationPolicy": "ask"` in its `_meta`, and the endpoint runs it
+only once the person confirms the call (below).
 
 `initialize` names the server after the API, at the version its OpenAPI
 document states (`openAPIVersion`, `1.0.0` unless set). The router's
@@ -746,7 +746,7 @@ before that second call too.
 A 2025 client gets the token even when it declared elicitation at
 `initialize`. A 2025 server asks a client mid-call by sending it a
 request on the call's event stream, and the client posts its answer as a
-new request. The endpoint is stateless, as the engine's is: it keeps no
+new request. The endpoint is stateless: it keeps no
 session, so it neither remembers the capabilities `initialize` declared
 nor finds the call that waits for an answer, which may be on another
 replica or Worker isolate. 2026-07-28 carries the request and the answer
@@ -931,130 +931,6 @@ Where a Rust endpoint differs from a TypeScript one:
 - A Rust app's program builds its API's router itself, and the build
   hands it no confirmation key yet, so the stack's build refuses an app
   whose API serves a tool that asks.
-
-## The engine
-
-`@superschematic/engine` runs schemas with no generated code (D16) and
-writes the same tools document from them while it runs:
-`GET /namespaces/{namespace}/tools` answers `tools/schema.json`'s shape for
-a namespace, and `/namespaces/{namespace}/mcp` serves the tools over MCP.
-Its tools have no `@mcp` or `@docs`. A tool per operation of every live
-schema, behavior operations included, is named `<schema>.<operation>` as
-the generators name a method, with the schema name in kebab case, and its
-handle is the same two parts in snake case (`line_item_add_note`). A
-behavior operation's tool takes the instance `id`, `params` and
-`expectedSeq`; a schema-level one's (`scope: "schema"` in its
-declaration) takes `params` alone. Where a behavior of the schema
-declares a precondition, as `Lease` does its token, the update, delete
-and instance operation tools also take `preconditions`, by behavior
-name, and where one takes create parameters, as `Links` and
-`Dependencies` do, the create tool takes `behaviors`
-([Engine behaviors](/superschematic/guides/engine-behaviors/#create-parameters)).
-A behavior's namespace operation (`scope: "namespace"`), which runs
-across every schema of the namespace that composes the behavior, has one
-tool, named after the behavior (`comments.inbox`, handle
-`comments_inbox`; `comments.searchMessages`, handle
-`comments_search_messages`), that takes `params` alone; the access policy's
-question for it, which names the behavior and no schema, with
-`listing: true`, hides it from a caller it refuses
-([Engine behaviors](/superschematic/guides/engine-behaviors/#namespace-operations)).
-The endpoint honors the `Acting-For` header, the subject an agent calls
-for, only when the host mounts it with `actingFor` as it does the HTTP
-API; then every call of the request acts for that subject, and the
-events it writes record it as `for`
-([The engine](/superschematic/guides/engine/#callers-and-the-access-policy)).
-Its `hiddenBy` names the same causes as a schema's tool (below):
-`deployment` when `tools.hidden` names it, `archived` for one that writes
-in an archived namespace, `policy` when that question refuses the caller,
-`handle` when its handle collides or is refused, and `filter`.
-Three more list, describe and define
-schemas, and none publishes; two list the behaviors the engine runs and
-describe one by name (`list_behaviors`, `describe_behavior`), which every
-caller may call; `get_value` reads a value of the engine's value store by
-its hash, for a caller who may read a schema that references it, and a
-schema's `get` and `list` take `valueRefs` to return such values as
-refs; a schema's `list` takes `where`, the values of the fields it
-filters on, `null` for none, and a schema with a `@unique` field has `lookup`, whose
-`key` names the values of one unique index's fields; four list, create,
-archive and unarchive namespaces (`list_namespaces`, `create_namespace`,
-`archive_namespace`, `unarchive_namespace`), as the access policy's
-`manage` allows, and in an archived namespace every tool that writes
-there is hidden; and where a schema composes `Search`, one more,
-`search`, searches every such schema the caller may read. Each caller's
-list holds what the policy lets it use: `define_schema` and the
-namespace tools, which name their schema or namespace only when called,
-are hidden from a caller the policy refuses `define` or `manage` there,
-and a mount's `tools` filter narrows a caller's set further, refusing a
-call of a tool it leaves out. Where an SDK
-tool's guidance is its operation's `@docs`, the engine writes its own:
-fixed for its tools, a base for the operations every schema has, and
-what each behavior the type composes says under its config: the states
-a transition may move to and the permission a move needs, how often to
-renew a lease, what keeps work out of a claim, and the veto codes a call
-can meet, each led by its behavior's name. A create's `behaviors` argument shows the create
-parameters a behavior takes under its config, `Links`' link names with
-the required ones required. The engine takes the invocation policy and
-the vendor keys above as options, and takes a behavior operation's policy from its
-declaration, else the default: the core's behaviors (`Workflow`,
-`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
-`Branches`, `Approvals`, `Numbering`, `Timers`, and `Reactions`, `Constants`, `Variants` and `StateRules`,
-which have no operations),
-which every engine registers, name none, and neither do the work-queue
-behaviors `@superschematic/engine-workqueue` implements or the commerce
-ones (`Stock`, `Calendar`, `Holds`, `Payments`) of
-`@superschematic/engine-commerce`.
-
-A deployment sets a policy the declarations leave out through the
-engine's `tools.invocation`: a built-in tool's by its name (`delete`,
-`defineSchema`), and a behavior operation's by
-`<Behavior>.<operation>` (`Payments.capturePayment`,
-`acme.Rating.rate`), which takes the place of its declaration's, given
-when the engine opens (`EngineOptions.tools.invocation`). No generated
-server opens the engine: a schema config's `outputs.engine`, which set
-these for an engine database, is refused (D103), and a table's behavior
-operations are an API's tools, whose `@mcp` sets each one's
-`invocationPolicy`
-([Selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)).
-
-`tools.hidden` lists behavior operations the tools leave out: a service
-calls them through the API or in-process, and no agent is offered them.
-A hidden tool reads `hidden: true` with its reason, and a call by its
-MCP handle is a tool the namespace does not have; the operation itself
-still runs through the engine's API. An engine hides only what it is
-given (`EngineOptions.tools.hidden`).
-
-The engine's hidden record adds `hiddenBy` after `hiddenReason`, which
-the generators' `tools/schema.json` does not write: each cause the
-engine found, in this order, and `hiddenReason` is the first one's.
-
-| `hiddenBy` | The engine hides the tool because |
-| --- | --- |
-| `deployment` | `tools.hidden` names its operation; the policy is not asked |
-| `archived` | it writes in an archived namespace; an operation that asks read (`markRead`, `follow`) writes only the caller's own state and is not hidden |
-| `policy` | the access policy refuses the caller what its call asks |
-| `handle` | `@mcp` would refuse its handle: not snake case, longer than 48 characters, an engine tool's, or another tool's too; the policy is asked all the same, since the API still offers the operation |
-| `filter` | the mount's `tools` filter leaves it out; asked only of a tool nothing else hides |
-
-```json
-"mcp": {
-  "hidden": true,
-  "hiddenReason": "the access policy refuses reader write on SupplierContractAmendmentRequest (withdrawSignOff)",
-  "hiddenBy": ["policy", "handle"]
-}
-```
-
-A tool hidden by `deployment` and `handle` keeps the deployment's reason.
-A client that shows the engine's operations outside MCP, as the Topcoat
-console does, offers one hidden by `handle` (or `filter`) alone, drops
-one hidden by `deployment`, and refuses any other.
-
-Its argument schemas are the generators':
-`runtime/engine/testdata/tool_parameters_parity.json` holds them to
-`toolsutil`. A create's `data` and an update's `patch` also carry, under
-`allOf`, what a behavior holds the fields to, `Variants`' type for each
-value of a field, which no generator writes. `runtime/engine/README.md` ("Tools", "MCP") has the rest, and
-[the engine guide](/superschematic/guides/engine/#mcp-tools) lists and calls
-them on a running server.
 
 ## Rules an extension adds
 

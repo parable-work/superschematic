@@ -223,13 +223,13 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use superschematic_engine_testkit::ScenarioFile;
 use superschematic_rules::{
     Action, Command, Core, OutboxEvent, Refusal, RowWrite, SubRow, TypeSpec,
 };
 
 use crate::host::{Applied, Store, StoredRow};
 use crate::replay::replay_recording;
+use crate::scenario::ScenarioFile;
 use crate::shape::{FieldDef, RawWrite};
 
 /// One recording's transcript.

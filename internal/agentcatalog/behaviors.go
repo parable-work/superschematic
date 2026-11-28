@@ -6,7 +6,6 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/parable-work/superschematic/internal/loader/verify"
 	"github.com/parable-work/superschematic/internal/registry"
 )
 
@@ -24,9 +23,9 @@ var configMember = regexp.MustCompile(`(?m)^\s*(?:readonly\s+)?([A-Za-z_$][\w$]*
 // (registry.RulesPackage: Seats, Reconcile, Schedules, Pool, D104;
 // Recurrence, D152; Aliased, D147) is left out: only a table composes it,
 // so BehaviorConfigs names no type for it, and the guide to tables
-// (database-tables) describes it. So is one D103 folds into a schema
-// feature (verify.FoldedBehaviors: Links, Search, Queue and Branches),
-// which the build refuses though its declaration stays registered.
+// (database-tables) describes it. The behaviors D103 folds into schema
+// features (Links, Search, Queue and Branches) are no registered ones since
+// the engine went (D103, #587).
 func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	configTypes := map[string]string{}
 	for _, d := range typeDecls(exports) {
@@ -60,7 +59,7 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 	b.WriteString("the JSON Schema the declaration checks them against.\n")
 
 	for _, beh := range reg.Behaviors() {
-		if !registry.EngineImplements(beh) || verify.IsFoldedBehavior(beh.Name) {
+		if !registry.EngineImplements(beh) {
 			continue
 		}
 		fmt.Fprintf(&b, "\n## `%s`\n\n", beh.Name)
@@ -93,7 +92,9 @@ func renderBehaviors(exports []export, reg *registry.Registry) ([]byte, error) {
 		if len(beh.Conflicts) > 0 {
 			fmt.Fprintf(&b, "- Cannot be composed with %s.\n", codeList(beh.Conflicts))
 		}
-		if beh.Package != "" {
+		// A core behavior's package names the engine's, which D103's
+		// step 7 deleted: the behaviors' core implements it.
+		if beh.Extension != "" && beh.Package != "" {
 			fmt.Fprintf(&b, "- Implemented by `%s`.\n", beh.Package)
 		}
 		if len(beh.Fields) > 0 {

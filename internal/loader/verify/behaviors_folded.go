@@ -3,34 +3,23 @@ package verify
 import (
 	"slices"
 
+	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
 // FoldedBehaviors are the behaviors D103 folds into schema features, by
-// name, each with what replaces it: a storage shape or a query is a
-// schema feature, not a behavior (D103, "What a behavior is"). Their
-// declarations stay registered while the engine that runs them is in the
-// tree, so its crates' declarations still match the registry's, but no
-// schema composes one: checkFoldedBehaviors refuses each, in every kind,
-// naming its replacement.
-var FoldedBehaviors = map[string]string{
-	"Links": "a relation replaces it: give the type a field of Relation<Target> " +
-		`(in the data forms, a field with "relation": {"type": "Target"}), ` +
-		"and name that field where a config named a link",
-	"Search": "@searchField replaces it: mark each field to search @searchField " +
-		`(in the data forms, "searchField": true), and keep a vector in a ` +
-		"Validate<Embedding.Vector, { dimensions }> field (D84)",
-	"Queue": "@queue replaces it: claimable work is a queue's messages, which " +
-		"its workers claim (D53, D80); to claim rows of a table, read the rows " +
-		"to claim and take Lease's acquire on the first (D104)",
-	"Branches": "@versioned replaces it: a version graph's members are " +
-		"@versioned tables of a @versionGraph (D17, D19)",
-}
+// name, each with what replaces it (registry.FoldedBehaviors). No registry
+// declares them since the engine that ran them went (D103, #587), so the
+// refusal names them itself: checkFoldedBehaviors refuses each a type
+// composes, in every kind, naming its replacement, and the data forms'
+// reader refuses one in the same words before it would say that no
+// behavior of the name is registered.
+var FoldedBehaviors = registry.FoldedBehaviors
 
 // IsFoldedBehavior reports whether name is a behavior D103 folds into a
 // schema feature (FoldedBehaviors).
 func IsFoldedBehavior(name string) bool {
-	_, ok := FoldedBehaviors[name]
+	_, ok := registry.FoldedBehavior(name)
 	return ok
 }
 
@@ -42,7 +31,7 @@ func IsFoldedBehavior(name string) bool {
 func checkFoldedBehaviors(td *ir.TypeDef, r *Result) bool {
 	var refused []string
 	for _, ref := range td.Behaviors {
-		if replacement, ok := FoldedBehaviors[ref.Name]; ok && !slices.Contains(refused, ref.Name) {
+		if replacement, ok := registry.FoldedBehavior(ref.Name); ok && !slices.Contains(refused, ref.Name) {
 			refused = append(refused, ref.Name)
 			r.errorf(td.Owner, "type %s composes %s, which is no longer a behavior (D103): %s", td.Name, ref.Name, replacement)
 		}

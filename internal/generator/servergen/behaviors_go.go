@@ -50,20 +50,18 @@ type rulesDocker struct {
 }
 
 // engineCrates are the paths, relative to the checkout's root, that the
-// engine's Cargo workspace, runtime/engine/rust, which holds the behaviors'
-// core's crates, reaches by path. superscalar's core inherits its lints
-// from its workspace's manifest, which names every crate under crates/ a
-// member. Cargo reads the manifest of every member's path dependency, an
-// optional one too, to load the workspace: development mode's server
-// (rules-dev's server feature, D117) reaches the Rust http runtime, and
-// runtime mode (rules-runtime) the Rust migration runner.
+// Cargo workspace runtime/engine/rust, which holds the behaviors' core's
+// crates, reaches by path. superscalar's core, which the behaviors read
+// scalars with, inherits its lints from its workspace's manifest, which
+// names every crate under crates/ a member. Cargo reads the manifest of
+// every member's path dependency, an optional one too, to load the
+// workspace: development mode's server (rules-dev's server feature, D117)
+// reaches the Rust http runtime and, through it, the schema runtime, and
+// runtime mode (rules-runtime) the Rust migration runner. The engine's
+// crates, and the schema reader and version graph they reached, went with
+// the engine (D103, #587).
 var engineCrates = []string{
-	"runtime/engine-workqueue/rust",
-	"runtime/engine-commerce/rust",
-	"runtime/schema/rust-ir",
 	"runtime/schema/rust",
-	"runtime/versiongraph/rust-engine",
-	"runtime/versiongraph/rust",
 	"runtime/http/rust",
 	"runtime/migrate/rust",
 	"third_party/superscalar/Cargo.toml",

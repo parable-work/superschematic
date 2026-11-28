@@ -87,9 +87,9 @@ use crate::supply::{
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Stock";
 
-/// Stock's declaration, the commerce package's file, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../../../engine-commerce/rust/declarations/Stock.behavior.json");
+/// Stock's declaration, read in place: the copy `make behaviors` writes of the
+/// one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Stock.behavior.json");
 
 /// The operations, by their declared names.
 pub const RECEIVE_STOCK: &str = "receiveStock";

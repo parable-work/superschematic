@@ -1,6 +1,6 @@
 //! Rollups, values derived from the rows that point at a row (D16,
-//! amended), ported onto the pure core (D103) from the engine's
-//! (`../behaviors/src/rollups.rs`): a project's count of tasks, its tasks by
+//! amended), ported onto the pure core (D103) from the engine's, which is
+//! gone (D103, #587): a project's count of tasks, its tasks by
 //! status, the sum of their estimates, whether every one is done. A table
 //! says `implements Rollups<Project, { rollups: { ... } }>`. Each rollup
 //! names the rows it reads by the table that points here (`schema`) and its
@@ -99,9 +99,9 @@ use crate::workflow::{self, state_outcome, WorkflowOutcome};
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Rollups";
 
-/// Rollups' declaration, the file the compiler registers and the engine
-/// embeds, read in place.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Rollups.behavior.json");
+/// Rollups' declaration, read in place: the copy `make behaviors` writes of the
+/// one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Rollups.behavior.json");
 
 /// The field a read shows every rollup's value in.
 pub const VALUES: &str = "values";

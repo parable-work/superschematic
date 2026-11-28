@@ -20,9 +20,8 @@
 #   scripts/rules-archive.sh --crate <rules crate> --out <dir>
 #                                     # stage a project's core (D103's step 5)
 #
-# Put the -L flag in CGO_LDFLAGS beside scripts/superscalar-dep.sh --print,
-# scripts/versiongraph-archive.sh --print and scripts/engine-archive.sh
-# --print. Inside this checkout the binding finds the staged archive without
+# Put the -L flag in CGO_LDFLAGS beside scripts/superscalar-dep.sh --print
+# and scripts/versiongraph-archive.sh --print. Inside this checkout the binding finds the staged archive without
 # it (its cgo_ldflags_<goos>_<goarch>.go name lib/<goos>_<goarch>).
 set -euo pipefail
 
@@ -69,19 +68,20 @@ if ! command -v cargo >/dev/null 2>&1; then
   exit 1
 fi
 
-# Go binaries link this archive beside superscalar's, the version graph's
-# and the engine's, so all four are built with tools.env's RUST_VERSION
+# Go binaries link this archive beside superscalar's and the version
+# graph's, so all three are built with tools.env's RUST_VERSION
 # (scripts/lib/archive.sh says why).
 archive_toolchain
 
-# The crate is a member of the engine's workspace, which cargo loads whole:
-# the engine reads schemas through runtime/schema/rust-ir, which depends on
+# The crate is a member of the workspace runtime/engine/rust, which cargo
+# loads whole: the behaviors (rules-behaviors) read scalars through
 # superscalar's core by path, so the checkout must be there, nothing of it
-# built (as scripts/engine-archive.sh has it).
+# built.
 archive_superscalar_sources
 
-# The crate is a member of the engine's workspace, so it builds against
-# the workspace's committed lock file; a project's crate against its own.
+# The crate is a member of the runtime/engine/rust workspace, so it builds
+# against the workspace's committed lock file; a project's crate against
+# its own.
 LOCKED=--locked
 if [ -n "$PROJECT" ]; then
   LOCKED=""

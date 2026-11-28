@@ -25,12 +25,12 @@
 use std::collections::BTreeMap;
 use std::fs;
 
-use superschematic_engine_testkit::{load, ScenarioFile};
 use superschematic_rules::Core;
 use superschematic_rules_testkit::{
     declarations_of, hand_written_path, hand_written_transcript, hand_written_transcript_declaring,
     ported, scenario_path, transcript, transcript_path, Transcript, TranscriptStep,
 };
+use superschematic_rules_testkit::{load, ScenarioFile};
 
 /// The steps `core-workflow.transcript.json` holds, of `core-workflow.json`'s
 /// 159: each one the reference host maps onto the core (61 define and

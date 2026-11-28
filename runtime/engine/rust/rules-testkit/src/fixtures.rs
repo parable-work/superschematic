@@ -1,7 +1,7 @@
 //! What a scenario file's tests wrote in TypeScript, ported onto the core so
 //! the replayer can run the scenarios that use it, as the engine's test kit
-//! ports the test behaviors onto the engine (`superschematic-engine-testkit`'s
-//! `behaviors` and `core_fixtures`): the test behaviors a file composes
+//! ported the test behaviors onto the engine until the engine went (D103,
+//! #587): the test behaviors a file composes
 //! (`testBehaviors`) or registers when it opens an engine, each
 //! acting as its TypeScript fixture does with none of its hooks set, and
 //! the permission matchers a test opens an engine with
@@ -206,7 +206,7 @@ impl Behavior for Bounce {
 /// test.Hold of `test/core-timers.test.ts`: vetoes a fire of a row whose
 /// own title starts with `stuck` (`held`), as a lease another principal
 /// holds does, a caller's or a deadline's alike. The engine's test kit
-/// calls it `FireHold`, beside the other test.Hold of
+/// called it `FireHold`, beside the other test.Hold of
 /// `test/behavior-fixtures.ts`.
 pub struct FireHold;
 
@@ -270,7 +270,7 @@ impl Behavior for Refuser {
 /// vetoes every update of its row, whoever makes it, a caller's or an
 /// approval's through `update()`, so a scenario shows an approval meets
 /// every guard. Its `held` reads false until then. The engine's test kit
-/// has no port of it; this kit calls it `UpdateHold`, beside the other
+/// had no port of it; this kit calls it `UpdateHold`, beside the other
 /// test.Holds.
 pub struct UpdateHold;
 
@@ -368,7 +368,8 @@ impl Behavior for Gate {
     }
 }
 
-/// test.Gate of `runtime/engine-workqueue/typescript/test/fixtures.ts`: it
+/// test.Gate, as the work queue's TypeScript tests defined it until the
+/// engine went (D103, #587): it
 /// refuses Workflow's transition of a row titled held, and Lease's expire
 /// of one titled stuck, with no code, whoever calls.
 pub struct LeaseGate;
@@ -405,7 +406,8 @@ impl Behavior for LeaseGate {
     }
 }
 
-/// test.Signal of `runtime/engine-workqueue/typescript/test/fixtures.ts`:
+/// test.Signal, as the work queue's TypeScript tests defined it until the
+/// engine went (D103, #587):
 /// its own operation, `signal({ name })`, sends the holder a directive
 /// through Lease's direct (`Cx::call`), as a budget does on an overrun.
 pub struct Signal;

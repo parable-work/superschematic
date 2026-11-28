@@ -1,5 +1,5 @@
 //! Dependencies, blockers between rows (D16, amended), ported onto the pure
-//! core (D103) from the engine's (`../behaviors/src/dependencies.rs`). An
+//! core (D103) from the engine's, which is gone (D103, #587). An
 //! edge says a blocker holds up its dependent. A table says `implements
 //! Dependencies<Task, { schemas?, gatedStates?, satisfiedBy? }>` beside its
 //! Workflow. A blocker is a row of the dependent's own table, or of one the
@@ -89,10 +89,9 @@ use crate::workflow::{self, is_terminal_state, state_outcome, WorkflowOutcome};
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Dependencies";
 
-/// Dependencies' declaration, the file the compiler registers and the
-/// engine embeds, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../behaviors/declarations/Dependencies.behavior.json");
+/// Dependencies' declaration, read in place: the copy `make behaviors` writes
+/// of the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Dependencies.behavior.json");
 
 /// The sub-table that holds a row's edges, keyed by each one's number.
 pub const BLOCKERS: &str = "blockers";

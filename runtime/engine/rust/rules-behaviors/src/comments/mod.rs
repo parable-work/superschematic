@@ -1,6 +1,6 @@
 //! Comments, a conversation on each row (D16, rebuilt by D77), ported from
 //! the engine's `comments/` with its rules and words
-//! (`../behaviors/src/comments-contract.md`, batch 1 as batches 2 to 5 amend
+//! (`../comments-contract.md`, batch 1 as batches 2 to 5 amend
 //! it): messages, each top-level or a reply in the thread of a top-level
 //! one, one level deep, which their authors edit and delete, others react
 //! to and pin, and whose threads are resolved and reopened; a moderator
@@ -105,10 +105,9 @@ use messages::Message;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Comments";
 
-/// Its declaration file, which the compiler registers and the engine
-/// embeds.
-pub const DECLARATION: &str =
-    include_str!("../../../behaviors/declarations/Comments.behavior.json");
+/// Comments' declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../../declarations/Comments.behavior.json");
 
 /// The sub-table of the row's messages.
 pub const MESSAGES: &str = "messages";

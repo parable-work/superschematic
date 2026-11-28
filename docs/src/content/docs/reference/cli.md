@@ -265,8 +265,7 @@ A General schema's type that composes a behavior with `@behavior`
 (`behaviors` in the data forms) loads, and `--emit-ir` prints it. The
 `types` generator renders it: each language's types write
 `<Type>Behaviors`, the type's behaviors' fields as a read returns them,
-narrowed by the type's config
-([Behavior fields](/superschematic/guides/engine-behaviors/#behavior-fields)).
+narrowed by the type's config.
 A General schema with such a type builds, and development mode serves it
 (D117). A DB schema's type is a table, which composes a behavior by a
 field type or by `implements` (D103), so the load refuses `@behavior` on
@@ -854,13 +853,13 @@ registry.
 ## `behaviors --out <dir>`
 
 Write the declaration of every behavior the binary registers into the
-crate that implements it for the engine: one `<name>.behavior.json` per
-behavior, the same declaration the Go package embeds and registers. The
-Rust implementation embeds that copy (`include_str!`), so the engine and
+crate that implements it on the behaviors' core: one `<name>.behavior.json`
+per behavior, the same declaration the Go package embeds and registers.
+The Rust implementation embeds that copy (`include_str!`), so the core and
 the compiler read one declaration. Other `*.behavior.json` files in the
 directory are removed. `--package` and `--extension` narrow what is
-written to the behaviors one npm package ships and the ones one
-extension registered.
+written to the behaviors whose registration names one npm package and
+the ones one extension registered.
 
 A copy is canonical rather than the source bytes: the declaration's keys
 in `BehaviorDeclaration`'s order, each JSON Schema's object keys sorted
@@ -868,9 +867,8 @@ with number literals as written, two-space indents and a final newline.
 It changes only when the declaration does.
 
 ```
-superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
-superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
-superschematic behaviors --package @superschematic/rules --out runtime/engine/rust/rules-behaviors/declarations --check
+superschematic behaviors --out runtime/engine/rust/rules-behaviors/declarations
+superschematic behaviors --out runtime/engine/rust/rules-behaviors/declarations --check
 my-schematic behaviors --extension my --out crates/my-rules/declarations
 my-schematic behaviors --extension my --out crates/my-rules/declarations --check
 ```
@@ -879,7 +877,7 @@ my-schematic behaviors --extension my --out crates/my-rules/declarations --check
 | --- | --- | --- |
 | `--out` | (required) | the directory the copies go in |
 | `--check` | false | write nothing; fail, naming each file, when a copy differs, is missing, or is no registered behavior's |
-| `--package` | every behavior | only the behaviors this npm package ships, as their registration names it; fails, naming the packages there are, when it ships none |
+| `--package` | every behavior | only the behaviors whose registration names this npm package; fails, naming the packages there are, when none does |
 | `--extension` | every behavior | only the behaviors this extension (its `Name()`) registered; fails when it registers none |
 | `--naming` | built-in names | naming config file; this command has no service directory to discover one from |
 
@@ -888,23 +886,13 @@ extension's declarations are registered only in its own binary: an
 extension's copy comes from it, into the crate whose hooks run its
 behavior on the behaviors' core (its registration's `Rules` crate).
 acme.Rating's rules are declarative, so no crate implements it and acme
-keeps no copy. The core binary writes the behaviors the core
-declares into the four Rust crates that implement them: `Workflow`,
-`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
-`Reactions`, `Constants`, `Variants`, `Branches`, `Timers`,
-`StateRules`, `Numbering` and `Approvals` with `--package
-@superschematic/engine` into the engine's behaviors crate
-(`runtime/engine/rust/behaviors/declarations`), and `Lease`,
-`Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`
-with `--package @superschematic/engine-workqueue` into the work queue's
-(`runtime/engine-workqueue/rust/declarations`), `Stock`, `Calendar`,
-`Holds` and `Payments` with `--package @superschematic/engine-commerce`
-into the commerce crate's (`runtime/engine-commerce/rust/declarations`,
-D70), and `Seats`, `Reconcile`, `Schedules` and `Pool`, which no engine implements, with
-`--package @superschematic/rules` into the behaviors' core's
-(`runtime/engine/rust/rules-behaviors/declarations`, D104) (`make
-behaviors`; `make behaviors-check` in CI). Without `--extension`, an extension's binary
-writes the core's declarations beside its own.
+keeps no copy. The core binary writes every behavior the core declares
+into the behaviors' core's crate
+(`runtime/engine/rust/rules-behaviors/declarations`), which reads the
+copies of those it implements in place (`make behaviors`; `make
+behaviors-check` in CI). The engine's crates carried their own packages'
+copies until the engine went (D103, #587). Without `--extension`, an
+extension's binary writes the core's declarations beside its own.
 
 ## `stack init [<services-root>]`
 

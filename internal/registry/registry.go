@@ -136,9 +136,9 @@ func New(n naming.Naming) *Registry {
 			panic("registry: core decorators: " + err.Error())
 		}
 	}
-	// The core declares the behaviors @superschematic/engine implements
-	// (core_behaviors.go), so a binary with no extension linked accepts a
-	// schema that composes them.
+	// The core declares its behaviors (core_behaviors.go), which the
+	// behaviors' core runs (D103), so a binary with no extension linked
+	// accepts a schema that composes them.
 	for _, spec := range coreBehaviorSpecs() {
 		if err := r.RegisterBehavior(spec); err != nil {
 			panic("registry: core behaviors: " + err.Error())

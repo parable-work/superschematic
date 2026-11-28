@@ -54,9 +54,8 @@ func ToSnakeCase(s string) string {
 //
 // It is not ir.Kebab (getHTTPResponse is get-http-response there, and
 // line_item line-item): its output is a wire name, an operation's route
-// and capability and a tool's name, which the engine derives the same way
-// (runtime/engine/testdata/tool_parameters_parity.json), so changing it
-// would move routes and tools a deployed API serves.
+// and capability and a tool's name, so changing it would move routes and
+// tools a deployed API serves.
 func ToKebabCase(s string) string {
 	kebab := caseBoundaryRegex.ReplaceAllString(s, "${1}-${2}")
 	return strings.ToLower(kebab)

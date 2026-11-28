@@ -171,16 +171,16 @@ An exclusive, time-bounded lease on the row, held by one principal.
   after a time, whose own heartbeats show it alive.
 - **Beside `Approvals`.** A sign-off is a writing operation of another
   principal than the holder, so the guard refuses
-  [`Approvals`](/superschematic/guides/engine-behaviors/#approvals)'
+  [`Approvals`](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)'
   `signOff` and `withdrawSignOff` while a lease is active. List
   `"Approvals.signOff"` and `"Approvals.withdrawSignOff"` in `exempt` to
   let approvers sign leased work off.
 - **Beside `Numbering` and `Timers`.** A create holds no lease, so
-  [`Numbering`](/superschematic/guides/engine-behaviors/#numbering)
+  [`Numbering`](/superschematic/guides/database-tables/#a-rows-number-and-its-history)
   numbers each new row whoever holds what; list
   `"Numbering.assignNumber"` in `exempt` to backfill leased rows. List
   `"Timers.fireTimer"` to let a
-  [`Timers`](/superschematic/guides/engine-behaviors/#timers) deadline
+  [`Timers`](/superschematic/guides/api-routes/#a-tables-deadlines-timers-and-its-worker) deadline
   move leased work on.
 - **Not yet.** `directOn`, which sends a directive when a linked row
   gains a revision or a release, waits for the core to hear one on a
@@ -243,10 +243,10 @@ closes over it. A step that ends in a failure state (`outcomes: { failed:
 "failure" }` on the child's `Workflow`) stays a blocker, so the steps
 after it wait until someone removes the edge. The child table needs the
 `parentLink` relation, `Dependencies` when steps use `after`, and
-[`Constants`](/superschematic/guides/engine-behaviors/#constants-and-variants)
+[`Constants`](/superschematic/guides/database-tables/#fields-a-table-keeps-freezes-and-signs-off)
 over `keyField` and every copied field. To settle the parent from its
 steps, give it `Reactions` with `allTerminal` and `anyTerminal` rules
-([Reactions](/superschematic/guides/engine-behaviors/#reactions)). It
+([A table's reactions](/superschematic/guides/api-routes/#a-tables-reactions-and-its-change-queue)). It
 takes inline steps alone: the engine's `from`, a map read from a pinned
 revision, needs a pin a relation does not keep.
 
@@ -304,16 +304,6 @@ Attempts counted per failure class, against per-class caps and a total.
   `limitsPermission`, and the lease holder may not change it.
 - Nothing resets exhaustion.
 
-## The engine's work-queue package
-
-`@superschematic/engine-workqueue` ran these behaviors, Queue and
-Assignment among them, on the engine (`@superschematic/engine`), with a
-worker loop over the engine's client. Nothing in the repository's
-examples runs on the engine any more, and the engine and its packages are
-removed in a later step. The package's
-[README](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md)
-documents it until then.
-
 ## Where to go next
 
 - [Rows a worker leases, retries, beats and meters](/superschematic/guides/database-tables/#rows-a-worker-leases-retries-beats-and-meters):
@@ -321,6 +311,6 @@ documents it until then.
   and the API's behavior worker.
 - [Development mode](/superschematic/guides/development-mode/): the
   requests, routes, policy and runner the example uses.
-- [Engine behaviors](/superschematic/guides/engine-behaviors/): the core's
-  Dependencies, Rollups and Reactions, which Blueprint and a batch build
-  on.
+- [Values a row's children roll up, and blockers between rows](/superschematic/guides/database-tables/#values-a-rows-children-roll-up-and-blockers-between-rows):
+  the core's Dependencies and Rollups, which Blueprint and a batch build
+  on, beside [a table's reactions](/superschematic/guides/api-routes/#a-tables-reactions-and-its-change-queue).

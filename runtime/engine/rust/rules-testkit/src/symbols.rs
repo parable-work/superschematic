@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use serde_json::{Map, Value};
 
-use superschematic_engine_testkit::{iso_of, ms_of_iso};
+use crate::scenario::{iso_of, ms_of_iso};
 
 /// What a symbol is bound to.
 #[derive(Clone, Debug, PartialEq)]

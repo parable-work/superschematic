@@ -1,5 +1,5 @@
 //! Timers, named deadlines on a row (D56), ported onto the pure core (D103)
-//! from the engine's (`../behaviors/src/timers.rs`): a ticket answered
+//! from the engine's, which is gone (D103, #587): a ticket answered
 //! within four hours of entering open, an order paid within thirty minutes
 //! of its create, a reminder a day before an appointment. A deadline starts
 //! from a fact of the row: its create (`{ create: true }`), each entry of
@@ -166,9 +166,9 @@ pub const RESET_TIMER: &str = "resetTimer";
 /// The operation that moves a started deadline's due time.
 pub const SNOOZE_TIMER: &str = "snoozeTimer";
 
-/// Timers' declaration, the file the compiler registers and the engine
-/// embeds, read in place: what a host describes the behavior with.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Timers.behavior.json");
+/// Timers' declaration, read in place: the copy `make behaviors` writes of the
+/// one the compiler registers, what a host describes the behavior with.
+pub const DECLARATION: &str = include_str!("../declarations/Timers.behavior.json");
 
 // The members the configSchema's closed objects take.
 const CONFIG_KEYS: [&str; 4] = ["deadlines", "permission", "status", "sweepMs"];

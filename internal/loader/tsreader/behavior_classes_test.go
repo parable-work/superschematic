@@ -16,12 +16,10 @@ import (
 // derived from (D103).
 const coreBehaviorsDir = "../../registry/behaviors"
 
-// crateDeclarationDirs are the directories `make behaviors` writes each
-// package's canonical copies into, the files the core and the engine embed.
+// crateDeclarationDirs are the directories `make behaviors` writes the
+// canonical copies into, the files the core embeds: the behaviors' crate's
+// alone, since the engine's crates went (D103, #587).
 var crateDeclarationDirs = []string{
-	"../../../runtime/engine/rust/behaviors/declarations",
-	"../../../runtime/engine-workqueue/rust/declarations",
-	"../../../runtime/engine-commerce/rust/declarations",
 	"../../../runtime/engine/rust/rules-behaviors/declarations",
 }
 

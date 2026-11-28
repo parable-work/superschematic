@@ -1,7 +1,7 @@
 # superschematic (the schema compiler). Convenience targets for the Go
 # modules, the installed binary, the TypeScript authoring packages, the
 # schema runtimes, the TypeScript and Rust http runtimes, the version-graph
-# core, the engine and the engine's work-queue package.
+# core and the behaviors' core.
 # Mirrors the CI workflow gates (.github/workflows/ci.yml).
 #
 #   make setup && make all
@@ -24,17 +24,11 @@ export RUSTUP_TOOLCHAIN ?= $(RUST_VERSION)
 # command that links a scalar-dependent package needs this in CGO_LDFLAGS.
 # The version-graph binding (runtime/versiongraph/go) links the core's static
 # archive, which scripts/versiongraph-archive.sh (make versiongraph) stages,
-# the engine's (runtime/engine/go) the engine's, which
-# scripts/engine-archive.sh (make engine-archive) stages, and the behaviors'
-# core's (runtime/rules/go, D103) its own, which scripts/rules-archive.sh
-# (make rules-archive) stages.
-export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print) $(shell scripts/engine-archive.sh --print) $(shell scripts/rules-archive.sh --print)
+# and the behaviors' core's (runtime/rules/go, D103) its own, which
+# scripts/rules-archive.sh (make rules-archive) stages.
+export CGO_LDFLAGS := $(shell scripts/superscalar-dep.sh --print) $(shell scripts/versiongraph-archive.sh --print) $(shell scripts/rules-archive.sh --print)
 
-# Where make engine-go stages the test kit's engine archive, which the corpus
-# replay links in place of the core's (it is never shipped).
-ENGINE_REPLAY_LIB := $(CURDIR)/runtime/engine/go/lib/testkit/$(shell go env GOOS)_$(shell go env GOARCH)
-
-GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/engine/go runtime/rules/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/embedded extensions/resolvers extensions/pulumi extensions/topcoat cmd/superschematic
+GO_MODULES := . ir runtime/schema/go runtime/http/go runtime/versiongraph/go runtime/rules/go runtime/migrate/go extensions/gcp extensions/cloudflare extensions/embedded extensions/resolvers extensions/pulumi extensions/topcoat cmd/superschematic
 
 # Two programs, one CLI (docs/stack-model.md, section 13). BIN is the binary
 # a release ships and a user installs: cmd/superschematic, a Go module of its
@@ -55,8 +49,8 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 .PHONY: all setup build cli test lint fmt vet go-build go-test go-vet go-fmt-check go-lint \
         go-goldens catalog-check schema-file-types schema-file-types-check behavior-config-types behavior-config-types-check \
         behaviors behaviors-check \
-        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust engine-rust \
-        engine-rust-soak engine-archive engine-go engine-link-check rules-archive \
+        gcp-schemas gcp-schemas-check cloudflare-schemas cloudflare-schemas-check generic-schemas generic-schemas-check ts python rust rules-rust \
+        link-check rules-archive \
         versiongraph versiongraph-scenarios versiongraph-scenarios-ts versiongraph-scenarios-rust \
         versiongraph-scenarios-python docs cli-smoke example-migrations scrub versions clean
 
@@ -77,9 +71,6 @@ setup:
 	cd runtime/versiongraph/typescript && bun install
 	cd runtime/rules/typescript && bun install
 	cd runtime/rules-handler/typescript && bun install
-	cd runtime/engine/typescript && bun install
-	cd runtime/engine-workqueue/typescript && bun install
-	cd runtime/engine-commerce/typescript && bun install
 	cd runtime/schema/python && uv sync
 	cd runtime/versiongraph/python && uv sync
 
@@ -103,13 +94,13 @@ $(CORE_BIN): FORCE
 
 FORCE:
 
-go-build: versiongraph engine-archive rules-archive
+go-build: versiongraph rules-archive
 	@for m in $(GO_MODULES); do echo "==> go build $$m"; (cd $$m && go build ./...) || exit 1; done
 
 go-vet:
 	@for m in $(GO_MODULES); do echo "==> go vet $$m"; (cd $$m && go vet ./...) || exit 1; done
 
-go-test: versiongraph engine-archive rules-archive
+go-test: versiongraph rules-archive
 	@for m in $(GO_MODULES); do echo "==> go test $$m"; (cd $$m && go test -count=1 ./...) || exit 1; done
 
 go-fmt-check:
@@ -137,9 +128,8 @@ go-goldens: schema-file-types behavior-config-types
 catalog-check:
 	go run ./internal/tools/scalarcatalog -check
 
-# The schema-file JSON Schema and TypeScript types in ir/typescript, and the
-# engine's Rust schema reader's copy of the JSON Schema, are written from
-# the IR structs. CI fails when a committed file differs.
+# The schema-file JSON Schema and TypeScript types in ir/typescript are
+# written from the IR structs. CI fails when a committed file differs.
 schema-file-types:
 	go run ./internal/tools/schemafiletypes
 
@@ -196,35 +186,25 @@ generic-schemas-check:
 # TypeScript reader, behaviorclasses), which needs superscalar's checkout
 # in third_party, and so does acme.Rating, the acme example's declarative
 # behavior (examples/acme-schematic/ext/rating.behavior.ts, D103's step
-# 5), whose rating.behavior.json the extension embeds. Then the engine's behaviors crate, the work queue's crate (D58), the
-# commerce crate (D70) and the behaviors' core (rules-behaviors, for the
-# behaviors no engine implements, D104) implement the core's behaviors over
-# a copy of each declaration (internal/registry/behaviors), which the core
-# with no extension linked
-# writes into the crate that implements it, by the npm package that ships
-# it (--package): each behavior embeds its copy with include_str!. CI fails
-# when a committed copy differs.
-ENGINE_RUST_DECLARATIONS := runtime/engine/rust/behaviors/declarations
-WORKQUEUE_RUST_DECLARATIONS := runtime/engine-workqueue/rust/declarations
-COMMERCE_RUST_DECLARATIONS := runtime/engine-commerce/rust/declarations
+# 5), whose rating.behavior.json the extension embeds. Then the behaviors'
+# core (rules-behaviors) implements the core's behaviors over a copy of each
+# declaration (internal/registry/behaviors), which the core with no
+# extension linked writes into the crate, every core behavior's at once
+# (D103, #587): each behavior embeds its copy with include_str!. The
+# engine's crates, which carried their own packages' copies, are gone. CI
+# fails when a committed copy differs.
 RULES_RUST_DECLARATIONS := runtime/engine/rust/rules-behaviors/declarations
 
 behaviors:
 	go run ./internal/tools/behaviorclasses
 	go run ./internal/tools/behaviorclasses examples/acme-schematic/ext
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS)
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS)
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS)
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/rules --out $(RULES_RUST_DECLARATIONS)
+	go run ./internal/cmd/superschematic-core behaviors --out $(RULES_RUST_DECLARATIONS)
 	go run ./internal/tools/behaviorconfigtypes
 
 behaviors-check:
 	go run ./internal/tools/behaviorclasses -check
 	go run ./internal/tools/behaviorclasses -check examples/acme-schematic/ext
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine --out $(ENGINE_RUST_DECLARATIONS) --check
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-workqueue --out $(WORKQUEUE_RUST_DECLARATIONS) --check
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/engine-commerce --out $(COMMERCE_RUST_DECLARATIONS) --check
-	go run ./internal/cmd/superschematic-core behaviors --package @superschematic/rules --out $(RULES_RUST_DECLARATIONS) --check
+	go run ./internal/cmd/superschematic-core behaviors --out $(RULES_RUST_DECLARATIONS) --check
 
 ts:
 	cd packages && bun install --frozen-lockfile && bun run typecheck && bun test
@@ -233,11 +213,6 @@ ts:
 	cd runtime/rules-handler/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	cd runtime/http/typescript && bun install --frozen-lockfile && bun run build && bun run test
 	cd runtime/versiongraph/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
-	cd runtime/engine/typescript && bun install --frozen-lockfile
-	scripts/engine-napi.sh --js-behaviors >/dev/null
-	cd runtime/engine/typescript && bun run typecheck && bun run build && bun run test
-	cd runtime/engine-workqueue/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
-	cd runtime/engine-commerce/typescript && bun install --frozen-lockfile && bun run typecheck && bun run test
 	examples/engine-notes/scripts/check.sh
 	examples/engine-jobs/scripts/check.sh
 	examples/runtime-providers/scripts/check.sh
@@ -262,12 +237,9 @@ python:
 # too, and its lints run with and without each of its features. The schema
 # runtime's run again with arbitrary_precision too, which superscalar's
 # default lossless-json feature turns on: an error map and a number check
-# must not depend on either. The engine's schema reader (rust-ir) links
-# superscalar's core from the checkout `make setup` stands up, so
-# preserve_order is always on there; its lints and tests run with its
-# schemafile feature and without, and again with arbitrary_precision. The
-# http runtime's run again with its optional http-client feature, with its
-# identity features, whose store and route tests run on SQLite (and on the
+# must not depend on either. The http runtime's run again with its optional
+# http-client feature, with its identity features, whose store and route
+# tests run on SQLite (and on the
 # Postgres SUPERSCHEMATIC_IDENTITY_TEST_DATABASE_URL names, when it is set),
 # and with a stack server's features (D57): postgres, whose tests run on the
 # Postgres SUPERSCHEMATIC_POSTGRES_TEST_DATABASE_URL names, when it is set,
@@ -313,11 +285,6 @@ rust:
 	cd runtime/migrate/go && CGO_ENABLED=0 go build $(GO_BUILD_FLAGS) -o $(CURDIR)/bin/superschematic-migrate ./cmd/superschematic-migrate
 	cd runtime/migrate/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& SUPERSCHEMATIC_MIGRATE_BIN=$(CURDIR)/bin/superschematic-migrate cargo test
-	cd runtime/schema/rust-ir && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
-		&& cargo clippy --all-targets --all-features -- -D warnings \
-		&& cargo clippy --all-targets --all-features --features serde_json/arbitrary_precision -- -D warnings \
-		&& cargo test && cargo test --all-features \
-		&& cargo test --all-features --features serde_json/arbitrary_precision
 	cd runtime/versiongraph/rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings \
 		&& cargo clippy --all-targets --no-default-features -- -D warnings \
 		&& cargo clippy --target wasm32-unknown-unknown -- -D warnings && cargo test \
@@ -328,43 +295,39 @@ rust:
 		&& cargo clippy --no-default-features --features rusqlite -- -D warnings \
 		&& cargo test --features rusqlite && cargo test --features rusqlite,serde_json/preserve_order
 
-# The Rust engine's workspace (D58): every crate's format, its lints on
-# every feature combination of the databases (both, neither, and each
-# alone) and on the axum router over Postgres, as a Rust server builds it,
-# and its tests, under the toolchain RUSTUP_TOOLCHAIN names. The work
-# queue's crate (runtime/engine-workqueue/rust) and the commerce crate
-# (runtime/engine-commerce/rust) are members, so they build, lint and test
-# here with the rest. The
-# engine reads schemas through runtime/schema/rust-ir, which needs the
-# superscalar checkout (scripts/superscalar-dep.sh --checkout). The engine's
-# and the storage's tests run on SQLite, and on Postgres as well when
-# SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names one (say a container of your
-# own on a spare port, postgres://postgres:<password>@localhost:<port>/postgres?sslmode=disable),
-# each in a schema it creates and drops; without it they skip that pass.
-# The behaviors' Rust adapter (rules-adapter, D103) runs its store tests and
-# replays the core's transcripts on SQLite, and on Postgres as well when
-# SUPERSCHEMATIC_RULES_TEST_DATABASE_URL names one, in schemas of its own.
-# The test kit replays the scenario corpus
-# (runtime/engine/testdata/scenarios, or the directory ENGINE_CORPUS_DIR
-# names) on the same databases, and the HTTP corpus through the engine's
-# routes and its axum router, and fails when a corpus is missing.
-# CI's engine-rust job runs the same lints and the same tests against its
-# Postgres, the tests in shards (scripts/engine_rust_shards.py).
-engine-rust:
+# The behaviors' core's Rust workspace (runtime/engine/rust, D103): every
+# crate's format; its lints with every feature, with the defaults, with
+# none, with each database alone (the adapter's sqlite; the adapter's,
+# development mode's and runtime mode's postgres) and with development
+# mode's server over no database; and its tests, under the toolchain
+# RUSTUP_TOOLCHAIN names. The behaviors read scalars through superscalar's
+# core by path, which needs the superscalar checkout
+# (scripts/superscalar-dep.sh --checkout). The Rust adapter (rules-adapter)
+# runs its store tests and replays the core's transcripts on SQLite, and on
+# Postgres as well when SUPERSCHEMATIC_RULES_TEST_DATABASE_URL names one
+# (say a container of your own on a spare port,
+# postgres://postgres:<password>@localhost:<port>/postgres?sslmode=disable),
+# in schemas of its own, as development and runtime mode's tests do; pg's
+# connection test reads SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL. The
+# reference host (rules-testkit) replays the recorded scenarios
+# (runtime/engine/testdata/scenarios) and the hand-written ones
+# (runtime/engine/testdata/rules/scenarios), and holds the transcripts to
+# what it writes. Runtime mode's scenarios run the planner and the
+# migration runner SUPERSCHEMATIC_BIN and SUPERSCHEMATIC_MIGRATE_BIN name,
+# and say so and pass without them. CI's rules-rust-lint job runs the same
+# lints and its rules-rust job the same tests against its Postgres, in
+# shards (scripts/rules_rust_shards.py). The engine's crates, which this
+# workspace held beside these as engine-rust, went with the engine (D103,
+# #587).
+rules-rust:
 	cd runtime/engine/rust && cargo fmt --all --check \
 		&& cargo clippy --workspace --all-targets --all-features -- -D warnings \
 		&& cargo clippy --workspace --all-targets -- -D warnings \
 		&& cargo clippy --workspace --all-targets --no-default-features -- -D warnings \
-		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/sqlite -- -D warnings \
-		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres -- -D warnings \
-		&& cargo clippy --workspace --all-targets --no-default-features --features superschematic-engine/postgres,superschematic-engine/axum,superschematic-engine-testkit/axum -- -D warnings \
+		&& cargo clippy --workspace --all-targets --features superschematic-rules-adapter/sqlite -- -D warnings \
+		&& cargo clippy --workspace --all-targets --features superschematic-rules-adapter/postgres,superschematic-rules-dev/postgres,superschematic-rules-runtime/postgres -- -D warnings \
+		&& cargo clippy --workspace --all-targets --features superschematic-rules-dev/server -- -D warnings \
 		&& cargo test --workspace --all-features
-
-# The engine's static archive (D58), the core's C ABI over the core's
-# behaviors, staged where its Go binding links it
-# (runtime/engine/go/lib/<goos>_<goarch>).
-engine-archive:
-	scripts/engine-archive.sh >/dev/null
 
 # The behaviors' core's static archive (D103), superschematic-rules-wasm's
 # native build, staged where its Go binding links it
@@ -372,41 +335,13 @@ engine-archive:
 rules-archive:
 	scripts/rules-archive.sh >/dev/null
 
-# The engine's Go binding (runtime/engine/go), whose own tests go-test runs
-# over the core's archive, replays the HTTP corpus
-# (runtime/engine/testdata/http) through enginehttp, and the engine's own
-# scenario files through Engine.Do, over the test kit's archive, which has
-# the test behaviors and the recorded policies the corpora need, on SQLite
-# and on the Postgres SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL names, when it
-# is set.
-engine-go: engine-archive
-	scripts/engine-archive.sh --crate runtime/engine/rust/testkit-ffi --out $(ENGINE_REPLAY_LIB) >/dev/null
-	cd runtime/engine/go && CGO_LDFLAGS="-L$(ENGINE_REPLAY_LIB) $(CGO_LDFLAGS)" ENGINE_REPLAY_ARCHIVE=1 \
-		go test -count=1 -run Replay -v ./enginehttp/
-	scripts/engine-archive.sh >/dev/null
-
-# One Go binary that links superscalar's, the version graph's, the engine's
-# and the behaviors' core's archives together and calls each
-# (scripts/engine-link-check.sh), after checking that each of the four
-# defines its own C functions alone.
-engine-link-check:
-	scripts/engine-link-check.sh
-
-# The Rust engine's soaks on Postgres (D58), which CI does not run: two
-# engines on one database racing long, with more threads than either pool
-# has connections, then the invariants the CI tests check (no lost update,
-# no repeated seq, cursor or number, no over-committed budget, no job
-# claimed twice); event streams that see every event once while their
-# listener's session is ended every 200 ms; and reactions handled once
-# each while the runner's lease is taken from its holder every 300 ms
-# (testkit/tests/replicas_*.rs). They need
-# SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL; ENGINE_SOAK_CALLS sets the calls
-# each thread makes, and the orders the handover soak creates (200 unless
-# set).
-engine-rust-soak:
-	@test -n "$$SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL" || \
-		{ echo "set SUPERSCHEMATIC_ENGINE_TEST_DATABASE_URL to the Postgres the soaks run against" >&2; exit 1; }
-	cd runtime/engine/rust && cargo test -p superschematic-engine-testkit --all-features --test 'replicas_*' -- --ignored --nocapture
+# One Go binary that links superscalar's, the version graph's and the
+# behaviors' core's archives together and calls each (scripts/link-check.sh,
+# runtime/engine/testdata/linkcheck), after checking that each of the three
+# defines its own C functions alone. The engine's archive was a fourth until
+# the engine went (D103, #587).
+link-check:
+	scripts/link-check.sh
 
 # The version-graph core's static archive, staged where the Go binding links
 # it (runtime/versiongraph/go/lib/<goos>_<goarch>).
@@ -498,19 +433,10 @@ docs:
 # fixture-seats-db, fixture-schedules-db and fixture-pool-db, whose types
 # and tables compose the core's behaviors (D10, D104): --emit-ir carries all
 # twenty-eight, Seats, Reconcile, Schedules and Pool on their tables, and
-# json-schema admits them, and Links, Search, Queue and Branches too, whose
-# declarations stay registered though the build refuses them (D103 folds
-# them into schema features); fixture-commerce-currency-json holds a
-# commerce currency in a Finance.Currency own field (D70). The engine runs
-# the first nine documents with its own behaviors in
-# runtime/engine/typescript/test/core-behaviors.test.ts, and the work-queue
-# package fixture-workqueue-json in
-# runtime/engine-workqueue/typescript/test/package.test.ts, each fixture
-# that composed a folded behavior as the engine's copy of it as it was
-# (runtime/engine/testdata/documents, with fixture-search-json and
-# fixture-branches-json, which the loader no longer has), and the
-# commerce package's suites (runtime/engine-commerce/typescript) run its
-# behaviors on the addon. It builds
+# json-schema admits them, but not Links, Search, Queue and Branches, which
+# D103 folds into schema features and whose declarations went with the
+# engine (D103, #587); fixture-commerce-currency-json holds a
+# commerce currency in a Finance.Currency own field (D70). It builds
 # fixture-behaviors-json, a General schema.
 cli-smoke: $(CORE_BIN)
 	@rm -rf /tmp/superschematic-cli-smoke
@@ -558,8 +484,8 @@ cli-smoke: $(CORE_BIN)
 		grep -q "\"name\": \"$$b\"" /tmp/superschematic-cli-smoke/behaviors-ir.json && grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
 			|| { echo "cli-smoke: the core binary does not carry behavior $$b"; exit 1; }; done
 	@for b in Links Search Queue Branches; do \
-		grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
-			|| { echo "cli-smoke: json-schema does not admit $$b, whose declaration stays registered"; exit 1; }; done
+		! grep -q "\"const\": \"$$b\"" /tmp/superschematic-cli-smoke/schema-file.json \
+			|| { echo "cli-smoke: json-schema admits $$b, which no registry declares since the engine went"; exit 1; }; done
 
 # examples/migrations: plans its DB service from v1 to v2 for Postgres and
 # SQLite with the core alone, gates the plans on their hazards, and applies
@@ -584,7 +510,7 @@ versions:
 	python3 scripts/bump_version.py check
 	python3 -m unittest discover -s scripts -p 'test_*.py'
 
-test: go-test catalog-check schema-file-types-check behavior-config-types-check behaviors-check ts python rust engine-rust engine-go engine-link-check cli-smoke example-migrations versions
+test: go-test catalog-check schema-file-types-check behavior-config-types-check behaviors-check ts python rust rules-rust link-check cli-smoke example-migrations versions
 
 lint: go-vet go-fmt-check go-lint scrub
 

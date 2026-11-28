@@ -1,21 +1,17 @@
 // Command schemafiletypes writes the schema-file data form into the
-// @superschematic/schema-ir package, and the core JSON Schema into the
-// engine's Rust schema reader:
+// @superschematic/schema-ir package:
 //
 //	ir/typescript/schema-file.json  the JSON Schema `superschematic json-schema`
 //	                                prints with the core registry and the
 //	                                default naming
 //	ir/typescript/schema-file.d.ts  TypeScript types for the same documents,
 //	                                with the parts a registry closes left open
-//	runtime/schema/rust-ir/src/schemafile/schema-file.json
-//	                                the same JSON Schema, the Rust strict
-//	                                loader's default meta-schema, inside its
-//	                                crate (superschematic-schema-ir)
 //
 // They come from the reflection of the IR structs the JSON and YAML readers
 // validate against (internal/loader/schemafile). ir/typescript's
-// schema-file.json is the copy TestDefinitionGolden compares against; the
-// Rust crate's is byte for byte the same.
+// schema-file.json is the copy TestDefinitionGolden compares against. The
+// engine's Rust schema reader kept a copy of it too until the engine went
+// (D103, #587).
 //
 // Run from the repository root: go run ./internal/tools/schemafiletypes
 // With -check the command exits 1 when a committed file differs from what it
@@ -34,9 +30,8 @@ import (
 )
 
 const (
-	schemaPath     = "ir/typescript/schema-file.json"
-	typesPath      = "ir/typescript/schema-file.d.ts"
-	rustSchemaPath = "runtime/schema/rust-ir/src/schemafile/schema-file.json"
+	schemaPath = "ir/typescript/schema-file.json"
+	typesPath  = "ir/typescript/schema-file.d.ts"
 )
 
 func main() {
@@ -88,7 +83,7 @@ func render() (map[string][]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("schema-file TypeScript types: %w", err)
 	}
-	return map[string][]byte{schemaPath: definition, typesPath: types, rustSchemaPath: definition}, nil
+	return map[string][]byte{schemaPath: definition, typesPath: types}, nil
 }
 
 func fail(err error) {

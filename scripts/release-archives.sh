@@ -10,20 +10,17 @@
 #   lib/libsuperscalar_ffi.a              superscalar's, from the commit in
 #                                         superscalar.pin
 #   lib/libsuperschematic_versiongraph.a  the version graph's
-#   lib/libsuperschematic_engine.a        the engine's, its C ABI over the
-#                                         core's behaviors (D58)
 #   lib/libsuperschematic_rules.a         the behaviors' core's, its JSON C
 #                                         ABI (D103), which a generated ORM
 #                                         whose tables' fields are behaviors
 #                                         links through runtime/rules/go
-#   include/superschematic_engine.h       the engine's C ABI
 #   include/superschematic_rules.h        the behaviors' core's C ABI
 #   BUILD_COMMIT                          the commit the release is cut from
 #   LICENSE
 #
-# The four archives are built with tools.env's RUST_VERSION, so they link
+# The three archives are built with tools.env's RUST_VERSION, so they link
 # into one binary (scripts/lib/archive.sh says why;
-# scripts/engine-link-check.sh checks it). A server whose module comes from
+# scripts/link-check.sh checks it). A server whose module comes from
 # the module proxy finds none of them in the module cache, and links them
 # with CGO_LDFLAGS=-L<dir>/lib. internal/release names the file
 # (ArchiveName), and the CLI embeds each platform's digest.
@@ -61,7 +58,6 @@ fi
 
 "$ROOT/scripts/superscalar-dep.sh" --archive >/dev/null
 "$ROOT/scripts/versiongraph-archive.sh" >/dev/null
-"$ROOT/scripts/engine-archive.sh" >/dev/null
 "$ROOT/scripts/rules-archive.sh" >/dev/null
 
 name="superschematic-archives_${VERSION}_${PLATFORM}"
@@ -70,9 +66,7 @@ rm -rf "$dir"
 mkdir -p "$dir/lib" "$dir/include"
 cp "$ROOT/third_party/superscalar/go/lib/${goos}_${goarch}/libsuperscalar_ffi.a" "$dir/lib/"
 cp "$ROOT/runtime/versiongraph/go/lib/${goos}_${goarch}/libsuperschematic_versiongraph.a" "$dir/lib/"
-cp "$ROOT/runtime/engine/go/lib/${goos}_${goarch}/libsuperschematic_engine.a" "$dir/lib/"
 cp "$ROOT/runtime/rules/go/lib/${goos}_${goarch}/libsuperschematic_rules.a" "$dir/lib/"
-cp "$ROOT/runtime/engine/go/include/superschematic_engine.h" "$dir/include/"
 cp "$ROOT/runtime/rules/go/include/superschematic_rules.h" "$dir/include/"
 cp "$ROOT/LICENSE" "$dir/"
 printf '%s\n' "${GITHUB_SHA:-$(git -C "$ROOT" rev-parse HEAD)}" > "$dir/BUILD_COMMIT"

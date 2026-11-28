@@ -1,6 +1,6 @@
 [package]
 name = "superschematic-engine-pg"
-description = "The engine crates' one Postgres layer: the class of a SQLSTATE each maps its errors from, and a connection string's sslmode read as the HTTP runtime reads it, with the TLS that honours it"
+description = "The rules crates' one Postgres layer: the class of a SQLSTATE each maps its errors from, and a connection string's sslmode read as the HTTP runtime reads it, with the TLS that honours it"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -12,9 +12,8 @@ publish.workspace = true
 default = []
 # The TLS a connection opens with: rustls on ring, through
 # tokio-postgres-rustls, which the synchronous postgres crate and
-# tokio-postgres both connect with. Pure Rust, so the engine's static archive
-# and addon link no system TLS library: a Go binary links them with the
-# flags it always did, and an addon loads on a host without OpenSSL.
+# tokio-postgres both connect with. Pure Rust, so what links it links no
+# system TLS library and runs on a host without OpenSSL.
 tls = ["dep:rustls", "dep:rustls-native-certs", "dep:tokio-postgres-rustls"]
 
 [dependencies]

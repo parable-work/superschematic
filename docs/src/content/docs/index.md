@@ -101,7 +101,7 @@ composed behaviors on development mode.
    Python and Rust, [stacks and deploys](/superschematic/guides/stacks/),
    [a server with no build](/superschematic/guides/engine/), which runs a
    schema with no generated code on development mode, with
-   [behaviors](/superschematic/guides/engine-behaviors/) and
+   [behaviors](/superschematic/guides/database-tables/#beyond-plain-tables) and
    [work queues](/superschematic/guides/work-queues/), and
    [pages with Topcoat](/superschematic/guides/topcoat/), which call a Rust
    API in-process. [Events and notifications](/superschematic/guides/notifications/),

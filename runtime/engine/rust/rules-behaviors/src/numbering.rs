@@ -79,8 +79,9 @@ use crate::timers::parse_date_time;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Numbering";
 
-/// Numbering's declaration, the engine's file, read in place.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Numbering.behavior.json");
+/// Numbering's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Numbering.behavior.json");
 
 /// The row's number in its count, from 1.
 pub const SEQ: &str = "seq";

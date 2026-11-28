@@ -1,10 +1,10 @@
 //! The MCP endpoint of a generated API (D81, D116): `POST /api/mcp` serves
 //! the API's visible `@mcp` operations as MCP tools over the streamable
 //! HTTP transport, statelessly, as the TypeScript runtime's `mcp.ts` serves
-//! them and the engine serves its own (`runtime/engine/rust/engine/src/
-//! api/mcp.rs`, whose conventions this module copies; the runtime does not
-//! depend on the engine). The three are held to the same recorded
-//! exchanges, `runtime/engine/testdata/http/mcp.json`.
+//! them and the Go runtime's mcp package does, with the conventions this
+//! module copied from the engine's own endpoint, which went with the engine
+//! (D103, #587). The three are held to the exchanges the engine recorded,
+//! `runtime/engine/testdata/http/mcp.json`.
 //!
 //! - The 2025 revisions (a request with no per-request `_meta` envelope):
 //!   `initialize`, negotiating one of [`MCP_INITIALIZE_VERSIONS`], `ping`,

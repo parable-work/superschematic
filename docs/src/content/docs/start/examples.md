@@ -49,16 +49,13 @@ Postgres: set `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` for the
 
 ## Runtime references
 
-The generated code and the engine link runtimes, and each one has its own
-README:
+The generated code and the servers with no build link runtimes, and each
+one has its own README:
 
 - [schema runtime](https://github.com/parable-work/superschematic/blob/main/runtime/schema/README.md), which generated types link
 - HTTP runtime for [Go](https://github.com/parable-work/superschematic/blob/main/runtime/http/go/README.md),
   [Rust](https://github.com/parable-work/superschematic/blob/main/runtime/http/rust/README.md) and
   [TypeScript](https://github.com/parable-work/superschematic/blob/main/runtime/http/typescript/README.md), which generated servers link
-- [engine](https://github.com/parable-work/superschematic/blob/main/runtime/engine/README.md), its
-  [work queue](https://github.com/parable-work/superschematic/blob/main/runtime/engine-workqueue/README.md) and its
-  [commerce package](https://github.com/parable-work/superschematic/blob/main/runtime/engine-commerce/README.md)
 - the behaviors' core in [TypeScript](https://github.com/parable-work/superschematic/blob/main/runtime/rules/typescript/README.md)
   and [Go](https://github.com/parable-work/superschematic/blob/main/runtime/rules/go/README.md), and
   [development mode's handler](https://github.com/parable-work/superschematic/blob/main/runtime/rules-handler/typescript/README.md)

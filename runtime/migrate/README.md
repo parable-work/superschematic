@@ -386,9 +386,8 @@ its members do not inherit). It makes the user a member that may act as
 the role, which Postgres 16 does not make a role's creator, creates
 `schema` owned by the role, or gives an existing schema to it, and grants
 the role to each of `members`, taking it back from any other role that
-holds it but the user's own. The engine acts as its schema's owner
-(`runtime/engine/README.md`, "Several instances on one Postgres
-database"), so whatever any member creates there, at the engine's own
+holds it but the user's own. The engine acted as its schema's owner,
+so whatever any member creates there, at the engine's own
 migrations or a publish, is the role's, and every member may change it
 later; `readWrite`'s grants leave the schema out. In a transaction of its
 own, it creates the `unaccent` extension, which the engine's Search needs

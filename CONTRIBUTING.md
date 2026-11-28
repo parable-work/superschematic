@@ -78,9 +78,7 @@ By making a contribution to this project, I certify that:
 | [`runtime/http/`](runtime/http/) | The HTTP runtime generated servers link, in Go, Rust and TypeScript |
 | [`runtime/versiongraph/`](runtime/versiongraph/) | The version-graph core (Rust, with a Go binding and a wasm build) and its engines in Go, TypeScript, Rust and Python |
 | [`runtime/migrate/`](runtime/migrate/) | The migration runner: `superschematic-migrate` applies the plans `superschematic migrate plan` writes |
-| [`runtime/engine/`](runtime/engine/) | `@superschematic/engine`: runs a schema with no generated code; its Cargo workspace also holds the behaviors' core and the crates of development and runtime mode |
-| [`runtime/engine-workqueue/`](runtime/engine-workqueue/) | `@superschematic/engine-workqueue`: claimable work for the engine |
-| [`runtime/engine-commerce/`](runtime/engine-commerce/) | `@superschematic/engine-commerce` and its crate: the engine's `Stock`, `Calendar`, `Holds` and `Payments` |
+| [`runtime/engine/`](runtime/engine/) | The Cargo workspace of the behaviors' core (D103) and of the crates of development and runtime mode (D117), and the transcripts every rules host replays |
 | [`runtime/rules/`](runtime/rules/) | The behaviors' core (D103): for Go, a cgo binding and the adapter every Go caller runs it through; for TypeScript, `@superschematic/rules`, the Rust core built for WebAssembly |
 | [`runtime/rules-handler/`](runtime/rules-handler/) | `@superschematic/rules-handler`: development mode's request handler for a TypeScript server (D117) |
 | [`tasks/`](tasks/) | The shape of the task file and of the plan (D203), with their JSON Schemas: what a Tasks service's build writes and `tasks plan` prints, which a forge reads |
@@ -88,13 +86,12 @@ By making a contribution to this project, I certify that:
 | [`extensions/`](extensions/), [`examples/`](examples/) | The official extensions (`gcp`, `cloudflare`, `embedded`, `resolvers`, `pulumi`), `topcoat`, and example extensions and projects |
 | [`agent/`](agent/), [`.claude-plugin/`](.claude-plugin/) | The agent skill for building with superschematic, and the marketplace that publishes it (D76) |
 | [`docs/`](docs/) | The docs site and the design documents |
-| [`scripts/`](scripts/) | The build and release scripts: superscalar's and the Rust cores' static archives, the engine's addon, release archives and tags, and the scrub check |
+| [`scripts/`](scripts/) | The build and release scripts: superscalar's and the Rust cores' static archives, release archives and tags, and the scrub check |
 | [`superschematic.toml`](superschematic.toml) | The default naming file, every key written out |
 
-The repository has fifteen Go modules: the root (the compiler), `ir`,
+The repository has fourteen Go modules: the root (the compiler), `ir`,
 `runtime/schema/go`, `runtime/http/go`, `runtime/versiongraph/go`,
-`runtime/engine/go` (the engine's binding), `runtime/rules/go` (the
-behaviors' core's binding and adapter, D103),
+`runtime/rules/go` (the behaviors' core's binding and adapter, D103),
 `runtime/migrate/go` (the migration runner), `extensions/gcp`,
 `extensions/cloudflare`, `extensions/embedded`, `extensions/resolvers`,
 `extensions/pulumi`, `extensions/topcoat` and
@@ -266,12 +263,12 @@ agent or a bot with write access counts.
 | `make go-lint`        | `golangci-lint run` with `.golangci.yml` in the Go modules           |
 | `make catalog-check`  | The committed TypeScript and Python scalar catalogs match the pinned superscalar, and the TypeScript one's value classes match the graph descriptor's rule, and the docs' scalar page matches the pinned superscalar |
 | `make schema-file-types-check` | The committed schema-file JSON Schema and TypeScript types in `ir/typescript` match the IR |
-| `make behaviors-check` | The copies of the core's behavior declarations in the crates that implement them (the engine's `runtime/engine/rust/behaviors/declarations`, the work queue's `runtime/engine-workqueue/rust/declarations`, the commerce crate's `runtime/engine-commerce/rust/declarations`) match the core registry; `make behaviors` rewrites them |
+| `make behaviors-check` | The copies of the core's behavior declarations in the behaviors' core's crate (`runtime/engine/rust/rules-behaviors/declarations`) match the core registry; `make behaviors` rewrites them |
 | `make build`          | `go build ./...` in the Go modules, then `bin/superschematic`, the installed binary (`cmd/superschematic`: the core with the gcp target, the Cloudflare DNS platform and the Pulumi provisioner linked) |
 | `make cli`            | `bin/superschematic` and `bin/superschematic-migrate` alone, over superscalar's archive, built or, with no `cargo` on `PATH`, prebuilt ([Without Rust](#without-rust)) |
 | `make cli-smoke`      | `bin/superschematic-core`, the core with no extension linked (`internal/cmd/superschematic-core`, never shipped), builds the DB, API and General fixtures |
 | `make example-migrations` | `examples/migrations/scripts/check.sh`: `migrate plan` between the example's two versions for Postgres and SQLite, its hazard gate, and `superschematic-migrate` applying it to SQLite, and to Postgres when `SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL` is set; the outputs the docs quote match `testdata/generated/` there |
-| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/rules/typescript`, `runtime/rules-handler/typescript`, `runtime/http/typescript`, `runtime/versiongraph/typescript`, `runtime/engine/typescript`, `runtime/engine-workqueue/typescript` and `runtime/engine-commerce/typescript` typecheck, build and test; the rules package builds the behaviors' core for wasm32 and runs its loader's and contract's tests under Bun and a smoke under Node.js, the rules-handler package builds development mode's handler for wasm32 and replays every rules transcript and rules-dev's store session through it on bun:sqlite, tests its routes and event stream, reads SQLite files across it and `superschematic-dev` (which it builds), and runs a smoke over node:sqlite under Node.js, and the http runtime's adapter replays the core's transcript on bun:sqlite (and on Postgres when `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` names one); the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the engine's, the work-queue package's and the commerce package's tests run under Node.js and Bun, and so do the end-to-end tests of `examples/engine-notes` and `examples/engine-jobs` (`scripts/check.sh` in each) |
+| `make ts`             | `packages/`, `runtime/schema/typescript`, `runtime/rules/typescript`, `runtime/rules-handler/typescript`, `runtime/http/typescript` and `runtime/versiongraph/typescript` typecheck, build and test; the rules package builds the behaviors' core for wasm32 and runs its loader's and contract's tests under Bun and a smoke under Node.js, the rules-handler package builds development mode's handler for wasm32 and replays every rules transcript and rules-dev's store session through it on bun:sqlite, tests its routes and event stream, reads SQLite files across it and `superschematic-dev` (which it builds), and runs a smoke over node:sqlite under Node.js, and the http runtime's adapter replays the core's transcript on bun:sqlite (and on Postgres when `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` names one); the version-graph package builds the version-graph core for wasm32 and runs every vector through the package, and every scenario on SQLite, and the SQLite adapter's tests under Bun and Node.js; the end-to-end tests of `examples/engine-notes` and `examples/engine-jobs` (`scripts/check.sh` in each) run under Node.js and Bun |
 | `make python`         | `runtime/schema/python` pytest; `runtime/versiongraph/python` fmt, clippy `-D warnings`, the PyO3 extension built by uv with maturin, and every core vector and the engine's tests that need no database through the package under the default Python and 3.9 |
 | `make rust`           | `runtime/http/rust`, `runtime/schema/rust` and `runtime/versiongraph/rust` fmt, clippy `-D warnings` (the core for native and wasm32), test; the schema runtime's and the version-graph crates' tests again with the serde_json features superscalar turns on |
 | `make versiongraph`   | Builds the version-graph core's static archive the Go binding links (`scripts/versiongraph-archive.sh`) |
@@ -430,16 +427,14 @@ or `bun run build` in a runtime package itself.
 
 A build run outside the tests (`make ts`, CI, another terminal) never
 removes what a test reads, but it does not swap it in as a whole either.
-The HTTP runtime's, the engine's and the work queue's `bun run build`
-compile through `scripts/build-dist.mjs` into a `.dist-build-*` staging
+The HTTP runtime's `bun run build` compiles through `scripts/build-dist.mjs` into a `.dist-build-*` staging
 directory, then rename each changed file into `dist/` and remove the files
 the build no longer writes. So `dist/` is never missing, and no file in it
 is ever missing or half written, and a rebuild with the same output
 changes nothing. But while a build whose output changed moves its files
 in, a reader that holds no lock can load one build's module beside
 another's. The script's header says why it does not swap the whole
-directory. `scripts/engine-napi.sh` likewise renames the new addon over
-the old one in `native/`. `internal/testpaths`'s
+directory. `internal/testpaths`'s
 `TestBuildDistNeverLeavesDistMissing`,
 `TestBuildDistLeavesAnIdenticalRebuildAlone` and
 `TestBuildOnceAcrossProcesses` show this.
@@ -490,16 +485,13 @@ and concrete.
 
 One version for everything: the npm packages (`@superschematic/schema`, `db`,
 `api`, `schema-config`, `stack`, `schema-ir`, `schema-runtime`,
-`http-runtime`, `versiongraph`, `engine`, `engine-workqueue`,
-`engine-commerce`, and the
-engine's prebuilt addons `engine-darwin-arm64`, `engine-darwin-x64`,
-`engine-linux-x64-gnu` and `engine-linux-arm64-gnu`), the
+`http-runtime`, `versiongraph` and `rules`), the
 PyPI distributions (`superschematic-schema-runtime`, and
 `superschematic-versiongraph`, which is not published), the crates
 (`superschematic-schema-runtime`, `superschematic-http-runtime`, and
 `superschematic-versiongraph`,
 `superschematic-versiongraph-engine` and
-`superschematic-versiongraph-python`, which are not published) and the eleven
+`superschematic-versiongraph-python`, which are not published) and the fourteen
 Go modules all carry the SemVer
 version in `versions.env`, and `scripts/bump_version.py` is the only thing
 that writes it. `bump_version.py check` fails when any site disagrees; CI
@@ -509,7 +501,7 @@ building anything. `0.0.0` means unreleased.
 The Go modules are versioned by tags, one per module because each is its own
 module: `vX.Y.Z` (root), `ir/vX.Y.Z`, `runtime/schema/go/vX.Y.Z`,
 `runtime/http/go/vX.Y.Z`, `runtime/versiongraph/go/vX.Y.Z`,
-`runtime/engine/go/vX.Y.Z`, `runtime/rules/go/vX.Y.Z`,
+`runtime/rules/go/vX.Y.Z`,
 `runtime/migrate/go/vX.Y.Z`, `extensions/gcp/vX.Y.Z`,
 `extensions/cloudflare/vX.Y.Z`, `extensions/embedded/vX.Y.Z`,
 `extensions/resolvers/vX.Y.Z`, `extensions/pulumi/vX.Y.Z`, `extensions/topcoat/vX.Y.Z` and
@@ -527,27 +519,13 @@ binary is not `go install`able: users download it from the release or run
 A generated Go server links superscalar's static archive, and the version
 graph's and the behaviors' core's when it uses them, through cgo, and no
 module the module proxy serves carries them. Each release ships them, with
-the engine's archive and C ABI header while the engine is in the tree, as `superschematic-archives_<version>_<platform>.tar.gz`
+the behaviors' core's C ABI header, as `superschematic-archives_<version>_<platform>.tar.gz`
 beside the CLI, built by `scripts/release-archives.sh` with `RUST_VERSION`
 in the release's `build-archives` job, before the CLIs: each CLI links its
 platform's tarball and every tarball's SHA-256 (`internal/release`), which
 the Dockerfiles and workflows it generates pin
 ([`docs/stack-model.md`](docs/stack-model.md), section 8.2; D47, amended).
 A CLI built any other way names no digests.
-
-The same job packs the engine's prebuilt Node-API addon for its platform
-(D58): `scripts/release-engine-addon.sh` builds the core's addon
-(`runtime/engine/rust/addon`) with the engine workspace's `dist` profile
-(fat LTO, one codegen unit, symbols stripped), loads it and opens an
-engine on it, and packs `@superschematic/engine-<target>` from
-`runtime/engine/typescript/npm/<target>` (napi-rs's per-platform layout:
-the package's `os`, `cpu` and, on Linux, `libc`, and the `.node`).
-`assemble` names the four as `@superschematic/engine`'s
-`optionalDependencies` at the release's version, so npm installs the one
-for its host, and `publish-npm` publishes them before the engine. On
-Linux the job logs the newest glibc symbol version the addon needs, which
-the runner's glibc sets: an older glibc builds the addon from source
-(`scripts/engine-napi.sh`), as a Docker image does.
 
 `release-pr.yml` opens a pull request with the workflow token, which the
 repository setting "Allow GitHub Actions to create and approve pull requests"
@@ -587,7 +565,6 @@ A release is three steps, each started by a person. For the first release,
    `ir/v0.1.0-alpha.1`, `runtime/schema/go/v0.1.0-alpha.1`,
    `runtime/http/go/v0.1.0-alpha.1`,
    `runtime/versiongraph/go/v0.1.0-alpha.1`,
-   `runtime/engine/go/v0.1.0-alpha.1`,
    `runtime/rules/go/v0.1.0-alpha.1`,
    `runtime/migrate/go/v0.1.0-alpha.1` and the extension and
    `cmd/superschematic` tags on the same commit. `release.yml` runs
@@ -615,8 +592,7 @@ A release is three steps, each started by a person. For the first release,
 
 After the release, `go get github.com/parable-work/superschematic@v0.1.0-alpha.1`
 (and `.../ir@`, `.../runtime/schema/go@`, `.../runtime/http/go@`,
-`.../runtime/versiongraph/go@`, `.../runtime/engine/go@`,
-`.../runtime/rules/go@`, `.../runtime/migrate/go@`,
+`.../runtime/versiongraph/go@`, `.../runtime/rules/go@`, `.../runtime/migrate/go@`,
 `.../extensions/gcp@`, `.../extensions/pulumi@` and
 `.../extensions/topcoat@` at the same version) resolves, so a downstream
 distribution can link the official extensions. The migration runner needs no cgo. The other Go modules

@@ -31,10 +31,10 @@ type behaviorsFlags struct {
 }
 
 // newBehaviorsCmd writes the declaration of every behavior the binary
-// registers into the crate that implements them (D16, D58), by the npm
-// package that ships it. It is a command of the binary, not a tool of the
-// core module, because an extension's declarations are registered only in
-// its own binary.
+// registers into the crate that implements them (D16, D103), by the npm
+// package its registration names. It is a command of the binary, not a
+// tool of the core module, because an extension's declarations are
+// registered only in its own binary.
 func newBehaviorsCmd(a *app) *cobra.Command {
 	flags := &behaviorsFlags{}
 	cmd := &cobra.Command{
@@ -49,17 +49,15 @@ crate and the compiler read one declaration.
 A copy is canonical: the declaration's keys in their documented order,
 each JSON Schema's object keys sorted, two-space indents and a final
 newline, whatever the source file's layout. Other *.behavior.json files in
-the directory are removed. With --package, only the behaviors that npm
-package ships are written: the core's behaviors ship in
-@superschematic/engine (the crate runtime/engine/rust/behaviors),
-@superschematic/engine-workqueue (runtime/engine-workqueue/rust),
-@superschematic/engine-commerce (runtime/engine-commerce/rust) and
-@superschematic/rules (runtime/engine/rust/rules-behaviors/declarations,
-the behaviors the behaviors' core alone implements, on a table, D104), and
-each crate carries only its own. With --extension, only the behaviors that
-extension registered are written, into the crate whose hooks run them
-on the behaviors' core (its registration's Rules crate). Given both, a
-behavior must match both.
+the directory are removed. The behaviors' core's crate carries a copy of
+every core behavior (runtime/engine/rust/rules-behaviors/declarations,
+D103). With --package, only the behaviors whose registration names that
+npm package are written: of the core's, @superschematic/rules names the
+ones the behaviors' core alone implements, on a table (D104), and
+@superschematic/engine the ones a General schema composes with @behavior.
+With --extension, only the behaviors that extension registered are
+written, into the crate whose hooks run them on the behaviors' core (its
+registration's Rules crate). Given both, a behavior must match both.
 
 With --check nothing is written: the command fails, naming each file, when
 a copy differs, is missing, or has no registered behavior. CI runs it so a
@@ -67,9 +65,8 @@ changed declaration cannot reach the compiler without its implementation's
 copy.
 
 Examples:
-  superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
-  superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
-  superschematic behaviors --package @superschematic/rules --out runtime/engine/rust/rules-behaviors/declarations --check
+  superschematic behaviors --out runtime/engine/rust/rules-behaviors/declarations
+  superschematic behaviors --out runtime/engine/rust/rules-behaviors/declarations --check
   my-schematic behaviors --extension my --out crates/my-rules/declarations
   my-schematic behaviors --extension my --out crates/my-rules/declarations --check`,
 		Args: cobra.NoArgs,
@@ -80,7 +77,7 @@ Examples:
 	cmd.Flags().StringVar(&flags.out, "out", "", "directory the <name>.behavior.json files go in (required)")
 	cmd.Flags().BoolVar(&flags.check, "check", false, "write nothing; fail when the directory's copies are not what would be written")
 	cmd.Flags().StringVar(&flags.extension, "extension", "", "only the behaviors this extension registered (its Name())")
-	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors this npm package ships (@superschematic/engine, @superschematic/engine-workqueue, @superschematic/engine-commerce, @superschematic/rules)")
+	cmd.Flags().StringVar(&flags.pkg, "package", "", "only the behaviors whose registration names this npm package (of the core's, @superschematic/rules for those only a table composes, @superschematic/engine for the rest)")
 	addNamingFlag(cmd, &flags.namingPath, "(default: built-in names; behaviors has no service directory to find superschematic.toml from)")
 	_ = cmd.MarkFlagRequired("out")
 	return cmd

@@ -1,159 +1,42 @@
 # Engine scenarios
 
-What the engine did, recorded as data, so every binding of it (D58: the Rust
-engine itself, its napi and C ABI bindings, and the servers that link it) can
-replay it and hold itself to the same answers. The corpus was first recorded
-from the TypeScript engine (`runtime/engine/typescript` before the cutover,
-milestone 14), which the Rust engine was held to; since the cutover
-`@superschematic/engine` is the Rust engine through its Node-API addon, and
-the corpus is recorded from it, through the package's suite on the test
-addon (`scripts/engine-napi.sh --js-behaviors`), whose bridge runs the
-behaviors the tests write in TypeScript. Each file is the recording of one test
-file of the engine's suite, or, as `workqueue-<file>.json`, of the work
-queue's (below); each scenario in it is one test, the calls the
-test made on the engines it opened and what each call returned or threw.
-`../http` holds the same for the HTTP routes, the event stream and MCP.
-Cases of the behaviors' core that the engine recorded none of are written
-by hand in this format in `../rules/scenarios` (D104), and are never
-re-recorded.
+What the engine (D58) did, recorded as data: each file is the recording of
+one test file of the engine's suite, or of the work queue's
+(`workqueue-<file>.json`) or the commerce package's (`commerce-<file>.json`,
+D70), and each scenario in it is one test, the calls the test made on the
+engines it opened and what each call returned or threw. The engine held its
+bindings and servers to them; the behaviors' core (D103) holds itself to
+them now. Cases of the core that the engine recorded none of are written by
+hand in this format in `../rules/scenarios` (D104).
 
-The files are written by the recorder, `typescript/test/recorder.ts`, never
-by hand. With `ENGINE_RECORD=<dir>` set, every engine a test opens through
-`test/helpers.ts` (`openTestEngine`, `openEngine`) is a proxy that records
-each public call the test makes through it, and at exit each test file's
-scenarios are written to `<dir>/scenarios/<file>.json`. `test/corpus.test.ts`
-records the curated files below again, under Node.js, and fails when a
-committed file is not what the recorder writes:
+The engine went (D103, #587), and with it the recorder that wrote these
+files, so they are frozen: never re-recorded, and never edited by hand. The
+files left are the ones a rules host replays: the reference host's replayer
+(`runtime/engine/rust/rules-testkit`, which also writes each recording's
+transcript, `../rules/<name>.transcript.json`, that every adapter replays),
+development mode's access replay (`runtime/engine/rust/rules-dev/tests/access.rs`,
+`access.json`), and `core-reactions-holds-revised.json`, the answers of
+Reactions' holds and revised that the core has yet to port. The recordings
+of what the engine alone ran (its namespaces, registry, events, unique
+keys, list filters and compatibility rules, the behaviors D103 folds into
+schema features, Links, Search, Queue and Branches, and the work queue's
+filters and package) went with it.
 
-```
-scripts/engine-napi.sh --js-behaviors
-cd runtime/engine/typescript && bun run build
-UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts   # rewrite scenarios/ and http/; review the diff
-ENGINE_RECORD=/tmp/corpus node --test 'test/*.test.ts'   # record every test file, curated or not
-```
-
-The recording is Node.js's. A test's name carries `(node)`, the SQLite
-module the TypeScript engine ran it on, which the engine, with a SQLite of
-its own, keeps as the name of its one run.
-
-## Which tests
-
-The corpus holds the scenarios of 30 test files: every core behavior's
-(`core-*.test.ts`) and the engine's own `access`, `compat`, `events`,
-`instances`, `list-filters`, `namespaces`, `normalize`, `registry` and
-`unique`. `test/corpus.test.ts` lists them (`SCENARIO_FILES`). Every test file
-records, but the others are left out of the committed corpus to keep it
-small enough to review (about 4 MB):
-
-- the behavior API's files (`behavior-*.test.ts`) and the runner's, retention's
-  and the value store's (`runner*.test.ts`, `retention.test.ts`,
-  `values.test.ts`) define nearly every behavior they run in TypeScript; D58
-  runs the engine's TypeScript suite against the Rust engine, these through
-  the test addon's bridge, and a replayer without TypeScript cannot run them;
-- `tools.test.ts`, `tools-parity.test.ts`, `behavior-guidance.test.ts`,
-  `display.test.ts` and `client-codegen.test.ts` are mostly the describe and
-  tools documents, megabytes of them; `../tool_parameters_parity.json` and
-  `../client_codegen_parity.json` hold what the generators read;
-- `engine-migrations.test.ts` writes old files with SQL of its own; `../sqlite`
-  holds a file today's engine wrote;
-- `identity.test.ts` is the host's identity service (D50), whose session ids
-  come from a random source the recorder does not seed;
-- the client's tests (`client*.test.ts`) drive the HTTP API, which `../http`
-  records from the HTTP tests.
-
-A scenario whose JSON is longer than 200,000 characters (one that creates
-hundreds of instances to reach a limit) is not written; its file names it in
-`omitted`.
-
-## The work queue's files
-
-The 15 `workqueue-*.json` files (about 1.8 MB) are the work queue's suite,
-`runtime/engine-workqueue/typescript/test`, recorded by the same recorder:
-its `test/helpers.ts` opens every engine through `recordOpen` and calls
-`recordPackage('workqueue-', workQueueBehaviors)`, which names each file
-`workqueue-<file>.json` and says which behaviors are the package's. Its
-`test/corpus.test.ts` lists the curated files (`SCENARIO_FILES`) and holds
-them to what the recorder writes, through the check the engine's own corpus
-test runs (`typescript/test/corpus.ts`); each check rewrites and holds only
-its own package's files:
-
-```
-cd runtime/engine-workqueue/typescript && bun run build   # after the engine's
-UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts     # rewrite scenarios/workqueue-*.json; review the diff
-```
-
-Every test file that opens an engine is in the corpus, but three:
-
-- `guidance.test.ts` reads the describe and tools documents; each of its
-  scenarios is past 100,000 characters;
-- `worker.test.ts` records nothing (`openTestEngine(options, { record: false })`):
-  the worker (`@superschematic/engine-workqueue/worker`) is a TypeScript
-  runtime that reaches the engine over HTTP on its own timers and the wall
-  clock, several handlers at once, so which calls the engine sees, and in
-  what order, changes from run to run, and what the tests hold to account is
-  the worker, not the engine;
-- `sqlite-corpus.test.ts` writes the SQLite corpus (`../sqlite`), opening its
-  engine directly.
-
-A replayer reads them as it reads the engine's, with these differences:
-
-- `open`'s `behaviors` names the work queue's behaviors, `Lease`,
-  `Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`, in
-  the order the test passed them: all seven, or a few beside test behaviors.
-  A replayer registers its own implementations of them by name, as it does
-  the core's; they are never `testBehaviors`. A test's copy of one that wraps
-  a hook or an operation only to count its calls (`queue-exclusion.test.ts`'s
-  `counting()`) carries the package's declaration and records as the
-  package's.
-- The test behaviors are `test/fixtures.ts`'s: `test.Signal`, `test.Gate`,
-  `test.Lock`, and a stand-in for Budget's reserve under Budget's own name,
-  which one scenario of `workqueue-queue` composes ("with Budget on the type,
-  claim reserves ..."), listing `Budget` in `testBehaviors`. A name in
-  `open`'s `behaviors` is a test behavior when the scenario's
-  `testBehaviors` lists it, and the package's otherwise. An engine that
-  registers one also loads its schemas against the open meta-schema
-  (`metaSchema: "open"`). No fixture reads state the test sets, so no
-  scenario is marked `testHook.*`: what the Budget stand-in hears goes to
-  an array the test reads and no behavior does.
-- Marked `js`: one scenario of `workqueue-filters` (`args`,
-  `storage.transaction`), which creates more jobs than one scan reads in a
-  transaction of the file (its four-job scenarios create them one by one, so
-  they replay). The test of `workqueue-lease` over a value driver of the
-  test's went with the TypeScript engine, whose alone a driver written in
-  TypeScript was; its twin over the engine's own driver is recorded.
-- `dialect: "sqlite"`: three scenarios of `workqueue-queue` make a copy of
-  Queue's stale with `storage.run`, besides the one of `workqueue-filters`.
-  The `storage` reads in other scenarios (steps marked `dialect: "sqlite"`)
-  name the package's tables and columns, `bhv_lease__directives`,
-  `bhv_budget__meters`, `engine_instances.bhv_queue__status`, which a second
-  implementation keeps, as `../sqlite` holds it to.
-
-## The commerce package's files
-
-The `commerce-*.json` files are the commerce package's suite (D70),
-`runtime/engine-commerce/typescript/test`, recorded by the same recorder:
-its `test/helpers.ts` opens every engine through `recordOpen` with the
-package's behaviors named and calls `recordPackage('commerce-')`, and its
-`test/corpus.test.ts` holds them to what the recorder writes, through the
-same check, which rewrites only its own package's files:
-
-```
-cd runtime/engine-commerce/typescript && bun run build   # after the engine's
-UPDATE_ENGINE_CORPUS=1 node --test test/corpus.test.ts     # rewrite scenarios/commerce-*.json; review the diff
-```
-
-`open`'s `behaviors` names the package's behaviors, `Stock`, `Calendar`,
-`Holds` and `Payments`, which a replayer registers by name after the
-core's; the files define no test behaviors. Every scenario runs on a fixed
-clock, and `commerce-holds-timers` and `commerce-payments-refunds` run the
-runner (`runner.runDue`): a Timers deadline moves a checkout out of
-`held`, and a Reactions rule moves a refund to `issued` or `failed`.
+`open`'s `behaviors` names the behaviors a recording's engine registered
+beyond the core's, the work queue's (`Lease`, `Assignment`, `Queue`,
+`Presence`, `Blueprint`, `Budget` and `Retries`) or the commerce package's
+(`Stock`, `Calendar`, `Holds` and `Payments`), in the order the test passed
+them; a replayer registers its own implementations of them by name, and a
+name the scenario's `testBehaviors` lists is a test behavior instead. The
+test behaviors are the test files' (`test.Signal`, `test.Gate`, `test.Lock`
+and the like), which the replayer ports (`rules-testkit/src/fixtures.rs`).
 `commerce-calendar` holds a desk's time in Europe/London, so a replayer's
 wall times come from the same IANA database (2026e, which the crate
-bundles). `commerce-payments`, `commerce-payments-holds` and
-`commerce-payments-refunds` are Payments': attempts, provider events and
-refunds, a claim's `Holds.total` and the `total_unknown` it fails closed
-with, and a refund instance asked, approved and settled.
+bundles).
+
+A scenario whose JSON was longer than 200,000 characters (one that creates
+hundreds of instances to reach a limit) was not written; its file names it
+in `omitted`.
 
 ## A file
 

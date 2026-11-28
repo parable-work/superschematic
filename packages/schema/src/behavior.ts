@@ -1,13 +1,12 @@
 /**
  * The config each behavior takes, keyed by the behavior's registered name.
  * It lists the behaviors the core declares (internal/registry/behaviors in
- * the superschematic repository), which @superschematic/engine implements,
- * the work-queue behaviors, which @superschematic/engine-workqueue
- * implements, and the commerce behaviors (D70), which
- * @superschematic/engine-commerce implements. Links, Search, Queue and
- * Branches are not among them: D103 folds each into a schema feature (a
- * relation, @searchField, @queue and @versioned), and the build refuses
- * them.
+ * the superschematic repository) that a General schema composes with
+ * @behavior, the work-queue and the commerce behaviors (D70) among them,
+ * which development mode runs on the behaviors' core (D103, D117). Links,
+ * Search, Queue and Branches are not among them: D103 folds each into a
+ * schema feature (a relation, @searchField, @queue and @versioned), and the
+ * build refuses them.
  * An extension's authoring package adds its behaviors by module
  * augmentation, as it adds an invocation policy key to MCPToolOptions:
  *

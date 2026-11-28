@@ -13,8 +13,8 @@ import (
 
 // The behaviors D103 folds into schema features are refused in every kind
 // and every form a type composes one in (on the type, by implements, on a
-// field), each naming what replaces it, while the core registry still
-// registers their declarations.
+// field), each naming what replaces it, though no registry declares them
+// since the engine went (D103, #587).
 func TestFoldedBehaviorsAreRefused(t *testing.T) {
 	core := registry.New(naming.Naming{})
 	replacements := map[string]string{
@@ -38,8 +38,8 @@ func TestFoldedBehaviorsAreRefused(t *testing.T) {
 		"Branches": `{"kinds":{"step":{"type":"Step"}}}`,
 	}
 	for _, name := range names {
-		if _, ok := core.Behavior(name); !ok {
-			t.Errorf("the core registry does not register %s: its declaration stays until the engine goes", name)
+		if _, ok := core.Behavior(name); ok {
+			t.Errorf("the core registry registers %s, which went with the engine", name)
 		}
 		forms := map[string]func() *ir.Schema{
 			"on a General type": func() *ir.Schema {

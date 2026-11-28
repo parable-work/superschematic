@@ -1,7 +1,7 @@
 # shellcheck shell=bash
 # What the scripts that build a static archive for a Go binding share,
-# sourced by scripts/superscalar-dep.sh, scripts/versiongraph-archive.sh,
-# scripts/engine-archive.sh and scripts/rules-archive.sh: the Rust release
+# sourced by scripts/superscalar-dep.sh, scripts/versiongraph-archive.sh
+# and scripts/rules-archive.sh: the Rust release
 # every archive is built with, the host's Go target and the lib/<goos>_<goarch>
 # directory a binding links from, the cargo build that names the staticlib
 # it made, and the staging of an archive beside the stamp that puts its
@@ -12,8 +12,8 @@
 # its -L flag. It runs on macOS's bash 3.2 too.
 
 # archive_toolchain exports RUSTUP_TOOLCHAIN as tools.env's RUST_VERSION.
-# Go binaries link superscalar's archive beside the version graph's, the
-# engine's and the behaviors' core's, and the standard libraries of two Rust
+# Go binaries link superscalar's archive beside the version graph's and
+# the behaviors' core's, and the standard libraries of two Rust
 # releases both define rust_eh_personality: archives that different
 # toolchains built do not link into one binary, so every one is built with
 # this release, which overrides a checkout's own pin.
@@ -36,9 +36,9 @@ archive_lib_dir() {
 }
 
 # archive_superscalar_sources checks superscalar out when its core's sources
-# are missing: a crate of the engine's workspace reads schemas through
-# runtime/schema/rust-ir, which depends on superscalar's core by path, so
-# the checkout must be there, nothing of it built.
+# are missing: the behaviors (rules-behaviors), a crate of the
+# runtime/engine/rust workspace, read scalars through superscalar's core
+# by path, so the checkout must be there, nothing of it built.
 archive_superscalar_sources() {
   if [ ! -f "$ROOT/third_party/superscalar/crates/core/Cargo.toml" ]; then
     "$ROOT/scripts/superscalar-dep.sh" --checkout

@@ -135,10 +135,9 @@ generated interface, in an ordinary Go, TypeScript or Rust module you own,
 with the ORM, the SDK clients of the APIs it calls and its configuration
 handed to it. Rules that span rows or call out to the world live there.
 
-When the shape of the data is only known at run time, the
-[engine](runtime/engine/README.md) runs a schema with no generated code,
-with workflow, comments, revisions, approvals and search composed in as
-behaviors. The same schemas also run with nothing generated in
+When the shape of the data is only known at run time, the same schemas
+run with nothing generated, with workflow, comments, revisions and
+approvals composed in as behaviors: in
 [development mode](docs/src/content/docs/guides/development-mode.md), whose
 publish takes effect at once, and in
 [runtime mode](docs/src/content/docs/guides/runtime-mode.md), whose publish

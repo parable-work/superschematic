@@ -1,29 +1,18 @@
 # Engine HTTP corpus
 
-What the engine's HTTP surface answered, recorded as data, so the engine's
-transport-neutral routes (D58), and each server runtime that mounts them, Go
-through `httptest`, Rust through `tower::oneshot`, TypeScript through Hono,
-can replay it: request and response exchanges of the routes, event-stream
-transcripts and MCP's JSON-RPC exchanges. It was first recorded from the
-TypeScript engine's Hono app; since the cutover (milestone 14) it is recorded
-through `@superschematic/engine`'s `engineApp` and `engineMcp`, the Hono
-adapters over the Rust engine's own routes (`typescript/src/native/http.ts`). It is written by the recorder that writes
-`../scenarios`, from the tests that serve HTTP, and in the same format:
-`../scenarios/README.md` describes files, cases, engine steps, symbols,
-shared values and the values JSON cannot hold, and this file adds what
-serving HTTP needs. `typescript/test/corpus.test.ts` fails when a committed
-file is not what the recorder writes; `UPDATE_ENGINE_CORPUS=1` rewrites it.
-
-| File | Recorded from | What it covers |
-|---|---|---|
-| `http.json` | `test/http.test.ts` | Every route: envelopes, problem documents and their statuses, authentication and access, service callers (D37), `If-Match`, the merge patch media type, paging, event filters, namespaces and the behavior catalog. |
-| `operations.json` | `test/operations.test.ts` | Behavior operations and schema-level operations over HTTP, their ETags and refusals, the tools route and its filter, the core's behaviors through their routes. |
-| `stream.json` | `test/stream.test.ts` | The event stream: replay in pages, `ready`, live events, filters and the ids that carry the cursor past what they drop, resume from `Last-Event-ID`, `after=head`, a refused stream, 410 for a cursor retention passed, and a stream that ends. |
-| `mcp.json` | `test/mcp.test.ts` | The MCP endpoint: `initialize`, `tools/list`, `tools/call` and its tool errors, an unknown tool, the 2026-07-28 revision, service callers, the core's operations as tools. |
-
-`test/identity.test.ts` (the user model's session routes, D50) is left out:
-the plan keeps `/auth` host code, and its session ids come from a random
-source the recorder does not seed. The client's tests drive the same routes.
+What the engine's HTTP surface (D58) answered, recorded as data, in the
+format of `../scenarios` (whose README describes files, cases, engine steps,
+symbols, shared values and the values JSON cannot hold; this file adds what
+serving HTTP needs). The engine went (D103, #587), and with it the recorder
+and the replays of its routes and event stream through each server runtime,
+so one file is left, frozen: `mcp.json`, the MCP endpoint's exchanges
+(`initialize`, `tools/list`, `tools/call` and its tool errors, an unknown
+tool, the 2026-07-28 revision, service callers, the core's operations as
+tools), recorded from the engine's `test/mcp.test.ts` through the official
+MCP client. The HTTP runtimes' MCP transports are held to it: Rust's
+(`runtime/http/rust/tests/mcp_parity.rs`) and TypeScript's
+(`runtime/http/typescript/src/mcp-parity.test.ts`), each with tools that
+answer what the engine's answered.
 
 A file holds `cases` where a scenario file holds `scenarios`; a case's
 members are a scenario's.

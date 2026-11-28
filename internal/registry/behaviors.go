@@ -26,13 +26,13 @@ type BehaviorSpec struct {
 	// behavior has a bare name ("Workflow"), an extension's is
 	// "<extension>.<Name>".
 	Extension string
-	// Package is the npm package whose implementation runs the behavior in
-	// an engine (the core's are "@superschematic/engine",
-	// "@superschematic/engine-workqueue" and
-	// "@superschematic/engine-commerce"), or RulesPackage for a behavior the
-	// behaviors' core alone implements, which no engine registers (D104), so
-	// the behaviors command can write each package's declarations into that
-	// package (--package). Optional; when set it is an npm package name.
+	// Package is the npm package the behavior's registration names: for a
+	// core behavior a General schema composes with @behavior, EnginePackage,
+	// the name of the engine that ran it before D103's step 7 deleted the
+	// engine (D103, #587), and RulesPackage for one the behaviors' core
+	// alone implements, which only a table composes (D104). The behaviors
+	// command writes one package's declarations with --package. Optional;
+	// when set it is an npm package name.
 	Package string
 	// Rules is the Rust crate whose implementation of the core's hooks runs
 	// the behavior on the behaviors' core (D103's step 5): a crate whose

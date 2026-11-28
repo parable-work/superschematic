@@ -62,9 +62,7 @@ A schema with a [version graph](/superschematic/reference/version-graphs/)
 takes the version-graph core too: `bun run build` in
 `runtime/versiongraph/typescript` stages its prebuilt wasm32 module when
 `cargo` is missing, and `scripts/versiongraph-archive.sh --prebuilt`
-stages its static archive for a Go binary. A schema whose types compose
-engine behaviors needs the engine's Node-API addon, which a checkout still
-builds with Rust (`scripts/engine-napi.sh`). An API's
+stages its static archive for a Go binary. An API's
 [app](/superschematic/guides/stacks/#apps) is the project's own Rust program,
 which `stack dev` builds with cargo, so a project with one needs Rust too:
 no prebuilt stands in for the project's code.
@@ -436,9 +434,8 @@ a SQLite file, and on Cloudflare Workers over a D1 binding
 a TypeScript SDK client of each API it `calls` (`shopApi`
 for `shop-api`), a `Bucket` for each bucket it lists (a `ContentBucket`
 for one that names its objects by their content), a `MemoryStore` for
-each memory store it lists, `engine` for an engine database, and a
-`logger`, the HTTP runtime's JSON-lines logger. Over a database whose DB
-service lists `sqlite` first, `db` is a `SqlDatabase`, D1's interface,
+each memory store it lists, and a `logger`, the HTTP runtime's JSON-lines
+logger. Over a database whose DB service lists `sqlite` first, `db` is a `SqlDatabase`, D1's interface,
 which a D1 binding gives a Worker and a SQLite file gives `stack dev`.
 `Constructor`, `(deps: Deps) => Implementations | Promise<Implementations>`,
 is the type of the implementation's `create`, and an API with a route

@@ -4,17 +4,12 @@
 # from here: the repository root, cut down to the directories the image
 # builds from.
 *
-!runtime/engine-commerce/rust
-!runtime/engine-workqueue/rust
 !runtime/engine/rust
 !runtime/http/go
 !runtime/http/rust
 !runtime/migrate/rust
 !runtime/rules/go
 !runtime/schema/rust
-!runtime/schema/rust-ir
-!runtime/versiongraph/rust
-!runtime/versiongraph/rust-engine
 !schemas/dist/api/fixture-workflow-api
 !schemas/dist/orm/fixture-workflow-db
 !schemas/dist/server/workflow-stack/workflow

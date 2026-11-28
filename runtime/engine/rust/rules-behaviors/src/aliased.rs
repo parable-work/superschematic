@@ -89,8 +89,8 @@ use crate::schema::{self, Issues};
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Aliased";
 
-/// Aliased's declaration, the copy `make behaviors` writes for the
-/// package `@superschematic/rules`, since no engine implements it.
+/// Aliased's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
 pub const DECLARATION: &str = include_str!("../declarations/Aliased.behavior.json");
 
 /// The value field: the row's name.

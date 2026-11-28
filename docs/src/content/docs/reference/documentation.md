@@ -378,7 +378,7 @@ The TypeScript writer (`format`) writes the tag on a line of its own
 after the member's comment, and refuses a member's comment that holds
 the tag, which the reader would refuse. A title changes no generated
 code, and the OpenAPI document and the tool manifests leave it out, as
-they leave out a field's title. The engine's schema document carries it.
+they leave out a field's title. The IR and the data forms carry it.
 The Topcoat extension's forms, filters and display components label a
 member by its title, and its build log warns when two members of an enum
 take one label, such as a title that is another member's name in words
@@ -452,8 +452,7 @@ break, a no-break space or a byte order mark anywhere in it fails
 letters, digits, ., _, :, / and -)`). `states` and `transitions` label the type's `Workflow`
 behavior, so a type that does not compose `Workflow` takes neither, and
 each state and transition must be one its config lists. The loader checks
-every rule in every form, and the engine checks them again when a schema
-is defined:
+every rule in every form:
 
 ```
 src/ticket.schema.ts: type Ticket: @display states labels "lost", which is not a state of its Workflow (todo, implementing, review, done)
@@ -470,10 +469,6 @@ out; the Topcoat extension's display components read its `noun`,
 and its forms a row type's `noun` and `createLabel`, which number a list's
 rows and label its add button
 ([Rows without JavaScript](/superschematic/guides/topcoat/#rows-without-javascript)).
-The engine's describe document carries it
-for the schema's instance type, its `icon` included, with each field's
-title, icon and display
-([Engine behaviors](/superschematic/guides/engine-behaviors/#display)).
 The Topcoat console's nav shows a type's icon beside its link. The OpenAPI
 document and the tool manifests carry no display.
 

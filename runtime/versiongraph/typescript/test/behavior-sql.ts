@@ -1,7 +1,8 @@
 /*
 D16's checks of the SQL a behavior may run, as the TypeScript engine had
 them (runtime/engine/typescript/src/behaviors/sql.ts until the cutover,
-D58; the engine's own are now runtime/engine/rust/storage/src/checker.rs).
+D58; the Rust engine's own, in its storage crate, went with the engine,
+D103, #587).
 The engine's Branches runs the version graph's statements over the SQLite
 adapter's layout as a behavior's, so the tests hold the adapter's layout
 and statements to them. One statement at a time, on the behavior's own

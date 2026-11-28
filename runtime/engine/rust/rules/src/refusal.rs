@@ -1,6 +1,6 @@
-//! What the core refuses (D103), shaped as the engine's errors are
-//! (`superschematic-engine`'s `errors`, D15, D16, D58), so a host renders a
-//! refusal as the engine's error JSON for the same case: a code a client
+//! What the core refuses (D103), shaped as the engine's errors were (D15,
+//! D16, D58; the engine is gone, D103, #587), so a host renders a refusal
+//! as the engine's error JSON for the same case: a code a client
 //! branches on, the HTTP status it answers with, the engine's class for it,
 //! a message, and the class's members beyond the code and the message
 //! (`details`, as the scenario corpus records them).

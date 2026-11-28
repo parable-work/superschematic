@@ -106,8 +106,8 @@ use crate::values;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Pool";
 
-/// Pool's declaration, the file `make behaviors` writes for the package
-/// `@superschematic/rules`, read in place.
+/// Pool's declaration, read in place: the copy `make behaviors` writes of the
+/// one the compiler registers.
 pub const DECLARATION: &str = include_str!("../declarations/Pool.behavior.json");
 
 /// The operations, by their declared names: markOut and reportRoom of a

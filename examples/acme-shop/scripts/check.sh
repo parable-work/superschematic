@@ -567,14 +567,11 @@ done
 test "$(grep -c '(up to date)$' "$OUT/logs/build-all-cache.txt")" -eq 15
 # A schema's references to other services in its decorators' arguments
 # are recorded under dist (D41): each stack's to the APIs it deploys, and
-# shop-stock's to shop-orders, the one caller its sales admit. So
-# once dist is gone, they build again, and so does shop-orders, whose key
-# covers shop-stock's, the API it calls; each is cached under its new key,
-# and every other service is restored.
-test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 10
-for service in shop-stock shop-orders shop-stack storefront-stack wishlist-stack; do
-  grep -q "^  OK: $service (built, cached)\$" "$OUT/logs/build-all-restore.txt"
-done
+# shop-stock's to shop-orders, the one caller its sales admit. A cache
+# entry keeps those records (#727), so once dist is gone every service is
+# restored, the stacks, shop-stock and shop-orders among them, and the
+# restore writes the records back.
+test "$(grep -c '(restored from cache)$' "$OUT/logs/build-all-restore.txt")" -eq 15
 rm -f "$OUT"/logs/*.full.txt
 cp -R "$OUT/logs" "$OUT/quoted/logs"
 
