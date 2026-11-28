@@ -428,6 +428,12 @@ export interface EnqueueOnChangeOptions<TMessage, TTable = any> {
    * insert or an update among `on`.
    */
   readonly backfill?: boolean;
+  /**
+   * On a UserRole table, `"grants"`: the trigger is its grants', on the user model's UserRoleGrant table, whose
+   * fields `fields`, `when` and `message` name (`id`, `user`, `role`, `grantedAt`), so granting a role and revoking
+   * it raise the event whatever writes the grant (#625). The loader copies it onto UserRoleGrant.
+   */
+  readonly of?: "grants";
 }
 
 /**

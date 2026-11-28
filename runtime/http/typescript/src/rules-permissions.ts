@@ -19,8 +19,13 @@ const UUID_TYPES: ReadonlySet<string> = new Set(['Identity.UUID', 'Identity.User
  * permission; so is every subject of a layout that names no identity
  * tables (from undefined), whose database the adapter cannot answer for.
  */
-export async function readPermissions(store: RulesStore, from: RulesPermissions | undefined, subjects: readonly string[]): Promise<Record<string, string[]>> {
-  const out: Record<string, string[]> = {};
+export async function readPermissions(
+  store: RulesStore,
+  from: RulesPermissions | undefined,
+  subjects: readonly string[],
+  agents: readonly string[] = []
+): Promise<Record<string, string[]>> {
+  const out: Record<string, string[]> = await readAgentPermissions(store, from, agents);
   if (from === undefined || subjects.length === 0) return out;
   const uuid = UUID_TYPES.has(from.user.type);
   const p = (n: number) => (store.dialect === 'postgres' ? `$${n}` : `?${n}`);
@@ -86,4 +91,52 @@ function listOf(value: unknown, from: RulesPermissions): string[] {
   }
   if (!Array.isArray(list)) throw new Error(`rules: ${from.roles}.${from.rolePermissions} is no list of permissions`);
   return list.filter((item): item is string => typeof item === 'string');
+}
+
+/**
+ * The permissions of each of agents (#625): those of the role its
+ * definition row names, by the roles' name column. An Agent no definition
+ * row holds, or that is no key of the definitions table, is left out, and
+ * the core holds it to none; so is every Agent of a layout that names no
+ * agents table.
+ */
+async function readAgentPermissions(store: RulesStore, from: RulesPermissions | undefined, agents: readonly string[]): Promise<Record<string, string[]>> {
+  const out: Record<string, string[]> = {};
+  if (from === undefined || agents.length === 0 || !from.agents || !from.agent || !from.agentRole || !from.roleName) return out;
+  const uuid = UUID_TYPES.has(from.agent.type);
+  const p = (n: number) => (store.dialect === 'postgres' ? `$${n}` : `?${n}`);
+  const byAgent: [string, string][] = [];
+  const values: string[] = [];
+  for (const agent of agents) {
+    if (uuid) {
+      const n = uuidValue(agent);
+      if (n === undefined) continue;
+      byAgent.push([agent, base62UUID(n)]);
+      values.push(hyphenateUUID(n));
+    } else {
+      byAgent.push([agent, agent]);
+      values.push(agent);
+    }
+  }
+  if (values.length === 0) return out;
+  const key = quote(from.agent.column);
+  const text =
+    `SELECT a.${key} AS "agent", r.${quote(from.rolePermissions)} AS "held" FROM ${quote(from.agents)} AS a` +
+    ` LEFT JOIN ${quote(from.roles)} AS r ON r.${quote(from.roleName)} = a.${quote(from.agentRole)}` +
+    ` WHERE a.${key} IN (${values.map((_, i) => p(i + 1)).join(', ')}) ORDER BY a.${key}`;
+  const held = new Map<string, string[]>();
+  for (const row of await store.query(text, values)) {
+    const matched = keyOf(row['agent'], uuid);
+    if (matched === undefined) throw new Error(`rules: ${from.agents}'s key in a permissions read is no key`);
+    const permissions = held.get(matched) ?? [];
+    held.set(matched, permissions);
+    for (const permission of listOf(row['held'], from)) {
+      if (!permissions.includes(permission)) permissions.push(permission);
+    }
+  }
+  for (const [agent, matched] of byAgent) {
+    const permissions = held.get(matched);
+    if (permissions !== undefined) out[agent] = permissions;
+  }
+  return out;
 }

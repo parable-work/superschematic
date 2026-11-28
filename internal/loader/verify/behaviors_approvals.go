@@ -183,7 +183,7 @@ func checkApprovalsConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef,
 // The members a gate that reads its requirements from rows leaves to them
 // (D200), in the order the core names them.
 var approvalsRowMembers = []string{
-	"callers", "count", "excludeCreator", "excludeCreatorPerson", "excludeSubjectsIn",
+	"agentRole", "callers", "count", "excludeCreator", "excludeCreatorPerson", "excludeSubjectsIn",
 	"permission", "proof", "proofWithinMs", "recheckPermission", "when",
 }
 
@@ -206,6 +206,7 @@ var approvalsMemberTypes = map[string][]string{
 	"excludeSubjectsIn":    {"list"},
 	"resetOn":              {"list"},
 	"recheckPermission":    {"boolean"},
+	"agentRole":            {"boolean"},
 	"when":                 {"json"},
 	"archivedAt":           {"Temporal.DateTime"},
 }

@@ -882,7 +882,7 @@ func settle(ctx context.Context, host Host, core Core, spec TypeSpec, command Co
 func sameRequest(a, b ReadRequest) bool {
 	if a.Kind != b.Kind || a.Type != b.Type || a.Key != b.Key || a.UseID != b.UseID || a.Table != b.Table ||
 		a.Field != b.Field || a.Value != b.Value || a.After != b.After || a.Limit != b.Limit ||
-		len(a.Equal) != len(b.Equal) || !slices.Equal(a.Tables, b.Tables) || !slices.Equal(a.Subjects, b.Subjects) {
+		len(a.Equal) != len(b.Equal) || !slices.Equal(a.Tables, b.Tables) || !slices.Equal(a.Subjects, b.Subjects) || !slices.Equal(a.Agents, b.Agents) {
 		return false
 	}
 	for name, value := range a.Equal {
@@ -974,7 +974,7 @@ func answerOf(ctx context.Context, host Host, request ReadRequest, held int) (An
 		}
 		return Answer{Kind: ReadKindComposing, Specs: specs}, nil
 	case ReadKindPermissions:
-		held, err := readPermissions(ctx, host.Store, host.Layout.Permissions, request.Subjects)
+		held, err := readPermissions(ctx, host.Store, host.Layout.Permissions, request.Subjects, request.Agents)
 		if err != nil {
 			return Answer{}, err
 		}

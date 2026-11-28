@@ -534,6 +534,18 @@ pub struct Permissions {
     pub roles: String,
     pub role_key: String,
     pub role_permissions: String,
+    /// The agents' definitions table (#625), its key column and the
+    /// column of the role each acts with, which names a row of `roles` by
+    /// `role_name`: where an Agent's permissions are read. Absent for a
+    /// database with no agents.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agents: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<Column>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role_name: Option<String>,
 }
 
 #[cfg(test)]

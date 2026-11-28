@@ -1270,7 +1270,8 @@ impl Behavior for Echo {
 /// read across a table, `{type, equal, tables, after}`, as Pool's pick
 /// reads its members. Its read-only operation of the table as a whole,
 /// `permissions` (D200), answers the permissions each of `{subjects}`
-/// holds now, as Approvals' recheckPermission reads them.
+/// holds now, as Approvals' recheckPermission reads them, and each of
+/// `{agents}` through its agent role (#625).
 pub struct Finder;
 
 impl Behavior for Finder {
@@ -1294,7 +1295,15 @@ impl Behavior for Finder {
                 .get("subjects")
                 .and_then(|subjects| serde_json::from_value(subjects.clone()).ok())
                 .unwrap_or_default();
-            let held = cx.permissions_of(&subjects)?;
+            let agents: Vec<String> = params
+                .get("agents")
+                .and_then(|agents| serde_json::from_value(agents.clone()).ok())
+                .unwrap_or_default();
+            let held = if agents.is_empty() {
+                cx.permissions_of(&subjects)?
+            } else {
+                cx.permissions_with_agents(&subjects, &agents)?
+            };
             return Ok(serde_json::to_value(held).unwrap_or_default());
         }
         if name == "rows" {

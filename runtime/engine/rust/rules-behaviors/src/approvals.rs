@@ -68,6 +68,13 @@
 //!   (`held`, every one, so a row whose permission moves later counts a
 //!   signer who held the new one), and a gate written in the config does
 //!   not read it again;
+//! - `agentRole`, false (#625): a sign-off that counts as its Agent counts
+//!   through the permissions the Agent's agent role grants now, read at
+//!   each guard ([`superschematic_rules::ReadRequest::Permissions`]'s
+//!   `agents`), whether or not the requirement rechecks. Without it, a
+//!   requirement that rechecks reads no Agent, so such a sign-off counts
+//!   for nothing, as before; one that does not counts what the run held
+//!   when it signed;
 //! - `when`, none: conditions on the row's own fields, all of which must
 //!   hold for the requirement to apply. Each tests a field: `every-matches`
 //!   (every value matches one of the glob patterns), `any-matches`,
@@ -214,7 +221,8 @@ const ROW_NAME: &str = "name";
 const ARCHIVED_AT: &str = "archivedAt";
 
 // The members a gate that reads its requirements from rows leaves to them.
-const ROW_MEMBERS: [&str; 10] = [
+const ROW_MEMBERS: [&str; 11] = [
+    "agentRole",
     "callers",
     "count",
     "excludeCreator",
@@ -346,6 +354,9 @@ pub struct Requirement {
     /// the config's, whose gate consumes instead.
     pub reset_on: Vec<String>,
     pub recheck_permission: bool,
+    /// A sign-off that counts as its Agent counts through its agent role's
+    /// permissions now (#625).
+    pub agent_role: bool,
     pub when: Vec<Condition>,
 }
 
@@ -758,6 +769,7 @@ fn requirement_of(
         return Err(own.lacks("resetOn", field));
     }
     let recheck_permission = flag("recheckPermission", false)?;
+    let agent_role = flag("agentRole", false)?;
     let when = conditions_of(member("when"), own)?;
     Ok(Requirement {
         name: name.to_owned(),
@@ -771,6 +783,7 @@ fn requirement_of(
         exclude_subjects_in,
         reset_on,
         recheck_permission,
+        agent_role,
         when,
     })
 }
@@ -1577,6 +1590,19 @@ impl Signer {
         None
     }
 
+    // counts_as_agent says whether the sign-off counts toward the
+    // requirement as its run's Agent: counted_as's choice, which takes the
+    // person an agent run acts for first.
+    fn counts_as_agent(&self, requirement: &Requirement) -> bool {
+        let Some(classes) = &requirement.callers else {
+            return false;
+        };
+        if classes.contains(&CallerClass::ActingForPerson) && self.acts_for_person() {
+            return false;
+        }
+        classes.contains(&CallerClass::Agent) && self.is_agent_run()
+    }
+
     // proves says whether the sign-off shows the requirement's proof.
     fn proves(&self, requirement: &Requirement) -> bool {
         match requirement.proof {
@@ -1676,31 +1702,43 @@ fn listed(value: Option<&Value>) -> Vec<String> {
 }
 
 // rechecked reads, once, the permissions every signer a requirement that
-// reads them again counts as holds now (D200); None when none does.
+// reads them again counts as holds now (D200), and those of each Agent a
+// requirement counts through its agent role (#625); None when none does.
+// An Agent a requirement that rechecks counts without agentRole is read
+// for nothing, and counts for nothing.
 fn rechecked<'r>(
     view: &View<'r, ApprovalsConfig>,
     applying: &[&ReadRequirement],
     signers: &[Signer],
 ) -> Hook<Option<&'r BTreeMap<String, Vec<String>>>> {
     let mut subjects: BTreeSet<String> = BTreeSet::new();
+    let mut agents: BTreeSet<String> = BTreeSet::new();
     for found in applying {
         let Ok(requirement) = &found.requirement else {
             continue;
         };
-        if !requirement.recheck_permission {
-            continue;
+        for signer in signers {
+            let Some(whom) = signer.counted_as(requirement) else {
+                continue;
+            };
+            if signer.counts_as_agent(requirement) {
+                if requirement.agent_role {
+                    agents.insert(whom);
+                }
+            } else if requirement.recheck_permission {
+                subjects.insert(whom);
+            }
         }
-        subjects.extend(
-            signers
-                .iter()
-                .filter_map(|signer| signer.counted_as(requirement)),
-        );
     }
-    if subjects.is_empty() {
+    if subjects.is_empty() && agents.is_empty() {
         return Ok(None);
     }
     let subjects: Vec<String> = subjects.into_iter().collect();
-    Ok(Some(view.permissions_of(&subjects)?))
+    if agents.is_empty() {
+        return Ok(Some(view.permissions_of(&subjects)?));
+    }
+    let agents: Vec<String> = agents.into_iter().collect();
+    Ok(Some(view.permissions_with_agents(&subjects, &agents)?))
 }
 
 // met_by counts the distinct signers whose sign-off counts toward a
@@ -1719,10 +1757,15 @@ fn met_by(
         let Ok(whom) = shortfall(view, requirement, signer, own) else {
             continue;
         };
-        let permitted = if requirement.recheck_permission {
-            held_now
-                .and_then(|held| held.get(&whom))
-                .is_some_and(|held| has_any_permission(held, &wanted))
+        let agent = signer.counts_as_agent(requirement);
+        let permitted = if (agent && requirement.agent_role) || requirement.recheck_permission {
+            // An Agent counts through its agent role when the requirement
+            // says so, and else, rechecked, for nothing (#625): rechecked
+            // read it only with agentRole.
+            (!agent || requirement.agent_role)
+                && held_now
+                    .and_then(|held| held.get(&whom))
+                    .is_some_and(|held| has_any_permission(held, &wanted))
         } else {
             // A row's requirement counts what the signer held then; the
             // config's, whose permission signOff checked, does not read it

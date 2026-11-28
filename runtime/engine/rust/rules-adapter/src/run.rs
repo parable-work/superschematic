@@ -1302,9 +1302,14 @@ async fn answer_of<S: Store>(
         )),
         // The permissions each subject holds now (D200), from the layout's
         // identity tables.
-        ReadRequest::Permissions { subjects } => Ok(Answer::Permissions(
-            crate::permissions::read_permissions(store, layout.permissions.as_ref(), subjects)
-                .await?,
+        ReadRequest::Permissions { subjects, agents } => Ok(Answer::Permissions(
+            crate::permissions::read_permissions(
+                store,
+                layout.permissions.as_ref(),
+                subjects,
+                agents,
+            )
+            .await?,
         )),
         other => Err(internal(format!(
             "the adapter answers no read of this kind: {}",

@@ -147,6 +147,7 @@ holds<
     ApprovalsConfigSchema,
     | "status"
     | `gates.${string}.${
+        | "agentRole"
         | "callers"
         | "excludeCreatorPerson"
         | "excludeSubjectsIn"

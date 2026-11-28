@@ -530,6 +530,9 @@ type ReadRequest struct {
 	// Subjects are a permissions read's subjects (D200); nil for every
 	// other kind.
 	Subjects []string `json:"subjects,omitempty"`
+	// Agents are a permissions read's Agents (#625), each answered through
+	// its agent role; nil for none.
+	Agents []string `json:"agents,omitempty"`
 }
 
 // TableRef is one sub-table of a use, as a read across a table names it:
@@ -596,7 +599,8 @@ func (r ReadRequest) MarshalJSON() ([]byte, error) {
 		return json.Marshal(struct {
 			Kind     ReadKind `json:"kind"`
 			Subjects []string `json:"subjects"`
-		}{r.Kind, subjects})
+			Agents   []string `json:"agents,omitempty"`
+		}{r.Kind, subjects, r.Agents})
 	}
 	type plain ReadRequest
 	return json.Marshal(plain(r))

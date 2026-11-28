@@ -22,8 +22,9 @@ pub(crate) async fn read_permissions<S: Store>(
     store: &S,
     from: Option<&Permissions>,
     subjects: &[String],
+    agents: &[String],
 ) -> Result<BTreeMap<String, Vec<String>>, Error> {
-    let mut out = BTreeMap::new();
+    let mut out = read_agent_permissions(store, from, agents).await?;
     let Some(from) = from else {
         return Ok(out);
     };
@@ -88,6 +89,81 @@ pub(crate) async fn read_permissions<S: Store>(
     for (subject, matched) in by_subject {
         if let Some(permissions) = held.get(&matched) {
             out.insert(subject, permissions.clone());
+        }
+    }
+    Ok(out)
+}
+
+/// The permissions of each of `agents` (#625): those of the role its
+/// definition row names, by the roles' name column. An Agent no definition
+/// row holds, or that is no key of the definitions table, is left out, and
+/// the core holds it to none; so is every Agent of a layout that names no
+/// agents table.
+async fn read_agent_permissions<S: Store>(
+    store: &S,
+    from: Option<&Permissions>,
+    agents: &[String],
+) -> Result<BTreeMap<String, Vec<String>>, Error> {
+    let mut out = BTreeMap::new();
+    let Some(from) = from else {
+        return Ok(out);
+    };
+    let (Some(table), Some(key), Some(role), Some(name)) = (
+        from.agents.as_ref(),
+        from.agent.as_ref(),
+        from.agent_role.as_ref(),
+        from.role_name.as_ref(),
+    ) else {
+        return Ok(out);
+    };
+    let dialect = store.dialect();
+    let uuid = UUID_TYPES.contains(&key.type_name.as_str());
+    let mut by_agent = Vec::new();
+    let mut values = Vec::new();
+    for agent in agents {
+        let (bound, matched) = if uuid {
+            let Some(n) = uuid_value(agent) else {
+                continue;
+            };
+            (hyphenate(n), base62(n))
+        } else {
+            (agent.clone(), agent.clone())
+        };
+        by_agent.push((agent.clone(), matched));
+        values.push(Bind::Text(bound));
+    }
+    if values.is_empty() {
+        return Ok(out);
+    }
+    let placeholders: Vec<String> = (1..=values.len())
+        .map(|n| placeholder(dialect, n))
+        .collect();
+    let column = quote(&key.column);
+    let text = format!(
+        "SELECT {}, {} FROM {} AS a LEFT JOIN {} AS r ON r.{} = a.{} WHERE a.{column} IN ({}) ORDER BY a.{column}",
+        selected(dialect, &format!("a.{column}")),
+        selected(dialect, &format!("r.{}", quote(&from.role_permissions))),
+        quote(table),
+        quote(&from.roles),
+        quote(name),
+        quote(role),
+        placeholders.join(", "),
+    );
+    let mut held: HashMap<String, Vec<String>> = HashMap::new();
+    for row in store.query(&text, &values).await? {
+        let mut cells = row.into_iter();
+        let key = key_of(cells.next().unwrap_or(Cell::Null), uuid)
+            .ok_or_else(|| internal(format!("{table}'s key in a permissions read is no key")))?;
+        let permissions = held.entry(key).or_default();
+        for permission in permissions_of(cells.next().unwrap_or(Cell::Null), from)? {
+            if !permissions.contains(&permission) {
+                permissions.push(permission);
+            }
+        }
+    }
+    for (agent, matched) in by_agent {
+        if let Some(permissions) = held.get(&matched) {
+            out.insert(agent, permissions.clone());
         }
     }
     Ok(out)

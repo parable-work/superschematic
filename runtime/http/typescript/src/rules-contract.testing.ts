@@ -188,7 +188,7 @@ export const CONTRACT = {
     { kind: 'rows', type: 'Order', equal: { status: 'open' }, tables: [tableRef], after: 'o1', limit: 500 },
     { kind: 'sharedRow', type: 'Order', useId: 'Numbering', table: 'counts', key: '2026' },
     { kind: 'composing', behavior: 'Approvals' },
-    { kind: 'permissions', subjects: ['alice', 'bob'] },
+    { kind: 'permissions', subjects: ['alice', 'bob'], agents: ['triage'] },
   ],
   CoreTableRef: [tableRef],
   CoreRow: [row],

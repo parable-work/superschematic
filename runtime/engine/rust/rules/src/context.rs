@@ -278,6 +278,21 @@ impl<'r, C> View<'r, C> {
             .read_permissions(&ReadRequest::permissions(subjects.iter().cloned()))
     }
 
+    /// The permissions each subject holds now, and each Agent through its
+    /// agent role (#625), in one answer by subject and by Agent: what a
+    /// requirement whose Agents count through their roles reads.
+    pub fn permissions_with_agents(
+        &self,
+        subjects: &[String],
+        agents: &[String],
+    ) -> Hook<&'r BTreeMap<String, Vec<String>>> {
+        self.run
+            .read_permissions(&ReadRequest::permissions_with_agents(
+                subjects.iter().cloned(),
+                agents.iter().cloned(),
+            ))
+    }
+
     /// The uses of a type whose behaviors' declarations implement a
     /// contract (D104), in the type's list order: each use's id. The
     /// command's own type reads no host; another's spec is read.

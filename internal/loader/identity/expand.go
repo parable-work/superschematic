@@ -352,19 +352,40 @@ func (m *model) addOAuth() {
 	})
 }
 
-// addRoleGrant adds UserRoleGrant: one row per role a user holds.
+// addRoleGrant adds UserRoleGrant: one row per role a user holds, with
+// the @enqueueOnChange declarations the role table makes of its grants
+// (#625), a role grant's event.
 func (m *model) addRoleGrant(role *ir.TypeDef) {
-	m.addType(&ir.TypeDef{
+	m.addType(RoleGrantType(m.user, role))
+}
+
+// RoleGrantType is the UserRoleGrant table of the user table user and the
+// role table role: its fields, its (user, role) index, and a copy of each
+// of role's @enqueueOnChange declarations of its grants (Of
+// ir.EnqueueOfGrants), with Of unset, so sqlgen writes the trigger on the
+// grants' table. Verification checks those declarations against it before
+// the expansion adds it.
+func RoleGrantType(user, role *ir.TypeDef) *ir.TypeDef {
+	td := &ir.TypeDef{
 		Name:    ir.IdentityRoleGrantTable,
 		Comment: "A role a user holds.",
 		Fields: []*ir.FieldDef{
 			keyFieldDef(),
-			relation(ir.IdentityRoleGrantUserField, m.user.Name, ""),
+			relation(ir.IdentityRoleGrantUserField, user.Name, ""),
 			relation(ir.IdentityRoleGrantRoleField, role.Name, ""),
 			dateTime(ir.IdentityRoleGrantGrantedAtField, true, ""),
 		},
 		Indexes: []ir.IndexDef{grantIndex()},
-	})
+	}
+	for _, def := range role.EnqueueOnChange {
+		if def == nil || def.Of != ir.EnqueueOfGrants {
+			continue
+		}
+		copied := *def
+		copied.Of = ""
+		td.EnqueueOnChange = append(td.EnqueueOnChange, &copied)
+	}
+	return td
 }
 
 // addType adds td as a DB table owned by the User table's file, and marks

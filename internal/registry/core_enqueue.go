@@ -24,7 +24,7 @@ func enqueueOnChangeDecorator() DecoratorSpec {
 				return err
 			}
 			for _, other := range n.Type.EnqueueOnChange {
-				if other.Queue == def.Queue {
+				if other.Queue == def.Queue && other.Of == def.Of {
 					return fmt.Errorf("@enqueueOnChange of %s names queue %s twice; declare one per queue, whose on lists every write that enqueues", n.Type.Name, def.Queue)
 				}
 			}
@@ -78,6 +78,12 @@ func enqueueOnChangeOf(args []any) (*ir.EnqueueOnChange, error) {
 				}
 				def.Message[field] = s
 			}
+		case "of":
+			s, ok := value.(string)
+			if !ok || s != ir.EnqueueOfGrants {
+				return nil, ArgErrorf(1, "@enqueueOnChange of is %q, a UserRole table's grants (#625); got %v", ir.EnqueueOfGrants, value)
+			}
+			def.Of = s
 		case "backfill":
 			b, ok := value.(bool)
 			if !ok {
@@ -85,7 +91,7 @@ func enqueueOnChangeOf(args []any) (*ir.EnqueueOnChange, error) {
 			}
 			def.Backfill = b
 		default:
-			return nil, ArgErrorf(1, "@enqueueOnChange has no option %q; it takes on, fields, when, message and backfill", key)
+			return nil, ArgErrorf(1, "@enqueueOnChange has no option %q; it takes on, fields, when, message, backfill and of", key)
 		}
 	}
 	if err := CheckEnqueueOnChange(def); err != nil {

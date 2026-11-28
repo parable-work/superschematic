@@ -143,10 +143,15 @@ pub enum ReadRequest {
     /// The permissions each subject holds now ([`Answer::Permissions`],
     /// D200): what a rule that reads a permission again at each guard reads
     /// of the subjects who signed earlier (Approvals' recheckPermission). A
-    /// person's come from their roles, an Agent's from its role. A subject
-    /// the host cannot answer for is left out of the answer, and the rule
-    /// holds it to none.
-    Permissions { subjects: Vec<String> },
+    /// person's come from their roles; an Agent's, one of `agents`, from
+    /// its agent role (#625), which the host reads from the agents table
+    /// and the roles' table. A subject or an Agent the host cannot answer
+    /// for is left out of the answer, and the rule holds it to none.
+    Permissions {
+        subjects: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        agents: Vec<String>,
+    },
 }
 
 /// One sub-table of a use, as a read across a table names it (D104): the
@@ -191,6 +196,19 @@ impl ReadRequest {
     pub fn permissions(subjects: impl IntoIterator<Item = impl Into<String>>) -> Self {
         ReadRequest::Permissions {
             subjects: subjects.into_iter().map(Into::into).collect(),
+            agents: Vec::new(),
+        }
+    }
+
+    /// The permissions each of the subjects holds now, and each of the
+    /// Agents through its agent role (#625).
+    pub fn permissions_with_agents(
+        subjects: impl IntoIterator<Item = impl Into<String>>,
+        agents: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        ReadRequest::Permissions {
+            subjects: subjects.into_iter().map(Into::into).collect(),
+            agents: agents.into_iter().map(Into::into).collect(),
         }
     }
 

@@ -56,7 +56,7 @@
 //! config's `status`, each at define, naming the table form, D200's
 //! requirement members (`requirementsFrom`, `pinOn`, `callers`, `proof`,
 //! `proofWithinMs`, `excludeCreatorPerson`, `excludeSubjectsIn`,
-//! `recheckPermission`, `when`) the same way, and `signOff`'s `version`
+//! `recheckPermission`, `agentRole`, `when`) the same way, and `signOff`'s `version`
 //! and `read`, as a bad parameter. Ignoring a rule of what a
 //! sign-off holds to would be a hole, and an engine type can be defined at
 //! run time, past any build's check. The engine never answers `stale`.
@@ -83,7 +83,7 @@ const TABLE_FORM: &str = "implements Approvals<T, { ... }> on a DB table, D104";
 
 // The gate members D200 adds, each a table's Approvals' alone, in the
 // order the engine refuses them.
-const TABLE_REQUIREMENT_MEMBERS: [&str; 9] = [
+const TABLE_REQUIREMENT_MEMBERS: [&str; 10] = [
     "requirementsFrom",
     "pinOn",
     "callers",
@@ -92,6 +92,7 @@ const TABLE_REQUIREMENT_MEMBERS: [&str; 9] = [
     "excludeCreatorPerson",
     "excludeSubjectsIn",
     "recheckPermission",
+    "agentRole",
     "when",
 ];
 
