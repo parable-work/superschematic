@@ -547,7 +547,7 @@ func (s schemaSet) argField(arg *ir.ArgumentDef, param registry.RustParam, locat
 		Name:       arg.Name,
 		TypeRef:    ir.TypeRef{Name: ref.Name},
 		Required:   f.Required,
-		ValueRules: arg.ValueRules.Element(),
+		ValueRules: arg.Element(),
 	}
 	enum := s.enum(ref.Name)
 	switch {

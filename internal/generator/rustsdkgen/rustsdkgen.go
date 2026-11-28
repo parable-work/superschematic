@@ -373,7 +373,7 @@ func (arg ScalarArg) NeedsGeneratedValidation() bool {
 	if arg.IsArray {
 		return arg.HasList()
 	}
-	return arg.ValueRules.Any()
+	return arg.Any()
 }
 
 // FileUploadField represents file upload field metadata.

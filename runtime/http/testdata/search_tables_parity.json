@@ -1,0 +1,1220 @@
+{
+  "comment": "Search across tables (#740, D155). plans: each q, the plan it reads as, the Postgres query it renders under the simple configuration with its values, and its FTS5 match (null for none); runtime/http/typescript writes them with SEARCH_TABLES_PARITY_WRITE=1 bun test src/search-tables-parity.test.ts, and the Go and Rust runtimes hold their readers to them. corpus: index rows a search test writes into the search index as they stand, in the scope search-parity, embeddings of the model parity-model on Postgres alone. searches: what a user with no grants searches in that scope, and per database the titles of the hits in order and the total, or null where it refuses the search; written by hand, and run by the TypeScript, Go and Rust search tests over the generated repositories of fixture-search-db, whose index folds diacritics.",
+  "plans": [
+    {
+      "name": "words",
+      "q": "walnut desk",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "desk",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "walnut",
+          "desk"
+        ]
+      },
+      "fts5": "\"walnut\" AND \"desk\""
+    },
+    {
+      "name": "a quoted phrase",
+      "q": "\"walnut desk\"",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut desk",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "walnut desk"
+        ]
+      },
+      "fts5": "\"walnut desk\""
+    },
+    {
+      "name": "a prefix",
+      "q": "wal*",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "wal",
+              "prefix": true
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "to_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "'wal':*"
+        ]
+      },
+      "fts5": "\"wal\"*"
+    },
+    {
+      "name": "stars after a word are one prefix",
+      "q": "wal**",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "wal",
+              "prefix": true
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "to_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "'wal':*"
+        ]
+      },
+      "fts5": "\"wal\"*"
+    },
+    {
+      "name": "a star inside a word is its text",
+      "q": "w*l",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "w*l",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "w*l"
+        ]
+      },
+      "fts5": "\"w*l\""
+    },
+    {
+      "name": "an excluded word",
+      "q": "walnut -oak",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": [
+          {
+            "text": "oak",
+            "prefix": false
+          }
+        ]
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && !!phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "walnut",
+          "oak"
+        ]
+      },
+      "fts5": "(\"walnut\") NOT \"oak\""
+    },
+    {
+      "name": "an excluded phrase",
+      "q": "desk -\"walnut desk\"",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "desk",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": [
+          {
+            "text": "walnut desk",
+            "prefix": false
+          }
+        ]
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && !!phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "desk",
+          "walnut desk"
+        ]
+      },
+      "fts5": "(\"desk\") NOT \"walnut desk\""
+    },
+    {
+      "name": "a plus says required",
+      "q": "+walnut desk",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "desk",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "walnut",
+          "desk"
+        ]
+      },
+      "fts5": "\"walnut\" AND \"desk\""
+    },
+    {
+      "name": "OR puts two terms in a group",
+      "q": "oak OR pine",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "oak",
+              "prefix": false
+            },
+            {
+              "text": "pine",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "(phraseto_tsquery('simple'::regconfig, $1::text) || phraseto_tsquery('simple'::regconfig, $2::text))",
+        "args": [
+          "oak",
+          "pine"
+        ]
+      },
+      "fts5": "(\"oak\" OR \"pine\")"
+    },
+    {
+      "name": "OR binds the terms beside it",
+      "q": "walnut oak OR pine",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "oak",
+              "prefix": false
+            },
+            {
+              "text": "pine",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && (phraseto_tsquery('simple'::regconfig, $2::text) || phraseto_tsquery('simple'::regconfig, $3::text))",
+        "args": [
+          "walnut",
+          "oak",
+          "pine"
+        ]
+      },
+      "fts5": "\"walnut\" AND (\"oak\" OR \"pine\")"
+    },
+    {
+      "name": "OR chains",
+      "q": "oak OR pine OR maple",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "oak",
+              "prefix": false
+            },
+            {
+              "text": "pine",
+              "prefix": false
+            },
+            {
+              "text": "maple",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "(phraseto_tsquery('simple'::regconfig, $1::text) || phraseto_tsquery('simple'::regconfig, $2::text) || phraseto_tsquery('simple'::regconfig, $3::text))",
+        "args": [
+          "oak",
+          "pine",
+          "maple"
+        ]
+      },
+      "fts5": "(\"oak\" OR \"pine\" OR \"maple\")"
+    },
+    {
+      "name": "OR with no term before it, or after, is dropped",
+      "q": "OR walnut OR",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "walnut"
+        ]
+      },
+      "fts5": "\"walnut\""
+    },
+    {
+      "name": "OR before an excluded term is dropped",
+      "q": "walnut OR -oak",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": [
+          {
+            "text": "oak",
+            "prefix": false
+          }
+        ]
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && !!phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "walnut",
+          "oak"
+        ]
+      },
+      "fts5": "(\"walnut\") NOT \"oak\""
+    },
+    {
+      "name": "OR after an excluded term is dropped",
+      "q": "-oak OR walnut",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": [
+          {
+            "text": "oak",
+            "prefix": false
+          }
+        ]
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && !!phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "walnut",
+          "oak"
+        ]
+      },
+      "fts5": "(\"walnut\") NOT \"oak\""
+    },
+    {
+      "name": "lower case or is a word",
+      "q": "oak or pine",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "oak",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "or",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "pine",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && phraseto_tsquery('simple'::regconfig, $2::text) && phraseto_tsquery('simple'::regconfig, $3::text)",
+        "args": [
+          "oak",
+          "or",
+          "pine"
+        ]
+      },
+      "fts5": "\"oak\" AND \"or\" AND \"pine\""
+    },
+    {
+      "name": "a term with no letter or digit is dropped",
+      "q": "walnut -- * \"\" ... +",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "walnut"
+        ]
+      },
+      "fts5": "\"walnut\""
+    },
+    {
+      "name": "an unterminated quote runs to the end",
+      "q": "\"walnut desk",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut desk",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "walnut desk"
+        ]
+      },
+      "fts5": "\"walnut desk\""
+    },
+    {
+      "name": "a quote inside a word starts a phrase",
+      "q": "walnut\"desk oak\"",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "desk oak",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "walnut",
+          "desk oak"
+        ]
+      },
+      "fts5": "\"walnut\" AND \"desk oak\""
+    },
+    {
+      "name": "excluded terms alone",
+      "q": "-oak -pine",
+      "plan": {
+        "all": [],
+        "none": [
+          {
+            "text": "oak",
+            "prefix": false
+          },
+          {
+            "text": "pine",
+            "prefix": false
+          }
+        ]
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) || phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "oak",
+          "pine"
+        ]
+      },
+      "fts5": null
+    },
+    {
+      "name": "a sign before white space is a term of its own",
+      "q": "- walnut + desk",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "desk",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "walnut",
+          "desk"
+        ]
+      },
+      "fts5": "\"walnut\" AND \"desk\""
+    },
+    {
+      "name": "a prefix's quote and backslash are escaped",
+      "q": "o'br\\ien*",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "o'br\\ien",
+              "prefix": true
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "to_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "'o''br\\\\ien':*"
+        ]
+      },
+      "fts5": "\"o'br\\ien\"*"
+    },
+    {
+      "name": "a quoted phrase with a star after it",
+      "q": "\"walnut de\"*",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut de",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "walnut de"
+        ]
+      },
+      "fts5": "\"walnut de\""
+    },
+    {
+      "name": "sixteen terms count",
+      "q": "w1 w2 w3 w4 w5 w6 w7 w8 w9 w10 w11 w12 w13 w14 w15 w16 w17 w18",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "w1",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w2",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w3",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w4",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w5",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w6",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w7",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w8",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w9",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w10",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w11",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w12",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w13",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w14",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w15",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "w16",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && phraseto_tsquery('simple'::regconfig, $2::text) && phraseto_tsquery('simple'::regconfig, $3::text) && phraseto_tsquery('simple'::regconfig, $4::text) && phraseto_tsquery('simple'::regconfig, $5::text) && phraseto_tsquery('simple'::regconfig, $6::text) && phraseto_tsquery('simple'::regconfig, $7::text) && phraseto_tsquery('simple'::regconfig, $8::text) && phraseto_tsquery('simple'::regconfig, $9::text) && phraseto_tsquery('simple'::regconfig, $10::text) && phraseto_tsquery('simple'::regconfig, $11::text) && phraseto_tsquery('simple'::regconfig, $12::text) && phraseto_tsquery('simple'::regconfig, $13::text) && phraseto_tsquery('simple'::regconfig, $14::text) && phraseto_tsquery('simple'::regconfig, $15::text) && phraseto_tsquery('simple'::regconfig, $16::text)",
+        "args": [
+          "w1",
+          "w2",
+          "w3",
+          "w4",
+          "w5",
+          "w6",
+          "w7",
+          "w8",
+          "w9",
+          "w10",
+          "w11",
+          "w12",
+          "w13",
+          "w14",
+          "w15",
+          "w16"
+        ]
+      },
+      "fts5": "\"w1\" AND \"w2\" AND \"w3\" AND \"w4\" AND \"w5\" AND \"w6\" AND \"w7\" AND \"w8\" AND \"w9\" AND \"w10\" AND \"w11\" AND \"w12\" AND \"w13\" AND \"w14\" AND \"w15\" AND \"w16\""
+    },
+    {
+      "name": "a term is its first 200 characters",
+      "q": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+        ]
+      },
+      "fts5": "\"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\""
+    },
+    {
+      "name": "diacritics are the database's to fold",
+      "q": "caf\u00e9",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "caf\u00e9",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "caf\u00e9"
+        ]
+      },
+      "fts5": "\"caf\u00e9\""
+    },
+    {
+      "name": "the snippet marks are removed",
+      "q": "wal\u0002nut\u0003",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "walnut"
+        ]
+      },
+      "fts5": "\"walnut\""
+    },
+    {
+      "name": "white space past ASCII separates",
+      "q": "walnut\u3000desk",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "walnut",
+              "prefix": false
+            }
+          ],
+          [
+            {
+              "text": "desk",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text) && phraseto_tsquery('simple'::regconfig, $2::text)",
+        "args": [
+          "walnut",
+          "desk"
+        ]
+      },
+      "fts5": "\"walnut\" AND \"desk\""
+    },
+    {
+      "name": "nothing",
+      "q": "",
+      "plan": {
+        "all": [],
+        "none": []
+      },
+      "postgres": {
+        "query": "",
+        "args": []
+      },
+      "fts5": null
+    },
+    {
+      "name": "a number",
+      "q": "2027",
+      "plan": {
+        "all": [
+          [
+            {
+              "text": "2027",
+              "prefix": false
+            }
+          ]
+        ],
+        "none": []
+      },
+      "postgres": {
+        "query": "phraseto_tsquery('simple'::regconfig, $1::text)",
+        "args": [
+          "2027"
+        ]
+      },
+      "fts5": "\"2027\""
+    }
+  ],
+  "corpus": [
+    {
+      "table": "Note",
+      "key": "00000000-0000-4000-8000-00000000c001",
+      "title": "Walnut desk",
+      "body": "A desk of oiled walnut with two drawers",
+      "embedding": [
+        1,
+        0,
+        0
+      ]
+    },
+    {
+      "table": "Note",
+      "key": "00000000-0000-4000-8000-00000000c002",
+      "title": "Oak chair",
+      "body": "A chair of white oak beside the walnut desk",
+      "embedding": [
+        0.6,
+        0.8,
+        0
+      ]
+    },
+    {
+      "table": "Unit",
+      "key": "00000000-0000-4000-8000-00000000c003",
+      "title": "Pine table",
+      "body": "A table of pine that seats six",
+      "comments": "The walnut stain was sanded off",
+      "embedding": [
+        0,
+        1,
+        0
+      ]
+    },
+    {
+      "table": "Contract",
+      "key": "00000000-0000-4000-8000-00000000c004",
+      "title": "Caf\u00e9 lease",
+      "body": "The lease of the corner caf\u00e9",
+      "embedding": [
+        0,
+        0,
+        1
+      ]
+    },
+    {
+      "table": "Note",
+      "key": "00000000-0000-4000-8000-00000000c005",
+      "title": "Walnut shelf",
+      "body": "Shelves of walnut and pine",
+      "files": "An invoice for walnut boards",
+      "embedding": [
+        0.8,
+        0,
+        0.6
+      ]
+    },
+    {
+      "table": "Unit",
+      "key": "00000000-0000-4000-8000-00000000c006",
+      "title": "Desk lamp",
+      "body": "A brass lamp for the desk"
+    }
+  ],
+  "searches": [
+    {
+      "name": "a word",
+      "q": "walnut",
+      "postgres": {
+        "titles": [
+          "Walnut shelf",
+          "Walnut desk",
+          "Oak chair",
+          "Pine table"
+        ],
+        "total": 4
+      },
+      "sqlite": {
+        "titles": [
+          "Walnut desk",
+          "Walnut shelf",
+          "Oak chair",
+          "Pine table"
+        ],
+        "total": 4
+      }
+    },
+    {
+      "name": "two words",
+      "q": "walnut desk",
+      "postgres": {
+        "titles": [
+          "Walnut desk",
+          "Oak chair"
+        ],
+        "total": 2
+      },
+      "sqlite": {
+        "titles": [
+          "Walnut desk",
+          "Oak chair"
+        ],
+        "total": 2
+      }
+    },
+    {
+      "name": "a quoted phrase",
+      "q": "\"walnut desk\"",
+      "postgres": {
+        "titles": [
+          "Walnut desk",
+          "Oak chair"
+        ],
+        "total": 2
+      },
+      "sqlite": {
+        "titles": [
+          "Walnut desk",
+          "Oak chair"
+        ],
+        "total": 2
+      }
+    },
+    {
+      "name": "a prefix",
+      "q": "wal*",
+      "postgres": {
+        "titles": [
+          "Walnut shelf",
+          "Walnut desk",
+          "Oak chair",
+          "Pine table"
+        ],
+        "total": 4
+      },
+      "sqlite": {
+        "titles": [
+          "Walnut desk",
+          "Walnut shelf",
+          "Oak chair",
+          "Pine table"
+        ],
+        "total": 4
+      }
+    },
+    {
+      "name": "a prefix after a word",
+      "q": "desk lam*",
+      "postgres": {
+        "titles": [
+          "Desk lamp"
+        ],
+        "total": 1
+      },
+      "sqlite": {
+        "titles": [
+          "Desk lamp"
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "an excluded word",
+      "q": "walnut -pine",
+      "postgres": {
+        "titles": [
+          "Walnut desk",
+          "Oak chair"
+        ],
+        "total": 2
+      },
+      "sqlite": {
+        "titles": [
+          "Walnut desk",
+          "Oak chair"
+        ],
+        "total": 2
+      }
+    },
+    {
+      "name": "an excluded phrase",
+      "q": "desk -\"walnut desk\"",
+      "postgres": {
+        "titles": [
+          "Desk lamp"
+        ],
+        "total": 1
+      },
+      "sqlite": {
+        "titles": [
+          "Desk lamp"
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "OR",
+      "q": "oak OR pine",
+      "postgres": {
+        "titles": [
+          "Oak chair",
+          "Pine table",
+          "Walnut shelf"
+        ],
+        "total": 3
+      },
+      "sqlite": {
+        "titles": [
+          "Oak chair",
+          "Pine table",
+          "Walnut shelf"
+        ],
+        "total": 3
+      }
+    },
+    {
+      "name": "OR beside a word",
+      "q": "walnut oak OR pine",
+      "postgres": {
+        "titles": [
+          "Walnut shelf",
+          "Oak chair",
+          "Pine table"
+        ],
+        "total": 3
+      },
+      "sqlite": {
+        "titles": [
+          "Oak chair",
+          "Pine table",
+          "Walnut shelf"
+        ],
+        "total": 3
+      }
+    },
+    {
+      "name": "diacritics fold",
+      "q": "cafe",
+      "postgres": {
+        "titles": [
+          "Caf\u00e9 lease"
+        ],
+        "total": 1
+      },
+      "sqlite": {
+        "titles": [
+          "Caf\u00e9 lease"
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "diacritics fold in the query",
+      "q": "caf\u00e9 lease",
+      "postgres": {
+        "titles": [
+          "Caf\u00e9 lease"
+        ],
+        "total": 1
+      },
+      "sqlite": {
+        "titles": [
+          "Caf\u00e9 lease"
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "excluded terms alone match nothing",
+      "q": "-walnut",
+      "postgres": {
+        "titles": [],
+        "total": 0
+      },
+      "sqlite": {
+        "titles": [],
+        "total": 0
+      }
+    },
+    {
+      "name": "only some tables",
+      "q": "walnut",
+      "tables": [
+        "Unit"
+      ],
+      "postgres": {
+        "titles": [
+          "Pine table"
+        ],
+        "total": 1
+      },
+      "sqlite": {
+        "titles": [
+          "Pine table"
+        ],
+        "total": 1
+      }
+    },
+    {
+      "name": "a page",
+      "q": "walnut",
+      "limit": 2,
+      "offset": 1,
+      "postgres": {
+        "titles": [
+          "Walnut desk",
+          "Oak chair"
+        ],
+        "total": 4
+      },
+      "sqlite": {
+        "titles": [
+          "Walnut shelf",
+          "Oak chair"
+        ],
+        "total": 4
+      }
+    },
+    {
+      "name": "a vector alone",
+      "q": "",
+      "vector": [
+        1,
+        0,
+        0
+      ],
+      "postgres": {
+        "titles": [
+          "Walnut desk",
+          "Walnut shelf",
+          "Oak chair",
+          "Caf\u00e9 lease",
+          "Pine table"
+        ],
+        "total": 5
+      },
+      "sqlite": null
+    },
+    {
+      "name": "a vector alone keeps out excluded terms",
+      "q": "-oak",
+      "vector": [
+        1,
+        0,
+        0
+      ],
+      "postgres": {
+        "titles": [
+          "Walnut desk",
+          "Walnut shelf",
+          "Caf\u00e9 lease",
+          "Pine table"
+        ],
+        "total": 4
+      },
+      "sqlite": null
+    },
+    {
+      "name": "a vector re-ranks words",
+      "q": "walnut",
+      "vector": [
+        0,
+        1,
+        0
+      ],
+      "postgres": {
+        "titles": [
+          "Walnut shelf",
+          "Pine table",
+          "Oak chair",
+          "Walnut desk"
+        ],
+        "total": 4
+      },
+      "sqlite": null
+    }
+  ]
+}

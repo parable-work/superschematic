@@ -1473,7 +1473,7 @@ func endpointNeedsRegexp(endpoint EndpointInfo) bool {
 }
 
 func scalarArgHasValidationConstraints(arg ScalarArg) bool {
-	return arg.ValueRules.Any()
+	return arg.Any()
 }
 
 func loadUnionTypeNames(typesDir string) (map[string]struct{}, error) {

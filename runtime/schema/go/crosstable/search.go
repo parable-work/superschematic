@@ -33,16 +33,20 @@ SearchTables ranks every table's index rows in one query, so its pages and
 its total are exact and a row the caller may not read never shows, as a gap
 or otherwise:
 
-- The words: each whitespace-separated word of the query is a phrase of
-  the words Postgres's parser finds in it, and a row matches when it holds
-  every word, as the engine's Search reads a plain query (D58), in the
-  simple configuration.
+- The words: the query is read into a plan (query.go, #740): quoted
+  phrases, prefixes (wal*), excluded terms (-oak) and OR between terms,
+  each term a phrase of the words Postgres's parser finds in it. A row
+  matches when it holds a term of every group and no excluded term, in the
+  definition's text search configuration (simple, or search_unaccent,
+  which folds diacritics).
 - The order: ts_rank_cd over the row's words, weighed by where each is
   (title A, body B, conversation C, files D), then the table and the key.
   With an embedding, the first RRFWindow by text are re-ranked by
   reciprocal rank fusion of their text place and their place by cosine
   similarity, RRFK the engine's constant; a row past the window keeps its
-  text order after them.
+  text order after them. A query with no term to hold that brings a
+  vector ranks by the vector alone: every index row the caller may read
+  whose embedding is of the model, by cosine similarity (#740).
 - Access: the caller's audience is checked on the index row's copied
   columns, as a repository checks a row's. A caller with grants, a party
   or an agent run, reaches a table's rows only through its grants'
@@ -56,7 +60,8 @@ or otherwise:
 
 // SearchRequest is a search.
 type SearchRequest struct {
-	// Q is the words: a row matches when it holds every one.
+	// Q is the query (#740): words and quoted phrases a row holds each
+	// of, prefixes (wal*), excluded terms (-oak) and OR between terms.
 	Q string
 	// Tables are the tables it searches, by type name; every @searchable
 	// table the caller may read when nil.
@@ -67,7 +72,8 @@ type SearchRequest struct {
 	// Offset the hits before it (at most 10000).
 	Limit, Offset int
 	// Vector is a query embedding, of SearchOptions.Embeddings' model,
-	// which re-ranks the first hits; the embeddings compute one when nil.
+	// which re-ranks the first hits, or ranks alone when Q holds no term to
+	// hold; the embeddings compute one when nil.
 	Vector []float64
 }
 
@@ -311,8 +317,10 @@ func SearchTables(ctx context.Context, h Host, caller Caller, request SearchRequ
 	if err != nil {
 		return empty, err
 	}
-	words := SearchWords(request.Q)
-	if len(words) == 0 {
+	plan := ReadSearchQuery(request.Q)
+	// A query with no term to hold matches nothing, unless a vector ranks
+	// it.
+	if len(plan.All) == 0 && request.Vector == nil {
 		return empty, nil
 	}
 	all := h.Definitions().Searchable
@@ -342,9 +350,14 @@ func SearchTables(ctx context.Context, h Host, caller Caller, request SearchRequ
 		if options.Embeddings != nil {
 			return empty, fmt.Errorf("searchTables: %w", ErrSQLiteEmbeddings)
 		}
-		return searchOnSQLite(ctx, h, caller, words, sources, all, request.Scope, limit, offset)
+		return searchOnSQLite(ctx, h, caller, plan, sources, all, request.Scope, limit, offset)
 	}
 	first := all[sources[0]]
+	config := first.Config
+	if config == "" {
+		config = "simple"
+	}
+	regconfig := "'" + config + "'::regconfig"
 	as := h.As(ctx, caller.Principal)
 
 	var args []any
@@ -352,12 +365,15 @@ func SearchTables(ctx context.Context, h Host, caller Caller, request SearchRequ
 		args = append(args, value)
 		return fmt.Sprintf("$%d", len(args))
 	}
-	var phrases []string
-	for _, word := range words {
-		phrases = append(phrases, "phraseto_tsquery('simple'::regconfig, "+param(word)+"::text)")
+	byVector := len(plan.All) == 0
+	query := PostgresQuery(plan, regconfig, param)
+	var conditions []string
+	switch {
+	case !byVector:
+		conditions = []string{first.Document + " @@ q.q"}
+	case len(plan.None) > 0:
+		conditions = []string{"NOT (" + first.Document + " @@ (" + query + "))"}
 	}
-	query := strings.Join(phrases, " && ")
-	conditions := []string{first.Document + " @@ q.q"}
 	// The tables: for a caller with grants, each through its repository's
 	// conditions for that caller, an EXISTS back to its rows.
 	if caller.Principal.Grants == nil {
@@ -392,6 +408,16 @@ func SearchTables(ctx context.Context, h Host, caller Caller, request SearchRequ
 			}
 		}
 		conditions = append(conditions, "si.scope = ANY("+param(forms)+"::text[])")
+	}
+	if byVector {
+		if options.Embeddings == nil {
+			return empty, invalid("searchTables: a vector needs embeddings, which say its model")
+		}
+		vector, err := unit(request.Vector)
+		if err != nil {
+			return empty, err
+		}
+		return searchByVector(ctx, h, all, first.Index, conditions, args, vector, options.Embeddings.Model, limit, offset)
 	}
 
 	// The query's embedding, when embeddings are on or the request brings
@@ -442,7 +468,7 @@ func SearchTables(ctx context.Context, h Host, caller Caller, request SearchRequ
 	}
 	headline := "'StartSel=" + openMark + ", StopSel=" + closeMark + ", MaxWords=24, MinWords=12, ShortWord=0, HighlightAll=false, MaxFragments=0'"
 	matches := func(column string) string {
-		return "to_tsvector('simple'::regconfig, COALESCE(p." + column + ", '')) @@ q.q"
+		return "to_tsvector(" + regconfig + ", COALESCE(p." + column + ", '')) @@ q.q"
 	}
 	sql := `WITH q AS (SELECT ` + query + ` AS q),
     hits AS (
@@ -453,7 +479,7 @@ func SearchTables(ctx context.Context, h Host, caller Caller, request SearchRequ
     ),
     ` + ranked + fused + `
     SELECT c.total, p.source_table, p.source_key, p.title, p.matched,
-      ts_headline('simple'::regconfig, p.shown, q.q, ` + headline + `) AS snippet
+      ts_headline(` + regconfig + `, p.shown, q.q, ` + headline + `) AS snippet
     FROM (SELECT count(*) AS total FROM hits) AS c
     CROSS JOIN q
     LEFT JOIN LATERAL (

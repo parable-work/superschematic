@@ -260,7 +260,7 @@ func (p QueryParam) Validates() bool {
 	if p.IsArray {
 		return p.ChecksList() || p.ChecksItems()
 	}
-	return p.ValueRules.Any()
+	return p.Any()
 }
 
 // Validator is the types package's function the method checks the

@@ -1,9 +1,10 @@
 package stack
 
 import (
-	ir "github.com/parable-work/superschematic/ir"
 	"maps"
 	"slices"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // The static sites of a stack (D55; docs/stack-model.md, section 8.10). A

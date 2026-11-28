@@ -85,7 +85,7 @@ func checkSort(schema *ir.Schema, in Input, owner string, op *ir.FieldDef, r *Re
 	if sort.References != nil {
 		r.errorf("", "%s: sort argument %s refers to %s (RefersTo); a sort's value names a field of its item", owner, sort.Name, sort.References.Type)
 	}
-	if rules := sort.ValueRules.Names(); len(rules) > 0 {
+	if rules := sort.Names(); len(rules) > 0 {
 		r.errorf("", "%s: sort argument %s has Validate's %s; a sort's values are its fields, which the sort checks itself", owner, sort.Name, strings.Join(rules, ", "))
 	}
 

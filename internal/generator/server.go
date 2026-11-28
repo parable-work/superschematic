@@ -204,6 +204,9 @@ func (r run) generateServers() error {
 	for _, w := range workers {
 		switch w.Language {
 		case APILanguageGo:
+			if err := r.checkGoQueue(st.Name, w, services); err != nil {
+				return err
+			}
 			worker, _, err := r.planEntrypoint(st.Name, w, cloudSQL[w.Name], nil)
 			if err != nil {
 				return err

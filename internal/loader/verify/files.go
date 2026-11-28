@@ -106,7 +106,7 @@ func checkFileUploadField(owner string, field *ir.FieldDef, r *Result) {
 	for _, err := range ir.ValidateFileUploadConfig(owner, field.FileUpload) {
 		r.errorf("", "%v", err)
 	}
-	if field.Default != nil || field.ValueRules.Any() || field.ValidateUploadMaxBytes != nil {
+	if field.Default != nil || field.Any() || field.ValidateUploadMaxBytes != nil {
 		r.errorf("", "%s: a FileUpload takes its limit in its maxBytes, and no default or other rule", owner)
 	}
 }

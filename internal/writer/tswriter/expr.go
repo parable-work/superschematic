@@ -284,7 +284,7 @@ func (e *emitter) sortByExpr(arg *ir.ArgumentDef, item, owner string) string {
 		e.failf("%s: a sort argument that is not an optional query parameter has no TypeScript authoring form", owner)
 	}
 	if arg.TypeRef != (ir.TypeRef{Name: "string"}) || arg.Default != nil || arg.References != nil || arg.Search ||
-		arg.ValueRules.Any() {
+		arg.Any() {
 		e.failf("%s: a sort argument is SortBy's text alone; one of another type, or with a default, a reference, a search or a rule, has no TypeScript authoring form", owner)
 	}
 	fields := make([]string, len(arg.Sort))

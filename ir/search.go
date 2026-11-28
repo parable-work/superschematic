@@ -104,11 +104,46 @@ const (
 // full-text index falls back to where it has no unaccent (D58, D155).
 const SearchTextConfig = "simple"
 
+// SearchFoldedConfig is the text search configuration of an index that
+// folds diacritics (outputs.sql.search.foldDiacritics, #740): Postgres's
+// default parser, then the unaccent dictionary, then simple, so a word
+// finds its accented forms. The index's raw SQL, SearchUnaccentPiece,
+// makes it in the database's schema.
+const SearchFoldedConfig = "search_unaccent"
+
+// SearchUnaccentPiece is the id of the raw SQL that makes
+// SearchFoldedConfig, which the loader adds to an index that folds.
+const SearchUnaccentPiece = "search_unaccent"
+
+// SearchExtensionSchema is the schema SearchUnaccentPiece creates the
+// unaccent extension in where the database lacks it, the one the engine's
+// index shares (D58).
+const SearchExtensionSchema = "superschematic_extensions"
+
+// SearchConfig is the text search configuration of the schema's search
+// index: SearchFoldedConfig when it folds diacritics, else
+// SearchTextConfig.
+func (s *Schema) SearchConfig() string {
+	if s != nil {
+		if td := s.Types[SearchIndexTypeName]; td != nil && td.SearchFolds {
+			return SearchFoldedConfig
+		}
+	}
+	return SearchTextConfig
+}
+
 // SearchDocument is the expression of the index row's words, each weighed
 // by where it is: the title A, the body B, the conversation C and the
-// files' text D, which ts_rank_cd ranks by. The index's GIN index covers
-// this expression, and a search matches it as written.
+// files' text D, which ts_rank_cd ranks by, in SearchTextConfig. The
+// index's GIN index covers this expression, and a search matches it as
+// written.
 func SearchDocument(qualifier string) string {
+	return SearchDocumentIn(SearchTextConfig, qualifier)
+}
+
+// SearchDocumentIn is SearchDocument in the text search configuration
+// config (Schema.SearchConfig).
+func SearchDocumentIn(config, qualifier string) string {
 	column := func(name string) string {
 		if qualifier == "" {
 			return name
@@ -116,7 +151,7 @@ func SearchDocument(qualifier string) string {
 		return qualifier + "." + name
 	}
 	part := func(name, weight string) string {
-		return fmt.Sprintf("setweight(to_tsvector('%s'::regconfig, COALESCE(%s, '')), '%s')", SearchTextConfig, column(name), weight)
+		return fmt.Sprintf("setweight(to_tsvector('%s'::regconfig, COALESCE(%s, '')), '%s')", config, column(name), weight)
 	}
 	return "(" + part("title", "A") + " || " + part("body", "B") + " || " + part("comments", "C") + " || " + part("files", "D") + ")"
 }

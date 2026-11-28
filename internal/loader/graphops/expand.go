@@ -685,7 +685,7 @@ func (b *builder) content(member graphdesc.Member, described graphdesc.Kind) []*
 			Comment:    fd.Comment,
 			TypeRef:    fd.TypeRef,
 			Required:   fd.Required,
-			ValueRules: fd.ValueRules.Element(),
+			ValueRules: fd.Element(),
 			Origin:     ir.OriginGraphOperations,
 		}
 		name := fd.TypeRef.Name

@@ -3,6 +3,9 @@ import { covers } from './auth.js';
 import { activeGrants, permissionsOf as rolePermissions, reachesOf, rolesById, rolesByName } from './access.js';
 import { identityLapsed, type IdentityStanding } from './parties.js';
 import { withCaller } from './caller.js';
+import { quietSecondsAt } from './quiet-hours.js';
+import { createReplyInterpreter, referenceInText } from './reply-interpreter.js';
+import type { AgentTool } from './agents.js';
 import { createLogger, type Logger } from './logger.js';
 import type { EventDefinition, PlainRepository } from './orm.js';
 import type { ChannelAdapter, DeliveryState, InboundMessage, WebhookRequest } from './providers/channel.js';
@@ -217,6 +220,15 @@ export interface NotifierOptions {
    * agent with none is logged and reaches no one.
    */
   readonly agents?: { request(tx: any, input: Readonly<Record<string, unknown>> & { readonly agent: string }): Promise<void> };
+  /**
+   * A reply interpreter other than keywords (#602, D158): a reply from a
+   * user's verified identity whose words name no verb a reply takes goes to
+   * a run of this agent, through agents, acting for its sender; the run
+   * answers it with replyTool, which the agent's definition lists. Keywords
+   * alone unless set. The replies' interpreter column names it,
+   * agent:<name>.
+   */
+  readonly interpret?: { readonly agent: string };
   /** The core's expansion of a recurrence rule (RulesCore.expand, D152), which digests and briefs are dated by. */
   readonly expand?: (input: Record<string, unknown>) => { readonly occurrences: readonly { readonly dueAt: number }[] };
   readonly deliveryTimeoutSeconds?: number;
@@ -228,7 +240,8 @@ export interface NotifierOptions {
 
 /** What a reply came to. */
 export interface ReplyOutcome {
-  readonly outcome: 'done' | 'refused' | 'unknown' | 'ambiguous' | 'failed' | 'verified';
+  /** interpreting: an agent run reads it (NotifierOptions.interpret), and answers on its channel. */
+  readonly outcome: 'done' | 'refused' | 'unknown' | 'ambiguous' | 'failed' | 'verified' | 'interpreting';
   /** The reply's row in the replies table. */
   readonly reply?: string;
   readonly notice?: string;
@@ -317,6 +330,14 @@ export interface Notifier {
   scheduleSubscription(tx: any, subscription: string): Promise<void>;
   /** Deletes up to limit deliveries that ended past their retention, and resolves to how many. */
   prune(limit: number): Promise<number>;
+  /**
+   * The tool an interpreting agent run answers its reply with (interpret,
+   * #602): createAgents({ tools: { reply: notifier.replyTool } }), listed in
+   * the interpreter's definition.
+   */
+  readonly replyTool: AgentTool;
+  /** An interpreting run that ended (createAgents calls it): a reply it did not act on ends refused, and its sender is told. */
+  replyRunEnded(input: { readonly reply?: unknown; readonly outcome: string; readonly detail?: string | null }): Promise<void>;
 }
 
 type Values = Record<string, unknown>;
@@ -387,26 +408,15 @@ function wallDate(at: Date, zone: string): string {
   return new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at);
 }
 
-/** The minutes of the day of a time of day: HH:MM, or the HH:MM:SS a Temporal.Time is stored as, its seconds dropped. */
-function minutesOf(text: string): number | undefined {
-  const m = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/u.exec(text);
-  return m ? Number(m[1]) * 60 + Number(m[2]) : undefined;
-}
-
 /**
  * How many seconds from at until the quiet hours [start, end) of zone end,
  * or 0 when at is outside them. A window that crosses midnight
- * (22:00 to 07:00) is read as one.
+ * (22:00 to 07:00) is read as one, and a window the clocks change inside
+ * starts and ends at the instants its wall times are reached in the zone
+ * (quiet-hours.ts, #602).
  */
 export function quietDelaySeconds(at: Date, zone: string, start: string | null | undefined, end: string | null | undefined): number {
-  const from = start ? minutesOf(start) : undefined;
-  const to = end ? minutesOf(end) : undefined;
-  if (from === undefined || to === undefined || from === to) return 0;
-  const now = wallMinutes(at, zone);
-  const inside = from < to ? now >= from && now < to : now >= from || now < to;
-  if (!inside) return 0;
-  const minutes = (to - now + 1440) % 1440;
-  return minutes * 60 - at.getUTCSeconds();
+  return quietSecondsAt(at, zone, start, end);
 }
 
 /** Whether held, a principal's permissions, may use need within cap, the channel's trust (null: no cap). */
@@ -1202,6 +1212,27 @@ export function createNotifier(options: NotifierOptions): Notifier {
   };
 
   const actionOf = (kind: string, verb: string): ReplyAction | undefined => options.replies?.[kind]?.[verb] ?? options.replies?.['*']?.[verb];
+  /** Whether verb is a reply action's of any kind, which the keyword reader takes. */
+  const keywordVerb = (verb: string): boolean => Object.values(options.replies ?? {}).some(actions => Object.hasOwn(actions, verb));
+
+  const interpreter = createReplyInterpreter({
+    ...(options.interpret ? { agent: options.interpret.agent } : {}),
+    ...(options.agents ? { request: (tx: any, input: Readonly<Record<string, unknown>> & { readonly agent: string }) => options.agents!.request(tx, input) } : {}),
+    orm,
+    inbox: db => repo(sys(db), parts.inbox),
+    ...(parts.replies ? { replies: (db: any) => repo(sys(db), parts.replies) } : {}),
+    ...(parts.identities ? { identities: (db: any) => repo(sys(db), parts.identities) } : {}),
+    record,
+    echo,
+    trustOf,
+    actionOf,
+    acknowledgeIn,
+    acknowledgeDeliveries,
+    replyAllows,
+    narrowedPermissions,
+    sameId,
+    now,
+  });
 
   const reply = async (input: ReplyInput): Promise<ReplyOutcome> => {
     const addressKind = addressKindOf(input.channel);
@@ -1225,7 +1256,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
           if (await checkCode(identity, text, 'verify')) {
             const id = await record(orm, { ...base, identity: identity.id, principal: identity.principal, verb: 'verify', outcome: 'done' });
             await echo(input, address, 'This address is confirmed.', String(identity.principal));
-            return { outcome: 'verified', ...(id ? { reply: id } : {}), verb: 'verify', principal: { kind: identity.principalKind as RecipientRef['kind'], id: String(identity.principal) } };
+            return { outcome: 'verified', ...(id ? { reply: id } : {}), verb: 'verify', principal: { kind: identity.principalKind as RecipientRef['kind'], id: String(identity.principal), ...(identity.principalTable ? { table: String(identity.principalTable) } : {}) } };
           }
         }
       }
@@ -1242,7 +1273,10 @@ export function createNotifier(options: NotifierOptions): Notifier {
     const withIdentity = { ...base, identity: identity.id, principal: identity.principal };
     const read = readReply(text);
     const verb = read.verb;
-    const reference = read.reference;
+    // A reply no keyword reads may name its notice anywhere, as #142, when
+    // an agent run would interpret it.
+    const interpretable = !read.ack && !read.undo && !keywordVerb(verb) && interpreter.takes(identity, recipient);
+    const reference = read.reference ?? (interpretable ? referenceInText(text) : undefined);
     const words = read.args;
     const refuse = async (outcome: ReplyOutcome['outcome'], detail: string, extra: Values = {}): Promise<ReplyOutcome> => {
       const id = await record(orm, { ...withIdentity, verb, ...(reference !== undefined ? { reference } : {}), outcome, detail, ...extra });
@@ -1299,6 +1333,8 @@ export function createNotifier(options: NotifierOptions): Notifier {
     }
 
     const action = actionOf(notice.eventKind, verb);
+    // Words no keyword reads, from a verified identity: an agent run interprets them (#602).
+    if (!action && interpretable && interpreter.takes(identity, recipient, notice)) return interpreter.hand({ reply: input, address, recipient, withIdentity, notice, text });
     if (!action) return refuse('refused', `"${verb}" is no reply ${notice.reference} takes.`, { notice: notice.id });
     if (action.permission && !replyAllows(held, cap, action.permission)) {
       const detail = held.some(h => covers(h, action.permission!))
@@ -1441,6 +1477,8 @@ export function createNotifier(options: NotifierOptions): Notifier {
     sendDirect,
     scheduleSubscription,
     prune,
+    replyTool: interpreter.tool,
+    replyRunEnded: input => interpreter.ended(input),
   };
 }
 

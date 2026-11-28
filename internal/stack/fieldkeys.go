@@ -1,9 +1,10 @@
 package stack
 
 import (
-	ir "github.com/parable-work/superschematic/ir"
 	"maps"
 	"slices"
+
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // checkFieldKeys refuses a deployable that runs code on a database with
