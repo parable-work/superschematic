@@ -438,13 +438,6 @@ func TestBehaviorOperationsRefusals(t *testing.T) {
 			db.Types["Order"].Role = ir.RoleEmbeddedStruct
 			return db
 		}, "OrderActions: @behaviorOperations names Order, which is not a table of orders-db: a set serves a table one of whose fields is a behavior (D103)"},
-		{"an engine type", func() *ir.Schema {
-			return ordersAPI(actionsOf("OrderActions", "Order"))
-		}, func() *ir.Schema {
-			db := ordersDB()
-			db.Types["Order"].Behaviors = []ir.BehaviorRef{{Name: "Workflow"}}
-			return db
-		}, "OrderActions: @behaviorOperations names Order, an engine type of orders-db (D58), whose engine serves its operations; a set serves a table one of whose fields is a behavior (D103)"},
 		{"no field behavior", func() *ir.Schema {
 			return ordersAPI(actionsOf("OrderActions", "Order"))
 		}, func() *ir.Schema {

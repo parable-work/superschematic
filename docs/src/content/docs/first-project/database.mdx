@@ -70,12 +70,14 @@ A product's restock requests, which `shop-stock` files and orders:
 product, which `shop-stock`, the API that reads and writes the table,
 relies on ([Indexes](/superschematic/guides/database-tables/#indexes)).
 
-How many units of a product the warehouse holds is no table: `shop-db`'s
-`Inventory`, in `src/commerce.schema.ts`, composes the engine's `Stock`
-behavior, so the engine keeps it, with the checkouts that hold units and
-pickup slots and the refunds staff sign off. The build writes those types'
-engine document, and the SQL and the ORM leave them out
-([Engine behaviors](/superschematic/guides/engine-behaviors/)).
+How many units of a product the warehouse holds is a table too:
+`shop-db`'s `Inventory`, in `src/commerce.schema.ts`, implements the
+`Stock` behavior, so its state is columns of the table and a ledger
+beside it, with the checkouts that hold units and pickup slots and the
+refunds staff sign off. The SQL and the ORM cover them as any other
+table, and the behaviors' operations run in the repositories'
+transactions
+([Units and time a claim holds](/superschematic/guides/database-tables/#units-and-time-a-claim-holds-and-what-it-owes)).
 
 ## Build
 

@@ -6,7 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 	"reflect"
 	"regexp"
 	"strings"
@@ -277,6 +277,69 @@ func findJSONNullElement(data []byte, i, depth int) (end int, at [2]int, found b
 	}
 }
 
+// nullJSONMembers reports, for each of names, whether data, an object
+// json.Unmarshal has already decoded, holds that key as null. It reads the
+// members of the object itself, not of the values in it. A key names a
+// field as encoding/json matches it, exactly or else without regard to
+// case, and a repeated key counts at every occurrence: encoding/json leaves
+// the field nil only when the last one is null.
+func nullJSONMembers(data []byte, names ...string) []bool {
+	nulls := make([]bool, len(names))
+	i := skipJSONSpace(data, 0)
+	if i >= len(data) || data[i] != '{' {
+		return nulls
+	}
+	i++
+	for {
+		i = skipJSONSpace(data, i)
+		if i >= len(data) || data[i] != '"' {
+			return nulls
+		}
+		keyEnd := skipJSONString(data, i)
+		at := matchJSONKey(data[i:keyEnd], names)
+		i = skipJSONSpace(data, keyEnd)
+		if i >= len(data) || data[i] != ':' {
+			return nulls
+		}
+		i = skipJSONSpace(data, i+1)
+		if at >= 0 && i < len(data) && data[i] == 'n' {
+			nulls[at] = true
+		}
+		i = skipJSONSpace(data, skipJSONValue(data, i))
+		if i >= len(data) || data[i] != ',' {
+			return nulls
+		}
+		i++
+	}
+}
+
+// matchJSONKey returns the index of the name an object key, quoted as in
+// the payload, matches, or -1.
+func matchJSONKey(quoted []byte, names []string) int {
+	if len(quoted) < 2 {
+		return -1
+	}
+	key := quoted[1 : len(quoted)-1]
+	if bytes.IndexByte(key, '\\') >= 0 {
+		var unquoted string
+		if err := json.Unmarshal(quoted, &unquoted); err != nil {
+			return -1
+		}
+		key = []byte(unquoted)
+	}
+	for at, name := range names {
+		if string(key) == name {
+			return at
+		}
+	}
+	for at, name := range names {
+		if strings.EqualFold(string(key), name) {
+			return at
+		}
+	}
+	return -1
+}
+
 // skipJSONSpace returns the index of the first non-space byte at or after i.
 func skipJSONSpace(data []byte, i int) int {
 	for i < len(data) {
@@ -421,33 +484,6 @@ func validateCryptoSHA256Value(value CryptoSHA256, required bool) (bool, []Valid
 	return valid, coreErrs
 }
 
-// validateFinanceMoneyValue validates one Finance.Money value and reports a
-// failure once. A missing required value is "required". A value that breaks
-// the scalar's own length, pattern or range is reported by that rule's name,
-// as every other validator names it, and the scalar core's verdict (the
-// scalar's Validate) stands only for a value those rules accept.
-func validateFinanceMoneyValue(value FinanceMoney, required bool) (bool, []ValidationError) {
-	check := value.Validate
-	if required {
-		check = value.ValidateRequired
-	}
-	valid, coreErrs := check()
-	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
-		return false, coreErrs
-	}
-	var ruleErrs []ValidationError
-	if float64(value) < 0 {
-		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least 0"})
-	}
-	if float64(value) > 9007199254740991 {
-		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
-	}
-	if len(ruleErrs) > 0 {
-		return false, ruleErrs
-	}
-	return valid, coreErrs
-}
-
 // validateGenericInt64Value validates one Generic.Int64 value and reports a
 // failure once. A missing required value is "required". A value that breaks
 // the scalar's own length, pattern or range is reported by that rule's name,
@@ -468,6 +504,33 @@ func validateGenericInt64Value(value GenericInt64, required bool) (bool, []Valid
 	}
 	if float64(value) > 9007199254740991 {
 		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 9007199254740991"})
+	}
+	if len(ruleErrs) > 0 {
+		return false, ruleErrs
+	}
+	return valid, coreErrs
+}
+
+// validateGenericProbabilityValue validates one Generic.Probability value and reports a
+// failure once. A missing required value is "required". A value that breaks
+// the scalar's own length, pattern or range is reported by that rule's name,
+// as every other validator names it, and the scalar core's verdict (the
+// scalar's Validate) stands only for a value those rules accept.
+func validateGenericProbabilityValue(value GenericProbability, required bool) (bool, []ValidationError) {
+	check := value.Validate
+	if required {
+		check = value.ValidateRequired
+	}
+	valid, coreErrs := check()
+	if !valid && len(coreErrs) > 0 && coreErrs[0].Validator == "required" {
+		return false, coreErrs
+	}
+	var ruleErrs []ValidationError
+	if float64(value) < 0 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "min", Message: "must be at least 0"})
+	}
+	if float64(value) > 1 {
+		ruleErrs = append(ruleErrs, ValidationError{Validator: "max", Message: "must be at most 1"})
 	}
 	if len(ruleErrs) > 0 {
 		return false, ruleErrs
@@ -797,21 +860,56 @@ func AuditableFromYAMLNonStrict(data []byte) (*Auditable, error) {
 
 // Checkout - A shopper's checkout. shop-cart keeps it in cart while the shopper fills
 // it; shop-orders' startCheckout moves it to held, which holds each line's
-// units and the pickup slot, all of them or none; payCheckout opens its
-// payment with acmepay, and the capture acmepay reports moves it to
-// placed, through the Reactions rule, which commits what it holds and
-// lets shop-orders write its Order row. A checkout still held fifteen
-// minutes on expires, and lets go of what it holds, unless a payment is
-// in flight, which holds it until the two-hour backstop. A capture that
-// arrives after it expired is refunded.
+// units and the pickup slot at the counter, all of them or none;
+// payCheckout opens its payment with acmepay, and once acmepay's capture
+// is recorded shop-orders moves it to placed, which Payments allows only
+// once it is paid, which commits what it holds, and writes its Order row.
+// A checkout still held fifteen minutes on expires, through the deadline
+// shop-orders' behavior worker runs, and lets go of what it holds, unless
+// a payment is in flight, which holds it until the two-hour backstop. A
+// capture that arrives after it expired is refunded.
 type Checkout struct {
-	CustomerId IdentityUUID `json:"customerId"`
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Customer User `json:"customer"`
 
 	Lines []CheckoutLine `json:"lines"`
+
+	Counter *CollectionPoint `json:"counter,omitempty"`
 
 	PickupAt *TemporalDateTime `json:"pickupAt,omitempty"`
 
 	Address *CheckoutAddress `json:"address,omitempty"`
+
+	HoldsState string `json:"holdsState,omitempty"`
+
+	HoldsTotal *GenericJSON `json:"holdsTotal,omitempty"`
+
+	PaymentsDue *GenericInt64 `json:"paymentsDue,omitempty"`
+
+	PaymentsAuthorized *GenericInt64 `json:"paymentsAuthorized,omitempty"`
+
+	PaymentsCaptured *GenericInt64 `json:"paymentsCaptured,omitempty"`
+
+	PaymentsRefunded *GenericInt64 `json:"paymentsRefunded,omitempty"`
+
+	PaymentsOutstanding *GenericInt64 `json:"paymentsOutstanding,omitempty"`
+
+	PaymentsOverpaid *GenericInt64 `json:"paymentsOverpaid,omitempty"`
+
+	PaymentsCurrency string `json:"paymentsCurrency,omitempty"`
+
+	PaymentsState string `json:"paymentsState,omitempty"`
+
+	Status string `json:"status"`
+
+	StatusEnteredAt *TemporalDateTime `json:"statusEnteredAt,omitempty"`
+
+	NumberSeq *GenericInt64 `json:"numberSeq,omitempty"`
+
+	Number string `json:"number,omitempty"`
+
+	Version int64 `json:"_version"`
 }
 
 // MaskSecrets returns a copy of Checkout with secret fields cleared.
@@ -822,7 +920,12 @@ func (t *Checkout) MaskSecrets() *Checkout {
 
 	masked := &Checkout{}
 
-	masked.CustomerId = t.CustomerId
+	masked.Id = t.Id
+
+	maskedValueCustomer := t.Customer.MaskSecrets()
+	if maskedValueCustomer != nil {
+		masked.Customer = *maskedValueCustomer
+	}
 
 	if t.Lines != nil {
 		masked.Lines = make([]CheckoutLine, len(t.Lines))
@@ -836,9 +939,41 @@ func (t *Checkout) MaskSecrets() *Checkout {
 
 	}
 
+	masked.Counter = t.Counter.MaskSecrets()
+
 	masked.PickupAt = t.PickupAt
 
 	masked.Address = t.Address.MaskSecrets()
+
+	masked.HoldsState = t.HoldsState
+
+	masked.HoldsTotal = t.HoldsTotal
+
+	masked.PaymentsDue = t.PaymentsDue
+
+	masked.PaymentsAuthorized = t.PaymentsAuthorized
+
+	masked.PaymentsCaptured = t.PaymentsCaptured
+
+	masked.PaymentsRefunded = t.PaymentsRefunded
+
+	masked.PaymentsOutstanding = t.PaymentsOutstanding
+
+	masked.PaymentsOverpaid = t.PaymentsOverpaid
+
+	masked.PaymentsCurrency = t.PaymentsCurrency
+
+	masked.PaymentsState = t.PaymentsState
+
+	masked.Status = t.Status
+
+	masked.StatusEnteredAt = t.StatusEnteredAt
+
+	masked.NumberSeq = t.NumberSeq
+
+	masked.Number = t.Number
+
+	masked.Version = t.Version
 
 	return masked
 }
@@ -847,17 +982,26 @@ func (t *Checkout) MaskSecrets() *Checkout {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*Checkout) JSONFieldNames() []string {
-	return []string{"customerId", "lines", "pickupAt", "address"}
+	return []string{"id", "customer", "lines", "counter", "pickupAt", "address", "holdsState", "holdsTotal", "paymentsDue", "paymentsAuthorized", "paymentsCaptured", "paymentsRefunded", "paymentsOutstanding", "paymentsOverpaid", "paymentsCurrency", "paymentsState", "status", "statusEnteredAt", "numberSeq", "number", "_version"}
 }
 
 // Validate validates all fields in Checkout
 func (t *Checkout) Validate() ValidationErrors {
 	errors := NewValidationErrors()
 
-	// Validate customerId (required)
+	// Validate id (optional)
 
-	if valid, fieldErrs := validateIdentityUUIDValue(t.CustomerId, true); !valid {
-		errors.SetFieldErrors("customerId", fieldErrs)
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate customer (required nested type)
+
+	if fieldErrs := t.Customer.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("customer", fieldErrs)
 	}
 
 	// Validate lines (required nested type)
@@ -882,6 +1026,14 @@ func (t *Checkout) Validate() ValidationErrors {
 
 	}
 
+	// Validate counter (optional nested type)
+
+	if t.Counter != nil {
+		if fieldErrs := t.Counter.Validate(); fieldErrs.HasErrors() {
+			errors.AddNestedError("counter", fieldErrs)
+		}
+	}
+
 	// Validate pickupAt (optional)
 
 	// Validate optional pointer field
@@ -896,6 +1048,78 @@ func (t *Checkout) Validate() ValidationErrors {
 	if t.Address != nil {
 		if fieldErrs := t.Address.Validate(); fieldErrs.HasErrors() {
 			errors.AddNestedError("address", fieldErrs)
+		}
+	}
+
+	// Validate paymentsDue (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsDue != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsDue, false); !valid {
+			errors.SetFieldErrors("paymentsDue", fieldErrs)
+		}
+	}
+
+	// Validate paymentsAuthorized (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsAuthorized != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsAuthorized, false); !valid {
+			errors.SetFieldErrors("paymentsAuthorized", fieldErrs)
+		}
+	}
+
+	// Validate paymentsCaptured (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsCaptured != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsCaptured, false); !valid {
+			errors.SetFieldErrors("paymentsCaptured", fieldErrs)
+		}
+	}
+
+	// Validate paymentsRefunded (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsRefunded != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsRefunded, false); !valid {
+			errors.SetFieldErrors("paymentsRefunded", fieldErrs)
+		}
+	}
+
+	// Validate paymentsOutstanding (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsOutstanding != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsOutstanding, false); !valid {
+			errors.SetFieldErrors("paymentsOutstanding", fieldErrs)
+		}
+	}
+
+	// Validate paymentsOverpaid (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsOverpaid != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsOverpaid, false); !valid {
+			errors.SetFieldErrors("paymentsOverpaid", fieldErrs)
+		}
+	}
+
+	// Validate statusEnteredAt (optional)
+
+	// Validate optional pointer field
+	if t.StatusEnteredAt != nil {
+		if valid, fieldErrs := t.StatusEnteredAt.Validate(); !valid {
+			errors.SetFieldErrors("statusEnteredAt", fieldErrs)
+		}
+	}
+
+	// Validate numberSeq (optional)
+
+	// Validate optional pointer field
+	if t.NumberSeq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.NumberSeq, false); !valid {
+			errors.SetFieldErrors("numberSeq", fieldErrs)
 		}
 	}
 
@@ -927,6 +1151,13 @@ func (t *Checkout) UnmarshalJSON(data []byte) error {
 	}
 	if err := rejectNullListElements("Checkout", data, listFieldsOfCheckout); err != nil {
 		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "holdsTotal")
+		if nulls[0] && t.HoldsTotal == nil {
+			null := GenericJSON("null")
+			t.HoldsTotal = &null
+		}
 	}
 
 	// Preserve nil lists on input: absent/null required arrays must fail Validate.
@@ -1410,8 +1641,871 @@ func CheckoutAddressFromYAMLNonStrict(data []byte) (*CheckoutAddress, error) {
 	return decoded, nil
 }
 
-// CheckoutLine - One line of a checkout: an Inventory, by its id, which is the product's,
-// and how many: a value of the checkout, not a table.
+// CheckoutChange - The writes of Checkout's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
+type CheckoutChange struct {
+	RowKey IdentityUUID `json:"rowKey"`
+
+	Write string `json:"write"`
+
+	At GenericInt64 `json:"at"`
+
+	Before *GenericJSON `json:"before,omitempty"`
+
+	After *GenericJSON `json:"after,omitempty"`
+}
+
+// MaskSecrets returns a copy of CheckoutChange with secret fields cleared.
+func (t *CheckoutChange) MaskSecrets() *CheckoutChange {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutChange{}
+
+	masked.RowKey = t.RowKey
+
+	masked.Write = t.Write
+
+	masked.At = t.At
+
+	masked.Before = t.Before
+
+	masked.After = t.After
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutChange's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutChange) JSONFieldNames() []string {
+	return []string{"rowKey", "write", "at", "before", "after"}
+}
+
+// Validate validates all fields in CheckoutChange
+func (t *CheckoutChange) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate rowKey (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.RowKey, true); !valid {
+		errors.SetFieldErrors("rowKey", fieldErrs)
+	}
+
+	// Validate at (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.At, true); !valid {
+		errors.SetFieldErrors("at", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutChange to JSON
+func (t *CheckoutChange) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutChange
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutChange from JSON with validation
+func (t *CheckoutChange) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutChange
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "before", "after")
+		if nulls[0] && t.Before == nil {
+			null := GenericJSON("null")
+			t.Before = &null
+		}
+		if nulls[1] && t.After == nil {
+			null := GenericJSON("null")
+			t.After = &null
+		}
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutChange into a map representation.
+func (t *CheckoutChange) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutChange to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutChange to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutChange from a map using lenient decoding.
+func (t *CheckoutChange) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutChange from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutChange from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutChange from a map and rejects unknown fields.
+func (t *CheckoutChange) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutChange from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutChange from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutChange from JSON and rejects unknown fields.
+func (t *CheckoutChange) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutChange from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutChange from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutChange from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutChange from JSON using lenient decoding.
+func (t *CheckoutChange) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutChange from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutChange from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutChange from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutChange from YAML and rejects unknown fields.
+func (t *CheckoutChange) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutChange from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutChange from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutChange from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutChange from YAML using lenient decoding.
+func (t *CheckoutChange) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutChange from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutChange from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutChange from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutChangeFromMap builds CheckoutChange from a map using lenient decoding.
+func CheckoutChangeFromMap(value map[string]any) (*CheckoutChange, error) {
+	decoded := &CheckoutChange{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutChangeFromMapStrict builds CheckoutChange from a map and rejects unknown fields.
+func CheckoutChangeFromMapStrict(value map[string]any) (*CheckoutChange, error) {
+	decoded := &CheckoutChange{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutChangeFromJSON builds CheckoutChange from JSON and rejects unknown fields.
+func CheckoutChangeFromJSON(data []byte) (*CheckoutChange, error) {
+	decoded := &CheckoutChange{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutChangeFromJSONNonStrict builds CheckoutChange from JSON using lenient decoding.
+func CheckoutChangeFromJSONNonStrict(data []byte) (*CheckoutChange, error) {
+	decoded := &CheckoutChange{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutChangeFromYAML builds CheckoutChange from YAML and rejects unknown fields.
+func CheckoutChangeFromYAML(data []byte) (*CheckoutChange, error) {
+	decoded := &CheckoutChange{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutChangeFromYAMLNonStrict builds CheckoutChange from YAML using lenient decoding.
+func CheckoutChangeFromYAMLNonStrict(data []byte) (*CheckoutChange, error) {
+	decoded := &CheckoutChange{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutDeadline - The deadlines Checkout's behaviors arm, one message per row, use and deadline, due when it falls due (D103).
+type CheckoutDeadline struct {
+	RowKey IdentityUUID `json:"rowKey"`
+
+	UseId string `json:"useId"`
+
+	Name string `json:"name"`
+
+	At GenericInt64 `json:"at"`
+
+	Payload *GenericJSON `json:"payload,omitempty"`
+}
+
+// MaskSecrets returns a copy of CheckoutDeadline with secret fields cleared.
+func (t *CheckoutDeadline) MaskSecrets() *CheckoutDeadline {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutDeadline{}
+
+	masked.RowKey = t.RowKey
+
+	masked.UseId = t.UseId
+
+	masked.Name = t.Name
+
+	masked.At = t.At
+
+	masked.Payload = t.Payload
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutDeadline's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutDeadline) JSONFieldNames() []string {
+	return []string{"rowKey", "useId", "name", "at", "payload"}
+}
+
+// Validate validates all fields in CheckoutDeadline
+func (t *CheckoutDeadline) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate rowKey (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.RowKey, true); !valid {
+		errors.SetFieldErrors("rowKey", fieldErrs)
+	}
+
+	// Validate at (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.At, true); !valid {
+		errors.SetFieldErrors("at", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutDeadline to JSON
+func (t *CheckoutDeadline) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutDeadline
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutDeadline from JSON with validation
+func (t *CheckoutDeadline) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutDeadline
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "payload")
+		if nulls[0] && t.Payload == nil {
+			null := GenericJSON("null")
+			t.Payload = &null
+		}
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutDeadline into a map representation.
+func (t *CheckoutDeadline) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutDeadline to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutDeadline to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutDeadline from a map using lenient decoding.
+func (t *CheckoutDeadline) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutDeadline from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutDeadline from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutDeadline from a map and rejects unknown fields.
+func (t *CheckoutDeadline) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutDeadline from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutDeadline from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutDeadline from JSON and rejects unknown fields.
+func (t *CheckoutDeadline) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutDeadline from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutDeadline from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutDeadline from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutDeadline from JSON using lenient decoding.
+func (t *CheckoutDeadline) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutDeadline from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutDeadline from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutDeadline from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutDeadline from YAML and rejects unknown fields.
+func (t *CheckoutDeadline) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutDeadline from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutDeadline from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutDeadline from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutDeadline from YAML using lenient decoding.
+func (t *CheckoutDeadline) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutDeadline from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutDeadline from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutDeadline from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutDeadlineFromMap builds CheckoutDeadline from a map using lenient decoding.
+func CheckoutDeadlineFromMap(value map[string]any) (*CheckoutDeadline, error) {
+	decoded := &CheckoutDeadline{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutDeadlineFromMapStrict builds CheckoutDeadline from a map and rejects unknown fields.
+func CheckoutDeadlineFromMapStrict(value map[string]any) (*CheckoutDeadline, error) {
+	decoded := &CheckoutDeadline{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutDeadlineFromJSON builds CheckoutDeadline from JSON and rejects unknown fields.
+func CheckoutDeadlineFromJSON(data []byte) (*CheckoutDeadline, error) {
+	decoded := &CheckoutDeadline{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutDeadlineFromJSONNonStrict builds CheckoutDeadline from JSON using lenient decoding.
+func CheckoutDeadlineFromJSONNonStrict(data []byte) (*CheckoutDeadline, error) {
+	decoded := &CheckoutDeadline{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutDeadlineFromYAML builds CheckoutDeadline from YAML and rejects unknown fields.
+func CheckoutDeadlineFromYAML(data []byte) (*CheckoutDeadline, error) {
+	decoded := &CheckoutDeadline{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutDeadlineFromYAMLNonStrict builds CheckoutDeadline from YAML using lenient decoding.
+func CheckoutDeadlineFromYAMLNonStrict(data []byte) (*CheckoutDeadline, error) {
+	decoded := &CheckoutDeadline{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutHoldsItems - On a table, each item the claim has taken, keyed by its hold and index: the supply it names, what it asks, its state and the unit price the supply held it at, and the Workflow entry it was taken at. An item its fields ask that it has not taken is no row; the items field shows it pending.
+type CheckoutHoldsItems struct {
+	Checkout Checkout `json:"checkout"`
+
+	Key string `json:"key"`
+
+	Hold string `json:"hold,omitempty"`
+
+	Item *GenericInt64 `json:"item,omitempty"`
+
+	SupplySchema string `json:"supplySchema,omitempty"`
+
+	SupplyId string `json:"supplyId,omitempty"`
+
+	Quantity *GenericInt64 `json:"quantity,omitempty"`
+
+	StartMs *GenericInt64 `json:"startMs,omitempty"`
+
+	EndMs *GenericInt64 `json:"endMs,omitempty"`
+
+	State string `json:"state,omitempty"`
+
+	UnitPrice *GenericInt64 `json:"unitPrice,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	TakenAt *GenericInt64 `json:"takenAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of CheckoutHoldsItems with secret fields cleared.
+func (t *CheckoutHoldsItems) MaskSecrets() *CheckoutHoldsItems {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutHoldsItems{}
+
+	maskedValueCheckout := t.Checkout.MaskSecrets()
+	if maskedValueCheckout != nil {
+		masked.Checkout = *maskedValueCheckout
+	}
+
+	masked.Key = t.Key
+
+	masked.Hold = t.Hold
+
+	masked.Item = t.Item
+
+	masked.SupplySchema = t.SupplySchema
+
+	masked.SupplyId = t.SupplyId
+
+	masked.Quantity = t.Quantity
+
+	masked.StartMs = t.StartMs
+
+	masked.EndMs = t.EndMs
+
+	masked.State = t.State
+
+	masked.UnitPrice = t.UnitPrice
+
+	masked.Currency = t.Currency
+
+	masked.TakenAt = t.TakenAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutHoldsItems's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutHoldsItems) JSONFieldNames() []string {
+	return []string{"checkout", "key", "hold", "item", "supplySchema", "supplyId", "quantity", "startMs", "endMs", "state", "unitPrice", "currency", "takenAt"}
+}
+
+// Validate validates all fields in CheckoutHoldsItems
+func (t *CheckoutHoldsItems) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate checkout (required nested type)
+
+	if fieldErrs := t.Checkout.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("checkout", fieldErrs)
+	}
+
+	// Validate item (optional)
+
+	// Validate optional pointer field
+	if t.Item != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Item, false); !valid {
+			errors.SetFieldErrors("item", fieldErrs)
+		}
+	}
+
+	// Validate quantity (optional)
+
+	// Validate optional pointer field
+	if t.Quantity != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Quantity, false); !valid {
+			errors.SetFieldErrors("quantity", fieldErrs)
+		}
+	}
+
+	// Validate startMs (optional)
+
+	// Validate optional pointer field
+	if t.StartMs != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.StartMs, false); !valid {
+			errors.SetFieldErrors("startMs", fieldErrs)
+		}
+	}
+
+	// Validate endMs (optional)
+
+	// Validate optional pointer field
+	if t.EndMs != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.EndMs, false); !valid {
+			errors.SetFieldErrors("endMs", fieldErrs)
+		}
+	}
+
+	// Validate unitPrice (optional)
+
+	// Validate optional pointer field
+	if t.UnitPrice != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.UnitPrice, false); !valid {
+			errors.SetFieldErrors("unitPrice", fieldErrs)
+		}
+	}
+
+	// Validate takenAt (optional)
+
+	// Validate optional pointer field
+	if t.TakenAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.TakenAt, false); !valid {
+			errors.SetFieldErrors("takenAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutHoldsItems to JSON
+func (t *CheckoutHoldsItems) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutHoldsItems
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutHoldsItems from JSON with validation
+func (t *CheckoutHoldsItems) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutHoldsItems
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutHoldsItems into a map representation.
+func (t *CheckoutHoldsItems) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutHoldsItems to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutHoldsItems to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutHoldsItems from a map using lenient decoding.
+func (t *CheckoutHoldsItems) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutHoldsItems from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutHoldsItems from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutHoldsItems from a map and rejects unknown fields.
+func (t *CheckoutHoldsItems) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutHoldsItems from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutHoldsItems from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutHoldsItems from JSON and rejects unknown fields.
+func (t *CheckoutHoldsItems) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutHoldsItems from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutHoldsItems from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutHoldsItems from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutHoldsItems from JSON using lenient decoding.
+func (t *CheckoutHoldsItems) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutHoldsItems from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutHoldsItems from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutHoldsItems from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutHoldsItems from YAML and rejects unknown fields.
+func (t *CheckoutHoldsItems) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutHoldsItems from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutHoldsItems from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutHoldsItems from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutHoldsItems from YAML using lenient decoding.
+func (t *CheckoutHoldsItems) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutHoldsItems from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutHoldsItems from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutHoldsItems from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutHoldsItemsFromMap builds CheckoutHoldsItems from a map using lenient decoding.
+func CheckoutHoldsItemsFromMap(value map[string]any) (*CheckoutHoldsItems, error) {
+	decoded := &CheckoutHoldsItems{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutHoldsItemsFromMapStrict builds CheckoutHoldsItems from a map and rejects unknown fields.
+func CheckoutHoldsItemsFromMapStrict(value map[string]any) (*CheckoutHoldsItems, error) {
+	decoded := &CheckoutHoldsItems{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutHoldsItemsFromJSON builds CheckoutHoldsItems from JSON and rejects unknown fields.
+func CheckoutHoldsItemsFromJSON(data []byte) (*CheckoutHoldsItems, error) {
+	decoded := &CheckoutHoldsItems{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutHoldsItemsFromJSONNonStrict builds CheckoutHoldsItems from JSON using lenient decoding.
+func CheckoutHoldsItemsFromJSONNonStrict(data []byte) (*CheckoutHoldsItems, error) {
+	decoded := &CheckoutHoldsItems{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutHoldsItemsFromYAML builds CheckoutHoldsItems from YAML and rejects unknown fields.
+func CheckoutHoldsItemsFromYAML(data []byte) (*CheckoutHoldsItems, error) {
+	decoded := &CheckoutHoldsItems{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutHoldsItemsFromYAMLNonStrict builds CheckoutHoldsItems from YAML using lenient decoding.
+func CheckoutHoldsItemsFromYAMLNonStrict(data []byte) (*CheckoutHoldsItems, error) {
+	decoded := &CheckoutHoldsItems{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutLine - One line of a checkout: an Inventory, by its key, which is the
+// product's id, and how many: a value of the checkout, not a table.
 type CheckoutLine struct {
 	InventoryId IdentityUUID `json:"inventoryId"`
 
@@ -1666,11 +2760,2214 @@ func CheckoutLineFromYAMLNonStrict(data []byte) (*CheckoutLine, error) {
 	return decoded, nil
 }
 
+// CheckoutNumberCounts - On a table, one row per count, kept for the table as a whole: the last number it gave and the config it counted under. A delete of a row leaves it where it was, so a delete leaves a gap; a row whose config is not the use's counts from 1 again.
+type CheckoutNumberCounts struct {
+	Scope string `json:"scope"`
+
+	Last *GenericInt64 `json:"last,omitempty"`
+
+	Counting string `json:"counting,omitempty"`
+
+	Version int64 `json:"_version"`
+}
+
+// MaskSecrets returns a copy of CheckoutNumberCounts with secret fields cleared.
+func (t *CheckoutNumberCounts) MaskSecrets() *CheckoutNumberCounts {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutNumberCounts{}
+
+	masked.Scope = t.Scope
+
+	masked.Last = t.Last
+
+	masked.Counting = t.Counting
+
+	masked.Version = t.Version
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutNumberCounts's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutNumberCounts) JSONFieldNames() []string {
+	return []string{"scope", "last", "counting", "_version"}
+}
+
+// Validate validates all fields in CheckoutNumberCounts
+func (t *CheckoutNumberCounts) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate last (optional)
+
+	// Validate optional pointer field
+	if t.Last != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Last, false); !valid {
+			errors.SetFieldErrors("last", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutNumberCounts to JSON
+func (t *CheckoutNumberCounts) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutNumberCounts
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutNumberCounts from JSON with validation
+func (t *CheckoutNumberCounts) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutNumberCounts
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutNumberCounts into a map representation.
+func (t *CheckoutNumberCounts) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutNumberCounts to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutNumberCounts to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutNumberCounts from a map using lenient decoding.
+func (t *CheckoutNumberCounts) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutNumberCounts from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutNumberCounts from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutNumberCounts from a map and rejects unknown fields.
+func (t *CheckoutNumberCounts) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutNumberCounts from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutNumberCounts from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutNumberCounts from JSON and rejects unknown fields.
+func (t *CheckoutNumberCounts) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutNumberCounts from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutNumberCounts from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutNumberCounts from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutNumberCounts from JSON using lenient decoding.
+func (t *CheckoutNumberCounts) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutNumberCounts from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutNumberCounts from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutNumberCounts from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutNumberCounts from YAML and rejects unknown fields.
+func (t *CheckoutNumberCounts) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutNumberCounts from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutNumberCounts from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutNumberCounts from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutNumberCounts from YAML using lenient decoding.
+func (t *CheckoutNumberCounts) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutNumberCounts from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutNumberCounts from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutNumberCounts from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutNumberCountsFromMap builds CheckoutNumberCounts from a map using lenient decoding.
+func CheckoutNumberCountsFromMap(value map[string]any) (*CheckoutNumberCounts, error) {
+	decoded := &CheckoutNumberCounts{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutNumberCountsFromMapStrict builds CheckoutNumberCounts from a map and rejects unknown fields.
+func CheckoutNumberCountsFromMapStrict(value map[string]any) (*CheckoutNumberCounts, error) {
+	decoded := &CheckoutNumberCounts{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutNumberCountsFromJSON builds CheckoutNumberCounts from JSON and rejects unknown fields.
+func CheckoutNumberCountsFromJSON(data []byte) (*CheckoutNumberCounts, error) {
+	decoded := &CheckoutNumberCounts{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutNumberCountsFromJSONNonStrict builds CheckoutNumberCounts from JSON using lenient decoding.
+func CheckoutNumberCountsFromJSONNonStrict(data []byte) (*CheckoutNumberCounts, error) {
+	decoded := &CheckoutNumberCounts{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutNumberCountsFromYAML builds CheckoutNumberCounts from YAML and rejects unknown fields.
+func CheckoutNumberCountsFromYAML(data []byte) (*CheckoutNumberCounts, error) {
+	decoded := &CheckoutNumberCounts{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutNumberCountsFromYAMLNonStrict builds CheckoutNumberCounts from YAML using lenient decoding.
+func CheckoutNumberCountsFromYAMLNonStrict(data []byte) (*CheckoutNumberCounts, error) {
+	decoded := &CheckoutNumberCounts{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsActions - On a table, each thing the provider's adapter is to do for the row (create, capture, void, refund), keyed by its id, waiting until an event for it is recorded.
+type CheckoutPaymentsActions struct {
+	Checkout Checkout `json:"checkout"`
+
+	Action string `json:"action"`
+
+	Seq *GenericInt64 `json:"seq,omitempty"`
+
+	Kind string `json:"kind,omitempty"`
+
+	Attempt string `json:"attempt,omitempty"`
+
+	Refund string `json:"refund,omitempty"`
+
+	Provider string `json:"provider,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	At *GenericInt64 `json:"at,omitempty"`
+
+	DoneAt *GenericInt64 `json:"doneAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of CheckoutPaymentsActions with secret fields cleared.
+func (t *CheckoutPaymentsActions) MaskSecrets() *CheckoutPaymentsActions {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutPaymentsActions{}
+
+	maskedValueCheckout := t.Checkout.MaskSecrets()
+	if maskedValueCheckout != nil {
+		masked.Checkout = *maskedValueCheckout
+	}
+
+	masked.Action = t.Action
+
+	masked.Seq = t.Seq
+
+	masked.Kind = t.Kind
+
+	masked.Attempt = t.Attempt
+
+	masked.Refund = t.Refund
+
+	masked.Provider = t.Provider
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.At = t.At
+
+	masked.DoneAt = t.DoneAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutPaymentsActions's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutPaymentsActions) JSONFieldNames() []string {
+	return []string{"checkout", "action", "seq", "kind", "attempt", "refund", "provider", "amount", "currency", "at", "doneAt"}
+}
+
+// Validate validates all fields in CheckoutPaymentsActions
+func (t *CheckoutPaymentsActions) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate checkout (required nested type)
+
+	if fieldErrs := t.Checkout.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("checkout", fieldErrs)
+	}
+
+	// Validate seq (optional)
+
+	// Validate optional pointer field
+	if t.Seq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Seq, false); !valid {
+			errors.SetFieldErrors("seq", fieldErrs)
+		}
+	}
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.At, false); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	// Validate doneAt (optional)
+
+	// Validate optional pointer field
+	if t.DoneAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.DoneAt, false); !valid {
+			errors.SetFieldErrors("doneAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutPaymentsActions to JSON
+func (t *CheckoutPaymentsActions) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutPaymentsActions
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutPaymentsActions from JSON with validation
+func (t *CheckoutPaymentsActions) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutPaymentsActions
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutPaymentsActions into a map representation.
+func (t *CheckoutPaymentsActions) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsActions to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsActions to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutPaymentsActions from a map using lenient decoding.
+func (t *CheckoutPaymentsActions) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsActions from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsActions from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutPaymentsActions from a map and rejects unknown fields.
+func (t *CheckoutPaymentsActions) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsActions from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsActions from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutPaymentsActions from JSON and rejects unknown fields.
+func (t *CheckoutPaymentsActions) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsActions from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsActions from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsActions from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutPaymentsActions from JSON using lenient decoding.
+func (t *CheckoutPaymentsActions) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsActions from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsActions from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsActions from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutPaymentsActions from YAML and rejects unknown fields.
+func (t *CheckoutPaymentsActions) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsActions from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsActions from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsActions from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutPaymentsActions from YAML using lenient decoding.
+func (t *CheckoutPaymentsActions) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsActions from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsActions from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsActions from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutPaymentsActionsFromMap builds CheckoutPaymentsActions from a map using lenient decoding.
+func CheckoutPaymentsActionsFromMap(value map[string]any) (*CheckoutPaymentsActions, error) {
+	decoded := &CheckoutPaymentsActions{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsActionsFromMapStrict builds CheckoutPaymentsActions from a map and rejects unknown fields.
+func CheckoutPaymentsActionsFromMapStrict(value map[string]any) (*CheckoutPaymentsActions, error) {
+	decoded := &CheckoutPaymentsActions{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsActionsFromJSON builds CheckoutPaymentsActions from JSON and rejects unknown fields.
+func CheckoutPaymentsActionsFromJSON(data []byte) (*CheckoutPaymentsActions, error) {
+	decoded := &CheckoutPaymentsActions{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsActionsFromJSONNonStrict builds CheckoutPaymentsActions from JSON using lenient decoding.
+func CheckoutPaymentsActionsFromJSONNonStrict(data []byte) (*CheckoutPaymentsActions, error) {
+	decoded := &CheckoutPaymentsActions{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsActionsFromYAML builds CheckoutPaymentsActions from YAML and rejects unknown fields.
+func CheckoutPaymentsActionsFromYAML(data []byte) (*CheckoutPaymentsActions, error) {
+	decoded := &CheckoutPaymentsActions{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsActionsFromYAMLNonStrict builds CheckoutPaymentsActions from YAML using lenient decoding.
+func CheckoutPaymentsActionsFromYAMLNonStrict(data []byte) (*CheckoutPaymentsActions, error) {
+	decoded := &CheckoutPaymentsActions{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsAttempts - On a table, each payment attempt the row opened, keyed by its id: its provider and the provider's reference, its amount, currency and what was due when it opened, its status, what is authorized and captured of it, a card's brand and last four digits, and when it opened and last moved.
+type CheckoutPaymentsAttempts struct {
+	Checkout Checkout `json:"checkout"`
+
+	Attempt string `json:"attempt"`
+
+	Seq *GenericInt64 `json:"seq,omitempty"`
+
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+
+	Provider string `json:"provider,omitempty"`
+
+	ProviderRef string `json:"providerRef,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	Due *GenericInt64 `json:"due,omitempty"`
+
+	Status string `json:"status,omitempty"`
+
+	Authorized *GenericInt64 `json:"authorized,omitempty"`
+
+	Captured *GenericInt64 `json:"captured,omitempty"`
+
+	Brand string `json:"brand,omitempty"`
+
+	Last4 string `json:"last4,omitempty"`
+
+	ReturnUrl string `json:"returnUrl,omitempty"`
+
+	OpenedAt *GenericInt64 `json:"openedAt,omitempty"`
+
+	UpdatedAt *GenericInt64 `json:"updatedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of CheckoutPaymentsAttempts with secret fields cleared.
+func (t *CheckoutPaymentsAttempts) MaskSecrets() *CheckoutPaymentsAttempts {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutPaymentsAttempts{}
+
+	maskedValueCheckout := t.Checkout.MaskSecrets()
+	if maskedValueCheckout != nil {
+		masked.Checkout = *maskedValueCheckout
+	}
+
+	masked.Attempt = t.Attempt
+
+	masked.Seq = t.Seq
+
+	masked.IdempotencyKey = t.IdempotencyKey
+
+	masked.Provider = t.Provider
+
+	masked.ProviderRef = t.ProviderRef
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.Due = t.Due
+
+	masked.Status = t.Status
+
+	masked.Authorized = t.Authorized
+
+	masked.Captured = t.Captured
+
+	masked.Brand = t.Brand
+
+	masked.Last4 = t.Last4
+
+	masked.ReturnUrl = t.ReturnUrl
+
+	masked.OpenedAt = t.OpenedAt
+
+	masked.UpdatedAt = t.UpdatedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutPaymentsAttempts's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutPaymentsAttempts) JSONFieldNames() []string {
+	return []string{"checkout", "attempt", "seq", "idempotencyKey", "provider", "providerRef", "amount", "currency", "due", "status", "authorized", "captured", "brand", "last4", "returnUrl", "openedAt", "updatedAt"}
+}
+
+// Validate validates all fields in CheckoutPaymentsAttempts
+func (t *CheckoutPaymentsAttempts) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate checkout (required nested type)
+
+	if fieldErrs := t.Checkout.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("checkout", fieldErrs)
+	}
+
+	// Validate seq (optional)
+
+	// Validate optional pointer field
+	if t.Seq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Seq, false); !valid {
+			errors.SetFieldErrors("seq", fieldErrs)
+		}
+	}
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate due (optional)
+
+	// Validate optional pointer field
+	if t.Due != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Due, false); !valid {
+			errors.SetFieldErrors("due", fieldErrs)
+		}
+	}
+
+	// Validate authorized (optional)
+
+	// Validate optional pointer field
+	if t.Authorized != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Authorized, false); !valid {
+			errors.SetFieldErrors("authorized", fieldErrs)
+		}
+	}
+
+	// Validate captured (optional)
+
+	// Validate optional pointer field
+	if t.Captured != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Captured, false); !valid {
+			errors.SetFieldErrors("captured", fieldErrs)
+		}
+	}
+
+	// Validate openedAt (optional)
+
+	// Validate optional pointer field
+	if t.OpenedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.OpenedAt, false); !valid {
+			errors.SetFieldErrors("openedAt", fieldErrs)
+		}
+	}
+
+	// Validate updatedAt (optional)
+
+	// Validate optional pointer field
+	if t.UpdatedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.UpdatedAt, false); !valid {
+			errors.SetFieldErrors("updatedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutPaymentsAttempts to JSON
+func (t *CheckoutPaymentsAttempts) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutPaymentsAttempts
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutPaymentsAttempts from JSON with validation
+func (t *CheckoutPaymentsAttempts) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutPaymentsAttempts
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutPaymentsAttempts into a map representation.
+func (t *CheckoutPaymentsAttempts) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsAttempts to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsAttempts to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutPaymentsAttempts from a map using lenient decoding.
+func (t *CheckoutPaymentsAttempts) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsAttempts from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsAttempts from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutPaymentsAttempts from a map and rejects unknown fields.
+func (t *CheckoutPaymentsAttempts) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsAttempts from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsAttempts from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutPaymentsAttempts from JSON and rejects unknown fields.
+func (t *CheckoutPaymentsAttempts) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsAttempts from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsAttempts from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsAttempts from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutPaymentsAttempts from JSON using lenient decoding.
+func (t *CheckoutPaymentsAttempts) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsAttempts from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsAttempts from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsAttempts from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutPaymentsAttempts from YAML and rejects unknown fields.
+func (t *CheckoutPaymentsAttempts) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsAttempts from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsAttempts from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsAttempts from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutPaymentsAttempts from YAML using lenient decoding.
+func (t *CheckoutPaymentsAttempts) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsAttempts from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsAttempts from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsAttempts from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutPaymentsAttemptsFromMap builds CheckoutPaymentsAttempts from a map using lenient decoding.
+func CheckoutPaymentsAttemptsFromMap(value map[string]any) (*CheckoutPaymentsAttempts, error) {
+	decoded := &CheckoutPaymentsAttempts{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsAttemptsFromMapStrict builds CheckoutPaymentsAttempts from a map and rejects unknown fields.
+func CheckoutPaymentsAttemptsFromMapStrict(value map[string]any) (*CheckoutPaymentsAttempts, error) {
+	decoded := &CheckoutPaymentsAttempts{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsAttemptsFromJSON builds CheckoutPaymentsAttempts from JSON and rejects unknown fields.
+func CheckoutPaymentsAttemptsFromJSON(data []byte) (*CheckoutPaymentsAttempts, error) {
+	decoded := &CheckoutPaymentsAttempts{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsAttemptsFromJSONNonStrict builds CheckoutPaymentsAttempts from JSON using lenient decoding.
+func CheckoutPaymentsAttemptsFromJSONNonStrict(data []byte) (*CheckoutPaymentsAttempts, error) {
+	decoded := &CheckoutPaymentsAttempts{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsAttemptsFromYAML builds CheckoutPaymentsAttempts from YAML and rejects unknown fields.
+func CheckoutPaymentsAttemptsFromYAML(data []byte) (*CheckoutPaymentsAttempts, error) {
+	decoded := &CheckoutPaymentsAttempts{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsAttemptsFromYAMLNonStrict builds CheckoutPaymentsAttempts from YAML using lenient decoding.
+func CheckoutPaymentsAttemptsFromYAMLNonStrict(data []byte) (*CheckoutPaymentsAttempts, error) {
+	decoded := &CheckoutPaymentsAttempts{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsEvents - On a table, every provider event recorded, kept for the table as a whole and keyed by its provider and event id, so an event applies once per table and provider: the row it was recorded on, its normalised fields alone, and whether it moved anything. A delete of the row leaves it, so a redelivery is still a repeat.
+type CheckoutPaymentsEvents struct {
+	Event string `json:"event"`
+
+	Provider string `json:"provider,omitempty"`
+
+	EventId string `json:"eventId,omitempty"`
+
+	RowKey string `json:"rowKey,omitempty"`
+
+	Kind string `json:"kind,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	At *GenericInt64 `json:"at,omitempty"`
+
+	Attempt string `json:"attempt,omitempty"`
+
+	ProviderRef string `json:"providerRef,omitempty"`
+
+	Refund string `json:"refund,omitempty"`
+
+	Applied *bool `json:"applied,omitempty"`
+
+	Metadata *GenericJSON `json:"metadata,omitempty"`
+
+	RecordedAt *GenericInt64 `json:"recordedAt,omitempty"`
+
+	Version int64 `json:"_version"`
+}
+
+// MaskSecrets returns a copy of CheckoutPaymentsEvents with secret fields cleared.
+func (t *CheckoutPaymentsEvents) MaskSecrets() *CheckoutPaymentsEvents {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutPaymentsEvents{}
+
+	masked.Event = t.Event
+
+	masked.Provider = t.Provider
+
+	masked.EventId = t.EventId
+
+	masked.RowKey = t.RowKey
+
+	masked.Kind = t.Kind
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.At = t.At
+
+	masked.Attempt = t.Attempt
+
+	masked.ProviderRef = t.ProviderRef
+
+	masked.Refund = t.Refund
+
+	masked.Applied = t.Applied
+
+	masked.Metadata = t.Metadata
+
+	masked.RecordedAt = t.RecordedAt
+
+	masked.Version = t.Version
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutPaymentsEvents's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutPaymentsEvents) JSONFieldNames() []string {
+	return []string{"event", "provider", "eventId", "rowKey", "kind", "amount", "currency", "at", "attempt", "providerRef", "refund", "applied", "metadata", "recordedAt", "_version"}
+}
+
+// Validate validates all fields in CheckoutPaymentsEvents
+func (t *CheckoutPaymentsEvents) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.At, false); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	// Validate recordedAt (optional)
+
+	// Validate optional pointer field
+	if t.RecordedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.RecordedAt, false); !valid {
+			errors.SetFieldErrors("recordedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutPaymentsEvents to JSON
+func (t *CheckoutPaymentsEvents) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutPaymentsEvents
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutPaymentsEvents from JSON with validation
+func (t *CheckoutPaymentsEvents) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutPaymentsEvents
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "metadata")
+		if nulls[0] && t.Metadata == nil {
+			null := GenericJSON("null")
+			t.Metadata = &null
+		}
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutPaymentsEvents into a map representation.
+func (t *CheckoutPaymentsEvents) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsEvents to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsEvents to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutPaymentsEvents from a map using lenient decoding.
+func (t *CheckoutPaymentsEvents) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsEvents from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsEvents from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutPaymentsEvents from a map and rejects unknown fields.
+func (t *CheckoutPaymentsEvents) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsEvents from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsEvents from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutPaymentsEvents from JSON and rejects unknown fields.
+func (t *CheckoutPaymentsEvents) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsEvents from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsEvents from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsEvents from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutPaymentsEvents from JSON using lenient decoding.
+func (t *CheckoutPaymentsEvents) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsEvents from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsEvents from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsEvents from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutPaymentsEvents from YAML and rejects unknown fields.
+func (t *CheckoutPaymentsEvents) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsEvents from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsEvents from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsEvents from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutPaymentsEvents from YAML using lenient decoding.
+func (t *CheckoutPaymentsEvents) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsEvents from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsEvents from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsEvents from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutPaymentsEventsFromMap builds CheckoutPaymentsEvents from a map using lenient decoding.
+func CheckoutPaymentsEventsFromMap(value map[string]any) (*CheckoutPaymentsEvents, error) {
+	decoded := &CheckoutPaymentsEvents{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsEventsFromMapStrict builds CheckoutPaymentsEvents from a map and rejects unknown fields.
+func CheckoutPaymentsEventsFromMapStrict(value map[string]any) (*CheckoutPaymentsEvents, error) {
+	decoded := &CheckoutPaymentsEvents{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsEventsFromJSON builds CheckoutPaymentsEvents from JSON and rejects unknown fields.
+func CheckoutPaymentsEventsFromJSON(data []byte) (*CheckoutPaymentsEvents, error) {
+	decoded := &CheckoutPaymentsEvents{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsEventsFromJSONNonStrict builds CheckoutPaymentsEvents from JSON using lenient decoding.
+func CheckoutPaymentsEventsFromJSONNonStrict(data []byte) (*CheckoutPaymentsEvents, error) {
+	decoded := &CheckoutPaymentsEvents{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsEventsFromYAML builds CheckoutPaymentsEvents from YAML and rejects unknown fields.
+func CheckoutPaymentsEventsFromYAML(data []byte) (*CheckoutPaymentsEvents, error) {
+	decoded := &CheckoutPaymentsEvents{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsEventsFromYAMLNonStrict builds CheckoutPaymentsEvents from YAML using lenient decoding.
+func CheckoutPaymentsEventsFromYAMLNonStrict(data []byte) (*CheckoutPaymentsEvents, error) {
+	decoded := &CheckoutPaymentsEvents{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsIssues - On a refund row (refundOf), each refund it asked of the row it refunds, keyed by the refund's id: its key, amount and currency, its status as the provider settled it, and the Workflow entry it was asked at.
+type CheckoutPaymentsIssues struct {
+	Checkout Checkout `json:"checkout"`
+
+	Refund string `json:"refund"`
+
+	Seq *GenericInt64 `json:"seq,omitempty"`
+
+	OfSchema string `json:"ofSchema,omitempty"`
+
+	OfId string `json:"ofId,omitempty"`
+
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	Status string `json:"status,omitempty"`
+
+	Refunded *GenericInt64 `json:"refunded,omitempty"`
+
+	EnteredAt *GenericInt64 `json:"enteredAt,omitempty"`
+
+	At *GenericInt64 `json:"at,omitempty"`
+
+	UpdatedAt *GenericInt64 `json:"updatedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of CheckoutPaymentsIssues with secret fields cleared.
+func (t *CheckoutPaymentsIssues) MaskSecrets() *CheckoutPaymentsIssues {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutPaymentsIssues{}
+
+	maskedValueCheckout := t.Checkout.MaskSecrets()
+	if maskedValueCheckout != nil {
+		masked.Checkout = *maskedValueCheckout
+	}
+
+	masked.Refund = t.Refund
+
+	masked.Seq = t.Seq
+
+	masked.OfSchema = t.OfSchema
+
+	masked.OfId = t.OfId
+
+	masked.IdempotencyKey = t.IdempotencyKey
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.Status = t.Status
+
+	masked.Refunded = t.Refunded
+
+	masked.EnteredAt = t.EnteredAt
+
+	masked.At = t.At
+
+	masked.UpdatedAt = t.UpdatedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutPaymentsIssues's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutPaymentsIssues) JSONFieldNames() []string {
+	return []string{"checkout", "refund", "seq", "ofSchema", "ofId", "idempotencyKey", "amount", "currency", "status", "refunded", "enteredAt", "at", "updatedAt"}
+}
+
+// Validate validates all fields in CheckoutPaymentsIssues
+func (t *CheckoutPaymentsIssues) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate checkout (required nested type)
+
+	if fieldErrs := t.Checkout.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("checkout", fieldErrs)
+	}
+
+	// Validate seq (optional)
+
+	// Validate optional pointer field
+	if t.Seq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Seq, false); !valid {
+			errors.SetFieldErrors("seq", fieldErrs)
+		}
+	}
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate refunded (optional)
+
+	// Validate optional pointer field
+	if t.Refunded != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Refunded, false); !valid {
+			errors.SetFieldErrors("refunded", fieldErrs)
+		}
+	}
+
+	// Validate enteredAt (optional)
+
+	// Validate optional pointer field
+	if t.EnteredAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.EnteredAt, false); !valid {
+			errors.SetFieldErrors("enteredAt", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.At, false); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	// Validate updatedAt (optional)
+
+	// Validate optional pointer field
+	if t.UpdatedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.UpdatedAt, false); !valid {
+			errors.SetFieldErrors("updatedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutPaymentsIssues to JSON
+func (t *CheckoutPaymentsIssues) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutPaymentsIssues
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutPaymentsIssues from JSON with validation
+func (t *CheckoutPaymentsIssues) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutPaymentsIssues
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutPaymentsIssues into a map representation.
+func (t *CheckoutPaymentsIssues) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsIssues to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsIssues to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutPaymentsIssues from a map using lenient decoding.
+func (t *CheckoutPaymentsIssues) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsIssues from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsIssues from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutPaymentsIssues from a map and rejects unknown fields.
+func (t *CheckoutPaymentsIssues) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsIssues from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsIssues from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutPaymentsIssues from JSON and rejects unknown fields.
+func (t *CheckoutPaymentsIssues) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsIssues from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsIssues from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsIssues from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutPaymentsIssues from JSON using lenient decoding.
+func (t *CheckoutPaymentsIssues) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsIssues from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsIssues from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsIssues from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutPaymentsIssues from YAML and rejects unknown fields.
+func (t *CheckoutPaymentsIssues) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsIssues from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsIssues from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsIssues from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutPaymentsIssues from YAML using lenient decoding.
+func (t *CheckoutPaymentsIssues) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsIssues from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsIssues from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsIssues from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutPaymentsIssuesFromMap builds CheckoutPaymentsIssues from a map using lenient decoding.
+func CheckoutPaymentsIssuesFromMap(value map[string]any) (*CheckoutPaymentsIssues, error) {
+	decoded := &CheckoutPaymentsIssues{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsIssuesFromMapStrict builds CheckoutPaymentsIssues from a map and rejects unknown fields.
+func CheckoutPaymentsIssuesFromMapStrict(value map[string]any) (*CheckoutPaymentsIssues, error) {
+	decoded := &CheckoutPaymentsIssues{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsIssuesFromJSON builds CheckoutPaymentsIssues from JSON and rejects unknown fields.
+func CheckoutPaymentsIssuesFromJSON(data []byte) (*CheckoutPaymentsIssues, error) {
+	decoded := &CheckoutPaymentsIssues{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsIssuesFromJSONNonStrict builds CheckoutPaymentsIssues from JSON using lenient decoding.
+func CheckoutPaymentsIssuesFromJSONNonStrict(data []byte) (*CheckoutPaymentsIssues, error) {
+	decoded := &CheckoutPaymentsIssues{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsIssuesFromYAML builds CheckoutPaymentsIssues from YAML and rejects unknown fields.
+func CheckoutPaymentsIssuesFromYAML(data []byte) (*CheckoutPaymentsIssues, error) {
+	decoded := &CheckoutPaymentsIssues{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsIssuesFromYAMLNonStrict builds CheckoutPaymentsIssues from YAML using lenient decoding.
+func CheckoutPaymentsIssuesFromYAMLNonStrict(data []byte) (*CheckoutPaymentsIssues, error) {
+	decoded := &CheckoutPaymentsIssues{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsRefunds - On a table, each refund asked of the row, keyed by its id: the attempt it draws on, its amount and reason, its status and what was refunded, and the refund row that asked it, if one did.
+type CheckoutPaymentsRefunds struct {
+	Checkout Checkout `json:"checkout"`
+
+	Refund string `json:"refund"`
+
+	Seq *GenericInt64 `json:"seq,omitempty"`
+
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+
+	Attempt string `json:"attempt,omitempty"`
+
+	Provider string `json:"provider,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	Reason string `json:"reason,omitempty"`
+
+	Status string `json:"status,omitempty"`
+
+	Refunded *GenericInt64 `json:"refunded,omitempty"`
+
+	OriginSchema string `json:"originSchema,omitempty"`
+
+	OriginId string `json:"originId,omitempty"`
+
+	At *GenericInt64 `json:"at,omitempty"`
+
+	UpdatedAt *GenericInt64 `json:"updatedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of CheckoutPaymentsRefunds with secret fields cleared.
+func (t *CheckoutPaymentsRefunds) MaskSecrets() *CheckoutPaymentsRefunds {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutPaymentsRefunds{}
+
+	maskedValueCheckout := t.Checkout.MaskSecrets()
+	if maskedValueCheckout != nil {
+		masked.Checkout = *maskedValueCheckout
+	}
+
+	masked.Refund = t.Refund
+
+	masked.Seq = t.Seq
+
+	masked.IdempotencyKey = t.IdempotencyKey
+
+	masked.Attempt = t.Attempt
+
+	masked.Provider = t.Provider
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.Reason = t.Reason
+
+	masked.Status = t.Status
+
+	masked.Refunded = t.Refunded
+
+	masked.OriginSchema = t.OriginSchema
+
+	masked.OriginId = t.OriginId
+
+	masked.At = t.At
+
+	masked.UpdatedAt = t.UpdatedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutPaymentsRefunds's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutPaymentsRefunds) JSONFieldNames() []string {
+	return []string{"checkout", "refund", "seq", "idempotencyKey", "attempt", "provider", "amount", "currency", "reason", "status", "refunded", "originSchema", "originId", "at", "updatedAt"}
+}
+
+// Validate validates all fields in CheckoutPaymentsRefunds
+func (t *CheckoutPaymentsRefunds) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate checkout (required nested type)
+
+	if fieldErrs := t.Checkout.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("checkout", fieldErrs)
+	}
+
+	// Validate seq (optional)
+
+	// Validate optional pointer field
+	if t.Seq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Seq, false); !valid {
+			errors.SetFieldErrors("seq", fieldErrs)
+		}
+	}
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate refunded (optional)
+
+	// Validate optional pointer field
+	if t.Refunded != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Refunded, false); !valid {
+			errors.SetFieldErrors("refunded", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.At, false); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	// Validate updatedAt (optional)
+
+	// Validate optional pointer field
+	if t.UpdatedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.UpdatedAt, false); !valid {
+			errors.SetFieldErrors("updatedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutPaymentsRefunds to JSON
+func (t *CheckoutPaymentsRefunds) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutPaymentsRefunds
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutPaymentsRefunds from JSON with validation
+func (t *CheckoutPaymentsRefunds) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutPaymentsRefunds
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutPaymentsRefunds into a map representation.
+func (t *CheckoutPaymentsRefunds) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsRefunds to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutPaymentsRefunds to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutPaymentsRefunds from a map using lenient decoding.
+func (t *CheckoutPaymentsRefunds) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsRefunds from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsRefunds from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutPaymentsRefunds from a map and rejects unknown fields.
+func (t *CheckoutPaymentsRefunds) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsRefunds from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsRefunds from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutPaymentsRefunds from JSON and rejects unknown fields.
+func (t *CheckoutPaymentsRefunds) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsRefunds from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsRefunds from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsRefunds from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutPaymentsRefunds from JSON using lenient decoding.
+func (t *CheckoutPaymentsRefunds) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsRefunds from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsRefunds from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsRefunds from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutPaymentsRefunds from YAML and rejects unknown fields.
+func (t *CheckoutPaymentsRefunds) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsRefunds from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsRefunds from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutPaymentsRefunds from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutPaymentsRefunds from YAML using lenient decoding.
+func (t *CheckoutPaymentsRefunds) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutPaymentsRefunds from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsRefunds from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutPaymentsRefunds from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutPaymentsRefundsFromMap builds CheckoutPaymentsRefunds from a map using lenient decoding.
+func CheckoutPaymentsRefundsFromMap(value map[string]any) (*CheckoutPaymentsRefunds, error) {
+	decoded := &CheckoutPaymentsRefunds{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsRefundsFromMapStrict builds CheckoutPaymentsRefunds from a map and rejects unknown fields.
+func CheckoutPaymentsRefundsFromMapStrict(value map[string]any) (*CheckoutPaymentsRefunds, error) {
+	decoded := &CheckoutPaymentsRefunds{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsRefundsFromJSON builds CheckoutPaymentsRefunds from JSON and rejects unknown fields.
+func CheckoutPaymentsRefundsFromJSON(data []byte) (*CheckoutPaymentsRefunds, error) {
+	decoded := &CheckoutPaymentsRefunds{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsRefundsFromJSONNonStrict builds CheckoutPaymentsRefunds from JSON using lenient decoding.
+func CheckoutPaymentsRefundsFromJSONNonStrict(data []byte) (*CheckoutPaymentsRefunds, error) {
+	decoded := &CheckoutPaymentsRefunds{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsRefundsFromYAML builds CheckoutPaymentsRefunds from YAML and rejects unknown fields.
+func CheckoutPaymentsRefundsFromYAML(data []byte) (*CheckoutPaymentsRefunds, error) {
+	decoded := &CheckoutPaymentsRefunds{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutPaymentsRefundsFromYAMLNonStrict builds CheckoutPaymentsRefunds from YAML using lenient decoding.
+func CheckoutPaymentsRefundsFromYAMLNonStrict(data []byte) (*CheckoutPaymentsRefunds, error) {
+	decoded := &CheckoutPaymentsRefunds{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutTimersDeadlines - One row per deadline started on the row, keyed by the deadline's name: the time it starts from, the fact it started from, when it is due (null once until cancelled it), whether and when it fired, and what its then met.
+type CheckoutTimersDeadlines struct {
+	Checkout Checkout `json:"checkout"`
+
+	Name string `json:"name"`
+
+	BaseAt *TemporalDateTime `json:"baseAt,omitempty"`
+
+	ArmedFrom string `json:"armedFrom,omitempty"`
+
+	DueAt *TemporalDateTime `json:"dueAt,omitempty"`
+
+	Fired *bool `json:"fired,omitempty"`
+
+	FiredAt *TemporalDateTime `json:"firedAt,omitempty"`
+
+	Outcome string `json:"outcome,omitempty"`
+}
+
+// MaskSecrets returns a copy of CheckoutTimersDeadlines with secret fields cleared.
+func (t *CheckoutTimersDeadlines) MaskSecrets() *CheckoutTimersDeadlines {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CheckoutTimersDeadlines{}
+
+	maskedValueCheckout := t.Checkout.MaskSecrets()
+	if maskedValueCheckout != nil {
+		masked.Checkout = *maskedValueCheckout
+	}
+
+	masked.Name = t.Name
+
+	masked.BaseAt = t.BaseAt
+
+	masked.ArmedFrom = t.ArmedFrom
+
+	masked.DueAt = t.DueAt
+
+	masked.Fired = t.Fired
+
+	masked.FiredAt = t.FiredAt
+
+	masked.Outcome = t.Outcome
+
+	return masked
+}
+
+// JSONFieldNames are the keys CheckoutTimersDeadlines's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CheckoutTimersDeadlines) JSONFieldNames() []string {
+	return []string{"checkout", "name", "baseAt", "armedFrom", "dueAt", "fired", "firedAt", "outcome"}
+}
+
+// Validate validates all fields in CheckoutTimersDeadlines
+func (t *CheckoutTimersDeadlines) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate checkout (required nested type)
+
+	if fieldErrs := t.Checkout.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("checkout", fieldErrs)
+	}
+
+	// Validate baseAt (optional)
+
+	// Validate optional pointer field
+	if t.BaseAt != nil {
+		if valid, fieldErrs := t.BaseAt.Validate(); !valid {
+			errors.SetFieldErrors("baseAt", fieldErrs)
+		}
+	}
+
+	// Validate dueAt (optional)
+
+	// Validate optional pointer field
+	if t.DueAt != nil {
+		if valid, fieldErrs := t.DueAt.Validate(); !valid {
+			errors.SetFieldErrors("dueAt", fieldErrs)
+		}
+	}
+
+	// Validate firedAt (optional)
+
+	// Validate optional pointer field
+	if t.FiredAt != nil {
+		if valid, fieldErrs := t.FiredAt.Validate(); !valid {
+			errors.SetFieldErrors("firedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CheckoutTimersDeadlines to JSON
+func (t *CheckoutTimersDeadlines) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CheckoutTimersDeadlines
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CheckoutTimersDeadlines from JSON with validation
+func (t *CheckoutTimersDeadlines) UnmarshalJSON(data []byte) error {
+	type Alias CheckoutTimersDeadlines
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CheckoutTimersDeadlines into a map representation.
+func (t *CheckoutTimersDeadlines) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CheckoutTimersDeadlines to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CheckoutTimersDeadlines to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CheckoutTimersDeadlines from a map using lenient decoding.
+func (t *CheckoutTimersDeadlines) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutTimersDeadlines from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CheckoutTimersDeadlines from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CheckoutTimersDeadlines from a map and rejects unknown fields.
+func (t *CheckoutTimersDeadlines) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutTimersDeadlines from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CheckoutTimersDeadlines from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CheckoutTimersDeadlines from JSON and rejects unknown fields.
+func (t *CheckoutTimersDeadlines) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutTimersDeadlines from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutTimersDeadlines from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutTimersDeadlines from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CheckoutTimersDeadlines from JSON using lenient decoding.
+func (t *CheckoutTimersDeadlines) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutTimersDeadlines from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutTimersDeadlines from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutTimersDeadlines from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CheckoutTimersDeadlines from YAML and rejects unknown fields.
+func (t *CheckoutTimersDeadlines) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CheckoutTimersDeadlines from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CheckoutTimersDeadlines from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CheckoutTimersDeadlines from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CheckoutTimersDeadlines from YAML using lenient decoding.
+func (t *CheckoutTimersDeadlines) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CheckoutTimersDeadlines from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CheckoutTimersDeadlines from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CheckoutTimersDeadlines from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CheckoutTimersDeadlinesFromMap builds CheckoutTimersDeadlines from a map using lenient decoding.
+func CheckoutTimersDeadlinesFromMap(value map[string]any) (*CheckoutTimersDeadlines, error) {
+	decoded := &CheckoutTimersDeadlines{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutTimersDeadlinesFromMapStrict builds CheckoutTimersDeadlines from a map and rejects unknown fields.
+func CheckoutTimersDeadlinesFromMapStrict(value map[string]any) (*CheckoutTimersDeadlines, error) {
+	decoded := &CheckoutTimersDeadlines{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutTimersDeadlinesFromJSON builds CheckoutTimersDeadlines from JSON and rejects unknown fields.
+func CheckoutTimersDeadlinesFromJSON(data []byte) (*CheckoutTimersDeadlines, error) {
+	decoded := &CheckoutTimersDeadlines{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutTimersDeadlinesFromJSONNonStrict builds CheckoutTimersDeadlines from JSON using lenient decoding.
+func CheckoutTimersDeadlinesFromJSONNonStrict(data []byte) (*CheckoutTimersDeadlines, error) {
+	decoded := &CheckoutTimersDeadlines{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutTimersDeadlinesFromYAML builds CheckoutTimersDeadlines from YAML and rejects unknown fields.
+func CheckoutTimersDeadlinesFromYAML(data []byte) (*CheckoutTimersDeadlines, error) {
+	decoded := &CheckoutTimersDeadlines{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CheckoutTimersDeadlinesFromYAMLNonStrict builds CheckoutTimersDeadlines from YAML using lenient decoding.
+func CheckoutTimersDeadlinesFromYAMLNonStrict(data []byte) (*CheckoutTimersDeadlines, error) {
+	decoded := &CheckoutTimersDeadlines{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // CollectionPoint - A counter a shopper collects an order from, which opens fifteen-minute
 // pickup slots in London's time, four shoppers at a time, from two hours
 // ahead to sixty days ahead, with five minutes after each to clear it.
 type CollectionPoint struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
 	Name string `json:"name"`
+
+	Version int64 `json:"_version"`
 }
 
 // MaskSecrets returns a copy of CollectionPoint with secret fields cleared.
@@ -1681,7 +4978,11 @@ func (t *CollectionPoint) MaskSecrets() *CollectionPoint {
 
 	masked := &CollectionPoint{}
 
+	masked.Id = t.Id
+
 	masked.Name = t.Name
+
+	masked.Version = t.Version
 
 	return masked
 }
@@ -1690,12 +4991,21 @@ func (t *CollectionPoint) MaskSecrets() *CollectionPoint {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*CollectionPoint) JSONFieldNames() []string {
-	return []string{"name"}
+	return []string{"id", "name", "_version"}
 }
 
 // Validate validates all fields in CollectionPoint
 func (t *CollectionPoint) Validate() ValidationErrors {
 	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
 
 	{
 		value := t.Name
@@ -1903,17 +5213,889 @@ func CollectionPointFromYAMLNonStrict(data []byte) (*CollectionPoint, error) {
 	return decoded, nil
 }
 
-// Inventory - The units the warehouse holds of a product: one instance per product,
-// whose id is the product's. shop-stock's staff routes receive and count
+// CollectionPointCalendarBookings - On a table, the supply's record of each claim item that holds or held time of the row, keyed by the claim's type and key, the hold and the item's index: the interval it asked, its state, which a call moves only forward, so a call made again changes nothing, and when it last moved. A deleted claim's records retire under a key of their own, its committed time still booked, so a claim created again with its key holds afresh.
+type CollectionPointCalendarBookings struct {
+	CollectionPoint CollectionPoint `json:"collectionPoint"`
+
+	Record string `json:"record"`
+
+	HolderSchema string `json:"holderSchema,omitempty"`
+
+	HolderId string `json:"holderId,omitempty"`
+
+	Hold string `json:"hold,omitempty"`
+
+	Item *GenericInt64 `json:"item,omitempty"`
+
+	StartMs *GenericInt64 `json:"startMs,omitempty"`
+
+	EndMs *GenericInt64 `json:"endMs,omitempty"`
+
+	State string `json:"state,omitempty"`
+
+	UnitPrice *GenericInt64 `json:"unitPrice,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	At *TemporalDateTime `json:"at,omitempty"`
+
+	Retired *bool `json:"retired,omitempty"`
+}
+
+// MaskSecrets returns a copy of CollectionPointCalendarBookings with secret fields cleared.
+func (t *CollectionPointCalendarBookings) MaskSecrets() *CollectionPointCalendarBookings {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CollectionPointCalendarBookings{}
+
+	maskedValueCollectionPoint := t.CollectionPoint.MaskSecrets()
+	if maskedValueCollectionPoint != nil {
+		masked.CollectionPoint = *maskedValueCollectionPoint
+	}
+
+	masked.Record = t.Record
+
+	masked.HolderSchema = t.HolderSchema
+
+	masked.HolderId = t.HolderId
+
+	masked.Hold = t.Hold
+
+	masked.Item = t.Item
+
+	masked.StartMs = t.StartMs
+
+	masked.EndMs = t.EndMs
+
+	masked.State = t.State
+
+	masked.UnitPrice = t.UnitPrice
+
+	masked.Currency = t.Currency
+
+	masked.At = t.At
+
+	masked.Retired = t.Retired
+
+	return masked
+}
+
+// JSONFieldNames are the keys CollectionPointCalendarBookings's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CollectionPointCalendarBookings) JSONFieldNames() []string {
+	return []string{"collectionPoint", "record", "holderSchema", "holderId", "hold", "item", "startMs", "endMs", "state", "unitPrice", "currency", "at", "retired"}
+}
+
+// Validate validates all fields in CollectionPointCalendarBookings
+func (t *CollectionPointCalendarBookings) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate collectionPoint (required nested type)
+
+	if fieldErrs := t.CollectionPoint.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("collectionPoint", fieldErrs)
+	}
+
+	// Validate item (optional)
+
+	// Validate optional pointer field
+	if t.Item != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Item, false); !valid {
+			errors.SetFieldErrors("item", fieldErrs)
+		}
+	}
+
+	// Validate startMs (optional)
+
+	// Validate optional pointer field
+	if t.StartMs != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.StartMs, false); !valid {
+			errors.SetFieldErrors("startMs", fieldErrs)
+		}
+	}
+
+	// Validate endMs (optional)
+
+	// Validate optional pointer field
+	if t.EndMs != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.EndMs, false); !valid {
+			errors.SetFieldErrors("endMs", fieldErrs)
+		}
+	}
+
+	// Validate unitPrice (optional)
+
+	// Validate optional pointer field
+	if t.UnitPrice != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.UnitPrice, false); !valid {
+			errors.SetFieldErrors("unitPrice", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := t.At.Validate(); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CollectionPointCalendarBookings to JSON
+func (t *CollectionPointCalendarBookings) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CollectionPointCalendarBookings
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CollectionPointCalendarBookings from JSON with validation
+func (t *CollectionPointCalendarBookings) UnmarshalJSON(data []byte) error {
+	type Alias CollectionPointCalendarBookings
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CollectionPointCalendarBookings into a map representation.
+func (t *CollectionPointCalendarBookings) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CollectionPointCalendarBookings to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CollectionPointCalendarBookings to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CollectionPointCalendarBookings from a map using lenient decoding.
+func (t *CollectionPointCalendarBookings) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CollectionPointCalendarBookings from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarBookings from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CollectionPointCalendarBookings from a map and rejects unknown fields.
+func (t *CollectionPointCalendarBookings) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarBookings from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarBookings from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CollectionPointCalendarBookings from JSON and rejects unknown fields.
+func (t *CollectionPointCalendarBookings) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarBookings from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarBookings from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarBookings from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CollectionPointCalendarBookings from JSON using lenient decoding.
+func (t *CollectionPointCalendarBookings) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CollectionPointCalendarBookings from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarBookings from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarBookings from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CollectionPointCalendarBookings from YAML and rejects unknown fields.
+func (t *CollectionPointCalendarBookings) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarBookings from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarBookings from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarBookings from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CollectionPointCalendarBookings from YAML using lenient decoding.
+func (t *CollectionPointCalendarBookings) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CollectionPointCalendarBookings from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarBookings from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarBookings from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CollectionPointCalendarBookingsFromMap builds CollectionPointCalendarBookings from a map using lenient decoding.
+func CollectionPointCalendarBookingsFromMap(value map[string]any) (*CollectionPointCalendarBookings, error) {
+	decoded := &CollectionPointCalendarBookings{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarBookingsFromMapStrict builds CollectionPointCalendarBookings from a map and rejects unknown fields.
+func CollectionPointCalendarBookingsFromMapStrict(value map[string]any) (*CollectionPointCalendarBookings, error) {
+	decoded := &CollectionPointCalendarBookings{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarBookingsFromJSON builds CollectionPointCalendarBookings from JSON and rejects unknown fields.
+func CollectionPointCalendarBookingsFromJSON(data []byte) (*CollectionPointCalendarBookings, error) {
+	decoded := &CollectionPointCalendarBookings{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarBookingsFromJSONNonStrict builds CollectionPointCalendarBookings from JSON using lenient decoding.
+func CollectionPointCalendarBookingsFromJSONNonStrict(data []byte) (*CollectionPointCalendarBookings, error) {
+	decoded := &CollectionPointCalendarBookings{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarBookingsFromYAML builds CollectionPointCalendarBookings from YAML and rejects unknown fields.
+func CollectionPointCalendarBookingsFromYAML(data []byte) (*CollectionPointCalendarBookings, error) {
+	decoded := &CollectionPointCalendarBookings{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarBookingsFromYAMLNonStrict builds CollectionPointCalendarBookings from YAML using lenient decoding.
+func CollectionPointCalendarBookingsFromYAMLNonStrict(data []byte) (*CollectionPointCalendarBookings, error) {
+	decoded := &CollectionPointCalendarBookings{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarClosures - On a table, the row's closures, keyed by their name, closure-1 onward: when each starts and ends, why, who made it and when.
+type CollectionPointCalendarClosures struct {
+	CollectionPoint CollectionPoint `json:"collectionPoint"`
+
+	Closure string `json:"closure"`
+
+	StartMs *GenericInt64 `json:"startMs,omitempty"`
+
+	EndMs *GenericInt64 `json:"endMs,omitempty"`
+
+	Reason string `json:"reason,omitempty"`
+
+	By string `json:"by,omitempty"`
+
+	At *TemporalDateTime `json:"at,omitempty"`
+}
+
+// MaskSecrets returns a copy of CollectionPointCalendarClosures with secret fields cleared.
+func (t *CollectionPointCalendarClosures) MaskSecrets() *CollectionPointCalendarClosures {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CollectionPointCalendarClosures{}
+
+	maskedValueCollectionPoint := t.CollectionPoint.MaskSecrets()
+	if maskedValueCollectionPoint != nil {
+		masked.CollectionPoint = *maskedValueCollectionPoint
+	}
+
+	masked.Closure = t.Closure
+
+	masked.StartMs = t.StartMs
+
+	masked.EndMs = t.EndMs
+
+	masked.Reason = t.Reason
+
+	masked.By = t.By
+
+	masked.At = t.At
+
+	return masked
+}
+
+// JSONFieldNames are the keys CollectionPointCalendarClosures's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CollectionPointCalendarClosures) JSONFieldNames() []string {
+	return []string{"collectionPoint", "closure", "startMs", "endMs", "reason", "by", "at"}
+}
+
+// Validate validates all fields in CollectionPointCalendarClosures
+func (t *CollectionPointCalendarClosures) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate collectionPoint (required nested type)
+
+	if fieldErrs := t.CollectionPoint.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("collectionPoint", fieldErrs)
+	}
+
+	// Validate startMs (optional)
+
+	// Validate optional pointer field
+	if t.StartMs != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.StartMs, false); !valid {
+			errors.SetFieldErrors("startMs", fieldErrs)
+		}
+	}
+
+	// Validate endMs (optional)
+
+	// Validate optional pointer field
+	if t.EndMs != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.EndMs, false); !valid {
+			errors.SetFieldErrors("endMs", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := t.At.Validate(); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CollectionPointCalendarClosures to JSON
+func (t *CollectionPointCalendarClosures) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CollectionPointCalendarClosures
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CollectionPointCalendarClosures from JSON with validation
+func (t *CollectionPointCalendarClosures) UnmarshalJSON(data []byte) error {
+	type Alias CollectionPointCalendarClosures
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CollectionPointCalendarClosures into a map representation.
+func (t *CollectionPointCalendarClosures) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CollectionPointCalendarClosures to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CollectionPointCalendarClosures to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CollectionPointCalendarClosures from a map using lenient decoding.
+func (t *CollectionPointCalendarClosures) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CollectionPointCalendarClosures from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarClosures from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CollectionPointCalendarClosures from a map and rejects unknown fields.
+func (t *CollectionPointCalendarClosures) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarClosures from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarClosures from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CollectionPointCalendarClosures from JSON and rejects unknown fields.
+func (t *CollectionPointCalendarClosures) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarClosures from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarClosures from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarClosures from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CollectionPointCalendarClosures from JSON using lenient decoding.
+func (t *CollectionPointCalendarClosures) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CollectionPointCalendarClosures from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarClosures from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarClosures from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CollectionPointCalendarClosures from YAML and rejects unknown fields.
+func (t *CollectionPointCalendarClosures) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarClosures from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarClosures from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarClosures from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CollectionPointCalendarClosures from YAML using lenient decoding.
+func (t *CollectionPointCalendarClosures) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CollectionPointCalendarClosures from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarClosures from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarClosures from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CollectionPointCalendarClosuresFromMap builds CollectionPointCalendarClosures from a map using lenient decoding.
+func CollectionPointCalendarClosuresFromMap(value map[string]any) (*CollectionPointCalendarClosures, error) {
+	decoded := &CollectionPointCalendarClosures{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarClosuresFromMapStrict builds CollectionPointCalendarClosures from a map and rejects unknown fields.
+func CollectionPointCalendarClosuresFromMapStrict(value map[string]any) (*CollectionPointCalendarClosures, error) {
+	decoded := &CollectionPointCalendarClosures{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarClosuresFromJSON builds CollectionPointCalendarClosures from JSON and rejects unknown fields.
+func CollectionPointCalendarClosuresFromJSON(data []byte) (*CollectionPointCalendarClosures, error) {
+	decoded := &CollectionPointCalendarClosures{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarClosuresFromJSONNonStrict builds CollectionPointCalendarClosures from JSON using lenient decoding.
+func CollectionPointCalendarClosuresFromJSONNonStrict(data []byte) (*CollectionPointCalendarClosures, error) {
+	decoded := &CollectionPointCalendarClosures{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarClosuresFromYAML builds CollectionPointCalendarClosures from YAML and rejects unknown fields.
+func CollectionPointCalendarClosuresFromYAML(data []byte) (*CollectionPointCalendarClosures, error) {
+	decoded := &CollectionPointCalendarClosures{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarClosuresFromYAMLNonStrict builds CollectionPointCalendarClosures from YAML using lenient decoding.
+func CollectionPointCalendarClosuresFromYAMLNonStrict(data []byte) (*CollectionPointCalendarClosures, error) {
+	decoded := &CollectionPointCalendarClosures{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarSettings - On a table, what setOpeningHours and addClosure set of the row, keyed by name: hours, the row's own weekly hours; timeZone, its own zone; closuresMade, how many closures it has made, which names the next. A name with no row follows the config.
+type CollectionPointCalendarSettings struct {
+	CollectionPoint CollectionPoint `json:"collectionPoint"`
+
+	Name string `json:"name"`
+
+	Value *GenericJSON `json:"value,omitempty"`
+}
+
+// MaskSecrets returns a copy of CollectionPointCalendarSettings with secret fields cleared.
+func (t *CollectionPointCalendarSettings) MaskSecrets() *CollectionPointCalendarSettings {
+	if t == nil {
+		return nil
+	}
+
+	masked := &CollectionPointCalendarSettings{}
+
+	maskedValueCollectionPoint := t.CollectionPoint.MaskSecrets()
+	if maskedValueCollectionPoint != nil {
+		masked.CollectionPoint = *maskedValueCollectionPoint
+	}
+
+	masked.Name = t.Name
+
+	masked.Value = t.Value
+
+	return masked
+}
+
+// JSONFieldNames are the keys CollectionPointCalendarSettings's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*CollectionPointCalendarSettings) JSONFieldNames() []string {
+	return []string{"collectionPoint", "name", "value"}
+}
+
+// Validate validates all fields in CollectionPointCalendarSettings
+func (t *CollectionPointCalendarSettings) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate collectionPoint (required nested type)
+
+	if fieldErrs := t.CollectionPoint.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("collectionPoint", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals CollectionPointCalendarSettings to JSON
+func (t *CollectionPointCalendarSettings) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias CollectionPointCalendarSettings
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals CollectionPointCalendarSettings from JSON with validation
+func (t *CollectionPointCalendarSettings) UnmarshalJSON(data []byte) error {
+	type Alias CollectionPointCalendarSettings
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "value")
+		if nulls[0] && t.Value == nil {
+			null := GenericJSON("null")
+			t.Value = &null
+		}
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts CollectionPointCalendarSettings into a map representation.
+func (t *CollectionPointCalendarSettings) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert CollectionPointCalendarSettings to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert CollectionPointCalendarSettings to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes CollectionPointCalendarSettings from a map using lenient decoding.
+func (t *CollectionPointCalendarSettings) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode CollectionPointCalendarSettings from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarSettings from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes CollectionPointCalendarSettings from a map and rejects unknown fields.
+func (t *CollectionPointCalendarSettings) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarSettings from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarSettings from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes CollectionPointCalendarSettings from JSON and rejects unknown fields.
+func (t *CollectionPointCalendarSettings) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarSettings from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarSettings from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarSettings from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes CollectionPointCalendarSettings from JSON using lenient decoding.
+func (t *CollectionPointCalendarSettings) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CollectionPointCalendarSettings from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarSettings from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarSettings from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes CollectionPointCalendarSettings from YAML and rejects unknown fields.
+func (t *CollectionPointCalendarSettings) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarSettings from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarSettings from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode CollectionPointCalendarSettings from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes CollectionPointCalendarSettings from YAML using lenient decoding.
+func (t *CollectionPointCalendarSettings) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode CollectionPointCalendarSettings from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarSettings from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode CollectionPointCalendarSettings from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// CollectionPointCalendarSettingsFromMap builds CollectionPointCalendarSettings from a map using lenient decoding.
+func CollectionPointCalendarSettingsFromMap(value map[string]any) (*CollectionPointCalendarSettings, error) {
+	decoded := &CollectionPointCalendarSettings{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarSettingsFromMapStrict builds CollectionPointCalendarSettings from a map and rejects unknown fields.
+func CollectionPointCalendarSettingsFromMapStrict(value map[string]any) (*CollectionPointCalendarSettings, error) {
+	decoded := &CollectionPointCalendarSettings{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarSettingsFromJSON builds CollectionPointCalendarSettings from JSON and rejects unknown fields.
+func CollectionPointCalendarSettingsFromJSON(data []byte) (*CollectionPointCalendarSettings, error) {
+	decoded := &CollectionPointCalendarSettings{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarSettingsFromJSONNonStrict builds CollectionPointCalendarSettings from JSON using lenient decoding.
+func CollectionPointCalendarSettingsFromJSONNonStrict(data []byte) (*CollectionPointCalendarSettings, error) {
+	decoded := &CollectionPointCalendarSettings{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarSettingsFromYAML builds CollectionPointCalendarSettings from YAML and rejects unknown fields.
+func CollectionPointCalendarSettingsFromYAML(data []byte) (*CollectionPointCalendarSettings, error) {
+	decoded := &CollectionPointCalendarSettings{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// CollectionPointCalendarSettingsFromYAMLNonStrict builds CollectionPointCalendarSettings from YAML using lenient decoding.
+func CollectionPointCalendarSettingsFromYAMLNonStrict(data []byte) (*CollectionPointCalendarSettings, error) {
+	decoded := &CollectionPointCalendarSettings{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// Inventory - The units the warehouse holds of a product: one row per product, whose
+// key is the product's id. shop-stock's staff routes receive and count
 // them, and a checkout holds them at the price they sell for, in pounds.
-// A count at or below reorderAt makes Stock.low true, which shop-stock's
-// job OrderRestocks lists.
+// Its available units at or below reorderAt make it low, which
+// shop-stock's job OrderRestocks finds.
 type Inventory struct {
+	Id IdentityUUID `json:"id"`
+
 	Sku string `json:"sku"`
 
-	PriceCents FinanceMoney `json:"priceCents"`
+	PriceCents GenericInt64 `json:"priceCents"`
 
 	ReorderAt *GenericInt64 `json:"reorderAt,omitempty"`
+
+	StockOnHand *GenericInt64 `json:"stockOnHand,omitempty"`
+
+	StockHeld *GenericInt64 `json:"stockHeld,omitempty"`
+
+	Version int64 `json:"_version"`
 }
 
 // MaskSecrets returns a copy of Inventory with secret fields cleared.
@@ -1924,11 +6106,19 @@ func (t *Inventory) MaskSecrets() *Inventory {
 
 	masked := &Inventory{}
 
+	masked.Id = t.Id
+
 	masked.Sku = t.Sku
 
 	masked.PriceCents = t.PriceCents
 
 	masked.ReorderAt = t.ReorderAt
+
+	masked.StockOnHand = t.StockOnHand
+
+	masked.StockHeld = t.StockHeld
+
+	masked.Version = t.Version
 
 	return masked
 }
@@ -1937,12 +6127,21 @@ func (t *Inventory) MaskSecrets() *Inventory {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*Inventory) JSONFieldNames() []string {
-	return []string{"sku", "priceCents", "reorderAt"}
+	return []string{"id", "sku", "priceCents", "reorderAt", "stockOnHand", "stockHeld", "_version"}
 }
 
 // Validate validates all fields in Inventory
 func (t *Inventory) Validate() ValidationErrors {
 	errors := NewValidationErrors()
+
+	{
+		value := t.Id
+
+		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+			errors.AddFieldError("id", "pattern", "invalid format")
+		}
+
+	}
 
 	{
 		value := t.Sku
@@ -1955,7 +6154,7 @@ func (t *Inventory) Validate() ValidationErrors {
 
 	// Validate priceCents (required)
 
-	if valid, fieldErrs := validateFinanceMoneyValue(t.PriceCents, true); !valid {
+	if valid, fieldErrs := validateGenericInt64Value(t.PriceCents, true); !valid {
 		errors.SetFieldErrors("priceCents", fieldErrs)
 	}
 
@@ -1965,6 +6164,24 @@ func (t *Inventory) Validate() ValidationErrors {
 	if t.ReorderAt != nil {
 		if valid, fieldErrs := validateGenericInt64Value(*t.ReorderAt, false); !valid {
 			errors.SetFieldErrors("reorderAt", fieldErrs)
+		}
+	}
+
+	// Validate stockOnHand (optional)
+
+	// Validate optional pointer field
+	if t.StockOnHand != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.StockOnHand, false); !valid {
+			errors.SetFieldErrors("stockOnHand", fieldErrs)
+		}
+	}
+
+	// Validate stockHeld (optional)
+
+	// Validate optional pointer field
+	if t.StockHeld != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.StockHeld, false); !valid {
+			errors.SetFieldErrors("stockHeld", fieldErrs)
 		}
 	}
 
@@ -2165,6 +6382,1922 @@ func InventoryFromYAMLNonStrict(data []byte) (*Inventory, error) {
 	return decoded, nil
 }
 
+// InventoryStockHolds - On a table, the supply's record of each claim item it holds or held, keyed by the claim's type and key, the hold and the item's index: what the item asked, its state, which a call moves only forward, so a call made again changes nothing, and the price it was held at. A deleted claim's records retire under a key of their own: what it held is released, what it committed stays sold, and a claim created again with its key holds afresh.
+type InventoryStockHolds struct {
+	Inventory Inventory `json:"inventory"`
+
+	Record string `json:"record"`
+
+	HolderSchema string `json:"holderSchema,omitempty"`
+
+	HolderId string `json:"holderId,omitempty"`
+
+	Hold string `json:"hold,omitempty"`
+
+	Item *GenericInt64 `json:"item,omitempty"`
+
+	Quantity *GenericInt64 `json:"quantity,omitempty"`
+
+	State string `json:"state,omitempty"`
+
+	UnitPrice *GenericInt64 `json:"unitPrice,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	At *TemporalDateTime `json:"at,omitempty"`
+
+	Retired *bool `json:"retired,omitempty"`
+}
+
+// MaskSecrets returns a copy of InventoryStockHolds with secret fields cleared.
+func (t *InventoryStockHolds) MaskSecrets() *InventoryStockHolds {
+	if t == nil {
+		return nil
+	}
+
+	masked := &InventoryStockHolds{}
+
+	maskedValueInventory := t.Inventory.MaskSecrets()
+	if maskedValueInventory != nil {
+		masked.Inventory = *maskedValueInventory
+	}
+
+	masked.Record = t.Record
+
+	masked.HolderSchema = t.HolderSchema
+
+	masked.HolderId = t.HolderId
+
+	masked.Hold = t.Hold
+
+	masked.Item = t.Item
+
+	masked.Quantity = t.Quantity
+
+	masked.State = t.State
+
+	masked.UnitPrice = t.UnitPrice
+
+	masked.Currency = t.Currency
+
+	masked.At = t.At
+
+	masked.Retired = t.Retired
+
+	return masked
+}
+
+// JSONFieldNames are the keys InventoryStockHolds's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*InventoryStockHolds) JSONFieldNames() []string {
+	return []string{"inventory", "record", "holderSchema", "holderId", "hold", "item", "quantity", "state", "unitPrice", "currency", "at", "retired"}
+}
+
+// Validate validates all fields in InventoryStockHolds
+func (t *InventoryStockHolds) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate inventory (required nested type)
+
+	if fieldErrs := t.Inventory.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("inventory", fieldErrs)
+	}
+
+	// Validate item (optional)
+
+	// Validate optional pointer field
+	if t.Item != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Item, false); !valid {
+			errors.SetFieldErrors("item", fieldErrs)
+		}
+	}
+
+	// Validate quantity (optional)
+
+	// Validate optional pointer field
+	if t.Quantity != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Quantity, false); !valid {
+			errors.SetFieldErrors("quantity", fieldErrs)
+		}
+	}
+
+	// Validate unitPrice (optional)
+
+	// Validate optional pointer field
+	if t.UnitPrice != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.UnitPrice, false); !valid {
+			errors.SetFieldErrors("unitPrice", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := t.At.Validate(); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals InventoryStockHolds to JSON
+func (t *InventoryStockHolds) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias InventoryStockHolds
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals InventoryStockHolds from JSON with validation
+func (t *InventoryStockHolds) UnmarshalJSON(data []byte) error {
+	type Alias InventoryStockHolds
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts InventoryStockHolds into a map representation.
+func (t *InventoryStockHolds) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert InventoryStockHolds to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert InventoryStockHolds to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes InventoryStockHolds from a map using lenient decoding.
+func (t *InventoryStockHolds) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode InventoryStockHolds from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode InventoryStockHolds from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes InventoryStockHolds from a map and rejects unknown fields.
+func (t *InventoryStockHolds) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode InventoryStockHolds from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode InventoryStockHolds from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes InventoryStockHolds from JSON and rejects unknown fields.
+func (t *InventoryStockHolds) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode InventoryStockHolds from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode InventoryStockHolds from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode InventoryStockHolds from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes InventoryStockHolds from JSON using lenient decoding.
+func (t *InventoryStockHolds) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode InventoryStockHolds from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode InventoryStockHolds from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode InventoryStockHolds from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes InventoryStockHolds from YAML and rejects unknown fields.
+func (t *InventoryStockHolds) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode InventoryStockHolds from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode InventoryStockHolds from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode InventoryStockHolds from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes InventoryStockHolds from YAML using lenient decoding.
+func (t *InventoryStockHolds) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode InventoryStockHolds from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode InventoryStockHolds from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode InventoryStockHolds from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// InventoryStockHoldsFromMap builds InventoryStockHolds from a map using lenient decoding.
+func InventoryStockHoldsFromMap(value map[string]any) (*InventoryStockHolds, error) {
+	decoded := &InventoryStockHolds{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockHoldsFromMapStrict builds InventoryStockHolds from a map and rejects unknown fields.
+func InventoryStockHoldsFromMapStrict(value map[string]any) (*InventoryStockHolds, error) {
+	decoded := &InventoryStockHolds{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockHoldsFromJSON builds InventoryStockHolds from JSON and rejects unknown fields.
+func InventoryStockHoldsFromJSON(data []byte) (*InventoryStockHolds, error) {
+	decoded := &InventoryStockHolds{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockHoldsFromJSONNonStrict builds InventoryStockHolds from JSON using lenient decoding.
+func InventoryStockHoldsFromJSONNonStrict(data []byte) (*InventoryStockHolds, error) {
+	decoded := &InventoryStockHolds{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockHoldsFromYAML builds InventoryStockHolds from YAML and rejects unknown fields.
+func InventoryStockHoldsFromYAML(data []byte) (*InventoryStockHolds, error) {
+	decoded := &InventoryStockHolds{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockHoldsFromYAMLNonStrict builds InventoryStockHolds from YAML using lenient decoding.
+func InventoryStockHoldsFromYAMLNonStrict(data []byte) (*InventoryStockHolds, error) {
+	decoded := &InventoryStockHolds{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockMovements - On a table, every change of what is on hand, append-only, keyed by its sequence from 1: its kind, its delta, what was on hand after it, its reason and reference, the claim and item it was for, who made it and when. onHand always equals the sum of the deltas.
+type InventoryStockMovements struct {
+	Inventory Inventory `json:"inventory"`
+
+	Seq string `json:"seq"`
+
+	Kind string `json:"kind,omitempty"`
+
+	Delta *GenericInt64 `json:"delta,omitempty"`
+
+	OnHand *GenericInt64 `json:"onHand,omitempty"`
+
+	Reason string `json:"reason,omitempty"`
+
+	Reference string `json:"reference,omitempty"`
+
+	HolderSchema string `json:"holderSchema,omitempty"`
+
+	HolderId string `json:"holderId,omitempty"`
+
+	Hold string `json:"hold,omitempty"`
+
+	Item *GenericInt64 `json:"item,omitempty"`
+
+	Actor string `json:"actor,omitempty"`
+
+	At *TemporalDateTime `json:"at,omitempty"`
+}
+
+// MaskSecrets returns a copy of InventoryStockMovements with secret fields cleared.
+func (t *InventoryStockMovements) MaskSecrets() *InventoryStockMovements {
+	if t == nil {
+		return nil
+	}
+
+	masked := &InventoryStockMovements{}
+
+	maskedValueInventory := t.Inventory.MaskSecrets()
+	if maskedValueInventory != nil {
+		masked.Inventory = *maskedValueInventory
+	}
+
+	masked.Seq = t.Seq
+
+	masked.Kind = t.Kind
+
+	masked.Delta = t.Delta
+
+	masked.OnHand = t.OnHand
+
+	masked.Reason = t.Reason
+
+	masked.Reference = t.Reference
+
+	masked.HolderSchema = t.HolderSchema
+
+	masked.HolderId = t.HolderId
+
+	masked.Hold = t.Hold
+
+	masked.Item = t.Item
+
+	masked.Actor = t.Actor
+
+	masked.At = t.At
+
+	return masked
+}
+
+// JSONFieldNames are the keys InventoryStockMovements's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*InventoryStockMovements) JSONFieldNames() []string {
+	return []string{"inventory", "seq", "kind", "delta", "onHand", "reason", "reference", "holderSchema", "holderId", "hold", "item", "actor", "at"}
+}
+
+// Validate validates all fields in InventoryStockMovements
+func (t *InventoryStockMovements) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate inventory (required nested type)
+
+	if fieldErrs := t.Inventory.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("inventory", fieldErrs)
+	}
+
+	// Validate delta (optional)
+
+	// Validate optional pointer field
+	if t.Delta != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Delta, false); !valid {
+			errors.SetFieldErrors("delta", fieldErrs)
+		}
+	}
+
+	// Validate onHand (optional)
+
+	// Validate optional pointer field
+	if t.OnHand != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.OnHand, false); !valid {
+			errors.SetFieldErrors("onHand", fieldErrs)
+		}
+	}
+
+	// Validate item (optional)
+
+	// Validate optional pointer field
+	if t.Item != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Item, false); !valid {
+			errors.SetFieldErrors("item", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := t.At.Validate(); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals InventoryStockMovements to JSON
+func (t *InventoryStockMovements) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias InventoryStockMovements
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals InventoryStockMovements from JSON with validation
+func (t *InventoryStockMovements) UnmarshalJSON(data []byte) error {
+	type Alias InventoryStockMovements
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts InventoryStockMovements into a map representation.
+func (t *InventoryStockMovements) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert InventoryStockMovements to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert InventoryStockMovements to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes InventoryStockMovements from a map using lenient decoding.
+func (t *InventoryStockMovements) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode InventoryStockMovements from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode InventoryStockMovements from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes InventoryStockMovements from a map and rejects unknown fields.
+func (t *InventoryStockMovements) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode InventoryStockMovements from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode InventoryStockMovements from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes InventoryStockMovements from JSON and rejects unknown fields.
+func (t *InventoryStockMovements) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode InventoryStockMovements from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode InventoryStockMovements from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode InventoryStockMovements from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes InventoryStockMovements from JSON using lenient decoding.
+func (t *InventoryStockMovements) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode InventoryStockMovements from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode InventoryStockMovements from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode InventoryStockMovements from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes InventoryStockMovements from YAML and rejects unknown fields.
+func (t *InventoryStockMovements) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode InventoryStockMovements from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode InventoryStockMovements from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode InventoryStockMovements from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes InventoryStockMovements from YAML using lenient decoding.
+func (t *InventoryStockMovements) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode InventoryStockMovements from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode InventoryStockMovements from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode InventoryStockMovements from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// InventoryStockMovementsFromMap builds InventoryStockMovements from a map using lenient decoding.
+func InventoryStockMovementsFromMap(value map[string]any) (*InventoryStockMovements, error) {
+	decoded := &InventoryStockMovements{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockMovementsFromMapStrict builds InventoryStockMovements from a map and rejects unknown fields.
+func InventoryStockMovementsFromMapStrict(value map[string]any) (*InventoryStockMovements, error) {
+	decoded := &InventoryStockMovements{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockMovementsFromJSON builds InventoryStockMovements from JSON and rejects unknown fields.
+func InventoryStockMovementsFromJSON(data []byte) (*InventoryStockMovements, error) {
+	decoded := &InventoryStockMovements{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockMovementsFromJSONNonStrict builds InventoryStockMovements from JSON using lenient decoding.
+func InventoryStockMovementsFromJSONNonStrict(data []byte) (*InventoryStockMovements, error) {
+	decoded := &InventoryStockMovements{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockMovementsFromYAML builds InventoryStockMovements from YAML and rejects unknown fields.
+func InventoryStockMovementsFromYAML(data []byte) (*InventoryStockMovements, error) {
+	decoded := &InventoryStockMovements{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// InventoryStockMovementsFromYAMLNonStrict builds InventoryStockMovements from YAML using lenient decoding.
+func InventoryStockMovementsFromYAMLNonStrict(data []byte) (*InventoryStockMovements, error) {
+	decoded := &InventoryStockMovements{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClient - An OAuth client: a metadata document's, cached, or one that registered.
+type OAuthClient struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	ClientId string `json:"clientId"`
+
+	Kind string `json:"kind"`
+
+	Name string `json:"name"`
+
+	Uri string `json:"uri,omitempty"`
+
+	RedirectUris []string `json:"redirectUris"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	RefreshedAt *TemporalDateTime `json:"refreshedAt,omitempty"`
+
+	FreshUntil *TemporalDateTime `json:"freshUntil,omitempty"`
+
+	LastUsedAt *TemporalDateTime `json:"lastUsedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of OAuthClient with secret fields cleared.
+func (t *OAuthClient) MaskSecrets() *OAuthClient {
+	if t == nil {
+		return nil
+	}
+
+	masked := &OAuthClient{}
+
+	masked.Id = t.Id
+
+	masked.ClientId = t.ClientId
+
+	masked.Kind = t.Kind
+
+	masked.Name = t.Name
+
+	masked.Uri = t.Uri
+
+	if t.RedirectUris != nil {
+		masked.RedirectUris = make([]string, len(t.RedirectUris))
+
+		copy(masked.RedirectUris, t.RedirectUris)
+
+	}
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.RefreshedAt = t.RefreshedAt
+
+	masked.FreshUntil = t.FreshUntil
+
+	masked.LastUsedAt = t.LastUsedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys OAuthClient's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OAuthClient) JSONFieldNames() []string {
+	return []string{"id", "clientId", "kind", "name", "uri", "redirectUris", "createdAt", "refreshedAt", "freshUntil", "lastUsedAt"}
+}
+
+// Validate validates all fields in OAuthClient
+func (t *OAuthClient) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	{
+		value := t.ClientId
+
+		if utf8.RuneCountInString(string(value)) < 1 {
+			errors.AddFieldError("clientId", "minLength", "must be at least 1 characters")
+		}
+
+	}
+
+	// Validate refreshedAt (optional)
+
+	// Validate optional pointer field
+	if t.RefreshedAt != nil {
+		if valid, fieldErrs := t.RefreshedAt.Validate(); !valid {
+			errors.SetFieldErrors("refreshedAt", fieldErrs)
+		}
+	}
+
+	// Validate freshUntil (optional)
+
+	// Validate optional pointer field
+	if t.FreshUntil != nil {
+		if valid, fieldErrs := t.FreshUntil.Validate(); !valid {
+			errors.SetFieldErrors("freshUntil", fieldErrs)
+		}
+	}
+
+	// Validate lastUsedAt (optional)
+
+	// Validate optional pointer field
+	if t.LastUsedAt != nil {
+		if valid, fieldErrs := t.LastUsedAt.Validate(); !valid {
+			errors.SetFieldErrors("lastUsedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals OAuthClient to JSON
+func (t *OAuthClient) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias OAuthClient
+	return json.Marshal((*Alias)(t))
+}
+
+// listFieldsOfOAuthClient are the list fields of OAuthClient; UnmarshalJSON
+// refuses a null element in them.
+var listFieldsOfOAuthClient = []jsonListField{
+	{name: "redirectUris", depth: 1},
+}
+
+// UnmarshalJSON unmarshals OAuthClient from JSON with validation
+func (t *OAuthClient) UnmarshalJSON(data []byte) error {
+	type Alias OAuthClient
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if err := rejectNullListElements("OAuthClient", data, listFieldsOfOAuthClient); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts OAuthClient into a map representation.
+func (t *OAuthClient) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert OAuthClient to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert OAuthClient to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes OAuthClient from a map using lenient decoding.
+func (t *OAuthClient) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthClient from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode OAuthClient from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes OAuthClient from a map and rejects unknown fields.
+func (t *OAuthClient) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthClient from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode OAuthClient from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes OAuthClient from JSON and rejects unknown fields.
+func (t *OAuthClient) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthClient from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthClient from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthClient from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes OAuthClient from JSON using lenient decoding.
+func (t *OAuthClient) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthClient from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthClient from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthClient from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes OAuthClient from YAML and rejects unknown fields.
+func (t *OAuthClient) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthClient from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthClient from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthClient from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes OAuthClient from YAML using lenient decoding.
+func (t *OAuthClient) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthClient from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthClient from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthClient from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// OAuthClientFromMap builds OAuthClient from a map using lenient decoding.
+func OAuthClientFromMap(value map[string]any) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromMapStrict builds OAuthClient from a map and rejects unknown fields.
+func OAuthClientFromMapStrict(value map[string]any) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromJSON builds OAuthClient from JSON and rejects unknown fields.
+func OAuthClientFromJSON(data []byte) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromJSONNonStrict builds OAuthClient from JSON using lenient decoding.
+func OAuthClientFromJSONNonStrict(data []byte) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromYAML builds OAuthClient from YAML and rejects unknown fields.
+func OAuthClientFromYAML(data []byte) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthClientFromYAMLNonStrict builds OAuthClient from YAML using lenient decoding.
+func OAuthClientFromYAMLNonStrict(data []byte) (*OAuthClient, error) {
+	decoded := &OAuthClient{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCode - An OAuth authorization request: pending while its user consents, then the code its client redeems once.
+type OAuthCode struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Client OAuthClient `json:"client"`
+
+	User *User `json:"user,omitempty"`
+
+	Grant *OAuthGrant `json:"grant,omitempty"`
+
+	RedirectUri string `json:"redirectUri"`
+
+	CodeChallenge string `json:"codeChallenge"`
+
+	State string `json:"state,omitempty"`
+
+	Scope string `json:"scope,omitempty"`
+
+	Resource string `json:"resource"`
+
+	Nonce string `json:"nonce"`
+
+	CodeHash *CryptoSHA256 `json:"codeHash,omitempty"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	ExpiresAt TemporalDateTime `json:"expiresAt"`
+
+	UsedAt *TemporalDateTime `json:"usedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of OAuthCode with secret fields cleared.
+func (t *OAuthCode) MaskSecrets() *OAuthCode {
+	if t == nil {
+		return nil
+	}
+
+	masked := &OAuthCode{}
+
+	masked.Id = t.Id
+
+	maskedValueClient := t.Client.MaskSecrets()
+	if maskedValueClient != nil {
+		masked.Client = *maskedValueClient
+	}
+
+	masked.User = t.User.MaskSecrets()
+
+	masked.Grant = t.Grant.MaskSecrets()
+
+	masked.RedirectUri = t.RedirectUri
+
+	masked.CodeChallenge = t.CodeChallenge
+
+	masked.State = t.State
+
+	masked.Scope = t.Scope
+
+	masked.Resource = t.Resource
+
+	masked.Nonce = t.Nonce
+
+	masked.CodeHash = t.CodeHash
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.ExpiresAt = t.ExpiresAt
+
+	masked.UsedAt = t.UsedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys OAuthCode's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OAuthCode) JSONFieldNames() []string {
+	return []string{"id", "client", "user", "grant", "redirectUri", "codeChallenge", "state", "scope", "resource", "nonce", "codeHash", "createdAt", "expiresAt", "usedAt"}
+}
+
+// Validate validates all fields in OAuthCode
+func (t *OAuthCode) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate client (required nested type)
+
+	if fieldErrs := t.Client.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("client", fieldErrs)
+	}
+
+	// Validate user (optional nested type)
+
+	if t.User != nil {
+		if fieldErrs := t.User.Validate(); fieldErrs.HasErrors() {
+			errors.AddNestedError("user", fieldErrs)
+		}
+	}
+
+	// Validate grant (optional nested type)
+
+	if t.Grant != nil {
+		if fieldErrs := t.Grant.Validate(); fieldErrs.HasErrors() {
+			errors.AddNestedError("grant", fieldErrs)
+		}
+	}
+
+	// Validate codeHash (optional)
+
+	// Validate optional pointer field
+	if t.CodeHash != nil {
+		if valid, fieldErrs := validateCryptoSHA256Value(*t.CodeHash, false); !valid {
+			errors.SetFieldErrors("codeHash", fieldErrs)
+		}
+	}
+
+	// Validate expiresAt (required)
+
+	if valid, fieldErrs := t.ExpiresAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("expiresAt", fieldErrs)
+	}
+
+	// Validate usedAt (optional)
+
+	// Validate optional pointer field
+	if t.UsedAt != nil {
+		if valid, fieldErrs := t.UsedAt.Validate(); !valid {
+			errors.SetFieldErrors("usedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals OAuthCode to JSON
+func (t *OAuthCode) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias OAuthCode
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals OAuthCode from JSON with validation
+func (t *OAuthCode) UnmarshalJSON(data []byte) error {
+	type Alias OAuthCode
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts OAuthCode into a map representation.
+func (t *OAuthCode) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert OAuthCode to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert OAuthCode to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes OAuthCode from a map using lenient decoding.
+func (t *OAuthCode) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthCode from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode OAuthCode from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes OAuthCode from a map and rejects unknown fields.
+func (t *OAuthCode) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthCode from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode OAuthCode from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes OAuthCode from JSON and rejects unknown fields.
+func (t *OAuthCode) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthCode from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthCode from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthCode from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes OAuthCode from JSON using lenient decoding.
+func (t *OAuthCode) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthCode from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthCode from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthCode from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes OAuthCode from YAML and rejects unknown fields.
+func (t *OAuthCode) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthCode from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthCode from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthCode from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes OAuthCode from YAML using lenient decoding.
+func (t *OAuthCode) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthCode from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthCode from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthCode from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// OAuthCodeFromMap builds OAuthCode from a map using lenient decoding.
+func OAuthCodeFromMap(value map[string]any) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromMapStrict builds OAuthCode from a map and rejects unknown fields.
+func OAuthCodeFromMapStrict(value map[string]any) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromJSON builds OAuthCode from JSON and rejects unknown fields.
+func OAuthCodeFromJSON(data []byte) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromJSONNonStrict builds OAuthCode from JSON using lenient decoding.
+func OAuthCodeFromJSONNonStrict(data []byte) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromYAML builds OAuthCode from YAML and rejects unknown fields.
+func OAuthCodeFromYAML(data []byte) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthCodeFromYAMLNonStrict builds OAuthCode from YAML using lenient decoding.
+func OAuthCodeFromYAMLNonStrict(data []byte) (*OAuthCode, error) {
+	decoded := &OAuthCode{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrant - An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.
+type OAuthGrant struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	User User `json:"user"`
+
+	Client OAuthClient `json:"client"`
+
+	Permissions []string `json:"permissions,omitzero"`
+
+	Resource string `json:"resource"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	ExpiresAt TemporalDateTime `json:"expiresAt"`
+
+	LastUsedAt *TemporalDateTime `json:"lastUsedAt,omitempty"`
+
+	RevokedAt *TemporalDateTime `json:"revokedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of OAuthGrant with secret fields cleared.
+func (t *OAuthGrant) MaskSecrets() *OAuthGrant {
+	if t == nil {
+		return nil
+	}
+
+	masked := &OAuthGrant{}
+
+	masked.Id = t.Id
+
+	maskedValueUser := t.User.MaskSecrets()
+	if maskedValueUser != nil {
+		masked.User = *maskedValueUser
+	}
+
+	maskedValueClient := t.Client.MaskSecrets()
+	if maskedValueClient != nil {
+		masked.Client = *maskedValueClient
+	}
+
+	if t.Permissions != nil {
+		masked.Permissions = make([]string, len(t.Permissions))
+
+		copy(masked.Permissions, t.Permissions)
+
+	}
+
+	masked.Resource = t.Resource
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.ExpiresAt = t.ExpiresAt
+
+	masked.LastUsedAt = t.LastUsedAt
+
+	masked.RevokedAt = t.RevokedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys OAuthGrant's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OAuthGrant) JSONFieldNames() []string {
+	return []string{"id", "user", "client", "permissions", "resource", "createdAt", "expiresAt", "lastUsedAt", "revokedAt"}
+}
+
+// Validate validates all fields in OAuthGrant
+func (t *OAuthGrant) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate user (required nested type)
+
+	if fieldErrs := t.User.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("user", fieldErrs)
+	}
+
+	// Validate client (required nested type)
+
+	if fieldErrs := t.Client.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("client", fieldErrs)
+	}
+
+	// Validate expiresAt (required)
+
+	if valid, fieldErrs := t.ExpiresAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("expiresAt", fieldErrs)
+	}
+
+	// Validate lastUsedAt (optional)
+
+	// Validate optional pointer field
+	if t.LastUsedAt != nil {
+		if valid, fieldErrs := t.LastUsedAt.Validate(); !valid {
+			errors.SetFieldErrors("lastUsedAt", fieldErrs)
+		}
+	}
+
+	// Validate revokedAt (optional)
+
+	// Validate optional pointer field
+	if t.RevokedAt != nil {
+		if valid, fieldErrs := t.RevokedAt.Validate(); !valid {
+			errors.SetFieldErrors("revokedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals OAuthGrant to JSON
+func (t *OAuthGrant) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias OAuthGrant
+	return json.Marshal((*Alias)(t))
+}
+
+// listFieldsOfOAuthGrant are the list fields of OAuthGrant; UnmarshalJSON
+// refuses a null element in them.
+var listFieldsOfOAuthGrant = []jsonListField{
+	{name: "permissions", depth: 1},
+}
+
+// UnmarshalJSON unmarshals OAuthGrant from JSON with validation
+func (t *OAuthGrant) UnmarshalJSON(data []byte) error {
+	type Alias OAuthGrant
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if err := rejectNullListElements("OAuthGrant", data, listFieldsOfOAuthGrant); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts OAuthGrant into a map representation.
+func (t *OAuthGrant) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert OAuthGrant to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert OAuthGrant to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes OAuthGrant from a map using lenient decoding.
+func (t *OAuthGrant) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthGrant from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode OAuthGrant from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes OAuthGrant from a map and rejects unknown fields.
+func (t *OAuthGrant) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthGrant from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes OAuthGrant from JSON and rejects unknown fields.
+func (t *OAuthGrant) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthGrant from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes OAuthGrant from JSON using lenient decoding.
+func (t *OAuthGrant) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthGrant from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthGrant from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthGrant from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes OAuthGrant from YAML and rejects unknown fields.
+func (t *OAuthGrant) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthGrant from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthGrant from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes OAuthGrant from YAML using lenient decoding.
+func (t *OAuthGrant) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthGrant from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthGrant from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthGrant from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// OAuthGrantFromMap builds OAuthGrant from a map using lenient decoding.
+func OAuthGrantFromMap(value map[string]any) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromMapStrict builds OAuthGrant from a map and rejects unknown fields.
+func OAuthGrantFromMapStrict(value map[string]any) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromJSON builds OAuthGrant from JSON and rejects unknown fields.
+func OAuthGrantFromJSON(data []byte) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromJSONNonStrict builds OAuthGrant from JSON using lenient decoding.
+func OAuthGrantFromJSONNonStrict(data []byte) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromYAML builds OAuthGrant from YAML and rejects unknown fields.
+func OAuthGrantFromYAML(data []byte) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthGrantFromYAMLNonStrict builds OAuthGrant from YAML using lenient decoding.
+func OAuthGrantFromYAMLNonStrict(data []byte) (*OAuthGrant, error) {
+	decoded := &OAuthGrant{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthToken - An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.
+type OAuthToken struct {
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Grant OAuthGrant `json:"grant"`
+
+	Kind string `json:"kind"`
+
+	TokenHash CryptoSHA256 `json:"tokenHash"`
+
+	CreatedAt TemporalDateTime `json:"createdAt"`
+
+	ExpiresAt TemporalDateTime `json:"expiresAt"`
+
+	UsedAt *TemporalDateTime `json:"usedAt,omitempty"`
+
+	RevokedAt *TemporalDateTime `json:"revokedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of OAuthToken with secret fields cleared.
+func (t *OAuthToken) MaskSecrets() *OAuthToken {
+	if t == nil {
+		return nil
+	}
+
+	masked := &OAuthToken{}
+
+	masked.Id = t.Id
+
+	maskedValueGrant := t.Grant.MaskSecrets()
+	if maskedValueGrant != nil {
+		masked.Grant = *maskedValueGrant
+	}
+
+	masked.Kind = t.Kind
+
+	masked.TokenHash = t.TokenHash
+
+	masked.CreatedAt = t.CreatedAt
+
+	masked.ExpiresAt = t.ExpiresAt
+
+	masked.UsedAt = t.UsedAt
+
+	masked.RevokedAt = t.RevokedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys OAuthToken's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*OAuthToken) JSONFieldNames() []string {
+	return []string{"id", "grant", "kind", "tokenHash", "createdAt", "expiresAt", "usedAt", "revokedAt"}
+}
+
+// Validate validates all fields in OAuthToken
+func (t *OAuthToken) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate grant (required nested type)
+
+	if fieldErrs := t.Grant.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("grant", fieldErrs)
+	}
+
+	// Validate tokenHash (required)
+
+	if valid, fieldErrs := validateCryptoSHA256Value(t.TokenHash, true); !valid {
+		errors.SetFieldErrors("tokenHash", fieldErrs)
+	}
+
+	// Validate expiresAt (required)
+
+	if valid, fieldErrs := t.ExpiresAt.ValidateRequired(); !valid {
+		errors.SetFieldErrors("expiresAt", fieldErrs)
+	}
+
+	// Validate usedAt (optional)
+
+	// Validate optional pointer field
+	if t.UsedAt != nil {
+		if valid, fieldErrs := t.UsedAt.Validate(); !valid {
+			errors.SetFieldErrors("usedAt", fieldErrs)
+		}
+	}
+
+	// Validate revokedAt (optional)
+
+	// Validate optional pointer field
+	if t.RevokedAt != nil {
+		if valid, fieldErrs := t.RevokedAt.Validate(); !valid {
+			errors.SetFieldErrors("revokedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals OAuthToken to JSON
+func (t *OAuthToken) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias OAuthToken
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals OAuthToken from JSON with validation
+func (t *OAuthToken) UnmarshalJSON(data []byte) error {
+	type Alias OAuthToken
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts OAuthToken into a map representation.
+func (t *OAuthToken) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert OAuthToken to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert OAuthToken to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes OAuthToken from a map using lenient decoding.
+func (t *OAuthToken) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthToken from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode OAuthToken from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes OAuthToken from a map and rejects unknown fields.
+func (t *OAuthToken) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthToken from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode OAuthToken from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes OAuthToken from JSON and rejects unknown fields.
+func (t *OAuthToken) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthToken from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthToken from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthToken from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes OAuthToken from JSON using lenient decoding.
+func (t *OAuthToken) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthToken from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthToken from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthToken from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes OAuthToken from YAML and rejects unknown fields.
+func (t *OAuthToken) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode OAuthToken from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode OAuthToken from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode OAuthToken from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes OAuthToken from YAML using lenient decoding.
+func (t *OAuthToken) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode OAuthToken from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode OAuthToken from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode OAuthToken from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// OAuthTokenFromMap builds OAuthToken from a map using lenient decoding.
+func OAuthTokenFromMap(value map[string]any) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromMapStrict builds OAuthToken from a map and rejects unknown fields.
+func OAuthTokenFromMapStrict(value map[string]any) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromJSON builds OAuthToken from JSON and rejects unknown fields.
+func OAuthTokenFromJSON(data []byte) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromJSONNonStrict builds OAuthToken from JSON using lenient decoding.
+func OAuthTokenFromJSONNonStrict(data []byte) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromYAML builds OAuthToken from YAML and rejects unknown fields.
+func OAuthTokenFromYAML(data []byte) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// OAuthTokenFromYAMLNonStrict builds OAuthToken from YAML using lenient decoding.
+func OAuthTokenFromYAMLNonStrict(data []byte) (*OAuthToken, error) {
+	decoded := &OAuthToken{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // Order - A shopper's order. Staff look orders up by customer, newest first. An
 // order put back to placed, by staff or by a script in psql, is fulfilled
 // again: the database's trigger enqueues its OrderPlaced, whatever wrote
@@ -2178,7 +8311,7 @@ type Order struct {
 
 	Customer User `json:"customer"`
 
-	Status OrderStatus `json:"status"`
+	Status OrderStatus `json:"status,omitzero"`
 
 	PlacedAt TemporalDateTime `json:"placedAt"`
 
@@ -3412,15 +9545,46 @@ func ProductFromYAMLNonStrict(data []byte) (*Product, error) {
 }
 
 // Refund - A refund of a placed checkout, which two staff who hold refunds.approve
-// sign off before it is issued: issuing asks the checkout's Payments for
-// the refund, which shop-orders' job SettlePayments makes at acmepay and
-// reports back, and the Reactions rule moves it to issued once refunded.
+// sign off before it is issued: entering approved asks the checkout's
+// Payments for the refund, which shop-orders' job SettlePayments makes at
+// acmepay and records on the checkout, which settles it here; the job then
+// moves it to issued.
 type Refund struct {
-	AmountCents FinanceMoney `json:"amountCents"`
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Checkout Checkout `json:"checkout"`
+
+	AmountCents GenericInt64 `json:"amountCents"`
 
 	Reason string `json:"reason"`
 
-	RequestedBy IdentityUUID `json:"requestedBy"`
+	CreatedBy IdentityUUID `json:"createdBy"`
+
+	PaymentsDue *GenericInt64 `json:"paymentsDue,omitempty"`
+
+	PaymentsAuthorized *GenericInt64 `json:"paymentsAuthorized,omitempty"`
+
+	PaymentsCaptured *GenericInt64 `json:"paymentsCaptured,omitempty"`
+
+	PaymentsRefunded *GenericInt64 `json:"paymentsRefunded,omitempty"`
+
+	PaymentsOutstanding *GenericInt64 `json:"paymentsOutstanding,omitempty"`
+
+	PaymentsOverpaid *GenericInt64 `json:"paymentsOverpaid,omitempty"`
+
+	PaymentsCurrency string `json:"paymentsCurrency,omitempty"`
+
+	PaymentsState string `json:"paymentsState,omitempty"`
+
+	Status string `json:"status"`
+
+	StatusEnteredAt *TemporalDateTime `json:"statusEnteredAt,omitempty"`
+
+	NumberSeq *GenericInt64 `json:"numberSeq,omitempty"`
+
+	Number string `json:"number,omitempty"`
+
+	Version int64 `json:"_version"`
 }
 
 // MaskSecrets returns a copy of Refund with secret fields cleared.
@@ -3431,11 +9595,44 @@ func (t *Refund) MaskSecrets() *Refund {
 
 	masked := &Refund{}
 
+	masked.Id = t.Id
+
+	maskedValueCheckout := t.Checkout.MaskSecrets()
+	if maskedValueCheckout != nil {
+		masked.Checkout = *maskedValueCheckout
+	}
+
 	masked.AmountCents = t.AmountCents
 
 	masked.Reason = t.Reason
 
-	masked.RequestedBy = t.RequestedBy
+	masked.CreatedBy = t.CreatedBy
+
+	masked.PaymentsDue = t.PaymentsDue
+
+	masked.PaymentsAuthorized = t.PaymentsAuthorized
+
+	masked.PaymentsCaptured = t.PaymentsCaptured
+
+	masked.PaymentsRefunded = t.PaymentsRefunded
+
+	masked.PaymentsOutstanding = t.PaymentsOutstanding
+
+	masked.PaymentsOverpaid = t.PaymentsOverpaid
+
+	masked.PaymentsCurrency = t.PaymentsCurrency
+
+	masked.PaymentsState = t.PaymentsState
+
+	masked.Status = t.Status
+
+	masked.StatusEnteredAt = t.StatusEnteredAt
+
+	masked.NumberSeq = t.NumberSeq
+
+	masked.Number = t.Number
+
+	masked.Version = t.Version
 
 	return masked
 }
@@ -3444,16 +9641,31 @@ func (t *Refund) MaskSecrets() *Refund {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*Refund) JSONFieldNames() []string {
-	return []string{"amountCents", "reason", "requestedBy"}
+	return []string{"id", "checkout", "amountCents", "reason", "createdBy", "paymentsDue", "paymentsAuthorized", "paymentsCaptured", "paymentsRefunded", "paymentsOutstanding", "paymentsOverpaid", "paymentsCurrency", "paymentsState", "status", "statusEnteredAt", "numberSeq", "number", "_version"}
 }
 
 // Validate validates all fields in Refund
 func (t *Refund) Validate() ValidationErrors {
 	errors := NewValidationErrors()
 
+	// Validate id (optional)
+
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
+		}
+	}
+
+	// Validate checkout (required nested type)
+
+	if fieldErrs := t.Checkout.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("checkout", fieldErrs)
+	}
+
 	// Validate amountCents (required)
 
-	if valid, fieldErrs := validateFinanceMoneyValue(t.AmountCents, true); !valid {
+	if valid, fieldErrs := validateGenericInt64Value(t.AmountCents, true); !valid {
 		errors.SetFieldErrors("amountCents", fieldErrs)
 	}
 
@@ -3466,10 +9678,85 @@ func (t *Refund) Validate() ValidationErrors {
 
 	}
 
-	// Validate requestedBy (required)
+	{
+		value := t.CreatedBy
 
-	if valid, fieldErrs := validateIdentityUUIDValue(t.RequestedBy, true); !valid {
-		errors.SetFieldErrors("requestedBy", fieldErrs)
+		if matched, err := regexp.MatchString("^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", value.String()); err != nil || !matched {
+			errors.AddFieldError("createdBy", "pattern", "invalid format")
+		}
+
+	}
+
+	// Validate paymentsDue (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsDue != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsDue, false); !valid {
+			errors.SetFieldErrors("paymentsDue", fieldErrs)
+		}
+	}
+
+	// Validate paymentsAuthorized (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsAuthorized != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsAuthorized, false); !valid {
+			errors.SetFieldErrors("paymentsAuthorized", fieldErrs)
+		}
+	}
+
+	// Validate paymentsCaptured (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsCaptured != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsCaptured, false); !valid {
+			errors.SetFieldErrors("paymentsCaptured", fieldErrs)
+		}
+	}
+
+	// Validate paymentsRefunded (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsRefunded != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsRefunded, false); !valid {
+			errors.SetFieldErrors("paymentsRefunded", fieldErrs)
+		}
+	}
+
+	// Validate paymentsOutstanding (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsOutstanding != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsOutstanding, false); !valid {
+			errors.SetFieldErrors("paymentsOutstanding", fieldErrs)
+		}
+	}
+
+	// Validate paymentsOverpaid (optional)
+
+	// Validate optional pointer field
+	if t.PaymentsOverpaid != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.PaymentsOverpaid, false); !valid {
+			errors.SetFieldErrors("paymentsOverpaid", fieldErrs)
+		}
+	}
+
+	// Validate statusEnteredAt (optional)
+
+	// Validate optional pointer field
+	if t.StatusEnteredAt != nil {
+		if valid, fieldErrs := t.StatusEnteredAt.Validate(); !valid {
+			errors.SetFieldErrors("statusEnteredAt", fieldErrs)
+		}
+	}
+
+	// Validate numberSeq (optional)
+
+	// Validate optional pointer field
+	if t.NumberSeq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.NumberSeq, false); !valid {
+			errors.SetFieldErrors("numberSeq", fieldErrs)
+		}
 	}
 
 	return errors
@@ -3669,6 +9956,2244 @@ func RefundFromYAMLNonStrict(data []byte) (*Refund, error) {
 	return decoded, nil
 }
 
+// RefundApprovalsSignOffs - One row per sign-off on the row, keyed by its number, the order it was given in: the gated state, the caller who signed (its subject and kind, whom it acted for and its run's Agent), the assurance its host reported, the permissions it held and the values of the fields the gate's requirements reset on, why, when, and when it was consumed, absent while it counts. A withdrawal deletes its row; consumed ones stay for listSignOffs.
+type RefundApprovalsSignOffs struct {
+	Refund Refund `json:"refund"`
+
+	Number string `json:"number"`
+
+	State string `json:"state,omitempty"`
+
+	Subject string `json:"subject,omitempty"`
+
+	Kind string `json:"kind,omitempty"`
+
+	ActingFor string `json:"actingFor,omitempty"`
+
+	ActingForKind string `json:"actingForKind,omitempty"`
+
+	Agent string `json:"agent,omitempty"`
+
+	SignedInAt *TemporalDateTime `json:"signedInAt,omitempty"`
+
+	UserVerified *bool `json:"userVerified,omitempty"`
+
+	Held *GenericJSON `json:"held,omitempty"`
+
+	Values *GenericJSON `json:"values,omitempty"`
+
+	Note string `json:"note,omitempty"`
+
+	At *TemporalDateTime `json:"at,omitempty"`
+
+	ConsumedAt *TemporalDateTime `json:"consumedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of RefundApprovalsSignOffs with secret fields cleared.
+func (t *RefundApprovalsSignOffs) MaskSecrets() *RefundApprovalsSignOffs {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RefundApprovalsSignOffs{}
+
+	maskedValueRefund := t.Refund.MaskSecrets()
+	if maskedValueRefund != nil {
+		masked.Refund = *maskedValueRefund
+	}
+
+	masked.Number = t.Number
+
+	masked.State = t.State
+
+	masked.Subject = t.Subject
+
+	masked.Kind = t.Kind
+
+	masked.ActingFor = t.ActingFor
+
+	masked.ActingForKind = t.ActingForKind
+
+	masked.Agent = t.Agent
+
+	masked.SignedInAt = t.SignedInAt
+
+	masked.UserVerified = t.UserVerified
+
+	masked.Held = t.Held
+
+	masked.Values = t.Values
+
+	masked.Note = t.Note
+
+	masked.At = t.At
+
+	masked.ConsumedAt = t.ConsumedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys RefundApprovalsSignOffs's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RefundApprovalsSignOffs) JSONFieldNames() []string {
+	return []string{"refund", "number", "state", "subject", "kind", "actingFor", "actingForKind", "agent", "signedInAt", "userVerified", "held", "values", "note", "at", "consumedAt"}
+}
+
+// Validate validates all fields in RefundApprovalsSignOffs
+func (t *RefundApprovalsSignOffs) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate refund (required nested type)
+
+	if fieldErrs := t.Refund.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("refund", fieldErrs)
+	}
+
+	// Validate signedInAt (optional)
+
+	// Validate optional pointer field
+	if t.SignedInAt != nil {
+		if valid, fieldErrs := t.SignedInAt.Validate(); !valid {
+			errors.SetFieldErrors("signedInAt", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := t.At.Validate(); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	// Validate consumedAt (optional)
+
+	// Validate optional pointer field
+	if t.ConsumedAt != nil {
+		if valid, fieldErrs := t.ConsumedAt.Validate(); !valid {
+			errors.SetFieldErrors("consumedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RefundApprovalsSignOffs to JSON
+func (t *RefundApprovalsSignOffs) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RefundApprovalsSignOffs
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RefundApprovalsSignOffs from JSON with validation
+func (t *RefundApprovalsSignOffs) UnmarshalJSON(data []byte) error {
+	type Alias RefundApprovalsSignOffs
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "held", "values")
+		if nulls[0] && t.Held == nil {
+			null := GenericJSON("null")
+			t.Held = &null
+		}
+		if nulls[1] && t.Values == nil {
+			null := GenericJSON("null")
+			t.Values = &null
+		}
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RefundApprovalsSignOffs into a map representation.
+func (t *RefundApprovalsSignOffs) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RefundApprovalsSignOffs to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RefundApprovalsSignOffs to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RefundApprovalsSignOffs from a map using lenient decoding.
+func (t *RefundApprovalsSignOffs) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundApprovalsSignOffs from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RefundApprovalsSignOffs from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RefundApprovalsSignOffs from a map and rejects unknown fields.
+func (t *RefundApprovalsSignOffs) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundApprovalsSignOffs from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RefundApprovalsSignOffs from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RefundApprovalsSignOffs from JSON and rejects unknown fields.
+func (t *RefundApprovalsSignOffs) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundApprovalsSignOffs from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundApprovalsSignOffs from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundApprovalsSignOffs from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RefundApprovalsSignOffs from JSON using lenient decoding.
+func (t *RefundApprovalsSignOffs) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundApprovalsSignOffs from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundApprovalsSignOffs from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundApprovalsSignOffs from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RefundApprovalsSignOffs from YAML and rejects unknown fields.
+func (t *RefundApprovalsSignOffs) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundApprovalsSignOffs from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundApprovalsSignOffs from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundApprovalsSignOffs from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RefundApprovalsSignOffs from YAML using lenient decoding.
+func (t *RefundApprovalsSignOffs) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundApprovalsSignOffs from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundApprovalsSignOffs from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundApprovalsSignOffs from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RefundApprovalsSignOffsFromMap builds RefundApprovalsSignOffs from a map using lenient decoding.
+func RefundApprovalsSignOffsFromMap(value map[string]any) (*RefundApprovalsSignOffs, error) {
+	decoded := &RefundApprovalsSignOffs{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundApprovalsSignOffsFromMapStrict builds RefundApprovalsSignOffs from a map and rejects unknown fields.
+func RefundApprovalsSignOffsFromMapStrict(value map[string]any) (*RefundApprovalsSignOffs, error) {
+	decoded := &RefundApprovalsSignOffs{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundApprovalsSignOffsFromJSON builds RefundApprovalsSignOffs from JSON and rejects unknown fields.
+func RefundApprovalsSignOffsFromJSON(data []byte) (*RefundApprovalsSignOffs, error) {
+	decoded := &RefundApprovalsSignOffs{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundApprovalsSignOffsFromJSONNonStrict builds RefundApprovalsSignOffs from JSON using lenient decoding.
+func RefundApprovalsSignOffsFromJSONNonStrict(data []byte) (*RefundApprovalsSignOffs, error) {
+	decoded := &RefundApprovalsSignOffs{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundApprovalsSignOffsFromYAML builds RefundApprovalsSignOffs from YAML and rejects unknown fields.
+func RefundApprovalsSignOffsFromYAML(data []byte) (*RefundApprovalsSignOffs, error) {
+	decoded := &RefundApprovalsSignOffs{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundApprovalsSignOffsFromYAMLNonStrict builds RefundApprovalsSignOffs from YAML using lenient decoding.
+func RefundApprovalsSignOffsFromYAMLNonStrict(data []byte) (*RefundApprovalsSignOffs, error) {
+	decoded := &RefundApprovalsSignOffs{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundNumberCounts - On a table, one row per count, kept for the table as a whole: the last number it gave and the config it counted under. A delete of a row leaves it where it was, so a delete leaves a gap; a row whose config is not the use's counts from 1 again.
+type RefundNumberCounts struct {
+	Scope string `json:"scope"`
+
+	Last *GenericInt64 `json:"last,omitempty"`
+
+	Counting string `json:"counting,omitempty"`
+
+	Version int64 `json:"_version"`
+}
+
+// MaskSecrets returns a copy of RefundNumberCounts with secret fields cleared.
+func (t *RefundNumberCounts) MaskSecrets() *RefundNumberCounts {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RefundNumberCounts{}
+
+	masked.Scope = t.Scope
+
+	masked.Last = t.Last
+
+	masked.Counting = t.Counting
+
+	masked.Version = t.Version
+
+	return masked
+}
+
+// JSONFieldNames are the keys RefundNumberCounts's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RefundNumberCounts) JSONFieldNames() []string {
+	return []string{"scope", "last", "counting", "_version"}
+}
+
+// Validate validates all fields in RefundNumberCounts
+func (t *RefundNumberCounts) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate last (optional)
+
+	// Validate optional pointer field
+	if t.Last != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Last, false); !valid {
+			errors.SetFieldErrors("last", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RefundNumberCounts to JSON
+func (t *RefundNumberCounts) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RefundNumberCounts
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RefundNumberCounts from JSON with validation
+func (t *RefundNumberCounts) UnmarshalJSON(data []byte) error {
+	type Alias RefundNumberCounts
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RefundNumberCounts into a map representation.
+func (t *RefundNumberCounts) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RefundNumberCounts to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RefundNumberCounts to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RefundNumberCounts from a map using lenient decoding.
+func (t *RefundNumberCounts) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundNumberCounts from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RefundNumberCounts from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RefundNumberCounts from a map and rejects unknown fields.
+func (t *RefundNumberCounts) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundNumberCounts from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RefundNumberCounts from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RefundNumberCounts from JSON and rejects unknown fields.
+func (t *RefundNumberCounts) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundNumberCounts from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundNumberCounts from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundNumberCounts from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RefundNumberCounts from JSON using lenient decoding.
+func (t *RefundNumberCounts) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundNumberCounts from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundNumberCounts from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundNumberCounts from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RefundNumberCounts from YAML and rejects unknown fields.
+func (t *RefundNumberCounts) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundNumberCounts from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundNumberCounts from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundNumberCounts from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RefundNumberCounts from YAML using lenient decoding.
+func (t *RefundNumberCounts) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundNumberCounts from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundNumberCounts from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundNumberCounts from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RefundNumberCountsFromMap builds RefundNumberCounts from a map using lenient decoding.
+func RefundNumberCountsFromMap(value map[string]any) (*RefundNumberCounts, error) {
+	decoded := &RefundNumberCounts{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundNumberCountsFromMapStrict builds RefundNumberCounts from a map and rejects unknown fields.
+func RefundNumberCountsFromMapStrict(value map[string]any) (*RefundNumberCounts, error) {
+	decoded := &RefundNumberCounts{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundNumberCountsFromJSON builds RefundNumberCounts from JSON and rejects unknown fields.
+func RefundNumberCountsFromJSON(data []byte) (*RefundNumberCounts, error) {
+	decoded := &RefundNumberCounts{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundNumberCountsFromJSONNonStrict builds RefundNumberCounts from JSON using lenient decoding.
+func RefundNumberCountsFromJSONNonStrict(data []byte) (*RefundNumberCounts, error) {
+	decoded := &RefundNumberCounts{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundNumberCountsFromYAML builds RefundNumberCounts from YAML and rejects unknown fields.
+func RefundNumberCountsFromYAML(data []byte) (*RefundNumberCounts, error) {
+	decoded := &RefundNumberCounts{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundNumberCountsFromYAMLNonStrict builds RefundNumberCounts from YAML using lenient decoding.
+func RefundNumberCountsFromYAMLNonStrict(data []byte) (*RefundNumberCounts, error) {
+	decoded := &RefundNumberCounts{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsActions - On a table, each thing the provider's adapter is to do for the row (create, capture, void, refund), keyed by its id, waiting until an event for it is recorded.
+type RefundPaymentsActions struct {
+	RefundRow Refund `json:"refundRow"`
+
+	Action string `json:"action"`
+
+	Seq *GenericInt64 `json:"seq,omitempty"`
+
+	Kind string `json:"kind,omitempty"`
+
+	Attempt string `json:"attempt,omitempty"`
+
+	Refund string `json:"refund,omitempty"`
+
+	Provider string `json:"provider,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	At *GenericInt64 `json:"at,omitempty"`
+
+	DoneAt *GenericInt64 `json:"doneAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of RefundPaymentsActions with secret fields cleared.
+func (t *RefundPaymentsActions) MaskSecrets() *RefundPaymentsActions {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RefundPaymentsActions{}
+
+	maskedValueRefundRow := t.RefundRow.MaskSecrets()
+	if maskedValueRefundRow != nil {
+		masked.RefundRow = *maskedValueRefundRow
+	}
+
+	masked.Action = t.Action
+
+	masked.Seq = t.Seq
+
+	masked.Kind = t.Kind
+
+	masked.Attempt = t.Attempt
+
+	masked.Refund = t.Refund
+
+	masked.Provider = t.Provider
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.At = t.At
+
+	masked.DoneAt = t.DoneAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys RefundPaymentsActions's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RefundPaymentsActions) JSONFieldNames() []string {
+	return []string{"refundRow", "action", "seq", "kind", "attempt", "refund", "provider", "amount", "currency", "at", "doneAt"}
+}
+
+// Validate validates all fields in RefundPaymentsActions
+func (t *RefundPaymentsActions) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate refundRow (required nested type)
+
+	if fieldErrs := t.RefundRow.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("refundRow", fieldErrs)
+	}
+
+	// Validate seq (optional)
+
+	// Validate optional pointer field
+	if t.Seq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Seq, false); !valid {
+			errors.SetFieldErrors("seq", fieldErrs)
+		}
+	}
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.At, false); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	// Validate doneAt (optional)
+
+	// Validate optional pointer field
+	if t.DoneAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.DoneAt, false); !valid {
+			errors.SetFieldErrors("doneAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RefundPaymentsActions to JSON
+func (t *RefundPaymentsActions) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RefundPaymentsActions
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RefundPaymentsActions from JSON with validation
+func (t *RefundPaymentsActions) UnmarshalJSON(data []byte) error {
+	type Alias RefundPaymentsActions
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RefundPaymentsActions into a map representation.
+func (t *RefundPaymentsActions) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RefundPaymentsActions to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RefundPaymentsActions to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RefundPaymentsActions from a map using lenient decoding.
+func (t *RefundPaymentsActions) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsActions from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsActions from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RefundPaymentsActions from a map and rejects unknown fields.
+func (t *RefundPaymentsActions) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsActions from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsActions from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RefundPaymentsActions from JSON and rejects unknown fields.
+func (t *RefundPaymentsActions) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsActions from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsActions from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsActions from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RefundPaymentsActions from JSON using lenient decoding.
+func (t *RefundPaymentsActions) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsActions from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsActions from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsActions from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RefundPaymentsActions from YAML and rejects unknown fields.
+func (t *RefundPaymentsActions) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsActions from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsActions from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsActions from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RefundPaymentsActions from YAML using lenient decoding.
+func (t *RefundPaymentsActions) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsActions from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsActions from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsActions from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RefundPaymentsActionsFromMap builds RefundPaymentsActions from a map using lenient decoding.
+func RefundPaymentsActionsFromMap(value map[string]any) (*RefundPaymentsActions, error) {
+	decoded := &RefundPaymentsActions{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsActionsFromMapStrict builds RefundPaymentsActions from a map and rejects unknown fields.
+func RefundPaymentsActionsFromMapStrict(value map[string]any) (*RefundPaymentsActions, error) {
+	decoded := &RefundPaymentsActions{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsActionsFromJSON builds RefundPaymentsActions from JSON and rejects unknown fields.
+func RefundPaymentsActionsFromJSON(data []byte) (*RefundPaymentsActions, error) {
+	decoded := &RefundPaymentsActions{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsActionsFromJSONNonStrict builds RefundPaymentsActions from JSON using lenient decoding.
+func RefundPaymentsActionsFromJSONNonStrict(data []byte) (*RefundPaymentsActions, error) {
+	decoded := &RefundPaymentsActions{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsActionsFromYAML builds RefundPaymentsActions from YAML and rejects unknown fields.
+func RefundPaymentsActionsFromYAML(data []byte) (*RefundPaymentsActions, error) {
+	decoded := &RefundPaymentsActions{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsActionsFromYAMLNonStrict builds RefundPaymentsActions from YAML using lenient decoding.
+func RefundPaymentsActionsFromYAMLNonStrict(data []byte) (*RefundPaymentsActions, error) {
+	decoded := &RefundPaymentsActions{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsAttempts - On a table, each payment attempt the row opened, keyed by its id: its provider and the provider's reference, its amount, currency and what was due when it opened, its status, what is authorized and captured of it, a card's brand and last four digits, and when it opened and last moved.
+type RefundPaymentsAttempts struct {
+	Refund Refund `json:"refund"`
+
+	Attempt string `json:"attempt"`
+
+	Seq *GenericInt64 `json:"seq,omitempty"`
+
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+
+	Provider string `json:"provider,omitempty"`
+
+	ProviderRef string `json:"providerRef,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	Due *GenericInt64 `json:"due,omitempty"`
+
+	Status string `json:"status,omitempty"`
+
+	Authorized *GenericInt64 `json:"authorized,omitempty"`
+
+	Captured *GenericInt64 `json:"captured,omitempty"`
+
+	Brand string `json:"brand,omitempty"`
+
+	Last4 string `json:"last4,omitempty"`
+
+	ReturnUrl string `json:"returnUrl,omitempty"`
+
+	OpenedAt *GenericInt64 `json:"openedAt,omitempty"`
+
+	UpdatedAt *GenericInt64 `json:"updatedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of RefundPaymentsAttempts with secret fields cleared.
+func (t *RefundPaymentsAttempts) MaskSecrets() *RefundPaymentsAttempts {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RefundPaymentsAttempts{}
+
+	maskedValueRefund := t.Refund.MaskSecrets()
+	if maskedValueRefund != nil {
+		masked.Refund = *maskedValueRefund
+	}
+
+	masked.Attempt = t.Attempt
+
+	masked.Seq = t.Seq
+
+	masked.IdempotencyKey = t.IdempotencyKey
+
+	masked.Provider = t.Provider
+
+	masked.ProviderRef = t.ProviderRef
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.Due = t.Due
+
+	masked.Status = t.Status
+
+	masked.Authorized = t.Authorized
+
+	masked.Captured = t.Captured
+
+	masked.Brand = t.Brand
+
+	masked.Last4 = t.Last4
+
+	masked.ReturnUrl = t.ReturnUrl
+
+	masked.OpenedAt = t.OpenedAt
+
+	masked.UpdatedAt = t.UpdatedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys RefundPaymentsAttempts's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RefundPaymentsAttempts) JSONFieldNames() []string {
+	return []string{"refund", "attempt", "seq", "idempotencyKey", "provider", "providerRef", "amount", "currency", "due", "status", "authorized", "captured", "brand", "last4", "returnUrl", "openedAt", "updatedAt"}
+}
+
+// Validate validates all fields in RefundPaymentsAttempts
+func (t *RefundPaymentsAttempts) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate refund (required nested type)
+
+	if fieldErrs := t.Refund.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("refund", fieldErrs)
+	}
+
+	// Validate seq (optional)
+
+	// Validate optional pointer field
+	if t.Seq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Seq, false); !valid {
+			errors.SetFieldErrors("seq", fieldErrs)
+		}
+	}
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate due (optional)
+
+	// Validate optional pointer field
+	if t.Due != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Due, false); !valid {
+			errors.SetFieldErrors("due", fieldErrs)
+		}
+	}
+
+	// Validate authorized (optional)
+
+	// Validate optional pointer field
+	if t.Authorized != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Authorized, false); !valid {
+			errors.SetFieldErrors("authorized", fieldErrs)
+		}
+	}
+
+	// Validate captured (optional)
+
+	// Validate optional pointer field
+	if t.Captured != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Captured, false); !valid {
+			errors.SetFieldErrors("captured", fieldErrs)
+		}
+	}
+
+	// Validate openedAt (optional)
+
+	// Validate optional pointer field
+	if t.OpenedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.OpenedAt, false); !valid {
+			errors.SetFieldErrors("openedAt", fieldErrs)
+		}
+	}
+
+	// Validate updatedAt (optional)
+
+	// Validate optional pointer field
+	if t.UpdatedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.UpdatedAt, false); !valid {
+			errors.SetFieldErrors("updatedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RefundPaymentsAttempts to JSON
+func (t *RefundPaymentsAttempts) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RefundPaymentsAttempts
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RefundPaymentsAttempts from JSON with validation
+func (t *RefundPaymentsAttempts) UnmarshalJSON(data []byte) error {
+	type Alias RefundPaymentsAttempts
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RefundPaymentsAttempts into a map representation.
+func (t *RefundPaymentsAttempts) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RefundPaymentsAttempts to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RefundPaymentsAttempts to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RefundPaymentsAttempts from a map using lenient decoding.
+func (t *RefundPaymentsAttempts) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsAttempts from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsAttempts from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RefundPaymentsAttempts from a map and rejects unknown fields.
+func (t *RefundPaymentsAttempts) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsAttempts from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsAttempts from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RefundPaymentsAttempts from JSON and rejects unknown fields.
+func (t *RefundPaymentsAttempts) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsAttempts from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsAttempts from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsAttempts from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RefundPaymentsAttempts from JSON using lenient decoding.
+func (t *RefundPaymentsAttempts) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsAttempts from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsAttempts from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsAttempts from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RefundPaymentsAttempts from YAML and rejects unknown fields.
+func (t *RefundPaymentsAttempts) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsAttempts from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsAttempts from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsAttempts from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RefundPaymentsAttempts from YAML using lenient decoding.
+func (t *RefundPaymentsAttempts) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsAttempts from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsAttempts from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsAttempts from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RefundPaymentsAttemptsFromMap builds RefundPaymentsAttempts from a map using lenient decoding.
+func RefundPaymentsAttemptsFromMap(value map[string]any) (*RefundPaymentsAttempts, error) {
+	decoded := &RefundPaymentsAttempts{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsAttemptsFromMapStrict builds RefundPaymentsAttempts from a map and rejects unknown fields.
+func RefundPaymentsAttemptsFromMapStrict(value map[string]any) (*RefundPaymentsAttempts, error) {
+	decoded := &RefundPaymentsAttempts{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsAttemptsFromJSON builds RefundPaymentsAttempts from JSON and rejects unknown fields.
+func RefundPaymentsAttemptsFromJSON(data []byte) (*RefundPaymentsAttempts, error) {
+	decoded := &RefundPaymentsAttempts{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsAttemptsFromJSONNonStrict builds RefundPaymentsAttempts from JSON using lenient decoding.
+func RefundPaymentsAttemptsFromJSONNonStrict(data []byte) (*RefundPaymentsAttempts, error) {
+	decoded := &RefundPaymentsAttempts{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsAttemptsFromYAML builds RefundPaymentsAttempts from YAML and rejects unknown fields.
+func RefundPaymentsAttemptsFromYAML(data []byte) (*RefundPaymentsAttempts, error) {
+	decoded := &RefundPaymentsAttempts{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsAttemptsFromYAMLNonStrict builds RefundPaymentsAttempts from YAML using lenient decoding.
+func RefundPaymentsAttemptsFromYAMLNonStrict(data []byte) (*RefundPaymentsAttempts, error) {
+	decoded := &RefundPaymentsAttempts{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsEvents - On a table, every provider event recorded, kept for the table as a whole and keyed by its provider and event id, so an event applies once per table and provider: the row it was recorded on, its normalised fields alone, and whether it moved anything. A delete of the row leaves it, so a redelivery is still a repeat.
+type RefundPaymentsEvents struct {
+	Event string `json:"event"`
+
+	Provider string `json:"provider,omitempty"`
+
+	EventId string `json:"eventId,omitempty"`
+
+	RowKey string `json:"rowKey,omitempty"`
+
+	Kind string `json:"kind,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	At *GenericInt64 `json:"at,omitempty"`
+
+	Attempt string `json:"attempt,omitempty"`
+
+	ProviderRef string `json:"providerRef,omitempty"`
+
+	Refund string `json:"refund,omitempty"`
+
+	Applied *bool `json:"applied,omitempty"`
+
+	Metadata *GenericJSON `json:"metadata,omitempty"`
+
+	RecordedAt *GenericInt64 `json:"recordedAt,omitempty"`
+
+	Version int64 `json:"_version"`
+}
+
+// MaskSecrets returns a copy of RefundPaymentsEvents with secret fields cleared.
+func (t *RefundPaymentsEvents) MaskSecrets() *RefundPaymentsEvents {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RefundPaymentsEvents{}
+
+	masked.Event = t.Event
+
+	masked.Provider = t.Provider
+
+	masked.EventId = t.EventId
+
+	masked.RowKey = t.RowKey
+
+	masked.Kind = t.Kind
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.At = t.At
+
+	masked.Attempt = t.Attempt
+
+	masked.ProviderRef = t.ProviderRef
+
+	masked.Refund = t.Refund
+
+	masked.Applied = t.Applied
+
+	masked.Metadata = t.Metadata
+
+	masked.RecordedAt = t.RecordedAt
+
+	masked.Version = t.Version
+
+	return masked
+}
+
+// JSONFieldNames are the keys RefundPaymentsEvents's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RefundPaymentsEvents) JSONFieldNames() []string {
+	return []string{"event", "provider", "eventId", "rowKey", "kind", "amount", "currency", "at", "attempt", "providerRef", "refund", "applied", "metadata", "recordedAt", "_version"}
+}
+
+// Validate validates all fields in RefundPaymentsEvents
+func (t *RefundPaymentsEvents) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.At, false); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	// Validate recordedAt (optional)
+
+	// Validate optional pointer field
+	if t.RecordedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.RecordedAt, false); !valid {
+			errors.SetFieldErrors("recordedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RefundPaymentsEvents to JSON
+func (t *RefundPaymentsEvents) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RefundPaymentsEvents
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RefundPaymentsEvents from JSON with validation
+func (t *RefundPaymentsEvents) UnmarshalJSON(data []byte) error {
+	type Alias RefundPaymentsEvents
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "metadata")
+		if nulls[0] && t.Metadata == nil {
+			null := GenericJSON("null")
+			t.Metadata = &null
+		}
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RefundPaymentsEvents into a map representation.
+func (t *RefundPaymentsEvents) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RefundPaymentsEvents to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RefundPaymentsEvents to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RefundPaymentsEvents from a map using lenient decoding.
+func (t *RefundPaymentsEvents) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsEvents from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsEvents from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RefundPaymentsEvents from a map and rejects unknown fields.
+func (t *RefundPaymentsEvents) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsEvents from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsEvents from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RefundPaymentsEvents from JSON and rejects unknown fields.
+func (t *RefundPaymentsEvents) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsEvents from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsEvents from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsEvents from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RefundPaymentsEvents from JSON using lenient decoding.
+func (t *RefundPaymentsEvents) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsEvents from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsEvents from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsEvents from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RefundPaymentsEvents from YAML and rejects unknown fields.
+func (t *RefundPaymentsEvents) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsEvents from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsEvents from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsEvents from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RefundPaymentsEvents from YAML using lenient decoding.
+func (t *RefundPaymentsEvents) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsEvents from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsEvents from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsEvents from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RefundPaymentsEventsFromMap builds RefundPaymentsEvents from a map using lenient decoding.
+func RefundPaymentsEventsFromMap(value map[string]any) (*RefundPaymentsEvents, error) {
+	decoded := &RefundPaymentsEvents{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsEventsFromMapStrict builds RefundPaymentsEvents from a map and rejects unknown fields.
+func RefundPaymentsEventsFromMapStrict(value map[string]any) (*RefundPaymentsEvents, error) {
+	decoded := &RefundPaymentsEvents{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsEventsFromJSON builds RefundPaymentsEvents from JSON and rejects unknown fields.
+func RefundPaymentsEventsFromJSON(data []byte) (*RefundPaymentsEvents, error) {
+	decoded := &RefundPaymentsEvents{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsEventsFromJSONNonStrict builds RefundPaymentsEvents from JSON using lenient decoding.
+func RefundPaymentsEventsFromJSONNonStrict(data []byte) (*RefundPaymentsEvents, error) {
+	decoded := &RefundPaymentsEvents{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsEventsFromYAML builds RefundPaymentsEvents from YAML and rejects unknown fields.
+func RefundPaymentsEventsFromYAML(data []byte) (*RefundPaymentsEvents, error) {
+	decoded := &RefundPaymentsEvents{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsEventsFromYAMLNonStrict builds RefundPaymentsEvents from YAML using lenient decoding.
+func RefundPaymentsEventsFromYAMLNonStrict(data []byte) (*RefundPaymentsEvents, error) {
+	decoded := &RefundPaymentsEvents{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsIssues - On a refund row (refundOf), each refund it asked of the row it refunds, keyed by the refund's id: its key, amount and currency, its status as the provider settled it, and the Workflow entry it was asked at.
+type RefundPaymentsIssues struct {
+	RefundRow Refund `json:"refundRow"`
+
+	Refund string `json:"refund"`
+
+	Seq *GenericInt64 `json:"seq,omitempty"`
+
+	OfSchema string `json:"ofSchema,omitempty"`
+
+	OfId string `json:"ofId,omitempty"`
+
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	Status string `json:"status,omitempty"`
+
+	Refunded *GenericInt64 `json:"refunded,omitempty"`
+
+	EnteredAt *GenericInt64 `json:"enteredAt,omitempty"`
+
+	At *GenericInt64 `json:"at,omitempty"`
+
+	UpdatedAt *GenericInt64 `json:"updatedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of RefundPaymentsIssues with secret fields cleared.
+func (t *RefundPaymentsIssues) MaskSecrets() *RefundPaymentsIssues {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RefundPaymentsIssues{}
+
+	maskedValueRefundRow := t.RefundRow.MaskSecrets()
+	if maskedValueRefundRow != nil {
+		masked.RefundRow = *maskedValueRefundRow
+	}
+
+	masked.Refund = t.Refund
+
+	masked.Seq = t.Seq
+
+	masked.OfSchema = t.OfSchema
+
+	masked.OfId = t.OfId
+
+	masked.IdempotencyKey = t.IdempotencyKey
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.Status = t.Status
+
+	masked.Refunded = t.Refunded
+
+	masked.EnteredAt = t.EnteredAt
+
+	masked.At = t.At
+
+	masked.UpdatedAt = t.UpdatedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys RefundPaymentsIssues's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RefundPaymentsIssues) JSONFieldNames() []string {
+	return []string{"refundRow", "refund", "seq", "ofSchema", "ofId", "idempotencyKey", "amount", "currency", "status", "refunded", "enteredAt", "at", "updatedAt"}
+}
+
+// Validate validates all fields in RefundPaymentsIssues
+func (t *RefundPaymentsIssues) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate refundRow (required nested type)
+
+	if fieldErrs := t.RefundRow.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("refundRow", fieldErrs)
+	}
+
+	// Validate seq (optional)
+
+	// Validate optional pointer field
+	if t.Seq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Seq, false); !valid {
+			errors.SetFieldErrors("seq", fieldErrs)
+		}
+	}
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate refunded (optional)
+
+	// Validate optional pointer field
+	if t.Refunded != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Refunded, false); !valid {
+			errors.SetFieldErrors("refunded", fieldErrs)
+		}
+	}
+
+	// Validate enteredAt (optional)
+
+	// Validate optional pointer field
+	if t.EnteredAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.EnteredAt, false); !valid {
+			errors.SetFieldErrors("enteredAt", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.At, false); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	// Validate updatedAt (optional)
+
+	// Validate optional pointer field
+	if t.UpdatedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.UpdatedAt, false); !valid {
+			errors.SetFieldErrors("updatedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RefundPaymentsIssues to JSON
+func (t *RefundPaymentsIssues) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RefundPaymentsIssues
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RefundPaymentsIssues from JSON with validation
+func (t *RefundPaymentsIssues) UnmarshalJSON(data []byte) error {
+	type Alias RefundPaymentsIssues
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RefundPaymentsIssues into a map representation.
+func (t *RefundPaymentsIssues) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RefundPaymentsIssues to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RefundPaymentsIssues to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RefundPaymentsIssues from a map using lenient decoding.
+func (t *RefundPaymentsIssues) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsIssues from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsIssues from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RefundPaymentsIssues from a map and rejects unknown fields.
+func (t *RefundPaymentsIssues) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsIssues from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsIssues from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RefundPaymentsIssues from JSON and rejects unknown fields.
+func (t *RefundPaymentsIssues) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsIssues from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsIssues from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsIssues from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RefundPaymentsIssues from JSON using lenient decoding.
+func (t *RefundPaymentsIssues) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsIssues from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsIssues from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsIssues from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RefundPaymentsIssues from YAML and rejects unknown fields.
+func (t *RefundPaymentsIssues) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsIssues from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsIssues from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsIssues from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RefundPaymentsIssues from YAML using lenient decoding.
+func (t *RefundPaymentsIssues) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsIssues from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsIssues from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsIssues from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RefundPaymentsIssuesFromMap builds RefundPaymentsIssues from a map using lenient decoding.
+func RefundPaymentsIssuesFromMap(value map[string]any) (*RefundPaymentsIssues, error) {
+	decoded := &RefundPaymentsIssues{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsIssuesFromMapStrict builds RefundPaymentsIssues from a map and rejects unknown fields.
+func RefundPaymentsIssuesFromMapStrict(value map[string]any) (*RefundPaymentsIssues, error) {
+	decoded := &RefundPaymentsIssues{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsIssuesFromJSON builds RefundPaymentsIssues from JSON and rejects unknown fields.
+func RefundPaymentsIssuesFromJSON(data []byte) (*RefundPaymentsIssues, error) {
+	decoded := &RefundPaymentsIssues{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsIssuesFromJSONNonStrict builds RefundPaymentsIssues from JSON using lenient decoding.
+func RefundPaymentsIssuesFromJSONNonStrict(data []byte) (*RefundPaymentsIssues, error) {
+	decoded := &RefundPaymentsIssues{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsIssuesFromYAML builds RefundPaymentsIssues from YAML and rejects unknown fields.
+func RefundPaymentsIssuesFromYAML(data []byte) (*RefundPaymentsIssues, error) {
+	decoded := &RefundPaymentsIssues{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsIssuesFromYAMLNonStrict builds RefundPaymentsIssues from YAML using lenient decoding.
+func RefundPaymentsIssuesFromYAMLNonStrict(data []byte) (*RefundPaymentsIssues, error) {
+	decoded := &RefundPaymentsIssues{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsRefunds - On a table, each refund asked of the row, keyed by its id: the attempt it draws on, its amount and reason, its status and what was refunded, and the refund row that asked it, if one did.
+type RefundPaymentsRefunds struct {
+	RefundRow Refund `json:"refundRow"`
+
+	Refund string `json:"refund"`
+
+	Seq *GenericInt64 `json:"seq,omitempty"`
+
+	IdempotencyKey string `json:"idempotencyKey,omitempty"`
+
+	Attempt string `json:"attempt,omitempty"`
+
+	Provider string `json:"provider,omitempty"`
+
+	Amount *GenericInt64 `json:"amount,omitempty"`
+
+	Currency string `json:"currency,omitempty"`
+
+	Reason string `json:"reason,omitempty"`
+
+	Status string `json:"status,omitempty"`
+
+	Refunded *GenericInt64 `json:"refunded,omitempty"`
+
+	OriginSchema string `json:"originSchema,omitempty"`
+
+	OriginId string `json:"originId,omitempty"`
+
+	At *GenericInt64 `json:"at,omitempty"`
+
+	UpdatedAt *GenericInt64 `json:"updatedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of RefundPaymentsRefunds with secret fields cleared.
+func (t *RefundPaymentsRefunds) MaskSecrets() *RefundPaymentsRefunds {
+	if t == nil {
+		return nil
+	}
+
+	masked := &RefundPaymentsRefunds{}
+
+	maskedValueRefundRow := t.RefundRow.MaskSecrets()
+	if maskedValueRefundRow != nil {
+		masked.RefundRow = *maskedValueRefundRow
+	}
+
+	masked.Refund = t.Refund
+
+	masked.Seq = t.Seq
+
+	masked.IdempotencyKey = t.IdempotencyKey
+
+	masked.Attempt = t.Attempt
+
+	masked.Provider = t.Provider
+
+	masked.Amount = t.Amount
+
+	masked.Currency = t.Currency
+
+	masked.Reason = t.Reason
+
+	masked.Status = t.Status
+
+	masked.Refunded = t.Refunded
+
+	masked.OriginSchema = t.OriginSchema
+
+	masked.OriginId = t.OriginId
+
+	masked.At = t.At
+
+	masked.UpdatedAt = t.UpdatedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys RefundPaymentsRefunds's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*RefundPaymentsRefunds) JSONFieldNames() []string {
+	return []string{"refundRow", "refund", "seq", "idempotencyKey", "attempt", "provider", "amount", "currency", "reason", "status", "refunded", "originSchema", "originId", "at", "updatedAt"}
+}
+
+// Validate validates all fields in RefundPaymentsRefunds
+func (t *RefundPaymentsRefunds) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate refundRow (required nested type)
+
+	if fieldErrs := t.RefundRow.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("refundRow", fieldErrs)
+	}
+
+	// Validate seq (optional)
+
+	// Validate optional pointer field
+	if t.Seq != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Seq, false); !valid {
+			errors.SetFieldErrors("seq", fieldErrs)
+		}
+	}
+
+	// Validate amount (optional)
+
+	// Validate optional pointer field
+	if t.Amount != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Amount, false); !valid {
+			errors.SetFieldErrors("amount", fieldErrs)
+		}
+	}
+
+	// Validate refunded (optional)
+
+	// Validate optional pointer field
+	if t.Refunded != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Refunded, false); !valid {
+			errors.SetFieldErrors("refunded", fieldErrs)
+		}
+	}
+
+	// Validate at (optional)
+
+	// Validate optional pointer field
+	if t.At != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.At, false); !valid {
+			errors.SetFieldErrors("at", fieldErrs)
+		}
+	}
+
+	// Validate updatedAt (optional)
+
+	// Validate optional pointer field
+	if t.UpdatedAt != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.UpdatedAt, false); !valid {
+			errors.SetFieldErrors("updatedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals RefundPaymentsRefunds to JSON
+func (t *RefundPaymentsRefunds) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias RefundPaymentsRefunds
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals RefundPaymentsRefunds from JSON with validation
+func (t *RefundPaymentsRefunds) UnmarshalJSON(data []byte) error {
+	type Alias RefundPaymentsRefunds
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts RefundPaymentsRefunds into a map representation.
+func (t *RefundPaymentsRefunds) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert RefundPaymentsRefunds to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert RefundPaymentsRefunds to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes RefundPaymentsRefunds from a map using lenient decoding.
+func (t *RefundPaymentsRefunds) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsRefunds from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsRefunds from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes RefundPaymentsRefunds from a map and rejects unknown fields.
+func (t *RefundPaymentsRefunds) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsRefunds from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsRefunds from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes RefundPaymentsRefunds from JSON and rejects unknown fields.
+func (t *RefundPaymentsRefunds) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsRefunds from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsRefunds from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsRefunds from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes RefundPaymentsRefunds from JSON using lenient decoding.
+func (t *RefundPaymentsRefunds) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsRefunds from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsRefunds from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsRefunds from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes RefundPaymentsRefunds from YAML and rejects unknown fields.
+func (t *RefundPaymentsRefunds) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode RefundPaymentsRefunds from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsRefunds from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode RefundPaymentsRefunds from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes RefundPaymentsRefunds from YAML using lenient decoding.
+func (t *RefundPaymentsRefunds) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode RefundPaymentsRefunds from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode RefundPaymentsRefunds from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode RefundPaymentsRefunds from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// RefundPaymentsRefundsFromMap builds RefundPaymentsRefunds from a map using lenient decoding.
+func RefundPaymentsRefundsFromMap(value map[string]any) (*RefundPaymentsRefunds, error) {
+	decoded := &RefundPaymentsRefunds{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsRefundsFromMapStrict builds RefundPaymentsRefunds from a map and rejects unknown fields.
+func RefundPaymentsRefundsFromMapStrict(value map[string]any) (*RefundPaymentsRefunds, error) {
+	decoded := &RefundPaymentsRefunds{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsRefundsFromJSON builds RefundPaymentsRefunds from JSON and rejects unknown fields.
+func RefundPaymentsRefundsFromJSON(data []byte) (*RefundPaymentsRefunds, error) {
+	decoded := &RefundPaymentsRefunds{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsRefundsFromJSONNonStrict builds RefundPaymentsRefunds from JSON using lenient decoding.
+func RefundPaymentsRefundsFromJSONNonStrict(data []byte) (*RefundPaymentsRefunds, error) {
+	decoded := &RefundPaymentsRefunds{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsRefundsFromYAML builds RefundPaymentsRefunds from YAML and rejects unknown fields.
+func RefundPaymentsRefundsFromYAML(data []byte) (*RefundPaymentsRefunds, error) {
+	decoded := &RefundPaymentsRefunds{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// RefundPaymentsRefundsFromYAMLNonStrict builds RefundPaymentsRefunds from YAML using lenient decoding.
+func RefundPaymentsRefundsFromYAMLNonStrict(data []byte) (*RefundPaymentsRefunds, error) {
+	decoded := &RefundPaymentsRefunds{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
 // RestockRequest - A request to the supplier for more of a product: shop-stock's worker
 // ReorderStock files one when a sale runs the product low, and its job
 // OrderRestocks orders each open one. A product has at most one
@@ -3684,7 +12209,7 @@ type RestockRequest struct {
 
 	Product Product `json:"product"`
 
-	Status RestockStatus `json:"status"`
+	Status RestockStatus `json:"status,omitzero"`
 
 	Quantity GenericInt64 `json:"quantity"`
 
@@ -5518,15 +14043,20 @@ func StockLowFromYAMLNonStrict(data []byte) (*StockLow, error) {
 }
 
 // Ticket - A shopper's support ticket, which a model triages and a person confirms
-// (D73, D74): shop-cart's deriver TriageTickets fills its category,
+// (D73, D74, D146): shop-cart's deriver TriageTickets fills its category,
 // priority and summary from its subject and body while it is new or in
 // triage. A category or priority the model is less than 0.8 sure of waits
-// in review: the ticket moves to triage, and on to assigned once support
-// staff (support.review) accept or correct it. A ticket the model is sure
-// of is assigned with no person. The summary is derived in every state, so
-// it follows the body.
+// in review, which holds the ticket from assigned until support staff
+// (support.review) accept or correct it and move it on. A ticket the model
+// is sure of is assigned with no person: the Reactions rules hear its
+// category and its priority settle and move it, once both are there, the
+// state's required fields, and out of review. The summary is derived in
+// every state, so it follows the body. shop-cart's behavior worker
+// TicketReactions runs the rules.
 type Ticket struct {
-	CustomerId string `json:"customerId"`
+	Id *IdentityUUID `json:"id,omitempty"`
+
+	Customer User `json:"customer"`
 
 	Subject string `json:"subject"`
 
@@ -5539,6 +14069,14 @@ type Ticket struct {
 	Priority *TicketPriority `json:"priority,omitempty"`
 
 	Summary string `json:"summary,omitempty"`
+
+	ProvenanceInReview *bool `json:"provenanceInReview,omitempty"`
+
+	Status string `json:"status"`
+
+	StatusEnteredAt *TemporalDateTime `json:"statusEnteredAt,omitempty"`
+
+	Version int64 `json:"_version"`
 }
 
 // MaskSecrets returns a copy of Ticket with secret fields cleared.
@@ -5549,7 +14087,12 @@ func (t *Ticket) MaskSecrets() *Ticket {
 
 	masked := &Ticket{}
 
-	masked.CustomerId = t.CustomerId
+	masked.Id = t.Id
+
+	maskedValueCustomer := t.Customer.MaskSecrets()
+	if maskedValueCustomer != nil {
+		masked.Customer = *maskedValueCustomer
+	}
 
 	masked.Subject = t.Subject
 
@@ -5563,6 +14106,14 @@ func (t *Ticket) MaskSecrets() *Ticket {
 
 	masked.Summary = t.Summary
 
+	masked.ProvenanceInReview = t.ProvenanceInReview
+
+	masked.Status = t.Status
+
+	masked.StatusEnteredAt = t.StatusEnteredAt
+
+	masked.Version = t.Version
+
 	return masked
 }
 
@@ -5570,20 +14121,26 @@ func (t *Ticket) MaskSecrets() *Ticket {
 // route refuses an input body with any other top-level key, as every
 // generated server does.
 func (*Ticket) JSONFieldNames() []string {
-	return []string{"customerId", "subject", "body", "orderId", "category", "priority", "summary"}
+	return []string{"id", "customer", "subject", "body", "orderId", "category", "priority", "summary", "provenanceInReview", "status", "statusEnteredAt", "_version"}
 }
 
 // Validate validates all fields in Ticket
 func (t *Ticket) Validate() ValidationErrors {
 	errors := NewValidationErrors()
 
-	{
-		value := t.CustomerId
+	// Validate id (optional)
 
-		if utf8.RuneCountInString(string(value)) > 64 {
-			errors.AddFieldError("customerId", "maxLength", "must be at most 64 characters")
+	// Validate optional pointer field
+	if t.Id != nil {
+		if valid, fieldErrs := validateIdentityUUIDValue(*t.Id, false); !valid {
+			errors.SetFieldErrors("id", fieldErrs)
 		}
+	}
 
+	// Validate customer (required nested type)
+
+	if fieldErrs := t.Customer.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("customer", fieldErrs)
 	}
 
 	{
@@ -5638,6 +14195,15 @@ func (t *Ticket) Validate() ValidationErrors {
 			errors.AddFieldError("summary", "maxLength", "must be at most 500 characters")
 		}
 
+	}
+
+	// Validate statusEnteredAt (optional)
+
+	// Validate optional pointer field
+	if t.StatusEnteredAt != nil {
+		if valid, fieldErrs := t.StatusEnteredAt.Validate(); !valid {
+			errors.SetFieldErrors("statusEnteredAt", fieldErrs)
+		}
 	}
 
 	return errors
@@ -5830,6 +14396,913 @@ func TicketFromYAML(data []byte) (*Ticket, error) {
 // TicketFromYAMLNonStrict builds Ticket from YAML using lenient decoding.
 func TicketFromYAMLNonStrict(data []byte) (*Ticket, error) {
 	decoded := &Ticket{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketChange - The writes of Ticket's rows its behaviors hear, one message per write, whoever makes it, which a trigger of the table writes and a behavior worker runs (D103).
+type TicketChange struct {
+	RowKey IdentityUUID `json:"rowKey"`
+
+	Write string `json:"write"`
+
+	At GenericInt64 `json:"at"`
+
+	Before *GenericJSON `json:"before,omitempty"`
+
+	After *GenericJSON `json:"after,omitempty"`
+}
+
+// MaskSecrets returns a copy of TicketChange with secret fields cleared.
+func (t *TicketChange) MaskSecrets() *TicketChange {
+	if t == nil {
+		return nil
+	}
+
+	masked := &TicketChange{}
+
+	masked.RowKey = t.RowKey
+
+	masked.Write = t.Write
+
+	masked.At = t.At
+
+	masked.Before = t.Before
+
+	masked.After = t.After
+
+	return masked
+}
+
+// JSONFieldNames are the keys TicketChange's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*TicketChange) JSONFieldNames() []string {
+	return []string{"rowKey", "write", "at", "before", "after"}
+}
+
+// Validate validates all fields in TicketChange
+func (t *TicketChange) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate rowKey (required)
+
+	if valid, fieldErrs := validateIdentityUUIDValue(t.RowKey, true); !valid {
+		errors.SetFieldErrors("rowKey", fieldErrs)
+	}
+
+	// Validate at (required)
+
+	if valid, fieldErrs := validateGenericInt64Value(t.At, true); !valid {
+		errors.SetFieldErrors("at", fieldErrs)
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals TicketChange to JSON
+func (t *TicketChange) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias TicketChange
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals TicketChange from JSON with validation
+func (t *TicketChange) UnmarshalJSON(data []byte) error {
+	type Alias TicketChange
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "before", "after")
+		if nulls[0] && t.Before == nil {
+			null := GenericJSON("null")
+			t.Before = &null
+		}
+		if nulls[1] && t.After == nil {
+			null := GenericJSON("null")
+			t.After = &null
+		}
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts TicketChange into a map representation.
+func (t *TicketChange) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert TicketChange to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert TicketChange to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes TicketChange from a map using lenient decoding.
+func (t *TicketChange) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode TicketChange from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode TicketChange from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes TicketChange from a map and rejects unknown fields.
+func (t *TicketChange) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode TicketChange from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode TicketChange from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes TicketChange from JSON and rejects unknown fields.
+func (t *TicketChange) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode TicketChange from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode TicketChange from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode TicketChange from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes TicketChange from JSON using lenient decoding.
+func (t *TicketChange) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode TicketChange from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode TicketChange from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode TicketChange from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes TicketChange from YAML and rejects unknown fields.
+func (t *TicketChange) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode TicketChange from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode TicketChange from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode TicketChange from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes TicketChange from YAML using lenient decoding.
+func (t *TicketChange) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode TicketChange from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode TicketChange from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode TicketChange from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// TicketChangeFromMap builds TicketChange from a map using lenient decoding.
+func TicketChangeFromMap(value map[string]any) (*TicketChange, error) {
+	decoded := &TicketChange{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketChangeFromMapStrict builds TicketChange from a map and rejects unknown fields.
+func TicketChangeFromMapStrict(value map[string]any) (*TicketChange, error) {
+	decoded := &TicketChange{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketChangeFromJSON builds TicketChange from JSON and rejects unknown fields.
+func TicketChangeFromJSON(data []byte) (*TicketChange, error) {
+	decoded := &TicketChange{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketChangeFromJSONNonStrict builds TicketChange from JSON using lenient decoding.
+func TicketChangeFromJSONNonStrict(data []byte) (*TicketChange, error) {
+	decoded := &TicketChange{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketChangeFromYAML builds TicketChange from YAML and rejects unknown fields.
+func TicketChangeFromYAML(data []byte) (*TicketChange, error) {
+	decoded := &TicketChange{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketChangeFromYAMLNonStrict builds TicketChange from YAML using lenient decoding.
+func TicketChangeFromYAMLNonStrict(data []byte) (*TicketChange, error) {
+	decoded := &TicketChange{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketDerivedDerivations - On a table, one row per derived field of the row, keyed by the field's name: the hash its value is derived under, the hash of its last settled value with its model, confidence, settler and time, the override a write gave it, its failed attempts and last failure, and whether rederive forced it. Every write of the row keeps them in line; a delete of the row deletes them.
+type TicketDerivedDerivations struct {
+	Ticket Ticket `json:"ticket"`
+
+	Field string `json:"field"`
+
+	SourceHash *CryptoSHA256 `json:"sourceHash,omitempty"`
+
+	SettledHash *CryptoSHA256 `json:"settledHash,omitempty"`
+
+	Model string `json:"model,omitempty"`
+
+	Confidence *GenericProbability `json:"confidence,omitempty"`
+
+	SettledAt *TemporalDateTime `json:"settledAt,omitempty"`
+
+	SettledBy string `json:"settledBy,omitempty"`
+
+	OverriddenBy string `json:"overriddenBy,omitempty"`
+
+	OverriddenAt *TemporalDateTime `json:"overriddenAt,omitempty"`
+
+	Attempts *GenericInt64 `json:"attempts,omitempty"`
+
+	Failure *GenericJSON `json:"failure,omitempty"`
+
+	Forced *bool `json:"forced,omitempty"`
+}
+
+// MaskSecrets returns a copy of TicketDerivedDerivations with secret fields cleared.
+func (t *TicketDerivedDerivations) MaskSecrets() *TicketDerivedDerivations {
+	if t == nil {
+		return nil
+	}
+
+	masked := &TicketDerivedDerivations{}
+
+	maskedValueTicket := t.Ticket.MaskSecrets()
+	if maskedValueTicket != nil {
+		masked.Ticket = *maskedValueTicket
+	}
+
+	masked.Field = t.Field
+
+	masked.SourceHash = t.SourceHash
+
+	masked.SettledHash = t.SettledHash
+
+	masked.Model = t.Model
+
+	masked.Confidence = t.Confidence
+
+	masked.SettledAt = t.SettledAt
+
+	masked.SettledBy = t.SettledBy
+
+	masked.OverriddenBy = t.OverriddenBy
+
+	masked.OverriddenAt = t.OverriddenAt
+
+	masked.Attempts = t.Attempts
+
+	masked.Failure = t.Failure
+
+	masked.Forced = t.Forced
+
+	return masked
+}
+
+// JSONFieldNames are the keys TicketDerivedDerivations's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*TicketDerivedDerivations) JSONFieldNames() []string {
+	return []string{"ticket", "field", "sourceHash", "settledHash", "model", "confidence", "settledAt", "settledBy", "overriddenBy", "overriddenAt", "attempts", "failure", "forced"}
+}
+
+// Validate validates all fields in TicketDerivedDerivations
+func (t *TicketDerivedDerivations) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate ticket (required nested type)
+
+	if fieldErrs := t.Ticket.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("ticket", fieldErrs)
+	}
+
+	// Validate sourceHash (optional)
+
+	// Validate optional pointer field
+	if t.SourceHash != nil {
+		if valid, fieldErrs := validateCryptoSHA256Value(*t.SourceHash, false); !valid {
+			errors.SetFieldErrors("sourceHash", fieldErrs)
+		}
+	}
+
+	// Validate settledHash (optional)
+
+	// Validate optional pointer field
+	if t.SettledHash != nil {
+		if valid, fieldErrs := validateCryptoSHA256Value(*t.SettledHash, false); !valid {
+			errors.SetFieldErrors("settledHash", fieldErrs)
+		}
+	}
+
+	// Validate confidence (optional)
+
+	// Validate optional pointer field
+	if t.Confidence != nil {
+		if valid, fieldErrs := validateGenericProbabilityValue(*t.Confidence, false); !valid {
+			errors.SetFieldErrors("confidence", fieldErrs)
+		}
+	}
+
+	// Validate settledAt (optional)
+
+	// Validate optional pointer field
+	if t.SettledAt != nil {
+		if valid, fieldErrs := t.SettledAt.Validate(); !valid {
+			errors.SetFieldErrors("settledAt", fieldErrs)
+		}
+	}
+
+	// Validate overriddenAt (optional)
+
+	// Validate optional pointer field
+	if t.OverriddenAt != nil {
+		if valid, fieldErrs := t.OverriddenAt.Validate(); !valid {
+			errors.SetFieldErrors("overriddenAt", fieldErrs)
+		}
+	}
+
+	// Validate attempts (optional)
+
+	// Validate optional pointer field
+	if t.Attempts != nil {
+		if valid, fieldErrs := validateGenericInt64Value(*t.Attempts, false); !valid {
+			errors.SetFieldErrors("attempts", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals TicketDerivedDerivations to JSON
+func (t *TicketDerivedDerivations) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias TicketDerivedDerivations
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals TicketDerivedDerivations from JSON with validation
+func (t *TicketDerivedDerivations) UnmarshalJSON(data []byte) error {
+	type Alias TicketDerivedDerivations
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	if bytes.Contains(data, jsonNull) {
+		nulls := nullJSONMembers(data, "failure")
+		if nulls[0] && t.Failure == nil {
+			null := GenericJSON("null")
+			t.Failure = &null
+		}
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts TicketDerivedDerivations into a map representation.
+func (t *TicketDerivedDerivations) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert TicketDerivedDerivations to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert TicketDerivedDerivations to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes TicketDerivedDerivations from a map using lenient decoding.
+func (t *TicketDerivedDerivations) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode TicketDerivedDerivations from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode TicketDerivedDerivations from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes TicketDerivedDerivations from a map and rejects unknown fields.
+func (t *TicketDerivedDerivations) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode TicketDerivedDerivations from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode TicketDerivedDerivations from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes TicketDerivedDerivations from JSON and rejects unknown fields.
+func (t *TicketDerivedDerivations) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode TicketDerivedDerivations from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode TicketDerivedDerivations from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode TicketDerivedDerivations from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes TicketDerivedDerivations from JSON using lenient decoding.
+func (t *TicketDerivedDerivations) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode TicketDerivedDerivations from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode TicketDerivedDerivations from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode TicketDerivedDerivations from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes TicketDerivedDerivations from YAML and rejects unknown fields.
+func (t *TicketDerivedDerivations) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode TicketDerivedDerivations from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode TicketDerivedDerivations from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode TicketDerivedDerivations from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes TicketDerivedDerivations from YAML using lenient decoding.
+func (t *TicketDerivedDerivations) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode TicketDerivedDerivations from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode TicketDerivedDerivations from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode TicketDerivedDerivations from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// TicketDerivedDerivationsFromMap builds TicketDerivedDerivations from a map using lenient decoding.
+func TicketDerivedDerivationsFromMap(value map[string]any) (*TicketDerivedDerivations, error) {
+	decoded := &TicketDerivedDerivations{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketDerivedDerivationsFromMapStrict builds TicketDerivedDerivations from a map and rejects unknown fields.
+func TicketDerivedDerivationsFromMapStrict(value map[string]any) (*TicketDerivedDerivations, error) {
+	decoded := &TicketDerivedDerivations{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketDerivedDerivationsFromJSON builds TicketDerivedDerivations from JSON and rejects unknown fields.
+func TicketDerivedDerivationsFromJSON(data []byte) (*TicketDerivedDerivations, error) {
+	decoded := &TicketDerivedDerivations{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketDerivedDerivationsFromJSONNonStrict builds TicketDerivedDerivations from JSON using lenient decoding.
+func TicketDerivedDerivationsFromJSONNonStrict(data []byte) (*TicketDerivedDerivations, error) {
+	decoded := &TicketDerivedDerivations{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketDerivedDerivationsFromYAML builds TicketDerivedDerivations from YAML and rejects unknown fields.
+func TicketDerivedDerivationsFromYAML(data []byte) (*TicketDerivedDerivations, error) {
+	decoded := &TicketDerivedDerivations{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketDerivedDerivationsFromYAMLNonStrict builds TicketDerivedDerivations from YAML using lenient decoding.
+func TicketDerivedDerivationsFromYAMLNonStrict(data []byte) (*TicketDerivedDerivations, error) {
+	decoded := &TicketDerivedDerivations{}
+	if err := decoded.FromYAMLNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketProvenanceRecords - On a table, one row per recorded field of the row, keyed by the field's name: the last write's source, who made it and for whom, when, the confidence its attribution gave, and its review. Every write of the row keeps them in line; a delete of the row deletes them.
+type TicketProvenanceRecords struct {
+	Ticket Ticket `json:"ticket"`
+
+	Field string `json:"field"`
+
+	Source string `json:"source,omitempty"`
+
+	BySubject string `json:"bySubject,omitempty"`
+
+	ForSubject string `json:"forSubject,omitempty"`
+
+	WrittenAt *TemporalDateTime `json:"writtenAt,omitempty"`
+
+	Confidence *GenericProbability `json:"confidence,omitempty"`
+
+	Review string `json:"review,omitempty"`
+
+	ReviewedBy string `json:"reviewedBy,omitempty"`
+
+	ReviewedAt *TemporalDateTime `json:"reviewedAt,omitempty"`
+}
+
+// MaskSecrets returns a copy of TicketProvenanceRecords with secret fields cleared.
+func (t *TicketProvenanceRecords) MaskSecrets() *TicketProvenanceRecords {
+	if t == nil {
+		return nil
+	}
+
+	masked := &TicketProvenanceRecords{}
+
+	maskedValueTicket := t.Ticket.MaskSecrets()
+	if maskedValueTicket != nil {
+		masked.Ticket = *maskedValueTicket
+	}
+
+	masked.Field = t.Field
+
+	masked.Source = t.Source
+
+	masked.BySubject = t.BySubject
+
+	masked.ForSubject = t.ForSubject
+
+	masked.WrittenAt = t.WrittenAt
+
+	masked.Confidence = t.Confidence
+
+	masked.Review = t.Review
+
+	masked.ReviewedBy = t.ReviewedBy
+
+	masked.ReviewedAt = t.ReviewedAt
+
+	return masked
+}
+
+// JSONFieldNames are the keys TicketProvenanceRecords's JSON form declares. A generated
+// route refuses an input body with any other top-level key, as every
+// generated server does.
+func (*TicketProvenanceRecords) JSONFieldNames() []string {
+	return []string{"ticket", "field", "source", "bySubject", "forSubject", "writtenAt", "confidence", "review", "reviewedBy", "reviewedAt"}
+}
+
+// Validate validates all fields in TicketProvenanceRecords
+func (t *TicketProvenanceRecords) Validate() ValidationErrors {
+	errors := NewValidationErrors()
+
+	// Validate ticket (required nested type)
+
+	if fieldErrs := t.Ticket.Validate(); fieldErrs.HasErrors() {
+		errors.AddNestedError("ticket", fieldErrs)
+	}
+
+	// Validate writtenAt (optional)
+
+	// Validate optional pointer field
+	if t.WrittenAt != nil {
+		if valid, fieldErrs := t.WrittenAt.Validate(); !valid {
+			errors.SetFieldErrors("writtenAt", fieldErrs)
+		}
+	}
+
+	// Validate confidence (optional)
+
+	// Validate optional pointer field
+	if t.Confidence != nil {
+		if valid, fieldErrs := validateGenericProbabilityValue(*t.Confidence, false); !valid {
+			errors.SetFieldErrors("confidence", fieldErrs)
+		}
+	}
+
+	// Validate reviewedAt (optional)
+
+	// Validate optional pointer field
+	if t.ReviewedAt != nil {
+		if valid, fieldErrs := t.ReviewedAt.Validate(); !valid {
+			errors.SetFieldErrors("reviewedAt", fieldErrs)
+		}
+	}
+
+	return errors
+}
+
+// MarshalJSON marshals TicketProvenanceRecords to JSON
+func (t *TicketProvenanceRecords) MarshalJSON() ([]byte, error) {
+	if t != nil {
+		normalizeNilSlices(t)
+	}
+	type Alias TicketProvenanceRecords
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON unmarshals TicketProvenanceRecords from JSON with validation
+func (t *TicketProvenanceRecords) UnmarshalJSON(data []byte) error {
+	type Alias TicketProvenanceRecords
+	aux := (*Alias)(t)
+
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+
+	// Preserve nil lists on input: absent/null required arrays must fail Validate.
+	return nil
+}
+
+// ToMap converts TicketProvenanceRecords into a map representation.
+func (t *TicketProvenanceRecords) ToMap() (map[string]any, error) {
+	if t == nil {
+		return nil, fmt.Errorf("convert TicketProvenanceRecords to map: nil receiver")
+	}
+
+	result, err := toMapValue(t)
+	if err != nil {
+		return nil, fmt.Errorf("convert TicketProvenanceRecords to map: %w", err)
+	}
+
+	return result, nil
+}
+
+// FromMap decodes TicketProvenanceRecords from a map using lenient decoding.
+func (t *TicketProvenanceRecords) FromMap(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("decode TicketProvenanceRecords from map: nil receiver")
+	}
+
+	if err := fromMapValue(t, value); err != nil {
+		return fmt.Errorf("decode TicketProvenanceRecords from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromMapStrict decodes TicketProvenanceRecords from a map and rejects unknown fields.
+func (t *TicketProvenanceRecords) FromMapStrict(value map[string]any) error {
+	if t == nil {
+		return fmt.Errorf("strict decode TicketProvenanceRecords from map: nil receiver")
+	}
+
+	if err := fromMapValueStrict(t, value); err != nil {
+		return fmt.Errorf("strict decode TicketProvenanceRecords from map: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSON decodes TicketProvenanceRecords from JSON and rejects unknown fields.
+func (t *TicketProvenanceRecords) FromJSON(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode TicketProvenanceRecords from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode TicketProvenanceRecords from JSON: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode TicketProvenanceRecords from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromJSONNonStrict decodes TicketProvenanceRecords from JSON using lenient decoding.
+func (t *TicketProvenanceRecords) FromJSONNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode TicketProvenanceRecords from JSON: nil receiver")
+	}
+
+	value, err := mapFromJSONValue(data)
+	if err != nil {
+		return fmt.Errorf("decode TicketProvenanceRecords from JSON: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode TicketProvenanceRecords from JSON: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAML decodes TicketProvenanceRecords from YAML and rejects unknown fields.
+func (t *TicketProvenanceRecords) FromYAML(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("strict decode TicketProvenanceRecords from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("strict decode TicketProvenanceRecords from YAML: %w", err)
+	}
+
+	if err := t.FromMapStrict(value); err != nil {
+		return fmt.Errorf("strict decode TicketProvenanceRecords from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// FromYAMLNonStrict decodes TicketProvenanceRecords from YAML using lenient decoding.
+func (t *TicketProvenanceRecords) FromYAMLNonStrict(data []byte) error {
+	if t == nil {
+		return fmt.Errorf("decode TicketProvenanceRecords from YAML: nil receiver")
+	}
+
+	value, err := mapFromYAMLValue(data)
+	if err != nil {
+		return fmt.Errorf("decode TicketProvenanceRecords from YAML: %w", err)
+	}
+
+	if err := t.FromMap(value); err != nil {
+		return fmt.Errorf("decode TicketProvenanceRecords from YAML: %w", err)
+	}
+
+	return nil
+}
+
+// TicketProvenanceRecordsFromMap builds TicketProvenanceRecords from a map using lenient decoding.
+func TicketProvenanceRecordsFromMap(value map[string]any) (*TicketProvenanceRecords, error) {
+	decoded := &TicketProvenanceRecords{}
+	if err := decoded.FromMap(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketProvenanceRecordsFromMapStrict builds TicketProvenanceRecords from a map and rejects unknown fields.
+func TicketProvenanceRecordsFromMapStrict(value map[string]any) (*TicketProvenanceRecords, error) {
+	decoded := &TicketProvenanceRecords{}
+	if err := decoded.FromMapStrict(value); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketProvenanceRecordsFromJSON builds TicketProvenanceRecords from JSON and rejects unknown fields.
+func TicketProvenanceRecordsFromJSON(data []byte) (*TicketProvenanceRecords, error) {
+	decoded := &TicketProvenanceRecords{}
+	if err := decoded.FromJSON(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketProvenanceRecordsFromJSONNonStrict builds TicketProvenanceRecords from JSON using lenient decoding.
+func TicketProvenanceRecordsFromJSONNonStrict(data []byte) (*TicketProvenanceRecords, error) {
+	decoded := &TicketProvenanceRecords{}
+	if err := decoded.FromJSONNonStrict(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketProvenanceRecordsFromYAML builds TicketProvenanceRecords from YAML and rejects unknown fields.
+func TicketProvenanceRecordsFromYAML(data []byte) (*TicketProvenanceRecords, error) {
+	decoded := &TicketProvenanceRecords{}
+	if err := decoded.FromYAML(data); err != nil {
+		return nil, err
+	}
+
+	return decoded, nil
+}
+
+// TicketProvenanceRecordsFromYAMLNonStrict builds TicketProvenanceRecords from YAML using lenient decoding.
+func TicketProvenanceRecordsFromYAMLNonStrict(data []byte) (*TicketProvenanceRecords, error) {
+	decoded := &TicketProvenanceRecords{}
 	if err := decoded.FromYAMLNonStrict(data); err != nil {
 		return nil, err
 	}

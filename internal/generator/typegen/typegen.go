@@ -387,12 +387,6 @@ type ModuleOutput struct {
 	// table.
 	Identity *DescriptorFile
 
-	// Engine is the schema's engine document (D58), written as the
-	// constant EngineDocument in engine.go; the enginedoc generator writes
-	// the same document as engine/<schema>.json beside the types. Nil when
-	// no type of the DB schema composes a behavior.
-	Engine *DescriptorFile
-
 	// Behaviors are the types that compose behaviors, each with its
 	// <T>Behaviors and the structs and enums its behaviors' fields hold
 	// (D58), written as behaviors.go. Nil when no type composes one.
@@ -470,11 +464,6 @@ type Options struct {
 	// Registry declares the behaviors the schema's types compose, whose
 	// fields behaviors.go types; a schema that composes none needs none.
 	Registry *registry.Registry
-
-	// EngineDocument is the schema's engine document (D58), as
-	// GenerateContext.EngineDocument builds it, which engine.go holds as
-	// a constant. Nil writes no engine.go.
-	EngineDocument []byte
 
 	// Projections are the schema's @projection views as its create.sql
 	// renders them (sqlgen.Generate with the build's SQL options, so each
@@ -631,13 +620,6 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 			name = schema.Name
 		}
 		output.Identity = &DescriptorFile{FileName: name, JSON: descriptor}
-	}
-	if opts.EngineDocument != nil {
-		name := opts.SchemaName
-		if name == "" {
-			name = schema.Name
-		}
-		output.Engine = &DescriptorFile{FileName: name, JSON: opts.EngineDocument}
 	}
 
 	output.HasVersionedTypes = codegen.HasHistoryTypes(objectTypes)

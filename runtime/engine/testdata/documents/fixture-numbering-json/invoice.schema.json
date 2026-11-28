@@ -1,0 +1,19 @@
+{
+  "kind": "General",
+  "name": "invoices",
+  "description": "An invoice an engine runs with the core's behaviors and no extension: it bills the project every create gives, and is numbered at its create, INV-2026-0001 on, in a count of its project's own that starts again each UTC year.",
+  "types": {
+    "Invoice": {
+      "name": "Invoice",
+      "role": "EmbeddedStruct",
+      "behaviors": [
+        { "name": "Links", "config": { "links": { "project": { "schema": "projects", "required": true } } } },
+        { "name": "Numbering", "config": { "format": "INV-{yyyy}-{seq:4}", "scope": { "link": "project" }, "reset": "yearly" } }
+      ],
+      "fields": [
+        { "name": "title", "typeRef": { "name": "string" }, "required": true, "validateMaxLength": 200 },
+        { "name": "amount", "typeRef": { "name": "number" } }
+      ]
+    }
+  }
+}

@@ -17,6 +17,7 @@ import type {
   UnionDef,
 } from "../validation/types";
 import { BUILTIN_SCALARS } from "../builtin-scalars.generated";
+import { compilePattern } from "../validation/pattern";
 
 type JsonObject = Record<string, unknown>;
 const builtinScalars = BUILTIN_SCALARS;
@@ -498,7 +499,7 @@ function parseScalarDefinition(
   const pattern = asString(definition.pattern);
   if (pattern) {
     try {
-      new RegExp(pattern, "u");
+      compilePattern(pattern);
     } catch (error) {
       throw new Error(
         `runtime schema parse error: invalid regex pattern for scalar ${name}: ${String(error)}`,

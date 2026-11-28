@@ -125,7 +125,7 @@ func TestBehaviors_FieldAnchorJSON(t *testing.T) {
 }
 
 // A use's id is its field for a field anchor and its behavior for a type
-// anchor; a type with only field anchors is no engine type.
+// anchor; a type with only field anchors composes nothing by @behavior.
 func TestBehaviors_Anchors(t *testing.T) {
 	onType := BehaviorRef{Name: "Workflow"}
 	onField := BehaviorRef{Name: "Workflow", Field: "fulfilment"}
@@ -145,8 +145,8 @@ func TestBehaviors_Anchors(t *testing.T) {
 			{Name: "statusEnteredAt", Behavior: &FieldBehavior{Use: "status", Behavior: "Workflow", Field: "enteredAt"}},
 		},
 	}
-	if table.IsEngineType() {
-		t.Error("a type with only field anchors is an engine type")
+	if len(table.TypeBehaviors()) > 0 {
+		t.Error("a type with only field anchors composes a behavior on the type")
 	}
 	if got := table.FieldBehaviors(); len(got) != 2 || got[1].Field != "fulfilment" {
 		t.Errorf("FieldBehaviors() = %+v", got)
@@ -167,19 +167,19 @@ func TestBehaviors_Anchors(t *testing.T) {
 		t.Error("an own field is owned")
 	}
 
-	engine := &TypeDef{Name: "Ticket", Behaviors: []BehaviorRef{onType}}
-	if !engine.IsEngineType() {
-		t.Error("a type with a type anchor is no engine type")
+	onTheType := &TypeDef{Name: "Ticket", Behaviors: []BehaviorRef{onType}}
+	if len(onTheType.TypeBehaviors()) != 1 {
+		t.Error("a type with a type anchor composes no behavior on the type")
 	}
 	var none *TypeDef
-	if none.IsEngineType() || none.FieldBehaviors() != nil || none.OwnedFields() != nil {
+	if none.TypeBehaviors() != nil || none.FieldBehaviors() != nil || none.OwnedFields() != nil {
 		t.Error("a nil type composes behaviors")
 	}
 }
 
 func TestFindFieldBehavior(t *testing.T) {
 	s := NewSchema("svc", SchemaKindDB)
-	s.Types["Engine"] = &TypeDef{Name: "Engine", Behaviors: []BehaviorRef{{Name: "Workflow"}}}
+	s.Types["OnTheType"] = &TypeDef{Name: "OnTheType", Behaviors: []BehaviorRef{{Name: "Workflow"}}}
 	if _, _, _, found := s.FindFieldBehavior(); found {
 		t.Fatal("a type anchor is a field behavior")
 	}
@@ -206,8 +206,8 @@ func TestBehaviors_Implements(t *testing.T) {
 		{Name: "Timers", Implements: true},
 		{Name: "Workflow", Field: "status"},
 	}}
-	if got := td.TypeBehaviors(); len(got) != 0 || td.IsEngineType() {
-		t.Errorf("TypeBehaviors = %v, engine type %v; an implements use is a table's", got, td.IsEngineType())
+	if got := td.TypeBehaviors(); len(got) != 0 {
+		t.Errorf("TypeBehaviors = %v; an implements use is a table's", got)
 	}
 	if got := td.ImplementsBehaviors(); len(got) != 1 || got[0].Name != "Timers" || got[0].UseID() != "Timers" {
 		t.Errorf("ImplementsBehaviors = %v", got)
@@ -215,9 +215,9 @@ func TestBehaviors_Implements(t *testing.T) {
 	if got := td.TableBehaviors(); len(got) != 2 || got[0].Name != "Timers" || got[1].Field != "status" {
 		t.Errorf("TableBehaviors = %v", got)
 	}
-	engine := &TypeDef{Name: "Task", Behaviors: []BehaviorRef{{Name: "Comments"}}}
-	if !engine.IsEngineType() || len(engine.TableBehaviors()) != 0 {
-		t.Errorf("a @behavior use: engine type %v, table uses %v", engine.IsEngineType(), engine.TableBehaviors())
+	onTheType := &TypeDef{Name: "Task", Behaviors: []BehaviorRef{{Name: "Comments"}}}
+	if len(onTheType.TypeBehaviors()) != 1 || len(onTheType.TableBehaviors()) != 0 {
+		t.Errorf("a @behavior use: type uses %v, table uses %v", onTheType.TypeBehaviors(), onTheType.TableBehaviors())
 	}
 	data, err := json.Marshal(td.Behaviors[0])
 	if err != nil {
@@ -231,7 +231,7 @@ func TestBehaviors_Implements(t *testing.T) {
 	if _, _, found := s.FindTableBehavior(); found {
 		t.Error("FindTableBehavior of an empty schema found one")
 	}
-	s.Types["Task"] = engine
+	s.Types["Task"] = onTheType
 	s.Types["Ticket"] = td
 	s.Types["TicketDeadline"] = &TypeDef{Name: "TicketDeadline", BehaviorQueue: &BehaviorQueue{Row: "Ticket", Kind: BehaviorQueueDeadlines}}
 	if name, use, found := s.FindTableBehavior(); !found || name != "Ticket" || use.Name != "Timers" {

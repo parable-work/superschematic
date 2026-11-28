@@ -59,6 +59,13 @@ type Config struct {
 	// Identity.Middleware.
 	AuthMiddleware func(gohttp.Handler) gohttp.Handler
 
+	// ClientRateLimits holds the counts of every per-client @rateLimit
+	// route, so that each limit holds across the replicas that share it.
+	// Each route's limiter is named by its method and path. Optional: nil
+	// counts each limit in the memory of each replica, and while its store
+	// is unavailable each replica counts alone.
+	ClientRateLimits *runtimemiddleware.ClientRateLimits
+
 	// MinClientVersions is the oldest version of each client the API
 	// serves (D143): a request under /api whose X-Client-Version names a
 	// listed client at a lower version is answered 426 client_too_old.
@@ -266,7 +273,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/orders",
 			Handler: createOrderPlaceOrderHandler(cfg.Implementations.Order),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, "POST /api/orders")),
 				runtimemiddleware.BodyLimit(1, RespondError),
 				runtimesession.RequirePermissions("orders.write"),
 				runtimemiddleware.Timeout(10*time.Second, LoggerFromContext),
@@ -291,7 +298,7 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 			Path:    "/orders/{id}/cancel",
 			Handler: createOrderCancelOrderHandler(cfg.Implementations.Order),
 			Middlewares: []runtimerouting.Middleware{
-				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext),
+				runtimemiddleware.RateLimit(60, time.Minute, LoggerFromContext, runtimemiddleware.WithClientRateLimits(cfg.ClientRateLimits, "POST /api/orders/{id}/cancel")),
 				runtimesession.RequirePermissions("orders.write"),
 			},
 		},

@@ -2,7 +2,7 @@
   "compilerOptions": {
     "target": "ES2020",
     "module": "commonjs",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "outDir": "dist",
     "rootDir": "src",
     "declaration": true,
@@ -19,6 +19,6 @@
       "@superschematic/schema-ir/schema-file": ["../../../ir/typescript/schema-file.d.ts"]
     }
   },
-  "comment": "The CJS pass pins superscalar subpaths to that package's CJS declarations: its exports map lists the dist/esm .d.ts under `types`, and moduleResolution node cannot read exports maps at all. The ESM pass (tsconfig.esm.json, moduleResolution bundler) goes through the exports map. At runtime both resolve through node_modules (scripts/link-local-deps.mjs here, the consumer's own install elsewhere).",
+  "comment": "The CJS pass pins superscalar subpaths to that package's CJS declarations: its exports map lists the dist/esm .d.ts under `types`, which moduleResolution bundler (TypeScript 7 has no node10 resolution) would otherwise pick. The ESM pass (tsconfig.esm.json, moduleResolution bundler) goes through the exports map. At runtime both resolve through node_modules (scripts/link-local-deps.mjs here, the consumer's own install elsewhere).",
   "include": ["src/**/*.ts"]
 }

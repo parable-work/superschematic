@@ -274,16 +274,17 @@ export function ticketsDocument(): Record<string, unknown> {
 }
 
 /**
- * tasksDocument is the General schema-file document the core binary loads
- * with no extension linked beside documentsDocument (make cli-smoke,
- * fixture-cross-instance-json): its Task type composes Workflow,
+ * tasksDocument is the General schema-file document beside
+ * documentsDocument, the engine's copy of fixture-cross-instance-json as
+ * the loader held it before it refused Links (D103), in
+ * runtime/engine/testdata/documents: its Task type composes Workflow,
  * Dependencies, whose blockers are tasks or documents and whose gated
  * state is done, and Links, with spec pinned to a document's revision, a
  * required parent task and an optional project.
  */
 export function tasksDocument(): Record<string, unknown> {
   return JSON.parse(
-    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-cross-instance-json/src/task.schema.json', import.meta.url), 'utf8')
+    readFileSync(new URL('../../testdata/documents/fixture-cross-instance-json/task.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
 
@@ -302,21 +303,23 @@ export function projectsDocument(): Record<string, unknown> {
 }
 
 /**
- * notesDocument is the General schema-file document the core binary loads
- * with no extension linked beside the others (make cli-smoke,
- * fixture-search-json): its Note type composes Search over its title and
- * body, the title weighing three times the body.
+ * notesDocument is the General schema-file document beside the others, the
+ * engine's copy of fixture-search-json as the loader held it before it
+ * refused Search (D103), in runtime/engine/testdata/documents: its Note
+ * type composes Search over its title and body, the title weighing three
+ * times the body.
  */
 export function notesDocument(): Record<string, unknown> {
   return JSON.parse(
-    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-search-json/src/note.schema.json', import.meta.url), 'utf8')
+    readFileSync(new URL('../../testdata/documents/fixture-search-json/note.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
 
 /**
- * projectTreeDocument is the General schema-file document the core binary
- * loads with no extension linked beside the others (make cli-smoke,
- * fixture-reactions-json), a schema named projects as projectsDocument's
+ * projectTreeDocument is the General schema-file document beside the
+ * others, the engine's copy of fixture-reactions-json as the loader held it
+ * before it refused Links (D103), in runtime/engine/testdata/documents, a
+ * schema named projects as projectsDocument's
  * is: its Project type composes Workflow, whose failed state is a
  * failure, Links, with a parent project, and Reactions, whose rules start
  * a project's parent when the project starts, finish a project once every
@@ -324,7 +327,7 @@ export function notesDocument(): Record<string, unknown> {
  */
 export function projectTreeDocument(): Record<string, unknown> {
   return JSON.parse(
-    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-reactions-json/src/project.schema.json', import.meta.url), 'utf8')
+    readFileSync(new URL('../../testdata/documents/fixture-reactions-json/project.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
 
@@ -344,30 +347,31 @@ export function stepsDocument(): Record<string, unknown> {
 }
 
 /**
- * numberedInvoicesDocument is the General schema-file document the core binary
- * loads with no extension linked beside the others (make cli-smoke,
- * fixture-numbering-json): its Invoice type composes Links, with the
- * project every create gives, and Numbering, which numbers each invoice
- * at its create, INV-2026-0001 on, in its project's count, starting
- * again each UTC year.
+ * numberedInvoicesDocument is the General schema-file document beside the
+ * others, the engine's copy of fixture-numbering-json as the loader held it
+ * before it refused Links (D103), in runtime/engine/testdata/documents:
+ * its Invoice type composes Links, with the project every create gives,
+ * and Numbering, which numbers each invoice at its create, INV-2026-0001
+ * on, in its project's count, starting again each UTC year.
  */
 export function numberedInvoicesDocument(): Record<string, unknown> {
   return JSON.parse(
-    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-numbering-json/src/invoice.schema.json', import.meta.url), 'utf8')
+    readFileSync(new URL('../../testdata/documents/fixture-numbering-json/invoice.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
 
 /**
- * recipesDocument is the General schema-file document the core binary
- * loads with no extension linked beside the others (make cli-smoke,
- * fixture-branches-json), a schema named Recipe like its instance type,
+ * recipesDocument is the General schema-file document beside the others,
+ * the engine's copy of fixture-branches-json as the loader held it before
+ * it refused Branches (D103), in runtime/engine/testdata/documents, a
+ * schema named Recipe like its instance type,
  * which composes Branches: each recipe is a version graph's root, with
  * steps ordered by position, ingredients under a step and at most one
  * cover, and the sweep on.
  */
 export function recipesDocument(): Record<string, unknown> {
   return JSON.parse(
-    readFileSync(new URL('../../../../internal/loader/testdata/services/fixture-branches-json/src/recipe.schema.json', import.meta.url), 'utf8')
+    readFileSync(new URL('../../testdata/documents/fixture-branches-json/recipe.schema.json', import.meta.url), 'utf8')
   ) as Record<string, unknown>;
 }
 

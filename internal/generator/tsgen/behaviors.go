@@ -9,8 +9,8 @@ import (
 
 // renderBehaviors writes the declarations of types/behaviors.ts: for each
 // type that composes behaviors, the aliases its behaviors' fields refer to
-// and <T>Behaviors, typed by behaviortypes' TypeScript renderer as
-// engine-client types them, with each behavior under its exact name. A
+// and <T>Behaviors, typed by behaviortypes' TypeScript renderer, with
+// each behavior under its exact name. A
 // type whose behaviors declare no field has an empty record.
 func renderBehaviors(types []behaviortypes.Type) string {
 	r := behaviortypes.TSRenderer{}

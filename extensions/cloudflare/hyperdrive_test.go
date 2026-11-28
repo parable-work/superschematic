@@ -338,17 +338,6 @@ func TestHyperdriveRefusals(t *testing.T) {
 			code: stack.CodeUnrealizable,
 			want: "worker finances-api-embed-line-items claims for 15m and lets its handlers finish for 8s at each firing, 15m8s in all, and Cloudflare stops a scheduled run after 15m; shorten drainSeconds or its @worker's grace",
 		},
-		"a queue on D1": {
-			env: "Staging",
-			edit: func(s *ir.Stack, services []stack.Service) []stack.Service {
-				services[0].Dialects = []string{registry.SQLDialectSQLite, registry.SQLDialectPostgres}
-				services[0].Vectors = false
-				s.Environments[0].Settings = s.Environments[0].Settings[1:]
-				return services
-			},
-			code: stack.CodeUnrealizable,
-			want: "a worker on Workers, cloudflare.drainer, claims on Postgres through Hyperdrive",
-		},
 		"an unknown setting": {
 			env: "Staging",
 			edit: func(s *ir.Stack, services []stack.Service) []stack.Service {
@@ -377,5 +366,40 @@ func TestHyperdriveRefusals(t *testing.T) {
 			_, errs := resolveOver(t, reg, s, services, tc.env)
 			refusedWith(t, errs, tc.code, tc.want)
 		})
+	}
+}
+
+// TestWorkersDrainAQueueOnD1 (#702): a worker on Workers over a database
+// that lists sqlite first, placed on D1, claims there: each drainer's sql
+// edge goes through cloudflare.drainer-d1 to the d1 binding its drain.ts
+// claims over, and each keeps its Cron Trigger and its Workflow.
+func TestWorkersDrainAQueueOnD1(t *testing.T) {
+	reg := assemble(t)
+	s := ledgerStack()
+	services := ledgerServices()
+	services[0].Dialects = []string{registry.SQLDialectSQLite, registry.SQLDialectPostgres}
+	services[0].Vectors = false
+	s.Environments[0].Settings = s.Environments[0].Settings[1:]
+	env, errs := resolveOver(t, reg, s, services, "Staging")
+	if errs != nil {
+		t.Fatal(errs)
+	}
+	for _, from := range []string{"finances-api-sync-plaid-item", "finances-api-embed-line-items"} {
+		var edge *ir.Edge
+		for _, e := range env.Edges {
+			if e.ID == ir.EdgeID(ir.EdgeSQL, from, "finances-db") {
+				edge = e
+			}
+		}
+		if edge == nil || edge.Connector != cloudflare.DrainerD1Connector || edge.Field != "FINANCES_DB_DATABASE" {
+			t.Errorf("the sql edge of %s = %+v, want it through %s filling FINANCES_DB_DATABASE", from, edge, cloudflare.DrainerD1Connector)
+			continue
+		}
+		bindings := versionBindings(t, node(t, env, from+".version"))
+		if b := bindings["FINANCES_DB_DATABASE"]; b == nil || b["type"] != "d1" {
+			t.Errorf("%s binds FINANCES_DB_DATABASE as %v, want a d1 binding", from, b)
+		}
+		node(t, env, from+".schedule")
+		node(t, env, from+".workflow")
 	}
 }

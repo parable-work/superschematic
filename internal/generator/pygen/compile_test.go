@@ -148,8 +148,6 @@ func buildBehaviorsProbeScript(importPaths []string, moduleName string) string {
 	b.WriteString("assert behaviors.workflow.status == TicketState.InProgress, behaviors.workflow\n")
 	b.WriteString("assert behaviors.comments.messages == 2 and behaviors.comments.threads.open == 1\n")
 	b.WriteString("assert behaviors.revisions.pending_proposals is None\n")
-	b.WriteString("assert behaviors.links.targets.spec.schema_ == 'documents' and behaviors.links.targets.spec.stale\n")
-	b.WriteString("assert [r.id for r in behaviors.links.targets.reviewers] == ['ana', 'bo']\n")
 	b.WriteString("assert behaviors.timers.deadlines.close is None and behaviors.timers.deadlines.respond.outcome == 'moved'\n")
 	b.WriteString("assert behaviors.acme_rating.rating_average == 4.5\n")
 	b.WriteString("assert behaviors.to_json_dict() == json.loads(read), behaviors.to_json_dict()\n")

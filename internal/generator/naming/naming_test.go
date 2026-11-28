@@ -139,7 +139,7 @@ func TestParseRejectsUnknownTopLevelKeyNextToExtensionTable(t *testing.T) {
 }
 
 func TestParseReadsPathsTable(t *testing.T) {
-	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\nschema_runtime_rust = \"runtime/schema/rust\"\nengine_rust = \"runtime/engine/rust/engine\"\nengine_behaviors_rust = \"runtime/engine/rust/behaviors\"\nengine_workqueue_rust = \"runtime/engine-workqueue/rust\"\nengine_commerce_rust = \"runtime/engine-commerce/rust\"\nengine_abi_rust = \"runtime/engine/rust/abi\"\nengine_napi_rust = \"runtime/engine/rust/napi\"\nrules_adapter_rust = \"runtime/engine/rust/rules-adapter\"\nrules_behaviors_rust = \"runtime/engine/rust/rules-behaviors\"\n"), "test")
+	n, err := Parse([]byte("[paths]\nscalar_go = \"vendor/scalars/go\"\nhttp_runtime_rust = \"runtime/http/rust\"\nschema_runtime_rust = \"runtime/schema/rust\"\nrules_adapter_rust = \"runtime/engine/rust/rules-adapter\"\nrules_behaviors_rust = \"runtime/engine/rust/rules-behaviors\"\n"), "test")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,24 +155,6 @@ func TestParseReadsPathsTable(t *testing.T) {
 	}
 	if want := filepath.Join("/repo", "runtime", "schema", "rust"); local.SchemaRuntimeRust != want {
 		t.Fatalf("LocalPaths.SchemaRuntimeRust = %q, want %q", local.SchemaRuntimeRust, want)
-	}
-	if want := filepath.Join("/repo", "runtime", "engine", "rust", "engine"); local.EngineRust != want {
-		t.Fatalf("LocalPaths.EngineRust = %q, want %q", local.EngineRust, want)
-	}
-	if want := filepath.Join("/repo", "runtime", "engine", "rust", "behaviors"); local.EngineBehaviorsRust != want {
-		t.Fatalf("LocalPaths.EngineBehaviorsRust = %q, want %q", local.EngineBehaviorsRust, want)
-	}
-	if want := filepath.Join("/repo", "runtime", "engine-workqueue", "rust"); local.EngineWorkQueueRust != want {
-		t.Fatalf("LocalPaths.EngineWorkQueueRust = %q, want %q", local.EngineWorkQueueRust, want)
-	}
-	if want := filepath.Join("/repo", "runtime", "engine-commerce", "rust"); local.EngineCommerceRust != want {
-		t.Fatalf("LocalPaths.EngineCommerceRust = %q, want %q", local.EngineCommerceRust, want)
-	}
-	if want := filepath.Join("/repo", "runtime", "engine", "rust", "abi"); local.EngineABIRust != want {
-		t.Fatalf("LocalPaths.EngineABIRust = %q, want %q", local.EngineABIRust, want)
-	}
-	if want := filepath.Join("/repo", "runtime", "engine", "rust", "napi"); local.EngineNapiRust != want {
-		t.Fatalf("LocalPaths.EngineNapiRust = %q, want %q", local.EngineNapiRust, want)
 	}
 	if want := filepath.Join("/repo", "runtime", "engine", "rust", "rules-adapter"); local.RulesAdapterRust != want {
 		t.Fatalf("LocalPaths.RulesAdapterRust = %q, want %q", local.RulesAdapterRust, want)

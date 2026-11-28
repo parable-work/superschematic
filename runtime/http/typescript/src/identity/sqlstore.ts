@@ -1,6 +1,7 @@
 import { backend } from 'superscalar/backend';
 import { VALID_SCALARS } from 'superscalar/scalars';
 import { parseIdentityDescriptor, type IdentityDescriptor } from './descriptor.js';
+import { SqlOAuthStore } from './oauthstore.js';
 import { compareCodePoints } from './permissions.js';
 import { quoteIdentifier as quote } from '../sql-text.js';
 import { isHyphenatedUUID, uuidFromDb, uuidToDb, uuidValue } from '../uuid.js';
@@ -67,11 +68,11 @@ export interface SqlRunner {
   run<T>(work: () => SqlWork<T>, transaction: boolean): Promise<T>;
 }
 
-function* rows(sql: string, params: readonly SqlParam[] = []): SqlWork<SqlRow[]> {
+export function* rows(sql: string, params: readonly SqlParam[] = []): SqlWork<SqlRow[]> {
   return (yield { kind: 'rows', sql, params }) as SqlRow[];
 }
 
-function* exec(sql: string, params: readonly SqlParam[] = []): SqlWork<number> {
+export function* exec(sql: string, params: readonly SqlParam[] = []): SqlWork<number> {
   return (yield { kind: 'exec', sql, params }) as number;
 }
 
@@ -116,9 +117,9 @@ export async function driveAsync<T>(work: SqlWork<T>, execute: (statement: SqlSt
 const UUID_KEY_SCALARS = new Set(['Identity.UUID', 'Identity.UserID']);
 
 /** The key of every table the loader adds, the API key table among them, AutoGenerate<Identity.UUID>. */
-const SESSION_KEY_SCALAR = 'Identity.UUID';
+export const SESSION_KEY_SCALAR = 'Identity.UUID';
 
-class KeyCodec {
+export class KeyCodec {
   private readonly uuid: boolean;
   private readonly known: boolean;
 
@@ -154,12 +155,12 @@ class KeyCodec {
 // Timestamps.
 
 /** A timestamp as a statement binds it: UTC to the millisecond, the text SQLite keeps and Postgres reads. */
-function timeParam(at: Date): string {
+export function timeParam(at: Date): string {
   return at.toISOString();
 }
 
 /** A timestamp a row holds: a Date (pg's own parse of TIMESTAMPTZ) or text in RFC 3339, Postgres's or SQLite's layout. */
-function timeOf(value: unknown): Date | null {
+export function timeOf(value: unknown): Date | null {
   if (value === null || value === undefined) return null;
   if (value instanceof Date) return value;
   const text = String(value);
@@ -174,7 +175,7 @@ function timeOf(value: unknown): Date | null {
   return date;
 }
 
-function textOf(value: unknown): string {
+export function textOf(value: unknown): string {
   return value === null || value === undefined ? '' : String(value);
 }
 
@@ -236,6 +237,7 @@ export class SqlIdentityStore implements IdentityStore {
   private readonly nameScalar: string;
   private readonly nameIsLogin: boolean;
   private readonly t: Names;
+  private readonly oauthStore: SqlOAuthStore | undefined;
 
   constructor(runner: SqlRunner, descriptor: string | unknown) {
     if (runner.dialect !== 'postgres' && runner.dialect !== 'sqlite') {
@@ -291,6 +293,12 @@ export class SqlIdentityStore implements IdentityStore {
       apiKeyLastUsedAt: k ? quote(k.columns.lastUsedAt) : '',
       apiKeyRevokedAt: k ? quote(k.columns.revokedAt) : '',
     };
+    this.oauthStore = d.oauth ? new SqlOAuthStore(runner, d, this.userKey) : undefined;
+  }
+
+  /** The OAuth store over the descriptor's OAuth tables (#695), or undefined for a descriptor without them. */
+  oauth(): SqlOAuthStore | undefined {
+    return this.oauthStore;
   }
 
   get dialect(): SqlDialect {
@@ -583,6 +591,7 @@ export class SqlIdentityStore implements IdentityStore {
       );
       yield* store.revokeSessionsOf(key, '', at);
       yield* store.revokeApiKeysOf(key, at);
+      if (store.oauthStore) yield* store.oauthStore.revokeUserGrants(key, at);
     }, true);
   }
 

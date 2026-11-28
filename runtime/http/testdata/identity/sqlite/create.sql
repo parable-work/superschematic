@@ -1,6 +1,72 @@
 -- Generated SQLite DDL for schema: fixture-user-model-db
 -- This file is auto-generated. Do not edit manually.
--- It is the migration plan from an empty database to model bc11ea827f5a60de59d3dea18f5f69e633253917cec34d754ebf3c11d9d860a1.
+-- It is the migration plan from an empty database to model 26f2940fb59645d20055ed8c270d1e4a98a7857496d66c8bb2e931bc947f9ec1.
+
+CREATE TABLE "oauth_client" (
+  "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
+  "client_id" TEXT NOT NULL CHECK (length("client_id") >= 1),
+  "kind" TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  "uri" TEXT,
+  "redirect_uris" TEXT DEFAULT '[]' NOT NULL,
+  "created_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  "refreshed_at" TEXT,
+  "fresh_until" TEXT,
+  "last_used_at" TEXT,
+  PRIMARY KEY ("id")
+);
+CREATE UNIQUE INDEX "oauth_client_client_id_key" ON "oauth_client" ("client_id");
+
+CREATE TABLE "oauth_code" (
+  "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
+  "client_id" TEXT NOT NULL,
+  "user_id" TEXT,
+  "grant_id" TEXT,
+  "redirect_uri" TEXT NOT NULL,
+  "code_challenge" TEXT NOT NULL,
+  "state" TEXT,
+  "scope" TEXT,
+  "resource" TEXT NOT NULL,
+  "nonce" TEXT NOT NULL,
+  "code_hash" TEXT,
+  "created_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  "expires_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  "used_at" TEXT,
+  PRIMARY KEY ("id"),
+  FOREIGN KEY ("client_id") REFERENCES "oauth_client" ("id") ON DELETE CASCADE,
+  FOREIGN KEY ("grant_id") REFERENCES "oauth_grant" ("id") ON DELETE CASCADE,
+  FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX "oauth_code_code_hash_key" ON "oauth_code" ("code_hash");
+
+CREATE TABLE "oauth_grant" (
+  "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
+  "user_id" TEXT NOT NULL,
+  "client_id" TEXT NOT NULL,
+  "permissions" TEXT,
+  "resource" TEXT NOT NULL,
+  "created_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  "expires_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  "last_used_at" TEXT,
+  "revoked_at" TEXT,
+  PRIMARY KEY ("id"),
+  FOREIGN KEY ("client_id") REFERENCES "oauth_client" ("id") ON DELETE CASCADE,
+  FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
+);
+
+CREATE TABLE "oauth_token" (
+  "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
+  "grant_id" TEXT NOT NULL,
+  "kind" TEXT NOT NULL,
+  "token_hash" TEXT NOT NULL,
+  "created_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  "expires_at" TEXT DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+  "used_at" TEXT,
+  "revoked_at" TEXT,
+  PRIMARY KEY ("id"),
+  FOREIGN KEY ("grant_id") REFERENCES "oauth_grant" ("id") ON DELETE CASCADE
+);
+CREATE UNIQUE INDEX "oauth_token_token_hash_key" ON "oauth_token" ("token_hash");
 
 CREATE TABLE "role" (
   "id" TEXT DEFAULT (lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() & 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6)))) NOT NULL,
@@ -68,6 +134,10 @@ CREATE TABLE "user_role_grant" (
   FOREIGN KEY ("role_id") REFERENCES "role" ("id") ON DELETE CASCADE,
   FOREIGN KEY ("user_id") REFERENCES "user" ("id") ON DELETE CASCADE
 );
+
+CREATE INDEX "idx_oauth_grant_user" ON "oauth_grant" ("user_id");
+
+CREATE INDEX "idx_oauth_token_grant" ON "oauth_token" ("grant_id");
 
 CREATE INDEX "idx_session_user" ON "session" ("user_id");
 

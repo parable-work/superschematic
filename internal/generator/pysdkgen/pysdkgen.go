@@ -12,10 +12,12 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/apigen"
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/patterndialect"
 	"github.com/parable-work/superschematic/internal/generator/toolsutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -1410,7 +1412,10 @@ func WriteSDK(output *SDKOutput, outputDir string) error {
 }
 
 func generateFile(templateName, outputPath string, data interface{}) error {
-	return codegen.GenerateFile(codegen.NewFileConfig(templatesFS, templateName, outputPath, data, nil))
+	// A schema pattern is RE2's syntax: the SDK holds it rewritten so re
+	// matches what RE2 matches (patterndialect).
+	funcs := template.FuncMap{"pythonPattern": patterndialect.Python}
+	return codegen.GenerateFile(codegen.NewFileConfig(templatesFS, templateName, outputPath, data, funcs))
 }
 
 // FormatSDK runs ruff format on the generated Python SDK files.

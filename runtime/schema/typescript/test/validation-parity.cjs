@@ -8,11 +8,17 @@
 // also keeps validation_parity.document.json equal to writeSchemaJson of the
 // corpus IR, and validates every vector through both readers. Set
 // UPDATE_PARITY_DOCUMENT=1 to rewrite the document after the corpus changes.
+//
+// It also runs runtime/schema/testdata/pattern_dialect.json, which
+// internal/generator/patterndialect writes: patterns with texts and whether
+// Go's regexp (RE2) finds a match, which every runtime's pattern must agree
+// with. The Python and Rust runtime suites assert the same rows.
 /* eslint-disable no-console */
 const assert = require('node:assert');
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { compilePattern } = require('../dist/runtime/validation/pattern.js');
 const {
   parseSchema,
   parseSchemaIR,
@@ -80,6 +86,13 @@ for (const vector of corpus.vectors) {
   });
   test(`${vector.name} (JSON reader)`, () => {
     assert.deepStrictEqual(verdicts(fromDocument, vector), vector.want);
+  });
+}
+
+const dialect = JSON.parse(fs.readFileSync(path.join(testdata, 'pattern_dialect.json'), 'utf8'));
+for (const { pattern, text, match } of dialect.cases) {
+  test(`pattern ${JSON.stringify(pattern)} against ${JSON.stringify(text)}`, () => {
+    assert.strictEqual(compilePattern(pattern).test(text), match);
   });
 }
 

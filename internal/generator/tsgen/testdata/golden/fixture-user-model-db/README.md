@@ -22,7 +22,7 @@ bun run build
 
 ```typescript
 // Type-only import (zero runtime) - use for smallest bundle
-import type { ContactEmail, CryptoSHA256, IdentityName, IdentityUUID, TemporalDateTime, Role, Session, User, UserApiKey, UserCredential, UserRoleGrant,  } from '@schemas/fixture-user-model-db-types/types';
+import type { ContactEmail, CryptoSHA256, IdentityName, IdentityUUID, TemporalDateTime, OAuthClient, OAuthCode, OAuthGrant, OAuthToken, Role, Session, User, UserApiKey, UserCredential, UserRoleGrant,  } from '@schemas/fixture-user-model-db-types/types';
 
 // Or from main entry (re-exports everything, including scalar validation)
 import { ValidationErrors, ValidationResult } from '@schemas/fixture-user-model-db-types';
@@ -112,8 +112,16 @@ Validation errors follow a standardized format (see `validation_errors.md`):
 
 
 
-### Types (6)
+### Types (10)
 
+
+- **OAuthClient** - An OAuth client: a metadata document's, cached, or one that registered.
+
+- **OAuthCode** - An OAuth authorization request: pending while its user consents, then the code its client redeems once.
+
+- **OAuthGrant** - An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.
+
+- **OAuthToken** - An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.
 
 - **Role** - A named set of permissions users are granted.
 

@@ -71,9 +71,7 @@ func TestTypeScriptWorkersEntrypointGolden(t *testing.T) {
 // Workers whose API's database lists postgres first, which a Worker reaches
 // through no D1 binding, or which authenticates with the identity runtime
 // is refused, saying why, and so is a job on Cron Triggers whose API's
-// database lists postgres first (D64), and a server or a job whose API's
-// database is an engine database, whose engine is a native addon no
-// Worker loads (D58), whatever dialect it lists first.
+// database lists postgres first (D64).
 func TestTypeScriptWorkersRefusals(t *testing.T) {
 	input := func(edit func(*tsrestgen.APIOutput, *envgen.ConfigOutput)) servergen.TypeScriptInput {
 		output := &tsrestgen.APIOutput{
@@ -132,77 +130,21 @@ func TestTypeScriptWorkersRefusals(t *testing.T) {
 		t.Fatalf("a server on Workers over the user model in a Postgres database = %+v, %v", s, err)
 	}
 	for _, tc := range []struct {
-		name   string
-		edit   func(*tsrestgen.APIOutput, *envgen.ConfigOutput)
-		job    bool
-		want   string
-		engine bool
+		name string
+		edit func(*tsrestgen.APIOutput, *envgen.ConfigOutput)
+		job  bool
+		want string
 	}{
 		{"the identity runtime over D1", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
 			sqliteDB(o, c)
 			o.Identity = &tsrestgen.IdentityInfo{AuthDB: "shop-db"}
-		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over shop-db, its authDb, whose DB service lists sqlite first, and an environment places the server on Cloudflare Workers, where the database is a D1 binding: an identity store runs on a SQLite file or on Postgres, and none over D1 is built (D50, D92)", false},
-		{"an engine database", sqliteDB, false, "server shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the server on a platform whose artifact is a bundle, Cloudflare Workers, which cannot load the engine: it is a native addon, the Rust engine through Node-API (D64); place the server on a platform that builds an image", true},
-		{"a job's engine database", sqliteDB, true, "job shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58), and an environment places the job on a platform whose artifact is a bundle", true},
-		{"an engine database that lists postgres first", func(o *tsrestgen.APIOutput, c *envgen.ConfigOutput) {
-			o.Deps.Database = "shop-db"
-			c.Derived = []envgen.DerivedField{{Key: "SHOP_DB_DATABASE", Kind: ir.EdgeSQL, Service: "shop-db"}}
-		}, false, "server shop-api serves shop-api, whose database shop-db is an engine database whose engine the entrypoint opens (D58)", true},
+		}, false, "server shop-api serves shop-api, which authenticates with the identity runtime over shop-db, its authDb, whose DB service lists sqlite first, and an environment places the server on Cloudflare Workers, where the database is a D1 binding: an identity store runs on a SQLite file or on Postgres, and none over D1 is built (D50, D92)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			in := input(tc.edit)
 			if tc.job {
 				in.Job = &servergen.JobInput{Name: "Reindex"}
 			}
-			if tc.engine {
-				in.APIs[0].Routes.Engine = &apigen.EngineInfo{Database: "shop-db", Namespace: "shop_db", Mount: "/engine/shop-db"}
-			}
-			if _, err := servergen.PlanTypeScript(in); err == nil || !strings.Contains(err.Error(), "stack edge-stack: "+tc.want) {
-				t.Fatalf("PlanTypeScript = %v, want it to say %q", err, tc.want)
-			}
-		})
-	}
-}
-
-// TestTypeScriptEngineOnSQLiteRefused: a TypeScript entrypoint opens an
-// engine on Postgres, beside its pools, so a server on Bun is refused,
-// saying so, when its API's engine database lists sqlite first, and when
-// another API it serves connects to a database that lists sqlite first,
-// whose file main.ts would open beside the engine (D58, D64).
-func TestTypeScriptEngineOnSQLiteRefused(t *testing.T) {
-	api := func(name, db, dialect string, engine bool) servergen.TypeScriptAPIInput {
-		routes := &apigen.APIOutput{SchemaName: name}
-		if engine {
-			routes.Engine = &apigen.EngineInfo{Database: db, Namespace: strings.ReplaceAll(db, "-", "_"), Mount: "/engine/" + db}
-		}
-		field := strings.ToUpper(strings.ReplaceAll(db, "-", "_")) + "_DATABASE"
-		return servergen.TypeScriptAPIInput{
-			Output: &tsrestgen.APIOutput{
-				SchemaName:   name,
-				PackageName:  "@schemas/" + name + "-api",
-				HasEnvConfig: true,
-				Deps:         tsrestgen.DepsInfo{Database: db, Dialect: dialect},
-			},
-			Routes: routes,
-			Config: &envgen.ConfigOutput{
-				SchemaName: name,
-				Derived:    []envgen.DerivedField{{Key: field, Kind: ir.EdgeSQL, Service: db}},
-			},
-			Implementation: servergen.TypeScriptImplementation{Package: "@schemas/" + name + "-implementation"},
-		}
-	}
-	for _, tc := range []struct {
-		name string
-		apis []servergen.TypeScriptAPIInput
-		want string
-	}{
-		{"its engine database", []servergen.TypeScriptAPIInput{api("shop-api", "shop-db", "sqlite", true)},
-			"server shop-api serves shop-api, whose engine database shop-db lists sqlite first; a TypeScript entrypoint opens the engine on Postgres"},
-		{"another API's database", []servergen.TypeScriptAPIInput{api("shop-api", "shop-db", "postgres", true), api("shop-notes", "notes-db", "sqlite", false)},
-			"server shop-api opens the engine of shop-db (D58), and its database notes-db lists sqlite first; a TypeScript entrypoint that opens an engine opens it and its other databases on Postgres alone"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			in := servergen.TypeScriptInput{Stack: "edge-stack", Server: "shop-api", Dir: t.TempDir(), APIs: tc.apis}
 			if _, err := servergen.PlanTypeScript(in); err == nil || !strings.Contains(err.Error(), "stack edge-stack: "+tc.want) {
 				t.Fatalf("PlanTypeScript = %v, want it to say %q", err, tc.want)
 			}
@@ -271,7 +213,7 @@ func TestTypeScriptWorkersEntrypointWiring(t *testing.T) {
 		"import { binding, perIsolate, requestIP, serviceFetch, stackEnvOf, stackEnvWithSecrets } from '@superschematic/http-runtime/workers';",
 		"import { openR2Bucket } from '@superschematic/http-runtime/r2';",
 		"// shop-api's config holds Secret<T> fields, which a Worker reads only within\n// a request, so the isolate's first request loads it.",
-		"const values = await stackEnvWithSecrets(env, ['STRIPE_KEY']);",
+		"const values = await stackEnvWithSecrets(env, ['STRIPE_KEY'], ['STRIPE_KEY']);",
 		"const shopApiConfig = configure('shop-api', () => shopApiApi.loadEnvConfig(values));",
 		"const shopApiOrigins = configure('shop-api', () => loadCors('SHOP_API_CORS', values));",
 		"const shopPricingClient = newShopPricingClient(shopApiConfig.SHOP_PRICING_SERVICE);",

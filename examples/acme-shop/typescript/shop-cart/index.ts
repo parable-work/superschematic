@@ -1,23 +1,16 @@
 // The implementation of the shop-cart API, which shop-stack's generated
 // shop-cart server builds from its Deps (docs/stack-model.md, section
-// 8.6). A cart is shop-db's Checkout in cart (D70), which the engine keeps:
-// this package calls the engine in-process, through the Background its
-// Deps holds, as shop-cart for the shopper the identity runtime
-// authenticated, the actor each change records. shop-db's engine policy
-// lets shop-cart read and write checkouts and read the stock and the
-// collection points; the engine answers for a type, not an instance, so
-// this package checks a cart is the caller's own. shop-orders starts the
-// checkout, which holds what the cart asks, and takes payment for it. A
-// shopper's own reviews and reorders are rows of shop-db's tables, which
-// this package reads and writes through Deps.orm, the database's generated
-// repositories (D79), with no SQL of its own.
-import { randomUUID } from 'node:crypto';
-
-import { normalizeIdentityUUIDStrict } from 'superscalar';
+// 8.6). A cart is a row of shop-db's Checkout table in cart (D70, D103), a
+// ticket a row of its Ticket table, and a shopper's own reviews and
+// reorders rows of its other tables: this package reads and writes them
+// all through Deps.orm, the database's generated repositories (D79), which
+// act as the shopper the identity runtime authenticated and run each
+// table's behaviors through the behaviors' core, with no SQL of its own. A
+// cart is the caller's own, which this package checks. shop-orders starts
+// the checkout, which holds what the cart asks, and takes payment for it;
+// the pickup slots are what each CollectionPoint's Calendar has free.
 import { HttpProblem, OperationResult, decodeCursor, encodeCursor, notFound, refusedCursor, type RequestContext } from '@superschematic/http-runtime';
 import { NotFoundError, PageKeyError, enqueue } from '@superschematic/http-runtime/postgres';
-import { BehaviorVetoError, EngineError, type Principal } from '@superschematic/engine';
-import type { AsyncEngine } from '@superschematic/engine/server';
 import type {
   CartsImplementation,
   Constructor,
@@ -31,19 +24,8 @@ import type {
 } from '@acme/shop-cart-api';
 import type { CartLine, CartView, IdentityUUID, MyReview, PickupSlot, TicketView } from '@acme/shop-cart-types/types';
 import { TicketCategory, TicketPriority } from '@acme/shop-db-types';
-import type { ReviewPageKey, ReviewRow, ReviewSortField } from '@acme/shop-db-types/orm';
+import type { CheckoutRow, ReviewPageKey, ReviewRow, ReviewSortField, TicketRow } from '@acme/shop-db-types/orm';
 import { orderPlacedQueue } from '@acme/shop-db-types/queues';
-
-// The engine namespace shop-db's engine types live in, and the deployable
-// shop-cart's calls name to its policy (D37).
-const NAMESPACE = 'shop-db';
-const SERVICE = 'shop-cart';
-const inNamespace = { namespace: NAMESPACE };
-
-// An engine id is a UUID's canonical text, as Identity.UUID writes it:
-// the engine keeps a checkout's customerId and its lines' inventoryId so,
-// and an Inventory's id is its product's.
-const engineId = (id: string): IdentityUUID => normalizeIdentityUUIDStrict(id);
 
 // A pickup slot is fifteen minutes, the CollectionPoint's grid.
 const SLOT_MS = 15 * 60 * 1000;
@@ -58,140 +40,89 @@ export const create: Constructor = deps => ({
   tickets: tickets(deps),
 });
 
-/** The shopper's call through shop-cart: the shopper is the actor, shop-cart the service. */
-function shopper(ctx: RequestContext): Principal {
-  const subject = ctx.principal?.subject;
-  if (!subject) throw new HttpProblem(401, 'sign in to use a cart', { code: 'unauthorized' });
-  return { subject: engineId(subject), permissions: [], service: { deployable: SERVICE, serves: [SERVICE], subject: SERVICE, standsIn: false } };
-}
-
-/** shop-cart itself, for what no shopper asks: the pickup slots anyone reads. */
-const self: Principal = { subject: SERVICE, permissions: [], service: { deployable: SERVICE, serves: [SERVICE], subject: SERVICE, standsIn: false } };
-
-/** A Checkout as the engine reads it. */
-interface CheckoutRecord {
-  id: IdentityUUID;
-  data: { customerId: string; lines: Array<{ inventoryId: IdentityUUID; quantity: number }>; pickupAt?: string };
-  behaviors: {
-    Workflow?: { status: string };
-    Holds?: { items?: Array<{ hold: string; item: number; id: string; quantity?: number; state: string; unitPrice?: number }> };
-    Links?: { targets?: { counter?: { id: IdentityUUID } } };
-  };
-}
-
-/** A Checkout the engine answered with. */
-function checkout(record: unknown): CheckoutRecord {
-  return record as CheckoutRecord;
-}
-
-/** The engine, once it opens; 503 until then. */
-async function engineOf(deps: Deps): Promise<AsyncEngine> {
-  try {
-    return await deps.engine.wait(AbortSignal.timeout(10_000));
-  } catch {
-    throw new HttpProblem(503, 'the carts are not open yet', { code: 'unavailable' });
-  }
-}
-
-/**
- * Runs an engine call, answering a refusal as the API's: a behavior's veto
- * 409 with its code and details, a refused argument 400, a missing
- * instance 404, a busy engine 503.
- */
-async function engineCall<T>(deps: Deps, fn: (engine: AsyncEngine) => Promise<T>): Promise<T> {
-  const engine = await engineOf(deps);
-  try {
-    return await fn(engine);
-  } catch (err) {
-    if (err instanceof BehaviorVetoError) {
-      throw new HttpProblem(409, err.message, { code: err.vetoCode ?? 'vetoed', details: err.vetoDetails, cause: err });
-    }
-    if (err instanceof EngineError) {
-      const status = { invalid_argument: 400, invalid_instance: 400, not_found: 404, conflict: 409, busy: 503, unavailable: 503 }[err.code as string];
-      if (status) throw new HttpProblem(status, err.message, { code: err.code, cause: err });
-    }
-    throw err;
-  }
+/** One of a checkout's items, as its Holds' listHolds answers. */
+interface HoldItem {
+  hold: string;
+  item: number;
+  id: string;
+  quantity?: number;
+  state: string;
+  unitPrice?: number;
 }
 
 /** The caller's cart: another shopper's is the 404 of one never opened. */
-async function callersCart(deps: Deps, ctx: RequestContext, id: string): Promise<{ record: CheckoutRecord; principal: Principal }> {
-  const principal = shopper(ctx);
-  const found = await engineCall(deps, engine => engine.instances.get(principal, 'Checkout', engineId(id), inNamespace));
-  const record = found ? checkout(found) : undefined;
-  if (!record || record.data.customerId !== principal.subject) throw notFound(`Cart ${id} does not exist`);
-  return { record, principal };
+async function callersCart(deps: Deps, ctx: RequestContext, id: IdentityUUID): Promise<CheckoutRow> {
+  const shopper = callerId(ctx);
+  const cart = await found(`Cart ${id}`, deps.orm.checkout.getOne(id));
+  if (cart.customerId !== shopper) throw notFound(`Cart ${id} does not exist`);
+  return cart;
 }
 
 /** A cart in cart: one shop-orders started can no longer change. */
-function inCart(record: CheckoutRecord): void {
-  const status = record.behaviors.Workflow?.status;
-  if (status !== 'cart') throw new HttpProblem(409, `the cart is ${status}: start a new one`, { code: 'not_in_cart' });
+function inCart(cart: CheckoutRow): void {
+  if (cart.status !== 'cart') throw new HttpProblem(409, `the cart is ${cart.status}: start a new one`, { code: 'not_in_cart' });
 }
 
-function view(record: CheckoutRecord): CartView {
-  const held = new Map(
-    (record.behaviors.Holds?.items ?? []).filter(item => item.hold === 'lines').map(item => [item.item, item] as const)
-  );
-  const lines: CartLine[] = record.data.lines.map((line, index) => ({
+/** The cart as its shopper sees it, each line with its Holds item's state and the price it was held at. */
+async function view(deps: Deps, cart: CheckoutRow): Promise<CartView> {
+  const listed = (await deps.orm.checkout.holds.listHolds(cart.id, {})) as { items: HoldItem[] };
+  const held = new Map(listed.items.filter(item => item.hold === 'lines').map(item => [item.item, item] as const));
+  const lines: CartLine[] = cart.lines.map((line, index) => ({
     productId: line.inventoryId,
     quantity: line.quantity,
     state: held.get(index)?.state ?? 'pending',
     unitPriceCents: held.get(index)?.unitPrice,
   }));
   return {
-    id: record.id,
-    status: record.behaviors.Workflow?.status ?? 'cart',
+    id: cart.id,
+    status: cart.status,
     lines,
-    collectionPointId: record.behaviors.Links?.targets?.counter?.id,
-    pickupAt: record.data.pickupAt !== undefined ? new Date(record.data.pickupAt) : undefined,
+    collectionPointId: cart.counterId ?? undefined,
+    pickupAt: cart.pickupAt ?? undefined,
   };
 }
 
 function carts(deps: Deps): CartsImplementation {
   return {
-    // A new, empty cart of the caller's, whose id the engine's Checkout
-    // takes.
+    // A new, empty cart of the caller's.
     openCart: async (_args, ctx) => {
-      const principal = shopper(ctx);
-      const record = checkout(
-        await engineCall(deps, engine =>
-          engine.instances.create(principal, 'Checkout', { customerId: principal.subject, lines: [] }, { ...inNamespace, id: engineId(randomUUID()) })
-        )
-      );
-      deps.logger.info('cart opened', { cart: record.id, shopper: principal.subject });
-      return new OperationResult(view(record), 201);
+      const shopper = callerId(ctx);
+      const cart = await deps.orm.checkout.createOne({ customerId: shopper, lines: [] });
+      deps.logger.info('cart opened', { cart: cart.id, shopper });
+      return new OperationResult(await view(deps, cart), 201);
     },
-    getCart: async ({ id }, ctx) => view((await callersCart(deps, ctx, id)).record),
+    getCart: async ({ id }, ctx) => view(deps, await callersCart(deps, ctx, id)),
     // Adds units of a product, to its line when the cart has one. A
     // product the warehouse never stocked has no Inventory: 422.
     addCartLine: async ({ id, input }, ctx) => {
-      const { record, principal } = await callersCart(deps, ctx, id);
-      inCart(record);
-      const product = engineId(input.productId);
-      const inventory = await engineCall(deps, engine => engine.instances.get(principal, 'Inventory', product, inNamespace));
-      if (!inventory) throw new HttpProblem(422, `the shop does not stock product ${input.productId}`, { code: 'unknown_product' });
-      const lines = record.data.lines.map(line => ({ ...line }));
-      const line = lines.find(existing => existing.inventoryId === product);
+      const cart = await callersCart(deps, ctx, id);
+      inCart(cart);
+      await known(deps.orm.inventory.getOne(input.productId), `the shop does not stock product ${input.productId}`, 'unknown_product');
+      const lines = cart.lines.map(line => ({ ...line }));
+      const line = lines.find(existing => existing.inventoryId === input.productId);
       if (line) line.quantity += input.quantity;
-      else lines.push({ inventoryId: product, quantity: input.quantity });
-      return view(checkout(await engineCall(deps, engine => engine.instances.update(principal, 'Checkout', record.id, { lines }, inNamespace))));
+      else lines.push({ inventoryId: input.productId, quantity: input.quantity });
+      return view(deps, await deps.orm.checkout.updateOne(cart.id, { lines }));
     },
-    // Links the counter and records the slot, which startCheckout holds.
+    // Records the counter and the slot, which startCheckout holds. A
+    // counter no row holds is 422.
     choosePickup: async ({ id, input }, ctx) => {
-      const { record, principal } = await callersCart(deps, ctx, id);
-      inCart(record);
-      if (record.behaviors.Links?.targets?.counter !== undefined) {
-        await engineCall(deps, engine => engine.instances.invoke(principal, 'Checkout', record.id, 'unlink', { name: 'counter' }, inNamespace));
-      }
-      await engineCall(deps, engine =>
-        engine.instances.invoke(principal, 'Checkout', record.id, 'link', { name: 'counter', id: engineId(input.collectionPointId) }, inNamespace)
-      );
-      return view(
-        checkout(await engineCall(deps, engine => engine.instances.update(principal, 'Checkout', record.id, { pickupAt: input.startsAt.toISOString() }, inNamespace)))
-      );
+      const cart = await callersCart(deps, ctx, id);
+      inCart(cart);
+      await known(deps.orm.collectionPoint.getOne(input.collectionPointId), `no counter has id ${input.collectionPointId}`, 'unknown_counter');
+      return view(deps, await deps.orm.checkout.updateOne(cart.id, { counterId: input.collectionPointId, pickupAt: input.startsAt }));
     },
   };
+}
+
+/** Runs a read of a row the request names, answering a key no live row holds as 422 with code. */
+async function known<T>(call: Promise<T>, message: string, code: string): Promise<T> {
+  try {
+    return await call;
+  } catch (error) {
+    if (error instanceof NotFoundError) throw new HttpProblem(422, message, { code });
+    throw error;
+  }
 }
 
 function pickupSlots(deps: Deps): PickupSlotsImplementation {
@@ -200,17 +131,14 @@ function pickupSlots(deps: Deps): PickupSlotsImplementation {
     // rules: its hours, closures, lead time, horizon and capacity.
     listPickupSlots: async ({ from, days }) => {
       const startMs = from.getTime();
-      const found = (await engineCall(deps, engine =>
-        engine.instances.invokeSchema(
-          self,
-          'CollectionPoint',
-          'findAvailability',
-          { startMs, endMs: startMs + (days ?? 1) * DAY_MS, durationMs: SLOT_MS, limit: 500 },
-          inNamespace
-        )
-      )) as { slots: Array<{ id: IdentityUUID; startMs: number; endMs: number }> };
-      return found.slots.map(
-        (slot): PickupSlot => ({ collectionPointId: slot.id, startsAt: new Date(slot.startMs), endsAt: new Date(slot.endMs) })
+      const free = await deps.orm.collectionPoint.calendar.findAvailability({
+        startMs,
+        endMs: startMs + (days ?? 1) * DAY_MS,
+        durationMs: SLOT_MS,
+        limit: 500,
+      });
+      return free.slots.map(
+        (slot): PickupSlot => ({ collectionPointId: slot.id as IdentityUUID, startsAt: new Date(slot.startMs), endsAt: new Date(slot.endMs) })
       );
     },
   };
@@ -311,25 +239,17 @@ function reorders(deps: Deps): ReordersImplementation {
   };
 }
 
-/** A Ticket as the engine reads it. */
-interface TicketRecord {
-  id: IdentityUUID;
-  data: { customerId: string; subject: string; body?: string; orderId?: string; category?: string; priority?: string; summary?: string };
-  behaviors: { Workflow?: { status: string }; Provenance?: { inReview?: boolean } };
-}
-
-function ticketView(found: unknown): TicketView {
-  const record = found as unknown as TicketRecord;
+function ticketView(ticket: TicketRow): TicketView {
   return {
-    id: record.id,
-    status: record.behaviors.Workflow?.status ?? 'new',
-    subject: record.data.subject,
-    body: record.data.body,
-    orderId: record.data.orderId,
-    category: record.data.category,
-    priority: record.data.priority,
-    summary: record.data.summary,
-    inReview: record.behaviors.Provenance?.inReview ?? false,
+    id: ticket.id,
+    status: ticket.status,
+    subject: ticket.subject,
+    body: ticket.body ?? undefined,
+    orderId: ticket.orderId ?? undefined,
+    category: ticket.category ?? undefined,
+    priority: ticket.priority ?? undefined,
+    summary: ticket.summary ?? undefined,
+    inReview: ticket.provenanceInReview ?? false,
   };
 }
 
@@ -338,27 +258,23 @@ function tickets(deps: Deps): TicketsImplementation {
     // A new ticket of the caller's in new: shop-cart's deriver fills in its
     // category, priority and summary once it commits (D74).
     openTicket: async ({ input }, ctx) => {
-      const principal = shopper(ctx);
-      const data: Record<string, unknown> = { customerId: principal.subject, subject: input.subject };
-      if (input.body != null) data.body = input.body;
-      if (input.orderId != null) data.orderId = input.orderId;
-      const record = await engineCall(deps, engine =>
-        engine.instances.create(principal, 'Ticket', data, { ...inNamespace, id: engineId(randomUUID()) })
-      );
-      deps.logger.info('ticket opened', { ticket: (record as unknown as TicketRecord).id, shopper: principal.subject });
-      return new OperationResult(ticketView(record), 201);
+      const shopper = callerId(ctx);
+      const ticket = await deps.orm.ticket.createOne({ customerId: shopper, subject: input.subject, body: input.body ?? null, orderId: input.orderId ?? null });
+      deps.logger.info('ticket opened', { ticket: ticket.id, shopper });
+      return new OperationResult(ticketView(ticket), 201);
     },
+    // Another shopper's ticket is the 404 of one never opened.
     getTicket: async ({ id }, ctx) => {
-      const principal = shopper(ctx);
-      const found = await engineCall(deps, engine => engine.instances.get(principal, 'Ticket', engineId(id), inNamespace));
-      if (!found || (found as unknown as TicketRecord).data.customerId !== principal.subject) throw notFound(`Ticket ${id} does not exist`);
-      return ticketView(found);
+      const shopper = callerId(ctx);
+      const ticket = await found(`Ticket ${id}`, deps.orm.ticket.getOne(id));
+      if (ticket.customerId !== shopper) throw notFound(`Ticket ${id} does not exist`);
+      return ticketView(ticket);
     },
   };
 }
 
 /**
- * The deriver TriageTickets' answers (D74): keyword rules over the
+ * The deriver TriageTickets' answers (D74, D146): keyword rules over the
  * ticket's subject and body, which stand in for a model so stack dev and
  * CI need no provider. A rule that matches is sure (0.9); a ticket no rule
  * matches is "other" at 0.5, which Provenance holds in review for support

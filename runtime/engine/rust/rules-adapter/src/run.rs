@@ -28,16 +28,7 @@ use crate::{busy_refusal, CreateOptions, Error, ExecuteOptions, Executed, Owned}
 use crate::{ChangeRun, Claim, Deadline, DeadlineRun, EventRun, QueuedEvent, TableChange};
 use crate::{MAX_ATTEMPTS, MAX_ROUNDS, VETOED_RETRY_SECONDS};
 
-/// The SQL a store's statements are written in. A build with one store
-/// writes its dialect alone.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(all(feature = "postgres", feature = "sqlite")), allow(dead_code))]
-pub(crate) enum Dialect {
-    /// `$n` placeholders; a column read as `to_jsonb`'s JSON.
-    Postgres,
-    /// `?n` placeholders; a column read as it is stored.
-    Sqlite,
-}
+pub(crate) use crate::sql::{placeholder, quote, Dialect};
 
 /// One statement of a change set's apply, its placeholders the store's
 /// dialect's.
@@ -2866,19 +2857,6 @@ fn stamp_now(dialect: Dialect) -> &'static str {
     match dialect {
         Dialect::Postgres => "statement_timestamp()",
         Dialect::Sqlite => "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')",
-    }
-}
-
-/// An identifier quoted as Postgres and SQLite both read one.
-pub(crate) fn quote(identifier: &str) -> String {
-    format!("\"{}\"", identifier.replace('"', "\"\""))
-}
-
-/// The nth placeholder in a dialect: `$n` on Postgres, `?n` on SQLite.
-fn placeholder(dialect: Dialect, n: usize) -> String {
-    match dialect {
-        Dialect::Postgres => format!("${n}"),
-        Dialect::Sqlite => format!("?{n}"),
     }
 }
 

@@ -430,6 +430,122 @@ before the new server runs, as for any expand step: a server ahead of its
 migration serves sessions as before, and a bearer key, and the disabling
 of a user, which revokes their keys, fail until the table is there.
 
+## OAuth: connecting Claude and other clients
+
+An API key is pasted into a program by hand. Claude's connectors, on
+claude.ai, Desktop, mobile and Cowork, connect a remote MCP server only by
+OAuth, from Anthropic's side, so they cannot take one. With `oauth` the
+API is its own OAuth 2.1 authorization server
+([#695](https://github.com/parable-work/superschematic/issues/695)): a
+client sends the person to the API's own sign-in and consent page, and
+holds a grant that narrows the person's permissions as an API key does.
+
+```ts
+@userSessions({ oauth: true })
+export class Account {}
+
+// Optional: an administrator lists and revokes any user's grants.
+@userAdministration({ oauth: true })
+export class Admin {}
+```
+
+`oauth` needs the login and an API that serves MCP (`outputs.api.mcp`).
+The TypeScript server serves it; `check` refuses it on a Go or a Rust
+server, which do not serve it yet. `oauth: true` takes every default; an
+object sets them:
+
+| Member | Default | Meaning |
+| --- | --- | --- |
+| `accessTokenTtlSeconds` | 3600 (1 h) | How long an access token lasts. |
+| `refreshTokenTtlSeconds` | 2592000 (30 d) | How long a refresh token lasts, renewed on each rotation. |
+| `grantMaxTtlSeconds` | 31536000 (365 d) | The longest a grant lasts, however often it refreshes. |
+| `clients` | both | `metadataDocuments`: a client may name itself by a Client ID Metadata Document's URL, as Claude does. `registration`: a client may register (RFC 7591). |
+| `consentPath` | the runtime's page | The project's own consent page, a path from the site's origin or a URL, which takes `?request=<id>`. |
+
+The identity config, the API's `<API>_IDENTITY` field, takes the
+deployment's part: `oauth.publicBaseUrl`, the URL the API is reached at
+from outside, such as `https://app.example.com/api/notes`. The protected
+resource is its `/api/mcp` and the issuer is it, so a client sees the URL
+the person typed, not the one the server sees behind a site's proxy.
+Without it the server answers for the request's own host and the
+`X-Forwarded-Prefix` a site's proxy sends.
+
+### What the server serves
+
+| Route | What it is |
+| --- | --- |
+| `GET /.well-known/oauth-protected-resource`, and with the MCP endpoint's path after it | The protected resource metadata (RFC 9728). |
+| `GET /.well-known/oauth-authorization-server`, `/.well-known/openid-configuration`, and each with the issuer's path after it | The authorization server metadata (RFC 8414): S256 alone, public clients alone (`none`), `client_id_metadata_document_supported`, and `registration_endpoint` when registration is on. |
+| `GET` and `POST /oauth/authorize` | Stores the request and sends the browser to the consent page. A client it cannot read, or a redirect that is not the client's, is an error page; any other refusal goes back to the client's redirect. |
+| `GET /oauth/consent` | The runtime's consent page, unless `consentPath` names one. |
+| `POST /oauth/token` | `authorization_code` with its PKCE verifier, or `refresh_token`; form-encoded, RFC 6749's errors. |
+| `POST /oauth/register` | Dynamic Client Registration, public clients with https or loopback redirects. |
+| `POST /oauth/revoke` | RFC 7009. A refresh token revokes its grant. |
+| `getOAuthRequest`, `approveOAuthRequest`, `denyOAuthRequest` | `auth/oauth/requests/{id}[/approve\|/deny]`, the JSON routes the consent page drives, with a session. |
+| `listOAuthGrants`, `revokeOAuthGrant` | `auth/oauth/grants[/{id}]`, the person's connected apps. |
+| `listUserOAuthGrants`, `revokeUserOAuthGrant` | `auth/admin/users/{id}/oauth/grants[/{grantId}]`, with `@userAdministration({ oauth: true })`. |
+
+The MCP endpoint's 401 carries `WWW-Authenticate: Bearer
+resource_metadata="..."`, with `error="invalid_token"` when a token was
+refused, so a client finds the server from the endpoint's URL alone. The
+OAuth operations are hidden from the tools: a person consents in their
+own browser. The protocol routes run through the router's pipeline,
+rate-limited per client by the router's key (the transport's peer
+address unless `rateLimit.keyOf` names another), in its store.
+
+### How a grant behaves
+
+- **Consent.** The page names the client, who vouches for it (the host
+  of a metadata document's URL; a registered client's name is its own
+  claim), the host the request's redirect goes to (and warns when it is
+  the person's own machine, as a command-line client's is), and the
+  permissions it asks for, which are
+  the API's permission names as scopes. The person may untick any. A
+  request that names no scope asks for every permission the person
+  holds.
+- **Its tokens.** An access token is `oat_` and 43 characters, sent as
+  `Authorization: Bearer`, never in a query string. A refresh token is
+  `ort_...`, which only the token endpoint takes. The database keeps the
+  SHA-256 of each.
+- **Its audience.** An access token is held to the resource it was
+  given for, the API's MCP endpoint under its public base: another API
+  over the same `authDb` refuses it.
+- **What it may do.** On every request the grant's permissions are
+  narrowed against the person's current ones, as an API key's are, so a
+  role taken away, a disabled user or a pending one counts on the next
+  call. A token does not act on the person's account: the API key and
+  OAuth routes, `logout` and `changePassword` need a session.
+- **Once and bound.** A code works once, for 60 seconds, bound to its
+  client, redirect, PKCE challenge (S256) and resource, each checked
+  before the code is spent. A refresh token
+  rotates on every use; using one twice, or redeeming a code twice,
+  revokes the grant. Disabling a user revokes their grants.
+- **Its record.** With the access log in the identity service's options,
+  a grant given and one revoked are rows of it (`oauthGrant`,
+  `oauthRevoke`), and a router whose options carry the log records each
+  call a token makes (`oauthCall`).
+- **Clients.** A metadata document is fetched over https alone, from a
+  name that resolves to no private, loopback or link-local address, in
+  5 seconds and 16 KB at most, with no redirect to another host, and
+  kept as its cache headers say, a day at most. The fetch resolves the
+  name again, so a name whose answer changes between the check and the
+  fetch is not held; route the server's egress through a proxy where
+  that matters. A registered client unused for 90 days that holds no
+  live grant is pruned at the next registration, and the requests,
+  codes and tokens that ended a day ago at the next authorization.
+
+The four tables, `OAuthClient`, `OAuthGrant`, `OAuthCode` and
+`OAuthToken`, are added beside every `User` table, as the API key's is,
+whether or not an API turns `oauth` on: a project built before them has
+four new tables to migrate, an expand step with no hazard.
+
+Not built yet: the stack filling `publicBaseUrl` from the site's origin
+and routing the site's root `/.well-known` paths to the API on the
+Cloudflare and GCP sites, `stack dev` serving them for Claude Code, and
+the Go and Rust servers. Until the site routes them, an API behind a site
+serves discovery on its own origin alone. Claude reaches the server from
+`160.79.104.0/21`, discovery included: no WAF rule may block it.
+
 ## What it does not do
 
 The core model has no organizations or tenancy, single sign-on, second

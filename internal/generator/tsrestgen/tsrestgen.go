@@ -611,6 +611,33 @@ type IdentityInfo struct {
 	// admits users (D81), when the API's @userSessions declares
 	// approval, default roles or a first administrator; empty otherwise.
 	Registration string
+	// OAuth is the OAuthOptions literal of the API's OAuth authorization
+	// server (#695), when its @userSessions({ oauth }) turns it on; empty
+	// otherwise. OAuthAdministration is @userAdministration({ oauth }).
+	OAuth               string
+	OAuthAdministration bool
+}
+
+// oauthLiteral renders cfg's oauth as the identity runtime's
+// OAuthOptions, or "" when it has none: every lifetime and kind of
+// client, the consent page when the schema names one, and the session
+// set's path, under which the consent routes are.
+func oauthLiteral(cfg *ir.UserSessionsConfig) string {
+	if cfg == nil || cfg.OAuth == nil {
+		return ""
+	}
+	o := cfg.OAuth
+	members := []string{
+		fmt.Sprintf("accessTokenTtlSeconds: %d", o.AccessTokenTTL()),
+		fmt.Sprintf("refreshTokenTtlSeconds: %d", o.RefreshTokenTTL()),
+		fmt.Sprintf("grantMaxTtlSeconds: %d", o.GrantMaxTTL()),
+		fmt.Sprintf("clients: { metadataDocuments: %t, registration: %t }", o.MetadataDocuments(), o.Registration()),
+	}
+	if o.ConsentPath != "" {
+		members = append(members, "consentPath: "+tsString(o.ConsentPath))
+	}
+	members = append(members, "sessionsPath: "+tsString(cfg.UserSessionsPath()))
+	return "{ " + strings.Join(members, ", ") + " }"
 }
 
 // registrationLiteral renders cfg as the identity runtime's
@@ -1164,6 +1191,10 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 			DescriptorModule: opts.Naming.NpmTypesPackage(opts.AuthDB.Name) + "/identity",
 			HasRoles:         opts.AuthDB.UserRoleTable() != nil,
 			Registration:     registrationLiteral(apiOutput.Registration),
+		}
+		if cfg := apigen.IdentityOAuth(schema); cfg != nil {
+			output.Identity.OAuth = oauthLiteral(cfg)
+			output.Identity.OAuthAdministration = apigen.IdentityOAuthAdministration(schema)
 		}
 	}
 

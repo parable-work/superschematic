@@ -2,7 +2,6 @@ package rules
 
 import (
 	"bytes"
-	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -118,17 +117,6 @@ func uuidToWire(text string) (string, error) {
 		return "", fmt.Errorf("rules: %q is no UUID, hyphenated or base62", text)
 	}
 	return base62(n), nil
-}
-
-// randomUUID is a random version 4 UUID's sixteen bytes.
-func randomUUID() [16]byte {
-	var raw [16]byte
-	if _, err := rand.Read(raw[:]); err != nil {
-		panic(fmt.Sprintf("rules: read random bytes: %v", err))
-	}
-	raw[6] = raw[6]&0x0f | 0x40
-	raw[8] = raw[8]&0x3f | 0x80
-	return raw
 }
 
 // isoFormat is the text Date.prototype.toISOString writes: UTC, always

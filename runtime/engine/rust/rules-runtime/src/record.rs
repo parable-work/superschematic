@@ -296,8 +296,46 @@ pub(crate) fn versions_after(
 }
 
 /// The DB service the documents are of: each one's `name`, the same in
-/// every one, as a plan from documents requires.
-pub(crate) fn service_of(documents: &[Value]) -> Result<String, Refusal> {
+/// every one, as a plan from documents requires. Documents that are all
+/// General are development mode's, each named after its type, and publish
+/// as the tables of the service named, or of the name they share (D117);
+/// a DB service's documents must name the service named, when one is.
+pub(crate) fn service_of(documents: &[Value], named: Option<&str>) -> Result<String, Refusal> {
+    let general = !documents.is_empty()
+        && documents
+            .iter()
+            .all(|document| document.get("kind").and_then(Value::as_str) == Some("General"));
+    if let Some(named) = named.filter(|named| !named.is_empty()) {
+        if !general {
+            for document in documents {
+                let name = document
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if name != named {
+                    return Err(Refusal::invalid_argument(format!(
+                        "a document is of {name}, and the publish is of {named}: a publish takes one DB service's documents"
+                    )));
+                }
+            }
+        }
+        return Ok(named.to_owned());
+    }
+    if general {
+        let mut names: Vec<&str> = documents
+            .iter()
+            .filter_map(|document| document.get("name").and_then(Value::as_str))
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        if names.len() > 1 {
+            let (last, rest) = names.split_last().unwrap_or((&"", &[]));
+            return Err(Refusal::invalid_argument(format!(
+                "the documents are development mode's General schemas {} and {last}, which publish as the tables of one DB service (D117): name the service (service)",
+                rest.join(", ")
+            )));
+        }
+    }
     let mut service: Option<&str> = None;
     for document in documents {
         let name = document

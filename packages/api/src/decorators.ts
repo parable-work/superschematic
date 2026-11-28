@@ -414,6 +414,11 @@ export function source(_target: unknown): ClassDecorator {
  * createApiKey, listApiKeys and revokeApiKey (D114), with which a user
  * signed in with a session makes, lists and revokes API keys: named,
  * long-lived tokens a program calls as them with. It needs the login.
+ * `oauth` (#695) makes the API its own OAuth 2.1 authorization server, so
+ * Claude's connectors, and any client that speaks the protocol, sign a
+ * person in with the API's logins and hold a grant that narrows their
+ * permissions as an API key does. It needs the login and an API that
+ * serves MCP (outputs.api.mcp), in TypeScript for now.
  */
 export type UserSessionsConfig =
   | {
@@ -421,12 +426,14 @@ export type UserSessionsConfig =
       readonly login?: true;
       readonly register?: false;
       readonly apiKeys?: boolean;
+      readonly oauth?: boolean | OAuthConfig;
     }
   | ({
       readonly path?: string;
       readonly login?: true;
       readonly register: true;
       readonly apiKeys?: boolean;
+      readonly oauth?: boolean | OAuthConfig;
     } & RegistrationConfig)
   | {
       readonly path?: string;
@@ -458,21 +465,48 @@ export type RegistrationConfig = {
 };
 
 /**
+ * @userSessions' `oauth` (#695); `oauth: true` is every default.
+ *
+ * - `accessTokenTtlSeconds`: how long an access token lasts; 3600 (1 h).
+ * - `refreshTokenTtlSeconds`: how long a refresh token lasts, renewed on
+ *   each rotation; 2592000 (30 d). Longer than an access token's.
+ * - `grantMaxTtlSeconds`: the longest a grant lasts, however often its
+ *   refresh token rotates; 31536000 (365 d). At least a refresh token's.
+ * - `clients`: whether a client may name itself by a Client ID Metadata
+ *   Document's URL (`metadataDocuments`) and register through Dynamic
+ *   Client Registration (`registration`); both by default, and not both
+ *   off.
+ * - `consentPath`: the project's own consent page, a path from the site's
+ *   origin or a URL, which takes `?request=<id>` and drives the consent
+ *   routes; the runtime's page by default.
+ */
+export type OAuthConfig = {
+  readonly accessTokenTtlSeconds?: number;
+  readonly refreshTokenTtlSeconds?: number;
+  readonly grantMaxTtlSeconds?: number;
+  readonly clients?: { readonly metadataDocuments?: boolean; readonly registration?: boolean };
+  readonly consentPath?: string;
+};
+
+/**
  * The routes @userAdministration adds. `path` prefixes them, "auth/admin"
  * by default. `apiKeys`, false by default, adds listUserApiKeys and
  * revokeUserApiKey (D114), with which an administrator lists and revokes
- * any user's API keys.
+ * any user's API keys. `oauth`, false by default, adds listUserOAuthGrants
+ * and revokeUserOAuthGrant (#695), the same for a user's OAuth grants.
  */
 export type UserAdministrationConfig = {
   readonly path?: string;
   readonly apiKeys?: boolean;
+  readonly oauth?: boolean;
 };
 
 /**
  * The user model's session routes, on a class with no methods:
  * superschematic adds login, logout, me, capabilities and changePassword
- * under the path, register with `register: true`, and the API key routes
- * with `apiKeys: true`. The identity runtime
+ * under the path, register with `register: true`, the API key routes
+ * with `apiKeys: true`, and the OAuth consent and connected-app routes
+ * with `oauth`. The identity runtime
  * serves them, so the implementation has no method for them. The API's
  * authDb must name a DB schema with a User table, and an API takes one
  * such class. The class takes no Authenticated or Encrypted base and no

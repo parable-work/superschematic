@@ -267,39 +267,20 @@ func TestNarrowWorkflowTypesFromAsAState(t *testing.T) {
 	}
 }
 
-// An engine type's Workflow refuses from and never answers unchanged,
-// not_principal or stale (D104), so its narrowing has none of them, and its
-// generated clients offer none.
-func TestNarrowWorkflowOfAnEngineTypeHasNoFromOrUnchanged(t *testing.T) {
+// Narrow leaves the declaration as it was: a second narrowing of Workflow
+// types transition's from again.
+func TestNarrowWorkflowLeavesTheDeclaration(t *testing.T) {
 	reg := registry.New(naming.Default())
 	declaration, _ := reg.Behavior("Workflow")
-	engine := &ir.TypeDef{Name: "Order", Behaviors: []ir.BehaviorRef{{Name: "Workflow"}}}
-	for _, instance := range []*ir.TypeDef{engine, nil} {
-		target := Target{Schema: "orders", Base: "Order", Document: ir.NewSchema("orders", ir.SchemaKindGeneral), Instance: instance}
-		n, err := Narrow(declaration, json.RawMessage(`{"states": ["draft", "paid"], "transitions": [{"from": "draft", "to": "paid"}]}`), target)
+	for range 2 {
+		target := Target{Schema: "orders", Base: "Order", Document: ir.NewSchema("orders", ir.SchemaKindGeneral), Instance: &ir.TypeDef{Name: "Order", Behaviors: []ir.BehaviorRef{{Name: "Workflow", Field: "status"}}}}
+		n, err := Narrow(declaration, json.RawMessage(`{"states": ["draft"], "transitions": []}`), target)
 		if err != nil {
 			t.Fatal(err)
 		}
-		params, _ := at(n.Params["transition"], "properties")
-		results, _ := at(n.Results["transition"], "properties")
-		if got := slices.Sorted(maps.Keys(params)); !slices.Equal(got, []string{"to"}) {
-			t.Errorf("instance %v: transition's parameters = %v, want to alone", instance, got)
+		if _, err := at(n.Params["transition"], "properties", "from"); err != nil {
+			t.Errorf("a table's transition has no from: %v", err)
 		}
-		if got := slices.Sorted(maps.Keys(results)); !slices.Equal(got, []string{"from", "to"}) {
-			t.Errorf("instance %v: transition's result = %v, want from and to", instance, got)
-		}
-		if want := []string{"already_in_state", "terminal_state", "transition_not_allowed", "no_status"}; !slices.Equal(n.Vetoes, want) {
-			t.Errorf("instance %v: vetoes = %v, want %v", instance, n.Vetoes, want)
-		}
-	}
-	// Narrow leaves the declaration as it was.
-	again := Target{Schema: "orders", Base: "Order", Document: ir.NewSchema("orders", ir.SchemaKindGeneral), Instance: &ir.TypeDef{Name: "Order", Behaviors: []ir.BehaviorRef{{Name: "Workflow", Field: "status"}}}}
-	n, err := Narrow(declaration, json.RawMessage(`{"states": ["draft"], "transitions": []}`), again)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := at(n.Params["transition"], "properties", "from"); err != nil {
-		t.Errorf("a table's transition after an engine type's has no from: %v", err)
 	}
 }
 
@@ -385,67 +366,25 @@ func TestNarrowApprovalsReadNamesThePinnedFields(t *testing.T) {
 	}
 }
 
-// An engine type's Approvals refuses signOff's version and never answers
-// stale (D104): its narrowing names the gated states inline, as before,
-// and has neither, so its generated clients do not change.
-func TestNarrowApprovalsOfAnEngineTypeHasNoVersion(t *testing.T) {
-	reg := registry.New(naming.Default())
-	declaration, _ := reg.Behavior("Approvals")
-	engine := &ir.TypeDef{Name: "Expense", Behaviors: []ir.BehaviorRef{{Name: "Approvals"}}}
-	for _, instance := range []*ir.TypeDef{engine, nil} {
-		target := Target{Schema: "expenses", Base: "Expense", Document: ir.NewSchema("expenses", ir.SchemaKindGeneral), Instance: instance}
-		n, err := Narrow(declaration, json.RawMessage(`{"gates": {"approved": {"count": 2, "permission": "expenses.approve"}}}`), target)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(n.Aliases) != 0 {
-			t.Errorf("instance %v: aliases = %+v, want none", instance, n.Aliases)
-		}
-		params, _ := at(n.Params["signOff"], "properties")
-		if got := slices.Sorted(maps.Keys(params)); !slices.Equal(got, []string{"note", "state"}) {
-			t.Errorf("instance %v: signOff's parameters = %v, want note and state", instance, got)
-		}
-		if state, _ := at(n.Params["signOff"], "properties", "state"); state["enum"] == nil {
-			t.Errorf("instance %v: signOff's state = %v, want the inline enum", instance, state)
-		}
-		if want := []string{"approvals_missing", "already_signed", "creator_cannot_sign", "in_state", "no_gate", "not_signed"}; !slices.Equal(n.Vetoes, want) {
-			t.Errorf("instance %v: vetoes = %v, want %v", instance, n.Vetoes, want)
-		}
-	}
-}
-
-// An engine type's Constants refuses oneWay and never answers one_way
-// (D104), so its vetoes have none; a table's keeps it. Constants has no
-// operation and no field to narrow.
-func TestNarrowConstantsDropsOneWayForAnEngineType(t *testing.T) {
+// Constants has no operation and no field to narrow, and keeps its
+// declaration's veto one_way (D104).
+func TestNarrowConstantsKeepsOneWay(t *testing.T) {
 	reg := registry.New(naming.Default())
 	declaration, _ := reg.Behavior("Constants")
-	config := json.RawMessage(`{"fields": ["owner"]}`)
-	for _, tc := range []struct {
-		name     string
-		instance *ir.TypeDef
-		want     []string
-	}{
-		{"a table", &ir.TypeDef{Name: "Task", Behaviors: []ir.BehaviorRef{{Name: "Constants", Implements: true}}}, []string{"one_way"}},
-		{"an engine type", &ir.TypeDef{Name: "Step", Behaviors: []ir.BehaviorRef{{Name: "Constants"}}}, nil},
-		{"no instance", nil, nil},
-	} {
-		n, err := Narrow(declaration, config, Target{Schema: "tasks", Base: "Task", Document: ir.NewSchema("tasks", ir.SchemaKindDB), Instance: tc.instance})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !slices.Equal(n.Vetoes, tc.want) {
-			t.Errorf("%s: vetoes = %v, want %v", tc.name, n.Vetoes, tc.want)
-		}
+	table := &ir.TypeDef{Name: "Task", Behaviors: []ir.BehaviorRef{{Name: "Constants", Implements: true}}}
+	n, err := Narrow(declaration, json.RawMessage(`{"fields": ["owner"]}`), Target{Schema: "tasks", Base: "Task", Document: ir.NewSchema("tasks", ir.SchemaKindDB), Instance: table})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(n.Vetoes, []string{"one_way"}) {
+		t.Errorf("vetoes = %v, want one_way", n.Vetoes)
 	}
 }
 
 // A table's Retries types its failure classes as the alias <Base>Class,
 // which recordAttempt's failure names, and keeps retryAt, failingSince and
-// keyedBy, each absent until set; an engine type's keeps none of the
-// three, answers no retryAt and never backing_off or throttled (D104), so
-// its generated clients do not change.
-func TestNarrowRetriesOfATableAndOfAnEngineType(t *testing.T) {
+// keyedBy, each absent until set (D104).
+func TestNarrowRetriesOfATable(t *testing.T) {
 	reg := registry.New(naming.Default())
 	declaration, _ := reg.Behavior("Retries")
 	config := json.RawMessage(`{"classes": {"timeout": {"attempts": 3}, "build": {"attempts": 1}, "rejected": "terminal"}, "totalAttempts": 4, "exhaustedState": "failed"}`)
@@ -474,32 +413,12 @@ func TestNarrowRetriesOfATableAndOfAnEngineType(t *testing.T) {
 	if !slices.Contains(n.Vetoes, "backing_off") || !slices.Contains(n.Vetoes, "throttled") {
 		t.Errorf("vetoes = %v, want backing_off and throttled", n.Vetoes)
 	}
-	engine := &ir.TypeDef{Name: "Job", Behaviors: []ir.BehaviorRef{{Name: "Retries"}}}
-	for _, instance := range []*ir.TypeDef{engine, nil} {
-		n, err := Narrow(declaration, config, Target{Schema: "jobs", Base: "Job", Document: ir.NewSchema("jobs", ir.SchemaKindGeneral), Instance: instance})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(n.Aliases) != 0 {
-			t.Errorf("instance %v: aliases = %+v, want none", instance, n.Aliases)
-		}
-		if got := slices.Sorted(maps.Keys(n.Fields)); !slices.Equal(got, []string{"bestScore", "classAttempts", "exhausted", "stuck", "total"}) {
-			t.Errorf("instance %v: fields = %v, want the engine's", instance, got)
-		}
-		if result, _ := at(n.Results["recordAttempt"], "properties"); result["retryAt"] != nil {
-			t.Errorf("instance %v: recordAttempt's result = %v, want no retryAt", instance, result)
-		}
-		if want := []string{"exhausted", "limits_fixed", "not_configured"}; !slices.Equal(n.Vetoes, want) {
-			t.Errorf("instance %v: vetoes = %v, want %v", instance, n.Vetoes, want)
-		}
-	}
 }
 
-// A table's Budget types its meters as the alias <Base>Meter, which every
-// operation's meter names and recordUsage's, setLimit's and observe's
-// results; an engine type's refuses every observe (D104), so its clients
-// leave it out (Refused), and names its meters inline as before.
-func TestNarrowBudgetOfATableAndOfAnEngineType(t *testing.T) {
+// TestNarrowBudgetOfATable: a table's Budget names its meters by the alias
+// <Base>Meter in every operation's meter and in recordUsage's, setLimit's
+// and observe's results.
+func TestNarrowBudgetOfATable(t *testing.T) {
 	reg := registry.New(naming.Default())
 	declaration, _ := reg.Behavior("Budget")
 	config := json.RawMessage(`{"meters": {"tokens": {"limit": 10}, "questions": {"limit": 5}}}`)
@@ -519,22 +438,6 @@ func TestNarrowBudgetOfATableAndOfAnEngineType(t *testing.T) {
 	for _, op := range []string{"recordUsage", "setLimit", "observe"} {
 		if meter, err := at(n.Results[op], "properties", "meter"); err != nil || meter[RefKey] != "AccountBudgetMeter" {
 			t.Errorf("%s's result's meter = %v (%v), want AccountBudgetMeter", op, meter, err)
-		}
-	}
-	if len(n.Refused) != 0 || !n.Offers("observe") {
-		t.Errorf("a table's Budget refuses %v, want none", n.Refused)
-	}
-	engine := &ir.TypeDef{Name: "Account", Behaviors: []ir.BehaviorRef{{Name: "Budget"}}}
-	for _, instance := range []*ir.TypeDef{engine, nil} {
-		n, err := Narrow(declaration, config, Target{Schema: "accounts", Base: "Account", Document: ir.NewSchema("accounts", ir.SchemaKindGeneral), Instance: instance})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if len(n.Aliases) != 0 || !slices.Equal(n.Refused, []string{"observe"}) || n.Offers("observe") || !n.Offers("reserve") {
-			t.Errorf("instance %v: aliases = %+v, refused = %v, want none and observe", instance, n.Aliases, n.Refused)
-		}
-		if meter, _ := at(n.Params["reserve"], "properties", "meter"); meter[RefKey] != nil {
-			t.Errorf("instance %v: reserve's meter = %v, want the declaration's string", instance, meter)
 		}
 	}
 }
@@ -785,8 +688,7 @@ func poolAccounts(rank string) (*ir.Schema, *ir.TypeDef) {
 // value it holds (an enum and a UUID a string), and none for the key, a
 // list, a date-time, JSON or a field encrypted at rest; pick's member is
 // the alias <Base>PickMember or null, its order an integer when the order
-// field is a Generic.Int64 and a number otherwise. An engine type's, which
-// the build refuses, has no Match and no PickMember.
+// field is a Generic.Int64 and a number otherwise.
 func TestNarrowPool(t *testing.T) {
 	reg := registry.New(naming.Default())
 	declaration, _ := reg.Behavior("Pool")
@@ -858,8 +760,8 @@ func TestNarrowPool(t *testing.T) {
 			t.Errorf("%s = %+v, want epoch milliseconds, absent until set", name, field)
 		}
 	}
-	if !slices.Equal(n.Vetoes, []string{"pool_too_large"}) || len(n.Refused) != 0 {
-		t.Errorf("vetoes = %v, refused = %v", n.Vetoes, n.Refused)
+	if !slices.Equal(n.Vetoes, []string{"pool_too_large"}) {
+		t.Errorf("vetoes = %v", n.Vetoes)
 	}
 	// A number order field orders by a number.
 	document, account = poolAccounts("Generic.Float64")
@@ -870,22 +772,11 @@ func TestNarrowPool(t *testing.T) {
 	if order, _ := at(float.Aliases[2].Schema, "properties", "order"); !slices.Equal(stringsOf(order["type"]), []string{"number", "null"}) {
 		t.Errorf("AccountPoolPickMember's order of a Generic.Float64 = %v, want a number or null", order["type"])
 	}
-	// An engine type's, which the build refuses, names its availability
-	// alone.
-	engine := &ir.TypeDef{Name: "Account", Behaviors: []ir.BehaviorRef{{Name: "Pool"}}}
-	n, err = Narrow(declaration, config, Target{Schema: "accounts", Base: "Account", Document: ir.NewSchema("accounts", ir.SchemaKindGeneral), Instance: engine})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(n.Aliases) != 1 || n.Aliases[0].Name != "AccountAvailability" || refAt(n.Params["pick"], "properties", "match") != nil {
-		t.Errorf("an engine type's aliases = %+v, pick's match = %v", n.Aliases, refAt(n.Params["pick"], "properties", "match"))
-	}
 }
 
 // Lease on a table (D104): expireHolder's count of each reason is the alias
 // <Base>ExpireHolderReasons, which its result names, so the API and the
-// repositories name the type JobLeaseExpireHolderReasons; an engine type's
-// keeps its declaration's object in place, so its client reads as before.
+// repositories name the type JobLeaseExpireHolderReasons.
 func TestNarrowLeaseExpireHolder(t *testing.T) {
 	reg := registry.New(naming.Default())
 	declaration, _ := reg.Behavior("Lease")
@@ -904,13 +795,5 @@ func TestNarrowLeaseExpireHolder(t *testing.T) {
 	}
 	if node, err := at(n.Results["expireHolder"], "properties", "reasons"); err != nil || node[RefKey] != "JobLeaseExpireHolderReasons" {
 		t.Errorf("expireHolder's reasons = %v (%v)", node, err)
-	}
-	engine := &ir.TypeDef{Name: "Job", Behaviors: []ir.BehaviorRef{{Name: "Lease"}}}
-	n, err = Narrow(declaration, nil, Target{Schema: "jobs", Base: "Job", Document: ir.NewSchema("jobs", ir.SchemaKindGeneral), Instance: engine})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if node, err := at(n.Results["expireHolder"], "properties", "reasons"); err != nil || node[RefKey] != nil || len(n.Aliases) != 0 {
-		t.Errorf("an engine type's expireHolder reasons = %v (%v), aliases %v", node, err, n.Aliases)
 	}
 }

@@ -78,7 +78,7 @@ installQueueWakes(env);
 async function build(): Promise<Handle> {
   // The string bindings, and the value of each Secrets Store secret a
   // config names, awaited once per isolate.
-  const values = await stackEnvWithSecrets(env, ['CREDENTIALS_TOKEN', 'SMS_TOKEN']);
+  const values = await stackEnvWithSecrets(env, ['CREDENTIALS_TOKEN', 'SMS_TOKEN'], ['CREDENTIALS_TOKEN', 'SMS_TOKEN']);
   const workApiConfig = configure('work-api', () => workApiApi.loadEnvConfig(values));
 
   // One pool per Postgres database, shared by every API on it, over the

@@ -25,7 +25,7 @@ import (
 var coreBehaviorFiles embed.FS
 
 // The npm packages that ship the core's behaviors, which name them in a
-// behavior's spec and the engine document (enginedoc).
+// behavior's spec.
 const (
 	// EnginePackage is @superschematic/engine, whose engine registers its
 	// behaviors when it opens.

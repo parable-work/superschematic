@@ -82,10 +82,10 @@ func TestLoadProvidersChecksTheSlots(t *testing.T) {
 	sms := &ir.FieldDef{Name: "SMS", TypeRef: ir.TypeRef{Name: "string"}}
 
 	schema := providerSchema(sms)
-	if err := loadProviders(dir, schema, &schemaconfig.SchemaConfig{Providers: []string{"relay"}}); err != nil {
+	if err := loadProviders(dir, schema, &schemaconfig.SchemaConfig{Providers: []string{"./relay"}}); err != nil {
 		t.Fatal(err)
 	}
-	if len(schema.Providers) != 1 || schema.Providers[0].Path != "relay" || schema.Provider("relay") == nil {
+	if len(schema.Providers) != 1 || schema.Providers[0].Path != "./relay" || schema.Provider("relay") == nil {
 		t.Fatalf("Providers = %+v", schema.Providers)
 	}
 
@@ -94,17 +94,78 @@ func TestLoadProvidersChecksTheSlots(t *testing.T) {
 		providers []string
 		want      string
 	}{
-		"two of one name":  {providerSchema(sms), []string{"relay", "relay-copy"}, "providers relay and relay-copy are both named relay"},
-		"no field":         {providerSchema(), []string{"relay"}, "slot SMS is no field of the config Config"},
-		"a secret field":   {providerSchema(&ir.FieldDef{Name: "SMS", Secret: true, TypeRef: ir.TypeRef{Name: "string"}}), []string{"relay"}, "slot SMS is a Secret<T>"},
-		"a number field":   {providerSchema(&ir.FieldDef{Name: "SMS", TypeRef: ir.TypeRef{Name: "int"}}), []string{"relay"}, "slot SMS is a int; it is a string"},
-		"no implementer":   {providerSchema(sms), []string{"model"}, "slot SMS takes a channel adapter, and none of the providers the config lists implements channel"},
+		"two of one name":  {providerSchema(sms), []string{"./relay", "./relay-copy"}, "providers ./relay and ./relay-copy are both named relay"},
+		"no field":         {providerSchema(), []string{"./relay"}, "slot SMS is no field of the config Config"},
+		"a secret field":   {providerSchema(&ir.FieldDef{Name: "SMS", Secret: true, TypeRef: ir.TypeRef{Name: "string"}}), []string{"./relay"}, "slot SMS is a Secret<T>"},
+		"a number field":   {providerSchema(&ir.FieldDef{Name: "SMS", TypeRef: ir.TypeRef{Name: "int"}}), []string{"./relay"}, "slot SMS is a int; it is a string"},
+		"no implementer":   {providerSchema(sms), []string{"./model"}, "slot SMS takes a channel adapter, and none of the providers the config lists implements channel"},
 		"no listed at all": {providerSchema(sms), nil, "none of the providers the config lists implements channel"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := loadProviders(dir, tc.schema, &schemaconfig.SchemaConfig{Providers: tc.providers})
 			if err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("loadProviders() = %v, want it to say %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestLoadProvidersResolvesAnNpmName (D159, #608): a provider the config
+// lists by its npm name resolves from the first node_modules in the
+// service's directory or one above it, as Node.js resolves it, and the
+// schema records the name a TypeScript server imports it by. A package no
+// node_modules holds is refused, naming the entry and every place looked
+// in, and so is one whose package.json gives another name.
+func TestLoadProvidersResolvesAnNpmName(t *testing.T) {
+	root := t.TempDir()
+	service := filepath.Join(root, "schemas", "services", "notes-api")
+	if err := os.MkdirAll(service, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	modules := filepath.Join(root, "schemas", "node_modules")
+	writeProvider(t, modules, "@example/sms-relay", `{"name": "@example/sms-relay", "superschematic": {"provider": {"name": "sms-relay", "implements": "channel"}}}`)
+	writeProvider(t, modules, "model-stub", `{"name": "model-stub", "superschematic": {"provider": {"name": "model-stub", "implements": "model"}}}`)
+	writeProvider(t, modules, "renamed", `{"name": "@example/other", "superschematic": {"provider": {"name": "renamed", "implements": "model"}}}`)
+	writeProvider(t, root, "relays/local", `{"name": "@example/local", "superschematic": {"provider": {"name": "local", "implements": "channel"}}}`)
+	sms := &ir.FieldDef{Name: "SMS", TypeRef: ir.TypeRef{Name: "string"}}
+
+	schema := providerSchema(sms)
+	if err := loadProviders(service, schema, &schemaconfig.SchemaConfig{Providers: []string{"@example/sms-relay", "model-stub", "../../../relays/local"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]*ir.RuntimeProvider{}
+	for _, p := range schema.Providers {
+		got[p.Name] = p
+	}
+	if p := got["sms-relay"]; p == nil || p.Npm != "@example/sms-relay" || p.Path != "@example/sms-relay" || p.Dir != filepath.Join(modules, "@example", "sms-relay") {
+		t.Errorf("sms-relay = %+v, want npm @example/sms-relay from %s", p, modules)
+	}
+	if p := got["model-stub"]; p == nil || p.Npm != "model-stub" {
+		t.Errorf("model-stub = %+v, want npm model-stub", p)
+	}
+	if p := got["local"]; p == nil || p.Npm != "" || p.Path != "../../../relays/local" || p.Dir != filepath.Join(root, "relays", "local") {
+		t.Errorf("local = %+v, want the directory ../../../relays/local", p)
+	}
+
+	for name, tc := range map[string]struct {
+		entry string
+		want  []string
+	}{
+		"a missing package": {"@example/absent", []string{
+			"providers: @example/absent: no package @example/absent in the service's node_modules or one above it",
+			filepath.Join(service, "node_modules"), filepath.Join(root, "schemas", "node_modules"), filepath.Join(root, "node_modules"),
+		}},
+		"another name": {"renamed", []string{`holds package "@example/other", whose package.json names it other than renamed`}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := loadProviders(service, providerSchema(sms), &schemaconfig.SchemaConfig{Providers: []string{"@example/sms-relay", tc.entry}})
+			if err == nil {
+				t.Fatal("loadProviders() = nil")
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("loadProviders() = %v, want it to say %q", err, want)
+				}
 			}
 		})
 	}

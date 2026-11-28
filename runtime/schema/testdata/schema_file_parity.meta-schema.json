@@ -4743,10 +4743,6 @@
           "default": "",
           "type": "string"
         },
-        "runner": {
-          "default": false,
-          "type": "boolean"
-        },
         "service": {
           "$ref": "#/$defs/ServiceRef"
         },
@@ -5941,6 +5937,43 @@
         "role",
         "permissions"
       ],
+      "type": "object"
+    },
+    "IdentityOAuthClients": {
+      "additionalProperties": false,
+      "properties": {
+        "metadataDocuments": {
+          "type": "boolean"
+        },
+        "registration": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "IdentityOAuthConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "accessTokenTtlSeconds": {
+          "default": 0,
+          "type": "integer"
+        },
+        "clients": {
+          "$ref": "#/$defs/IdentityOAuthClients"
+        },
+        "consentPath": {
+          "default": "",
+          "type": "string"
+        },
+        "grantMaxTtlSeconds": {
+          "default": 0,
+          "type": "integer"
+        },
+        "refreshTokenTtlSeconds": {
+          "default": 0,
+          "type": "integer"
+        }
+      },
       "type": "object"
     },
     "ImageConstraints": {
@@ -8404,6 +8437,10 @@
           "default": false,
           "type": "boolean"
         },
+        "oauth": {
+          "default": false,
+          "type": "boolean"
+        },
         "path": {
           "default": "",
           "type": "string"
@@ -8436,6 +8473,9 @@
         "noLogin": {
           "default": false,
           "type": "boolean"
+        },
+        "oauth": {
+          "$ref": "#/$defs/IdentityOAuthConfig"
         },
         "path": {
           "default": "",
