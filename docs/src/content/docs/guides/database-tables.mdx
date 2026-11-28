@@ -659,8 +659,9 @@ found, err := crosstable.SearchTables(ctx, db.CrossTables(), crosstable.Caller{P
 `crosstable.SearchRoutes` serves `GET /api/search` as an `http.Handler`,
 and `SearchMCPTool` with `CallSearchTool` the MCP tool; an app mounts the
 handler on its router. `ReindexSearch` builds every row's index row again.
-A Go server whose database lists `sqlite` first is refused a `@searchable`
-table, since `crosstable` ranks by Postgres statements alone.
+Over a database that lists `sqlite`, the SQLite database's `CrossTables()`
+searches the file as the TypeScript runtime does on SQLite
+([On SQLite and D1](#on-sqlite-and-d1), [Go on SQLite](#go-on-sqlite)).
 
 ### On SQLite and D1
 
@@ -692,10 +693,11 @@ const { items, total } = await searchTables(orm, principal, { q: "walnut desk" }
 | the FTS5 table is a piece of the model's SQL of its own, after every object | the migration model has no form of a virtual table; a plan that adds the index runs it, and a table made `@searchable` with rows needs `reindexSearch` once |
 
 The triggers keep a row's index row whichever ORM writes it, so a
-service's Go types are built beside it. Go's search (D187) and Rust's
-(D188) run on Postgres alone: a Go server is refused search over a
-database that lists `sqlite` first, and a service that lists `sqlite` and
-declares `@searchable` takes no Rust types.
+service's Go types are built beside it. Go's search runs on SQLite too
+(#615): `crosstable` writes the same statements over the SQLite database's
+`CrossTables()`, with the same ranking, access and refusal of embeddings.
+Rust's search (D188) runs on Postgres alone, so a service that lists
+`sqlite` and declares `@searchable` takes no Rust types.
 
 ## Pages
 
@@ -2389,6 +2391,27 @@ clock as RFC 3339 text, and a ref block found through `json_each`. They
 take no advisory lock, since a transaction on SQLite holds the write lock
 from its `BEGIN IMMEDIATE`. The SQLite DDL's row triggers clear a deleted
 target's references and release a file's object.
+
+Recurrence, the calendar and search run on SQLite too (#615). A
+Recurrence's operations run as the core's commands in the repository's
+transaction, as every behavior's do, so a plan's occurrences and the
+deadlines it arms commit together, with the same dates as on Postgres.
+`CrossTables()` of the SQLite database and its transactions is the
+calendar's and search's host on the file: `crosstable` writes their
+statements in SQLite's words, as the TypeScript runtime does on SQLite
+([On SQLite and D1](#on-sqlite-and-d1)):
+
+| Read | On SQLite |
+| --- | --- |
+| The calendar | a window bound as RFC 3339 text, which orders as text; an owner by its hyphenated text; each table's rows held to the caller by its repository's conditions on SQLite |
+| The feed | a grant of the `@accessGrants` table, issued, rotated, revoked and read as on Postgres |
+| Search | the FTS5 table `search_index_fts`, each word a quoted phrase, every one required, ranked by `bm25` with Postgres's weights; the audience through `json_each` over the index row's copy, and a grant's reach by an `EXISTS` with the table's conditions on SQLite |
+| Indexing | `IndexSearch` reads the row and writes its index row with its access columns in one statement; `ReindexSearch` indexes a table's rows one at a time |
+
+Embeddings are refused on SQLite: a search with `Vector` is `Invalid`, and
+`Embeddings` in the options is `ErrSQLiteEmbeddings`. A Go server whose
+database lists `sqlite` first is still refused the notifier, the parties
+and the agents, which run in TypeScript alone there (D189).
 
 A table SQLite does not hold has a repository that refuses every call with
 `ErrSQLiteUnsupported`, naming why: a vector, a `POINT`, bytes, a
@@ -4091,10 +4114,12 @@ router.Mount("/api/calendar", crosstable.CalendarRoutes(crosstable.CalendarRoute
 
 `CallCalendarTool` answers the MCP tool `CalendarMCPTool` describes, and
 `IssueFeed`, `RotateFeed` and `RevokeFeed` are the feed's operations; the
-ORM's `AuthenticateGrant` refuses a feed's token on every other route. A
-Go server whose database lists `sqlite` first is refused Recurrence, a
-calendar source and search, and one whose calendar source is titled by an
-`Encrypted<T>` field is refused it.
+ORM's `AuthenticateGrant` refuses a feed's token on every other route. A Go
+server whose calendar source is titled by an `Encrypted<T>` field is
+refused it. Over a database that lists `sqlite`, Recurrence's operations
+run through the core in the SQLite repositories' transactions, and the
+SQLite database's `CrossTables()` reads the calendar and serves its feed
+on the file ([Go on SQLite](#go-on-sqlite)).
 
 On SQLite and D1 the `./orm/sqlite` entry's repositories run Recurrence
 through the core as Postgres's do (D186): the `occurrences` sub-table, its

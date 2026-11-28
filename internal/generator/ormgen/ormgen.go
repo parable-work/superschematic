@@ -1216,7 +1216,7 @@ func Generate(schema *ir.Schema, opts Options) (*ORMOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	crossTables, err := crossTablesOf(schema, tables)
+	crossTables, err := crossTablesOf(schema, tables, opts.SQLite)
 	if err != nil {
 		return nil, err
 	}

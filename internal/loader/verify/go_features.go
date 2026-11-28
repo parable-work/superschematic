@@ -37,12 +37,13 @@ import (
 // carries a table's calendar sources and search index, and the schema
 // runtime's crosstable package reads them. A calendar source a Go server
 // reads is refused a title of an Encrypted<T> field, which the Go read
-// across tables takes from its column. A Go server serves search,
-// Recurrence and the calendar on Postgres alone, so the build refuses
-// them over a database that lists sqlite first (GoServerSQLiteErr), as
-// Rust's refuses Recurrence and the calendar (D188): the loader lets a
-// database's TypeScript and Go types declare @searchable on SQLite (D186),
-// where only the TypeScript repositories search.
+// across tables takes from its column. On SQLite they are served too
+// (#615, part 2 of Go on SQLite): the behaviors' core runs a Recurrence's
+// operations in the SQLite repositories' transactions, and the SQLite
+// database's CrossTables is a crosstable.DialectHost, whose calendar and
+// search crosstable writes in SQLite's words, search's words the FTS5
+// table the index's triggers keep, as the TypeScript runtime's (D186).
+// Rust's server still refuses Recurrence and the calendar there (D188).
 //
 // Events and the notifier (D153) are served on Postgres (D190): the
 // generated ORM of a database that uses the notifier carries its tables'
@@ -93,23 +94,24 @@ func GoServerDatabaseErr(api, db *ir.Schema) error {
 
 // GoServerSQLiteErr is the refusal of the features of db, the database of
 // api, a Go server, that a Go server on a database that lists sqlite
-// first does not serve (D187, D190, D192), or nil: a table that composes
-// Recurrence, whose operations and deadline worker the Go adapter runs on
-// Postgres, a calendar source, and a @searchable table, which the
-// crosstable package reads and ranks with Postgres statements alone, a
-// table's events and notifications, which the notify package reads and
-// writes by Postgres's statements, and the parties' and agents' tables,
-// which the inbound path and the dispatcher read by Postgres's statements.
-// Since D189 the loader serves the notifier, the parties and the agents on
-// SQLite in TypeScript, so this is the Go server's own refusal of them. The generator calls it with
-// the database's dialects for every Go server over a database.
+// first does not serve (D190, D192), or nil: a table's events and
+// notifications, which the notify package reads and writes by Postgres's
+// statements, and the parties' and agents' tables, which the inbound path
+// and the dispatcher read by Postgres's statements. Since D189 the loader
+// serves the notifier, the parties and the agents on SQLite in
+// TypeScript, so this is the Go server's own refusal of them. The
+// generator calls it with the database's dialects for every Go server
+// over a database.
 //
 // Per-record access (an @audience table, @accessGrants and @accessLog) and
 // references and attachments are not refused: the Go repositories serve
-// them on SQLite as on Postgres (#611, part 1 of Go on SQLite). The
-// behaviors' core in SQLite transactions with Recurrence, the calendar and
-// search over FTS5 (part 2, as D186), and the notifier, the parties and
-// the dispatcher (part 3, as D189) each lift their own lines here.
+// them on SQLite as on Postgres (#611, part 1 of Go on SQLite). Nor are
+// Recurrence, a calendar source and a @searchable table (#615, part 2):
+// the behaviors' core runs in the SQLite repositories' transactions, and
+// the crosstable package writes the calendar and search in SQLite's words
+// over the SQLite database's CrossTables, its search over FTS5 as D186's.
+// The notifier, the parties and the dispatcher (part 3, as D189) lift
+// their own lines here.
 func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 	if api == nil || db == nil || len(dialects) == 0 || dialects[0] != registry.SQLDialectSQLite {
 		return nil
@@ -119,15 +121,6 @@ func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 		td := db.Types[name]
 		if td == nil {
 			continue
-		}
-		if usesBehavior(td, recurrenceBehavior) {
-			features = append(features, name+": Recurrence")
-		}
-		if len(td.CalendarSources) > 0 {
-			features = append(features, name+": @calendarSource")
-		}
-		if td.Searchable != nil {
-			features = append(features, name+": @searchable")
 		}
 		for _, mark := range notifierMarks(td) {
 			features = append(features, name+": "+mark)
@@ -139,7 +132,7 @@ func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
 	if len(features) == 0 {
 		return nil
 	}
-	return fmt.Errorf("the Go server of %s is over %s, whose DB service lists sqlite first, and serves %s on Postgres alone so far (D152, D153, D155, D157, D158, D187, D190, D192); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", api.Name, db.Name, strings.Join(features, ", "), db.Name)
+	return fmt.Errorf("the Go server of %s is over %s, whose DB service lists sqlite first, and serves %s on Postgres alone so far (D153, D157, D158, D190, D192); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", api.Name, db.Name, strings.Join(features, ", "), db.Name)
 }
 
 // checkGoTables refuses the table features of schema, a Go server's
@@ -233,18 +226,4 @@ func checkGoOperations(schema *ir.Schema, where string, r *Result) {
 			}
 		}
 	}
-}
-
-// usesBehavior reports whether td composes the behavior name, by
-// implements or as a behavior of the table.
-func usesBehavior(td *ir.TypeDef, name string) bool {
-	if _, ok := implementedConfig(td, name); ok {
-		return true
-	}
-	for _, ref := range td.Behaviors {
-		if ref.Name == name {
-			return true
-		}
-	}
-	return false
 }

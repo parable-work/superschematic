@@ -33,11 +33,9 @@ var sqliteReaders = map[string][]string{
 	"@accessGrants": {registry.LangTypeScript, registry.LangGo},
 	"@accessLog":    {registry.LangTypeScript, registry.LangGo},
 	// The search index on SQLite (D186): its triggers keep a row's index
-	// row whichever ORM writes it, and the TypeScript runtime searches it.
-	// Rust's search runs on Postgres alone (D188), and a Go server is
-	// refused search over a SQLite database (go_features.go's
-	// GoServerSQLiteErr), so Go's types, which the DB kind builds always,
-	// are served beside it.
+	// row whichever ORM writes it, and the TypeScript runtime and the Go
+	// schema runtime's crosstable search it (#615). Rust's search runs on
+	// Postgres alone (D188).
 	"@searchable": {registry.LangTypeScript, registry.LangGo},
 }
 

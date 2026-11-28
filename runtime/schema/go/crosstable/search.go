@@ -333,6 +333,16 @@ func SearchTables(ctx context.Context, h Host, caller Caller, request SearchRequ
 	if len(sources) == 0 {
 		return empty, nil
 	}
+	if onSQLite(h) {
+		// Embeddings re-rank on Postgres alone (D186).
+		if request.Vector != nil {
+			return empty, invalid("searchTables: %v", ErrSQLiteEmbeddings)
+		}
+		if options.Embeddings != nil {
+			return empty, fmt.Errorf("searchTables: %w", ErrSQLiteEmbeddings)
+		}
+		return searchOnSQLite(ctx, h, caller, words, sources, all, request.Scope, limit, offset)
+	}
 	first := all[sources[0]]
 	as := h.As(ctx, caller.Principal)
 

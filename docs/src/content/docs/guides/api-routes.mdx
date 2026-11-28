@@ -2174,10 +2174,12 @@ generated, needs.
 The Go ORM's repositories on SQLite keep to an audience and grants, and
 write the access log, as on Postgres (#611), with the TypeScript
 repositories' conditions on SQLite (D182). `(*SQLiteDatabase).AuthenticateGrant`
-reads a token's grant on every call. A Go server over a database that
-lists `sqlite` first is still refused Recurrence, a calendar source,
-search, the notifier, parties and agents, which it serves on Postgres
-alone so far. A service that enables the Rust types on SQLite is refused
+reads a token's grant on every call. Recurrence, the calendar and search
+run on SQLite too (#615): the calendar and search over the SQLite
+database's `CrossTables()` keep each table's rows to the caller by the
+same conditions. A Go server over a database that lists `sqlite` first is
+still refused the notifier, parties and agents, which it serves on
+Postgres alone so far. A service that enables the Rust types on SQLite is refused
 an audience, grants and the access log, naming the decorator and the
 table.
 
