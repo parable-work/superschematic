@@ -130,7 +130,7 @@ type RepositoryOperation struct {
 // operation when the declaration gives none.
 // ViewDoc is the doc comment of the use's View.
 func (u RepositoryUse) ViewDoc() string {
-	return fmt.Sprintf("View reads the row id names through the behaviors' core as the caller WithBehaviorCaller names (the core's read, #713), in a transaction, and returns %s's fields each reader reads its own of, by name (%s), each as its JSON. It writes nothing, and returns ErrNotFound when no live row holds id.", u.Member, strings.Join(u.View, ", "))
+	return fmt.Sprintf("View reads the row id names through the behaviors' core as the caller WithBehaviorCaller names (the core's read, #713), in a transaction, and returns %s's fields each reader reads its own of, by name (%s), each as its JSON. It writes nothing, and returns ErrNotFound when no live row holds id, or the row is one the caller does not see (D156), as GetOne's is.", u.Member, strings.Join(u.View, ", "))
 }
 
 func (o RepositoryOperation) MethodDoc() string {

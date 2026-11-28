@@ -207,11 +207,11 @@ impl World {
         panic!("the dispatch queue did not drain");
     }
 
-    /// The user's notices, oldest first: each one's kind, ticket and
-    /// message.
+    /// The user's notices in the order of their messages: each one's kind,
+    /// ticket and message.
     async fn notices_of(&self, user: &str) -> Vec<(String, String, i64)> {
         let mut notices = self.notifier.inbox(&RecipientRef::user(user), &[], None).await.unwrap();
-        notices.sort_by_key(|n| n.get("reference").and_then(Value::as_i64).unwrap_or_default());
+        notices.sort_by_key(|n| payload_of(n)["message"].as_i64().unwrap_or_default());
         notices
             .iter()
             .map(|n| (text(n, "eventKind"), same_id(&text(n, "subjectKey")), payload_of(n)["message"].as_i64().unwrap_or_default()))
@@ -220,7 +220,7 @@ impl World {
 
     async fn payloads_of(&self, user: &str) -> Vec<Value> {
         let mut notices = self.notifier.inbox(&RecipientRef::user(user), &[], None).await.unwrap();
-        notices.sort_by_key(|n| n.get("reference").and_then(Value::as_i64).unwrap_or_default());
+        notices.sort_by_key(|n| payload_of(n)["message"].as_i64().unwrap_or_default());
         notices.iter().map(payload_of).collect()
     }
 

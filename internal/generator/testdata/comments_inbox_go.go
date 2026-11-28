@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/parable-work/superschematic/runtime/http/go/notify"
 	rules "github.com/parable-work/superschematic/runtime/rules/go"
+	"github.com/parable-work/superschematic/runtime/schema/go/access"
 
 	orm "example.com/schemas/orm/fixture-comments-inbox-db"
 	types "example.com/schemas/types/go/fixture-comments-inbox-db"
@@ -99,9 +100,10 @@ func (w *world) exec(sql string, args ...any) {
 	}
 }
 
-// as is a context acting as user: the caller its behaviors' commands run as.
+// as is a context acting as user: the caller its behaviors' commands run
+// as, whose reads keep to what it sees (D156).
 func as(user types.IdentityUUID) context.Context {
-	return orm.WithUserID(context.Background(), user)
+	return orm.WithPrincipal(orm.WithUserID(context.Background(), user), access.Principal{Subject: user.String()})
 }
 
 func (w *world) comments() orm.TicketCommentsOperations {
@@ -263,6 +265,10 @@ func TestCommentsInbox(t *testing.T) {
 		}
 		if got := unread(w.cal); got != "0" {
 			t.Fatalf("Cal's unread after reading = %s", got)
+		}
+		// The view reads as its caller: Ben may not read the closed ticket.
+		if _, err := w.comments().View(as(w.ben), w.closed); err == nil {
+			t.Fatal("Ben read the closed ticket's view")
 		}
 		if followed := must(w.comments().Follow(as(w.cal), w.open, orm.TicketCommentsFollowParams{Thread: first.Id, On: true})); !followed.Following {
 			t.Fatalf("follow = %+v", followed)

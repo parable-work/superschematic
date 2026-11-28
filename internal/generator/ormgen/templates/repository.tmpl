@@ -5102,6 +5102,11 @@ func (o {{ $use.Value }}) {{ .GoName }}(ctx context.Context, id {{ $repo.Primary
 
 {{ docComment "" .ViewDoc }}
 func (o {{ .Value }}) View(ctx context.Context, id {{ $repo.PrimaryKeyType }}) (map[string]json.RawMessage, error) {
+	{{- if $repo.HeldByAccess }}
+	if err := o.r.requireReach(ctx, id{{ if $repo.PrimaryKeyIsUUID }}.ToUUID(){{ end }}, false); err != nil {
+		return nil, behaviorOutOfReach(err, {{ printf "%q" $repo.TypeName }}, {{ $repo.WireKey "id" }}, id)
+	}
+	{{- end }}
 	return inTransaction(ctx, o.r.database(), o.r.tx, func(tx pgx.Tx) (map[string]json.RawMessage, error) {
 		read, err := rules.RunRead(ctx, rulesHost(tx), {{ printf "%q" $repo.TypeName }}, {{ $repo.WireKey "id" }}, behaviorCaller(ctx))
 		if err != nil {
