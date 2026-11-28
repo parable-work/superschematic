@@ -843,12 +843,21 @@ mod tests {
         }))
         .unwrap();
         let none = CalendarOptions::default();
-        assert_eq!(source.permission_under(&none).map(String::as_str), Some("contracts.read"));
+        assert_eq!(
+            source.permission_under(&none).map(String::as_str),
+            Some("contracts.read")
+        );
         let named = CalendarOptions {
             permissions: [("contract".to_owned(), "calendar.all".to_owned())].into(),
         };
-        assert_eq!(source.permission_under(&named).map(String::as_str), Some("calendar.all"));
-        let open = CalendarSource { permission: None, ..source };
+        assert_eq!(
+            source.permission_under(&named).map(String::as_str),
+            Some("calendar.all")
+        );
+        let open = CalendarSource {
+            permission: None,
+            ..source
+        };
         assert_eq!(open.permission_under(&none), None);
     }
 
