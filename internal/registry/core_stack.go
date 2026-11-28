@@ -73,7 +73,8 @@ var (
 			"deploy": {"type": "array", "items": ` + stackHandleSchema + `},
 			"expose": {"type": "array", "items": ` + stackExposeSchema + `},
 			"origins": {"type": "array", "items": ` + stackOriginSchema + `},
-			"images": {"type": "array", "items": ` + stackImageSchema + `}
+			"images": {"type": "array", "items": ` + stackImageSchema + `},
+			"search": ` + stackHandleSchema + `
 		}
 	}`)
 	serverArgs = json.RawMessage(`{
@@ -195,18 +196,19 @@ func stackDeclaration(td *ir.TypeDef) string {
 	return ""
 }
 
-// applyStack reads @stack({ deploy, expose, origins, images }).
+// applyStack reads @stack({ deploy, expose, origins, images, search }).
 func applyStack(td *ir.TypeDef, arg any) error {
 	var args struct {
 		Deploy  []ir.ServiceRef `json:"deploy"`
 		Expose  []any           `json:"expose"`
 		Origins []*ir.Origin    `json:"origins"`
 		Images  []any           `json:"images"`
+		Search  *ir.ServiceRef  `json:"search"`
 	}
 	if err := DecodeArgs([]any{arg}, &args); err != nil {
 		return err
 	}
-	decl := &ir.StackDecl{Deploy: args.Deploy, Origins: args.Origins}
+	decl := &ir.StackDecl{Deploy: args.Deploy, Origins: args.Origins, Search: args.Search}
 	for i, v := range args.Expose {
 		ref, err := exposedRef(v)
 		if err != nil {

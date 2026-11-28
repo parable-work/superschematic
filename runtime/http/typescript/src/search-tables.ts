@@ -202,11 +202,12 @@ const WEIGHTS = `'{0.1, 0.2, 0.4, 1}'::real[]`;
 type Values = Record<string, unknown>;
 
 /** A repository as search runs it: its definition, and the conditions of its reads, which no generated Repository type has. */
-type RepositoryShape = Pick<PlainRepository, 'def'> & {
+export type RepositoryShape = Pick<PlainRepository, 'def'> & {
   conditions(filter: null, args: unknown[], offset: number, write?: boolean): string[];
 };
 
-interface OrmShape {
+/** @internal */
+export interface OrmShape {
   as(principal: Principal | null | undefined): OrmShape;
   asSystem(): OrmShape;
   query(text: string, values?: readonly unknown[]): Promise<{ rows: Values[] }>;
@@ -240,7 +241,8 @@ function whole(value: number | undefined, fallback: number, min: number, max: nu
   return value;
 }
 
-function unit(vector: readonly number[]): number[] {
+/** A vector of unit length; throws for one that is not finite. @internal */
+export function unit(vector: readonly number[]): number[] {
   let sum = 0;
   for (const x of vector) {
     if (typeof x !== 'number' || !Number.isFinite(x)) throw new TypeError('an embedding holds finite numbers');
@@ -330,24 +332,142 @@ export async function searchTables(orm: object, principal: Principal | null, req
   // The caller's audience, on the index row's copy of each row's.
   conditions.push(...audienceConditions({ effective: 'si.audience', agents: 'si.agents' }, caller, args, args.length));
   if (request.scope !== undefined) conditions.push(`si.scope = ANY(${param(scopeForms(request.scope))}::text[])`);
-  if (byVector) {
-    if (!options.embeddings) throw new TypeError('searchTables: a vector needs embeddings, which say its model');
-    return searchByVector(db, all, index, conditions, args, unit(request.vector!), options.embeddings.model, limit, offset);
+  const ranked = await rankIndex(db, { index, document, regconfig }, { conditions, args, query, byVector, q: request.q, vector: request.vector, embeddings: options.embeddings, limit, offset }, 'searchTables');
+  const items: SearchHit[] = ranked.rows.map(row => ({
+    table: row.table,
+    key: all.get(row.table)?.definition.uuid ? uuidFromDb(row.key) : row.key,
+    title: row.title,
+    matched: row.matched,
+    snippet: row.snippet,
+    place: row.place,
+  }));
+  return { items, total: ranked.total, more: offset + items.length < ranked.total, reranked: ranked.reranked };
+}
+
+/**
+ * Where a ranking reads (D155, #740): an index table, the expression of
+ * its rows' weighed words over si, and its text search configuration; a
+ * database's own index, or the environment's, whose rows name their
+ * database too (databases), which a hit carries and the order breaks ties
+ * by before the table.
+ *
+ * @internal
+ */
+export interface RankedIndex {
+  readonly index: string;
+  readonly document: string;
+  readonly regconfig: string;
+  readonly databases?: boolean;
+}
+
+/**
+ * What a ranking ranks: the conditions that keep the index's rows to the
+ * caller's (its words, its access and its scope), over args, which the
+ * ranking binds more of; the plan's query, a tsquery's expression over
+ * args; whether the plan holds no term to hold, so the vector alone ranks;
+ * and the request's text, vector, embeddings and page.
+ *
+ * @internal
+ */
+export interface RankInput {
+  readonly conditions: string[];
+  readonly args: unknown[];
+  readonly query: string;
+  readonly byVector: boolean;
+  readonly q: string;
+  readonly vector?: readonly number[];
+  readonly embeddings?: SearchEmbeddings;
+  readonly limit: number;
+  readonly offset: number;
+}
+
+/** A ranked row: its database (the environment index's), its table and key as the index holds them, its title, where it matched, its snippet and its place. @internal */
+export interface RankedRow {
+  readonly database?: string;
+  readonly table: string;
+  readonly key: string;
+  readonly title: string;
+  readonly matched: SearchHit['matched'];
+  readonly snippet: readonly SnippetPart[];
+  readonly place: number;
+}
+
+/**
+ * Ranks an index's rows (D155): the query a search of a database's index
+ * runs, and the one a search of the environment's runs over the same
+ * rows (#740), so both give the same answers. By the plan's words with
+ * ts_rank_cd, re-ranked by an embedding over the first RRF_WINDOW, or by
+ * the vector alone for a plan with no term to hold; one page, and the
+ * exact total.
+ *
+ * @internal
+ */
+export async function rankIndex(
+  db: OrmShape,
+  at: RankedIndex,
+  input: RankInput,
+  what: string
+): Promise<{ readonly rows: readonly RankedRow[]; readonly total: number; readonly reranked: boolean }> {
+  const { conditions, args, query, limit, offset } = input;
+  const { index, document, regconfig } = at;
+  const param = (value: unknown): string => {
+    args.push(value);
+    return `$${args.length}`;
+  };
+  // The columns a hit names its row by, and the order's ties after its rank.
+  const names = at.databases ? 'si.database, si.source_table, si.source_key' : 'si.source_table, si.source_key';
+  const ties = at.databases ? 'h.database, h.source_table, h.source_key' : 'h.source_table, h.source_key';
+  const picked = at.databases ? 'p.database, p.source_table, p.source_key' : 'p.source_table, p.source_key';
+  const rowOf = (row: Values, place: number, matched: SearchHit['matched'], snippet: readonly SnippetPart[]): RankedRow => ({
+    ...(at.databases ? { database: String(row.database) } : {}),
+    table: String(row.source_table),
+    key: String(row.source_key),
+    title: String(row.title ?? ''),
+    matched,
+    snippet,
+    place,
+  });
+  if (input.byVector) {
+    if (!input.embeddings) throw new TypeError(`${what}: a vector needs embeddings, which say its model`);
+    const v = param(unit(input.vector!));
+    conditions.push('si.embedding IS NOT NULL', `si.embedding_model = ${param(input.embeddings.model)}`, `cardinality(si.embedding) = cardinality(${v}::float8[])`);
+    const sql = `WITH hits AS (
+      SELECT ${names}, si.title,
+        (SELECT sum(a * b) FROM unnest(si.embedding, ${v}::float8[]) AS t(a, b)) AS similarity
+      FROM ${index} AS si
+      WHERE ${conditions.join(' AND ')}
+    ),
+    ranked AS (
+      SELECT h.*, row_number() OVER (ORDER BY h.similarity DESC, ${ties}) AS place FROM hits AS h
+    )
+    SELECT c.total, ${picked}, p.title, p.place
+    FROM (SELECT count(*) AS total FROM hits) AS c
+    LEFT JOIN (SELECT * FROM ranked ORDER BY place LIMIT ${limit} OFFSET ${offset}) AS p ON TRUE
+    ORDER BY p.place`;
+    const { rows } = await db.asSystem().query(sql, args);
+    const total = Number(rows[0]?.total ?? 0);
+    const out: RankedRow[] = [];
+    for (const row of rows) {
+      if (row.source_table === null || row.source_table === undefined) continue;
+      const title = String(row.title ?? '');
+      out.push(rowOf(row, offset + out.length + 1, 'title', title === '' ? [] : [{ text: title }]));
+    }
+    return { rows: out, total, reranked: true };
   }
 
   // The query's embedding, when embeddings are on or the request brings one.
   let vector: number[] | undefined;
   let model: string | undefined;
-  if (request.vector) {
-    if (!options.embeddings) throw new TypeError('searchTables: a vector needs embeddings, which say its model');
-    vector = unit(request.vector);
-    model = options.embeddings.model;
-  } else if (options.embeddings) {
+  if (input.vector) {
+    if (!input.embeddings) throw new TypeError(`${what}: a vector needs embeddings, which say its model`);
+    vector = unit(input.vector);
+    model = input.embeddings.model;
+  } else if (input.embeddings) {
     try {
-      const [embedded] = await options.embeddings.embed([request.q]);
+      const [embedded] = await input.embeddings.embed([input.q]);
       if (embedded && embedded.length > 0) {
         vector = unit(embedded);
-        model = options.embeddings.model;
+        model = input.embeddings.model;
       }
     } catch {
       // A model that fails leaves the text ranking as it is.
@@ -355,7 +475,7 @@ export async function searchTables(orm: object, principal: Principal | null, req
   }
 
   const ranked = `ranked AS (
-      SELECT h.*, row_number() OVER (ORDER BY h.rank DESC, h.source_table, h.source_key) AS text_place
+      SELECT h.*, row_number() OVER (ORDER BY h.rank DESC, ${ties}) AS text_place
       FROM hits AS h
     )`;
   let order = 'r.text_place';
@@ -381,18 +501,18 @@ export async function searchTables(orm: object, principal: Principal | null, req
   const matches = (column: string) => `to_tsvector(${regconfig}, COALESCE(p.${column}, '')) @@ q.q`;
   const sql = `WITH q AS (SELECT ${query} AS q),
     hits AS (
-      SELECT si.source_table, si.source_key, si.title, si.body, si.comments, si.files, si.embedding, si.embedding_model,
+      SELECT ${names}, si.title, si.body, si.comments, si.files, si.embedding, si.embedding_model,
         ts_rank_cd(${WEIGHTS}, ${document}, q.q) AS rank
       FROM ${index} AS si CROSS JOIN q
       WHERE ${conditions.join(' AND ')}
     ),
     ${ranked}${fused}
-    SELECT c.total, p.source_table, p.source_key, p.title, p.matched,
+    SELECT c.total, ${picked}, p.title, p.matched,
       ts_headline(${regconfig}, p.shown, q.q, ${headline}) AS snippet
     FROM (SELECT count(*) AS total FROM hits) AS c
     CROSS JOIN q
     LEFT JOIN LATERAL (
-      SELECT r.source_table, r.source_key, r.title, r.ord,
+      SELECT ${at.databases ? 'r.database, ' : ''}r.source_table, r.source_key, r.title, r.ord,
         CASE WHEN ${matches('title')} THEN 'title' WHEN ${matches('body')} THEN 'body' WHEN ${matches('comments')} THEN 'comments' WHEN ${matches('files')} THEN 'files' ELSE 'title' END AS matched,
         CASE WHEN ${matches('title')} THEN p.title WHEN ${matches('body')} THEN p.body WHEN ${matches('comments')} THEN p.comments WHEN ${matches('files')} THEN p.files ELSE p.title END AS shown
       FROM (
@@ -406,78 +526,12 @@ export async function searchTables(orm: object, principal: Principal | null, req
     ORDER BY p.ord`;
   const { rows } = await db.asSystem().query(sql, args);
   const total = Number(rows[0]?.total ?? 0);
-  const items: SearchHit[] = [];
+  const out: RankedRow[] = [];
   for (const row of rows) {
     if (row.source_table === null || row.source_table === undefined) continue;
-    const table = String(row.source_table);
-    const definition = all.get(table)?.definition;
-    const key = String(row.source_key);
-    items.push({
-      table,
-      key: definition?.uuid ? uuidFromDb(key) : key,
-      title: String(row.title ?? ''),
-      matched: row.matched as SearchHit['matched'],
-      snippet: snippetParts(String(row.snippet ?? '')),
-      place: offset + items.length + 1,
-    });
+    out.push(rowOf(row, offset + out.length + 1, row.matched as SearchHit['matched'], snippetParts(String(row.snippet ?? ''))));
   }
-  return { items, total, more: offset + items.length < total, reranked: vector !== undefined };
-}
-
-/**
- * A search by vector alone (#740): every index row conditions keep whose
- * embedding is of model and of vector's length, by cosine similarity,
- * best first, then table and key; one page of them and how many there
- * are, each matched by its title.
- */
-async function searchByVector(
-  db: OrmShape,
-  all: ReadonlyMap<string, { readonly definition: SearchableDefinition }>,
-  index: string,
-  conditions: string[],
-  args: unknown[],
-  vector: number[],
-  model: string,
-  limit: number,
-  offset: number
-): Promise<SearchResult> {
-  const param = (value: unknown): string => {
-    args.push(value);
-    return `$${args.length}`;
-  };
-  const v = param(vector);
-  conditions.push('si.embedding IS NOT NULL', `si.embedding_model = ${param(model)}`, `cardinality(si.embedding) = cardinality(${v}::float8[])`);
-  const sql = `WITH hits AS (
-      SELECT si.source_table, si.source_key, si.title,
-        (SELECT sum(a * b) FROM unnest(si.embedding, ${v}::float8[]) AS t(a, b)) AS similarity
-      FROM ${index} AS si
-      WHERE ${conditions.join(' AND ')}
-    ),
-    ranked AS (
-      SELECT h.*, row_number() OVER (ORDER BY h.similarity DESC, h.source_table, h.source_key) AS place FROM hits AS h
-    )
-    SELECT c.total, p.source_table, p.source_key, p.title, p.place
-    FROM (SELECT count(*) AS total FROM hits) AS c
-    LEFT JOIN (SELECT * FROM ranked ORDER BY place LIMIT ${limit} OFFSET ${offset}) AS p ON TRUE
-    ORDER BY p.place`;
-  const { rows } = await db.asSystem().query(sql, args);
-  const total = Number(rows[0]?.total ?? 0);
-  const items: SearchHit[] = [];
-  for (const row of rows) {
-    if (row.source_table === null || row.source_table === undefined) continue;
-    const table = String(row.source_table);
-    const key = String(row.source_key);
-    const title = String(row.title ?? '');
-    items.push({
-      table,
-      key: all.get(table)?.definition.uuid ? uuidFromDb(key) : key,
-      title,
-      matched: 'title',
-      snippet: title === '' ? [] : [{ text: title }],
-      place: offset + items.length + 1,
-    });
-  }
-  return { items, total, more: offset + items.length < total, reranked: true };
+  return { rows: out, total, reranked: vector !== undefined };
 }
 
 /** Throws for embeddings on SQLite, which re-rank on Postgres alone (D186): a TypeError for a request's vector, an Error for the options'. */
@@ -486,8 +540,8 @@ function refuseEmbeddings(what: string, request: boolean): never {
   throw request ? new TypeError(message) : new Error(message);
 }
 
-/** The scope values a search keeps to, each as text and, for a UUID, in its database form too. */
-function scopeForms(scope: string | readonly string[]): string[] {
+/** The scope values a search keeps to, each as text and, for a UUID, in its database form too. @internal */
+export function scopeForms(scope: string | readonly string[]): string[] {
   const forms = new Set<string>();
   for (const value of [scope].flat()) {
     if (typeof value !== 'string') throw new TypeError('searchTables: a scope is a text');
@@ -610,7 +664,8 @@ async function searchOnSQLite(
   return { items, total, more: offset + items.length < total, reranked: false };
 }
 
-function clean(text: unknown): string | null {
+/** @internal */
+export function clean(text: unknown): string | null {
   if (text === null || text === undefined) return null;
   const out = String(text).replace(MARKS, ' ').slice(0, MAX_INDEXED_TEXT);
   return out.trim() === '' ? null : out;

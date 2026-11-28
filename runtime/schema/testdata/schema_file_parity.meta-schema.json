@@ -7699,6 +7699,9 @@
             "$ref": "#/$defs/Origin"
           },
           "type": "array"
+        },
+        "search": {
+          "$ref": "#/$defs/ServiceRef"
         }
       },
       "type": "object"

@@ -183,6 +183,14 @@ export type SqlSearchConfig = {
    * Fold diacritics, so a word finds its accented forms: on Postgres the index's words and a search's query go through the unaccent dictionary (the migrations make a text search configuration, search_unaccent, and the unaccent extension where the database lacks it), and on SQLite the FTS5 table removes diacritics. Turning it on or off migrates the index: its GIN index is built again on Postgres, and its FTS5 table on SQLite. Unset is false.
    */
   readonly foldDiacritics?: boolean;
+  /**
+   * Search the database's @searchable tables through its environment's search index, which the stack's search database holds (@stack({ search }), #740): its worker copies each index row there after its commit, its tables' triggers enqueue every write of a row and its grants table's every write of a grant. Postgres alone. Unset is false.
+   */
+  readonly environment?: boolean;
+  /**
+   * Hold the environment's search index, environment_search_index, a copy of the index rows of the environment's databases that a stack names this database for (@stack({ search }), #740). Postgres alone. Unset is false.
+   */
+  readonly environmentIndex?: boolean;
 };
 
 /**

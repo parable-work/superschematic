@@ -16,13 +16,32 @@ import (
 // searchFoldsDiacritics is a DB service's outputs.sql.search.foldDiacritics
 // (#740): whether its search index folds diacritics.
 func searchFoldsDiacritics(cfg *schemaconfig.SchemaConfig) bool {
+	return searchOption(cfg, "foldDiacritics")
+}
+
+// searchEnvironment is a DB service's outputs.sql.search.environment
+// (#740): whether its @searchable tables are searched through their
+// environment's index, into which its worker copies their index rows.
+func searchEnvironment(cfg *schemaconfig.SchemaConfig) bool {
+	return searchOption(cfg, "environment")
+}
+
+// searchEnvironmentIndex is a DB service's
+// outputs.sql.search.environmentIndex (#740): whether it holds its
+// environment's search index.
+func searchEnvironmentIndex(cfg *schemaconfig.SchemaConfig) bool {
+	return searchOption(cfg, "environmentIndex")
+}
+
+// searchOption is the boolean outputs.sql.search.<name> of a DB service.
+func searchOption(cfg *schemaconfig.SchemaConfig, name string) bool {
 	if cfg == nil || cfg.Kind != ir.SchemaKindDB {
 		return false
 	}
 	sql, _ := cfg.Outputs["sql"].(map[string]any)
 	search, _ := sql["search"].(map[string]any)
-	fold, _ := search["foldDiacritics"].(bool)
-	return fold
+	on, _ := search[name].(bool)
+	return on
 }
 
 func sqlDialects(cfg *schemaconfig.SchemaConfig) []string {

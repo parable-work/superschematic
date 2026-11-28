@@ -63,6 +63,10 @@ func (e *emitter) emitStackDeclarations(def *ir.TypeDef) {
 			}
 			parts = append(parts, "images: ["+strings.Join(images, ", ")+"]")
 		}
+		if s.Search != nil {
+			// The database that holds the environment's search index (#740).
+			parts = append(parts, "search: "+e.handle(*s.Search))
+		}
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("stack"), objectLiteral(parts))
 	}
 	if s := def.Server; s != nil {

@@ -130,6 +130,13 @@ type Input struct {
 	// expansion reads.
 	SearchFoldsDiacritics bool
 
+	// SearchEnvironment is outputs.sql.search.environment (#740): the
+	// database's index rows are copied into its environment's index, and
+	// SearchEnvironmentIndex is outputs.sql.search.environmentIndex: the
+	// database holds that index. checkSearchEnvironment refuses either on
+	// a database that lists SQLite.
+	SearchEnvironment, SearchEnvironmentIndex bool
+
 	// GoServer is an API whose server is Go (outputs.api, language GO or
 	// unset, with the Go types on), which the loader reads from the config.
 	// checkGoFeatures refuses in it, and in its Database, each platform
@@ -333,6 +340,7 @@ func Run(schema *ir.Schema, in Input) *Result {
 	checkRowFeatures(schema, in, r)
 	checkCalendarSources(schema, r)
 	checkSearchables(schema, in, r)
+	checkSearchEnvironment(schema, in, r)
 	checkNotifications(schema, in, r)
 	checkAgents(schema, in, r)
 	checkParties(schema, in, r)

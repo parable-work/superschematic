@@ -25,27 +25,60 @@ const (
 	dateTimeScalar = "Temporal.DateTime"
 	floatScalar    = "Generic.Float64"
 	sha256Scalar   = "Crypto.SHA256"
+	int64Scalar    = "Generic.Int64"
 )
+
+// Options are a DB service's outputs.sql.search (#740).
+type Options struct {
+	// FoldDiacritics (foldDiacritics): the indexes' words are in
+	// ir.SearchFoldedConfig, which a piece of raw SQL makes on Postgres.
+	FoldDiacritics bool
+	// Environment (environment): the database's index rows are copied
+	// into its environment's index; its index carries
+	// ir.TypeDef.SearchEnvironment and the raw SQL of
+	// ir.SearchEnvironmentSequence.
+	Environment bool
+	// EnvironmentIndex (environmentIndex): the database holds its
+	// environment's index, ir.EnvironmentSearchIndexTypeName.
+	EnvironmentIndex bool
+}
 
 // Expand adds the search index to a schema with a @searchable table when
 // it has none yet, and fills each queue the declarations name that
-// declares no fields. With fold (outputs.sql.search.foldDiacritics, #740)
-// the index folds diacritics: its words are in ir.SearchFoldedConfig,
-// which a piece of its raw SQL makes on Postgres. It returns the scalar
-// names the added fields use, so the caller can hydrate any the schema
-// did not already reference.
-func Expand(schema *ir.Schema, fold bool) []string {
+// declares no fields; with opts.EnvironmentIndex it adds the
+// environment's index too, whether the schema has a @searchable table or
+// not. It returns the scalar names the added fields use, so the caller
+// can hydrate any the schema did not already reference.
+func Expand(schema *ir.Schema, opts Options) []string {
 	tables := schema.SearchableTables()
-	if len(tables) == 0 {
+	added := false
+	scalars := []string{uuidScalar, dateTimeScalar, floatScalar, sha256Scalar}
+	if len(tables) > 0 {
+		if schema.Types[ir.SearchIndexTypeName] == nil {
+			index := indexTable(tables[0].Owner, opts.FoldDiacritics)
+			if opts.Environment {
+				index.SearchEnvironment = true
+				index.RawSQL = append(index.RawSQL, sequencePiece())
+			}
+			schema.Types[ir.SearchIndexTypeName] = index
+		}
+		for _, td := range tables {
+			fill(schema, td.Searchable.Queue)
+		}
+		added = true
+	}
+	if opts.EnvironmentIndex && schema.Types[ir.EnvironmentSearchIndexTypeName] == nil {
+		// One piece makes the folded configuration, however many indexes
+		// are over it.
+		index := schema.Types[ir.SearchIndexTypeName]
+		piece := opts.FoldDiacritics && (index == nil || !index.SearchFolds)
+		schema.Types[ir.EnvironmentSearchIndexTypeName] = environmentTable(ownerOf(schema), opts.FoldDiacritics, piece)
+		scalars = append(scalars, int64Scalar)
+		added = true
+	}
+	if !added {
 		return nil
 	}
-	if schema.Types[ir.SearchIndexTypeName] == nil {
-		schema.Types[ir.SearchIndexTypeName] = indexTable(tables[0].Owner, fold)
-	}
-	for _, td := range tables {
-		fill(schema, td.Searchable.Queue)
-	}
-	scalars := []string{uuidScalar, dateTimeScalar, floatScalar, sha256Scalar}
 	for _, name := range scalars {
 		if schema.Scalars[name] == nil {
 			schema.Scalars[name] = &ir.ScalarDef{Name: name}

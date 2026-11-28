@@ -457,6 +457,23 @@ export {
 } from './search-tables.js';
 // The query syntax of search across tables (#740).
 export { MAX_QUERY_TERMS, ftsQuery, postgresQuery, searchPlan, type SearchPlan, type SearchTerm } from './search-query.js';
+// One search index per environment (#740): the copy of a source
+// database's index rows into the environment's index its stack's search
+// database holds, and the search that ranks it.
+export {
+  ENVIRONMENT_OBJECT_ROW,
+  SEARCH_ENVIRONMENT_SEQUENCE,
+  indexEnvironmentSearch,
+  reindexEnvironmentSearch,
+  searchEnvironment,
+  type EnvironmentCopy,
+  type EnvironmentIndex,
+  type EnvironmentSearchDefinition,
+  type EnvironmentSearchHit,
+  type EnvironmentSearchOptions,
+  type EnvironmentSearchRequest,
+  type EnvironmentSearchResult,
+} from './search-environment.js';
 // Events, notifications and channels (D153): the notifier that raises a
 // table's events in the caller's transaction, routes them by rows, holds
 // each recipient to the record's audience, delivers through the channel

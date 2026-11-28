@@ -96,6 +96,9 @@ func Service(schema *ir.Schema, outputs *registry.Outputs, dependencies map[stri
 		svc.Dialects = outputs.SQLDialects()
 		svc.Vectors = hasVectorColumns(schema)
 		svc.FieldKeys = outputs.EncryptionKey()
+		svc.Searchable = len(schema.SearchableTables()) > 0
+		svc.SearchEnvironment = schema.SearchesEnvironment()
+		svc.EnvironmentIndex = schema.EnvironmentSearchIndex() != nil
 		for _, td := range schema.Queues() {
 			svc.Queues = append(svc.Queues, td.Name)
 			if td.BehaviorQueue != nil {

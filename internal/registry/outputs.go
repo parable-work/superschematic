@@ -146,6 +146,18 @@ type SQLSearchConfig struct {
 	// word finds its accented forms: on Postgres through unaccent, on
 	// SQLite through FTS5's remove_diacritics.
 	FoldDiacritics bool `json:"foldDiacritics,omitempty"`
+
+	// Environment copies the index rows of the database's @searchable
+	// tables into its environment's search index, which the stack's
+	// search database holds: its tables' triggers enqueue every write of
+	// a row, and its grants table's every write of a grant, for its
+	// worker to copy. Postgres alone.
+	Environment bool `json:"environment,omitempty"`
+
+	// EnvironmentIndex makes the database hold its environment's search
+	// index, environment_search_index, which a stack names it for with
+	// @stack({ search }). Postgres alone.
+	EnvironmentIndex bool `json:"environmentIndex,omitempty"`
 }
 
 // SQLSystemActorConfig is outputs.sql.systemActor (D87): the user ID the

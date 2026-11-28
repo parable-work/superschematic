@@ -42,6 +42,12 @@ type ResolvedEnvironment struct {
 	Domain string       `json:"domain,omitempty"`
 	DNS    *ResolvedDNS `json:"dns,omitempty"`
 
+	// Search is the database that holds the environment's search index
+	// (#740), by its deployable's name: the database that hosts the
+	// stack's search database. Empty when the stack names none, and each
+	// database keeps its own index.
+	Search string `json:"search,omitempty"`
+
 	// Deployables are sorted by name.
 	Deployables []*ResolvedDeployable `json:"deployables"`
 
