@@ -140,7 +140,7 @@ type WiringConstructor func(deps Deps) (Wiring, error)
 // then the inbound path, which takes the notifier and the dispatcher's
 // approval of a send, and last the dispatcher is given both. A member of
 // Deps it already holds is kept, so an app that builds its own wins.
-func Wire(deps Deps, db *orm.Database, wiring Wiring) (Deps, error) {
+func Wire(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring) (Deps, error) {
 	if db == nil {
 		return deps, errors.New("{{ .SchemaName }}: Wire needs the ORM of {{ .Deps.Database }}")
 	}
@@ -245,7 +245,7 @@ func Wire(deps Deps, db *orm.Database, wiring Wiring) (Deps, error) {
 {{- else }}
 // as it is: the database keeps no grants.
 {{- end }}
-func Authenticator(deps Deps, db *orm.Database, wiring Wiring, inner func(http.Handler) http.Handler) func(http.Handler) http.Handler {
+func Authenticator(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring, inner func(http.Handler) http.Handler) func(http.Handler) http.Handler {
 {{- if and $w.Agents $w.Grants }}
 	if deps.Agents != nil {
 		return deps.Agents.Authenticator(db, inner, wiring.Authenticator)
@@ -290,7 +290,7 @@ func Authenticator(deps Deps, db *orm.Database, wiring Wiring, inner func(http.H
 {{- end }}
 //
 // Each path is wiring's when it names one.
-func Routes(deps Deps, db *orm.Database, wiring Wiring, auth func(http.Handler) http.Handler) *chi.Mux {
+func Routes(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring, auth func(http.Handler) http.Handler) *chi.Mux {
 	if auth == nil {
 		auth = func(next http.Handler) http.Handler { return next }
 	}
@@ -408,7 +408,7 @@ func principalOf(r *http.Request) (*orchestration.Principal, error) {
 // {{ .QueueFunc }} is the queue of the worker {{ .Name }}, {{ .Queue }}, the notifier's
 // (D190): each event routed and each notice delivered, escalated or
 // digested by Deps.Notifier, which Wire builds.
-func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue, error) {
+func {{ .QueueFunc }}(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring) (worker.Queue, error) {
 	if deps.Notifier == nil {
 		return worker.Queue{}, errors.New("{{ $.SchemaName }}: the worker {{ .Name }} needs Deps.Notifier, which Wire builds")
 	}
@@ -420,7 +420,7 @@ func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue,
 // dispatcher's (D192): each run request handed to Deps.Agents, which Wire
 // builds, and its prune the queue's and the transcripts' past their
 // retention.
-func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue, error) {
+func {{ .QueueFunc }}(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring) (worker.Queue, error) {
 	if deps.Agents == nil {
 		return worker.Queue{}, errors.New("{{ $.SchemaName }}: the worker {{ .Name }} needs Deps.Agents, which Wire builds")
 	}
@@ -431,7 +431,7 @@ func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue,
 // {{ .QueueFunc }} is the queue of the worker {{ .Name }}, {{ .Queue }}, D157's run
 // requests: each an inbound message's, which the inbound path enqueued,
 // handed to Deps.Agents as it is.
-func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue, error) {
+func {{ .QueueFunc }}(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring) (worker.Queue, error) {
 	if deps.Inbound == nil || deps.Agents == nil {
 		return worker.Queue{}, errors.New("{{ $.SchemaName }}: the worker {{ .Name }} needs Deps.Inbound and Deps.Agents, which Wire builds")
 	}
@@ -442,8 +442,9 @@ func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue,
 // {{ .QueueFunc }} is the queue of the worker {{ .Name }}, {{ .Queue }}, an @audience
 // declaration's (D156, #734): each message's rows, those that inherit
 // their audience from the parent it names, resolved again by
-// db.ResolveAudience after the parent's write.
-func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue, error) {
+// db.ResolveAudience after the parent's write. Postgres alone holds an
+// @audience queue (#734), so db is never the SQLite database's.
+func {{ .QueueFunc }}(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring) (worker.Queue, error) {
 	if db == nil {
 		return worker.Queue{}, errors.New("{{ $.SchemaName }}: the worker {{ .Name }} needs the ORM of {{ $.Deps.Database }}")
 	}
@@ -486,11 +487,17 @@ func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue,
 // declaration's (D155, D187): each message's row indexed again by
 // crosstable.IndexSearch over the database's CrossTables(), with wiring's
 // Indexing.
-func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue, error) {
+func {{ .QueueFunc }}(deps Deps, db {{ $w.DatabaseType }}, wiring Wiring) (worker.Queue, error) {
 	if db == nil {
 		return worker.Queue{}, errors.New("{{ $.SchemaName }}: the worker {{ .Name }} needs the ORM of {{ $.Deps.Database }}")
 	}
+{{- if $w.SQLite }}
+	// The database lists sqlite first, so the queue claims on its SQLite
+	// file (#717).
+	queue := orm.New{{ .Queue }}SQLiteQueue(db.SQL())
+{{- else }}
 	queue := db.{{ .Queue }}Queue()
+{{- end }}
 	host := db.CrossTables()
 	return worker.Queue{
 		Name:  {{ printf "%q" .Queue }},
@@ -520,8 +527,13 @@ func {{ .QueueFunc }}(deps Deps, db *orm.Database, wiring Wiring) (worker.Queue,
 		Fail:     queue.Fail,
 		Release:  queue.Release,
 		Prune:    queue.Prune,
+{{- if $w.SQLite }}
+		// SQLite holds no advisory locks and keeps no next due time: a
+		// worker in drain mode takes no slot and stops once idle (D145).
+{{- else }}
 		Slot:     queue.Slot,
 		NextDue:  queue.NextDue,
+{{- end }}
 	}, nil
 }
 {{- end }}

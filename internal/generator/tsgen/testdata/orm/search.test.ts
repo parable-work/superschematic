@@ -21,6 +21,7 @@ import {
 import { ObjectNotFoundError, type Bucket, type Principal } from '@superschematic/http-runtime';
 import { defineProvider, providersFrom, type FileProcessor } from '@superschematic/http-runtime/providers';
 import { createOrm, type FixtureSearchDbOrm } from './orm';
+import { paritySearches, parityAnswer, writeParityCorpus } from './search_parity';
 import { alice, bob, database, dsn, type TestDatabase } from './harness';
 
 const party = '3cKSm7Pv2EM8Wl4z4XvMh1';
@@ -342,6 +343,14 @@ describe.skipIf(dsn === '')('search across tables on Postgres', () => {
     expect(n).toBe(written.length + 1);
     expect([modelCalls, calls - textsBefore]).toEqual([6, written.length]);
     expect(await indexRows()).toEqual(written);
+  });
+
+  test("the parity file's searches answer the same titles in every runtime (#740)", async () => {
+    await writeParityCorpus('postgres', (text, values) => db.pool.query(text, values));
+    const answers: Record<string, unknown> = {};
+    for (const search of paritySearches) answers[search.name] = await parityAnswer(searchTables, orm, user(alice), search);
+    if (process.env.SEARCH_PARITY_PRINT) console.log(JSON.stringify(answers));
+    expect(answers).toEqual(Object.fromEntries(paritySearches.map(search => [search.name, search.postgres ?? null])));
   });
 });
 

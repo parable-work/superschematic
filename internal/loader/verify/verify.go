@@ -125,6 +125,11 @@ type Input struct {
 	// read them from, which leaves the dialects' rules unchecked.
 	Dialects []string
 
+	// SearchFoldsDiacritics is outputs.sql.search.foldDiacritics (#740):
+	// the database's search index folds diacritics, which the search
+	// expansion reads.
+	SearchFoldsDiacritics bool
+
 	// GoServer is an API whose server is Go (outputs.api, language GO or
 	// unset, with the Go types on), which the loader reads from the config.
 	// checkGoFeatures refuses in it, and in its Database, each platform

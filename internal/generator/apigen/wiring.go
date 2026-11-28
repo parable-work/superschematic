@@ -74,23 +74,30 @@ type DepsWiring struct {
 
 	// AudienceQueues are the @audience declarations' queues (#734),
 	// sorted: a @worker of one resolves each message's rows through the
-	// ORM's ResolveAudience.
+	// ORM's ResolveAudience. The loader refuses a queue on a database
+	// that lists sqlite, so these are a Postgres database's.
 	AudienceQueues []string
 
-	// Grants reports whether the database keeps @accessGrants on
-	// Postgres, whose tokens Authenticator establishes
-	// (session.GrantAuthenticator): a Go server serves grants on SQLite
-	// through none yet (GoServerSQLiteErr).
+	// Grants reports whether the database keeps @accessGrants, whose
+	// tokens Authenticator establishes (session.GrantAuthenticator), on
+	// Postgres or on SQLite (#703's AuthenticateGrant).
 	Grants bool
+
+	// SQLite reports whether the database's DB service lists sqlite first
+	// (#717): Wire, Authenticator, Routes and the queues take the ORM's
+	// SQLiteDatabase, which the entrypoints open over the SQLite file, and
+	// a @searchable queue claims there (New<Queue>SQLiteQueue).
+	SQLite bool
 }
 
 // WiringOf is the runtime wiring of db, the API's database, on SQLite
-// when sqlite: nil for a database with none of it.
+// when sqlite: nil for a database with none of it. The runtime is the
+// same on either (#618, #717); only the ORM's type it takes differs.
 func WiringOf(db *ir.Schema, sqlite bool) *DepsWiring {
 	if db == nil {
 		return nil
 	}
-	w := &DepsWiring{}
+	w := &DepsWiring{SQLite: sqlite}
 	if db.UsesNotifications() {
 		if dispatch := db.NotifierTable(ir.NotifierDispatch); dispatch != nil {
 			w.Notifier = dispatch.Name
@@ -126,7 +133,7 @@ func WiringOf(db *ir.Schema, sqlite bool) *DepsWiring {
 		}
 	}
 	sort.Strings(w.AudienceQueues)
-	w.Grants = db.AccessGrantsTable() != nil && !sqlite
+	w.Grants = db.AccessGrantsTable() != nil
 	if !w.Builds() && !w.Calendar && !w.Search && !w.Grants && len(w.AudienceQueues) == 0 {
 		return nil
 	}
@@ -154,6 +161,16 @@ func (w *DepsWiring) Serves() bool { return w != nil && (w.Builds() || w.Calenda
 
 // CrossTables reports whether the database's ORM has CrossTables (D187).
 func (w *DepsWiring) CrossTables() bool { return w != nil && (w.Calendar || w.Search) }
+
+// DatabaseType is the ORM's type Wire, Authenticator, Routes and the
+// queues take: the SQLiteDatabase over a database that lists sqlite first
+// (#717), the Database over a pool otherwise.
+func (w *DepsWiring) DatabaseType() string {
+	if w != nil && w.SQLite {
+		return "*orm.SQLiteDatabase"
+	}
+	return "*orm.Database"
+}
 
 // RuntimeOf is the runtime handler of a @worker of queue: one of the
 // Runtime constants, or "" for a queue whose messages the implementation

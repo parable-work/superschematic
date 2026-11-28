@@ -18,14 +18,20 @@
 //! pages and its total are exact and a row the caller may not read never
 //! shows, as a gap or otherwise:
 //!
-//! - The words: each whitespace-separated word of the query is a phrase
-//!   of the words Postgres's parser finds in it, and a row matches when it
-//!   holds every word (`phraseto_tsquery` over the `simple` configuration).
+//! - The words: the query is read into a plan ([`query`], #740): quoted
+//!   phrases, prefixes (`wal*`), excluded terms (`-oak`) and `OR` between
+//!   terms, each term a phrase of the words Postgres's parser finds in it.
+//!   A row matches when it holds a term of every group and no excluded
+//!   term, in the definition's text search configuration (`simple`, or
+//!   `search_unaccent`, which folds diacritics).
 //! - The order: `ts_rank_cd` over the row's words, weighed by where each
 //!   is (title A, body B, conversation C, files D), then the table and the
 //!   key. With an embedding, the first [`RRF_WINDOW`] by text are re-ranked
 //!   by reciprocal rank fusion of their text place and their place by
-//!   cosine similarity, [`RRF_K`] the engine's constant.
+//!   cosine similarity, [`RRF_K`] the engine's constant. A query with no
+//!   term to hold that brings a vector ranks by the vector alone: every
+//!   index row the caller may read whose embedding is of the model, by
+//!   cosine similarity (#740).
 //! - Access: the caller's audience is checked on the index row's copied
 //!   columns ([`audience_conditions`](super::audience_conditions)). A caller
 //!   with grants, a party or an agent run, reaches a table's rows only
@@ -41,8 +47,8 @@
 //!
 //! On a SQLite file ([`sqlite`], D186, #615) the index is the same table,
 //! its audience a JSON array (D182), and its words an FTS5 table beside it
-//! that the index table's triggers keep: a search matches each word as a
-//! quoted FTS5 phrase and ranks by bm25 with the weights Postgres gives
+//! that the index table's triggers keep: a search matches the plan's FTS5
+//! expression and ranks by bm25 with the weights Postgres gives
 //! the title, the body, the conversation and the files, as the TypeScript
 //! `searchOnSQLite` and the Go `crosstable` do. Embeddings are refused
 //! there.
@@ -121,12 +127,18 @@ pub struct SearchableDefinition {
     /// Postgres, whose `document` weighs them.
     #[serde(default)]
     pub fts: Option<String>,
+    /// The text search configuration the index's words are in on
+    /// Postgres, `simple` when none; `search_unaccent` folds diacritics
+    /// (#740).
+    #[serde(default)]
+    pub config: Option<String>,
 }
 
 /// A search.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SearchRequest {
-    /// The words: a row matches when it holds every one.
+    /// The query (#740): words and quoted phrases a row holds each of,
+    /// prefixes (`wal*`), excluded terms (`-oak`) and `OR` between terms.
     pub q: String,
     /// Only these tables, by type name; every `@searchable` table the
     /// caller may read when absent.
@@ -439,6 +451,9 @@ pub use shared::*;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
+pub mod query;
+pub use query::{fts_query, postgres_query, search_plan, SearchPlan, SearchTerm, MAX_QUERY_TERMS};
+
 #[cfg(any(feature = "postgres", feature = "sqlite"))]
 mod shared {
     use http::request::Parts;
@@ -602,8 +617,10 @@ mod pg {
     ) -> Result<SearchResult, Error> {
         let limit = whole(request.limit, 20, 1, MAX_LIMIT, "limit")?;
         let offset = whole(request.offset, 0, 0, MAX_OFFSET, "offset")?;
-        let words = search_words(&request.q);
-        if words.is_empty() {
+        let plan = search_plan(&request.q);
+        // A query with no term to hold matches nothing, unless a vector
+        // ranks it.
+        if plan.all.is_empty() && request.vector.is_none() {
             return Ok(SearchResult::default());
         }
         let definition = repositories.definition();
@@ -642,17 +659,23 @@ mod pg {
             return Ok(SearchResult::default());
         };
         let (index, document) = (first.index.clone(), first.document.clone());
+        let regconfig = format!(
+            "'{}'::regconfig",
+            first.config.as_deref().unwrap_or("simple")
+        );
 
         let mut args: Vec<Bound> = Vec::new();
-        let query = words
-            .iter()
-            .map(|word| {
-                let p = param(&mut args, Value::String(word.clone()));
-                format!("phraseto_tsquery('simple'::regconfig, {p})")
-            })
-            .collect::<Vec<_>>()
-            .join(" && ");
-        let mut conditions = vec![format!("{document} @@ q.q")];
+        let by_vector = plan.all.is_empty();
+        let query = postgres_query(&plan, &regconfig, &mut |value| {
+            param(&mut args, Value::String(value))
+        });
+        let mut conditions = if !by_vector {
+            vec![format!("{document} @@ q.q")]
+        } else if plan.none.is_empty() {
+            Vec::new()
+        } else {
+            vec![format!("NOT ({document} @@ ({query}))")]
+        };
         // The tables: for a caller with grants, each through its
         // repository's conditions for that caller, an EXISTS back to its
         // rows.
@@ -710,6 +733,25 @@ mod pg {
             }
             let p = param(&mut args, Value::Array(forms));
             conditions.push(format!("si.scope = ANY({p}::text[])"));
+        }
+        if by_vector {
+            let Some(embeddings) = &options.embeddings else {
+                return Err(Error::Invalid(
+                    "search_tables: a vector needs embeddings, which say its model".to_owned(),
+                ));
+            };
+            let vector = unit(request.vector.as_deref().unwrap_or_default())?;
+            return search_by_vector(
+                repositories.client(),
+                &all,
+                &index,
+                conditions,
+                args,
+                vector,
+                &embeddings.model,
+                (limit, offset),
+            )
+            .await;
         }
 
         // The query's embedding, when embeddings are on or the request
@@ -774,9 +816,8 @@ mod pg {
         let headline = format!(
             "'StartSel={OPEN}, StopSel={CLOSE}, MaxWords=24, MinWords=12, ShortWord=0, HighlightAll=false, MaxFragments=0'"
         );
-        let matches = |column: &str| {
-            format!("to_tsvector('simple'::regconfig, COALESCE(p.{column}, '')) @@ q.q")
-        };
+        let matches =
+            |column: &str| format!("to_tsvector({regconfig}, COALESCE(p.{column}, '')) @@ q.q");
         let (mt, mb, mc, mf) = (
             matches("title"),
             matches("body"),
@@ -794,7 +835,7 @@ mod pg {
     ),
     {ranked}{fused}
     SELECT c.total, p.source_table, p.source_key, p.title, p.matched,
-      ts_headline('simple'::regconfig, p.shown, q.q, {headline}) AS snippet
+      ts_headline({regconfig}, p.shown, q.q, {headline}) AS snippet
     FROM (SELECT count(*) AS total FROM hits) AS c
     CROSS JOIN q
     LEFT JOIN LATERAL (
@@ -849,6 +890,97 @@ mod pg {
             total,
             more,
             reranked,
+        })
+    }
+
+    /// A search by vector alone (#740), the TypeScript runtime's
+    /// `searchByVector`: every index row `conditions` keep whose embedding
+    /// is of `model` and of `vector`'s length, by cosine similarity, best
+    /// first, then table and key; one page of them and how many there are,
+    /// each matched by its title. `args` are the values `conditions` bind.
+    #[allow(clippy::too_many_arguments)]
+    async fn search_by_vector<C: GenericClient + Sync>(
+        client: &C,
+        all: &[(&str, &SearchableDefinition)],
+        index: &str,
+        mut conditions: Vec<String>,
+        mut args: Vec<Bound>,
+        vector: Vec<f64>,
+        model: &str,
+        (limit, offset): (i64, i64),
+    ) -> Result<SearchResult, Error> {
+        let v = param(
+            &mut args,
+            Value::Array(vector.into_iter().map(Value::from).collect()),
+        );
+        let m = param(&mut args, Value::String(model.to_owned()));
+        conditions.push("si.embedding IS NOT NULL".to_owned());
+        conditions.push(format!("si.embedding_model = {m}"));
+        conditions.push(format!(
+            "cardinality(si.embedding) = cardinality({v}::float8[])"
+        ));
+        let sql = format!(
+            "WITH hits AS (
+      SELECT si.source_table, si.source_key, si.title,
+        (SELECT sum(a * b) FROM unnest(si.embedding, {v}::float8[]) AS t(a, b)) AS similarity
+      FROM {index} AS si
+      WHERE {where_}
+    ),
+    ranked AS (
+      SELECT h.*, row_number() OVER (ORDER BY h.similarity DESC, h.source_table, h.source_key) AS place FROM hits AS h
+    )
+    SELECT c.total, p.source_table, p.source_key, p.title, p.place
+    FROM (SELECT count(*) AS total FROM hits) AS c
+    LEFT JOIN (SELECT * FROM ranked ORDER BY place LIMIT {limit} OFFSET {offset}) AS p ON TRUE
+    ORDER BY p.place",
+            where_ = conditions.join(" AND "),
+        );
+        let rows = query_rows(client, &sql, &args).await?;
+        let total = rows
+            .first()
+            .and_then(|row| row.first())
+            .map_or(0, |value| match value {
+                Value::Number(n) => n.as_u64().unwrap_or(0),
+                Value::String(s) => s.parse().unwrap_or(0),
+                _ => 0,
+            });
+        let offset = u64::try_from(offset).unwrap_or(0);
+        let mut items: Vec<SearchHit> = Vec::new();
+        for row in &rows {
+            let Some(Value::String(table)) = row.get(1) else {
+                continue;
+            };
+            let uuid = all.iter().any(|(name, d)| name == table && d.uuid);
+            let key = text_of(row.get(2).unwrap_or(&Value::Null));
+            let key = if uuid {
+                parse_uuid(&key).map_or(key, uuid_to_base62)
+            } else {
+                key
+            };
+            let title = text_of(row.get(3).unwrap_or(&Value::Null));
+            let snippet = if title.is_empty() {
+                Vec::new()
+            } else {
+                vec![SnippetPart {
+                    text: title.clone(),
+                    matched: false,
+                }]
+            };
+            items.push(SearchHit {
+                table: table.clone(),
+                key,
+                title,
+                matched: "title".to_owned(),
+                snippet,
+                place: offset + items.len() as u64 + 1,
+            });
+        }
+        let more = offset + (items.len() as u64) < total;
+        Ok(SearchResult {
+            items,
+            total,
+            more,
+            reranked: true,
         })
     }
 
