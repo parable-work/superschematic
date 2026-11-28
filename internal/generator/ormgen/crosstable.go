@@ -147,6 +147,7 @@ func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel, sqlite bool) 
 			onSQLite := make(map[string]searchableDef, len(searchable))
 			for name, def := range searchable {
 				def.Document = ""
+				def.Config = ""
 				def.FTS = sqlutil.QuoteIdentifier(sqlutil.SearchFTSTable)
 				def.KeyType = "text"
 				def.IndexAudience = &searchIndexAudienceDef{Contains: sqlutil.SQLiteAudienceContains, Placeholder: sqlutil.SQLiteAudiencePlaceholder}
@@ -253,8 +254,12 @@ func occurrencesOf(schema *ir.Schema, td *ir.TypeDef, byType map[string]*sqlutil
 
 // searchableDef is crosstable.Searchable, tsgen's SearchableDefinition.
 type searchableDef struct {
-	Index     string             `json:"index"`
-	Document  string             `json:"document"`
+	Index    string `json:"index"`
+	Document string `json:"document"`
+	// Config is the text search configuration the index's words are in
+	// on Postgres, when it is not simple: search_unaccent, which folds
+	// diacritics (#740).
+	Config    string             `json:"config,omitempty"`
 	Table     string             `json:"table"`
 	Key       string             `json:"key"`
 	KeyType   string             `json:"keyType"`
@@ -308,7 +313,8 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, byType map[string]*sqlutil.
 	key := table.KeyColumn()
 	out := searchableDef{
 		Index:    index.Quoted,
-		Document: ir.SearchDocument("si"),
+		Document: ir.SearchDocumentIn(schema.SearchConfig(), "si"),
+		Config:   searchConfigOf(schema),
 		Table:    table.Quoted,
 		Key:      key.Quoted,
 		KeyType:  strings.ToLower(key.Type),
@@ -374,4 +380,13 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, byType map[string]*sqlutil.
 		}
 	}
 	return out, nil
+}
+
+// searchConfigOf is the schema's search index's text search configuration
+// when it is not simple (#740), "" when it is.
+func searchConfigOf(schema *ir.Schema) string {
+	if config := schema.SearchConfig(); config != ir.SearchTextConfig {
+		return config
+	}
+	return ""
 }

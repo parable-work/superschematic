@@ -95,6 +95,8 @@ export {
   searchTables,
   searchWords,
 } from './search-tables.js';
+// The query syntax of search across tables (#740).
+export { MAX_QUERY_TERMS, ftsQuery, postgresQuery, searchPlan, type SearchPlan, type SearchTerm } from './search-query.js';
 export type * from './search-tables.js';
 // The platform's features that enqueue in a transaction and drain a queue,
 // on SQLite and D1 as on Postgres (D189): the notifier (D153), the inbound

@@ -120,6 +120,10 @@ const searchIndexAlias = "si"
 type rustSearchable struct {
 	Index     string              `json:"index"`
 	Document  string              `json:"document"`
+	// Config is the text search configuration the index's words are in
+	// on Postgres, when it is not simple: search_unaccent, which folds
+	// diacritics (#740).
+	Config string `json:"config,omitempty"`
 	Table     string              `json:"table"`
 	Key       string              `json:"key"`
 	KeyType   string              `json:"keyType"`
@@ -146,6 +150,7 @@ func sqliteSearchable(postgres *rustSearchable) *rustSearchable {
 	}
 	s := *postgres
 	s.Document = ""
+	s.Config = ""
 	s.FTS = sqlutil.QuoteIdentifier(sqlutil.SearchFTSTable)
 	s.KeyType = "text"
 	return &s
@@ -208,7 +213,8 @@ func searchableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel
 	key := table.KeyColumn()
 	out := &rustSearchable{
 		Index:    index.Quoted,
-		Document: ir.SearchDocument(searchIndexAlias),
+		Document: ir.SearchDocumentIn(schema.SearchConfig(), searchIndexAlias),
+		Config:   searchConfigOf(schema),
 		Table:    table.Quoted,
 		Key:      key.Quoted,
 		KeyType:  strings.ToLower(key.Type),
@@ -284,4 +290,13 @@ func sortedNames(schema *ir.Schema) []string {
 	}
 	slices.Sort(names)
 	return names
+}
+
+// searchConfigOf is the schema's search index's text search configuration
+// when it is not simple (#740), "" when it is.
+func searchConfigOf(schema *ir.Schema) string {
+	if config := schema.SearchConfig(); config != ir.SearchTextConfig {
+		return config
+	}
+	return ""
 }
