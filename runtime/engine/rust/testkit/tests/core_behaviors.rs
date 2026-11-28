@@ -451,11 +451,28 @@ fn it_runs_the_document_the_core_binary_builds_with_all_three_composed_on_one_ty
 }
 
 /// A document of the fixtures the core binary loads with no extension
-/// linked, by its service's directory and file.
+/// linked, by its service's directory and file. A fixture that composes
+/// Links, Search, Queue or Branches, which the loader refuses since D103
+/// folded them into schema features, is the engine's copy of it
+/// (`runtime/engine/testdata/documents`).
 fn fixture(service: &str, file: &str) -> Value {
-    let path = repository().join(format!(
-        "internal/loader/testdata/services/{service}/src/{file}"
-    ));
+    const ENGINE_COPIES: [&str; 6] = [
+        "fixture-branches-json",
+        "fixture-cross-instance-json",
+        "fixture-numbering-json",
+        "fixture-reactions-json",
+        "fixture-search-json",
+        "fixture-workqueue-json",
+    ];
+    let path = if ENGINE_COPIES.contains(&service) {
+        repository().join(format!(
+            "runtime/engine/testdata/documents/{service}/{file}"
+        ))
+    } else {
+        repository().join(format!(
+            "internal/loader/testdata/services/{service}/src/{file}"
+        ))
+    };
     serde_json::from_str(&std::fs::read_to_string(&path).expect("the fixture document"))
         .expect("JSON")
 }

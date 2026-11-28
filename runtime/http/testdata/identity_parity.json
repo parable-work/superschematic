@@ -22,6 +22,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -71,6 +74,9 @@
             "iterations": 3,
             "parallelism": 4
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -99,6 +105,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -127,6 +136,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -156,6 +168,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -184,6 +199,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -212,6 +230,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -238,6 +259,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -264,6 +288,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -291,6 +318,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -317,6 +347,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -349,6 +382,9 @@
             "iterations": 1,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -375,6 +411,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -401,6 +440,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -427,6 +469,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -454,6 +499,9 @@
             "iterations": 2,
             "parallelism": 1
           }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
         }
       }
     },
@@ -812,6 +860,311 @@
       "name": "a fractional number of seconds is refused",
       "input": {
         "sessionTtlSeconds": 1.5
+      },
+      "want": null
+    },
+    {
+      "name": "an OAuth public base URL",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com/api/notes"
+        }
+      },
+      "want": {
+        "sessionTtlSeconds": 1209600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        },
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com/api/notes"
+        }
+      }
+    },
+    {
+      "name": "an OAuth public base URL at the origin's root",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://api.example.com"
+        }
+      },
+      "want": {
+        "sessionTtlSeconds": 1209600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        },
+        "oauth": {
+          "publicBaseUrl": "https://api.example.com"
+        }
+      }
+    },
+    {
+      "name": "an OAuth public base URL with a port",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com:8443/api/notes"
+        }
+      },
+      "want": {
+        "sessionTtlSeconds": 1209600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        },
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com:8443/api/notes"
+        }
+      }
+    },
+    {
+      "name": "an OAuth public base URL over http on localhost",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "http://localhost:4000/api/notes"
+        }
+      },
+      "want": {
+        "sessionTtlSeconds": 1209600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        },
+        "oauth": {
+          "publicBaseUrl": "http://localhost:4000/api/notes"
+        }
+      }
+    },
+    {
+      "name": "an OAuth public base URL over http on 127.0.0.1",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "http://127.0.0.1:4000"
+        }
+      },
+      "want": {
+        "sessionTtlSeconds": 1209600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        },
+        "oauth": {
+          "publicBaseUrl": "http://127.0.0.1:4000"
+        }
+      }
+    },
+    {
+      "name": "an OAuth public base URL over http on [::1]",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "http://[::1]:4000"
+        }
+      },
+      "want": {
+        "sessionTtlSeconds": 1209600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        },
+        "oauth": {
+          "publicBaseUrl": "http://[::1]:4000"
+        }
+      }
+    },
+    {
+      "name": "an empty OAuth config",
+      "input": {
+        "oauth": {}
+      },
+      "want": {
+        "sessionTtlSeconds": 1209600,
+        "idleTimeoutSeconds": 0,
+        "touchIntervalSeconds": 60,
+        "apiKeyMaxTtlSeconds": 31536000,
+        "cookie": {
+          "name": "__Host-session",
+          "domain": "",
+          "secure": true,
+          "sameSite": "Lax"
+        },
+        "trustedOrigins": [],
+        "password": {
+          "argon2": {
+            "memoryKiB": 19456,
+            "iterations": 2,
+            "parallelism": 1
+          }
+        },
+        "oauth": {
+          "publicBaseUrl": ""
+        }
+      }
+    },
+    {
+      "name": "an OAuth public base URL over http elsewhere is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "http://app.example.com"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an OAuth public base URL with a trailing slash is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com/api/notes/"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an OAuth public base URL of a bare slash is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com/"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an OAuth public base URL with a query is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com?x=1"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an OAuth public base URL with a fragment is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://app.example.com#top"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an OAuth public base URL with a user is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "https://me@app.example.com"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an OAuth public base URL without a scheme is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "app.example.com"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an OAuth public base URL of another scheme is refused",
+      "input": {
+        "oauth": {
+          "publicBaseUrl": "ftp://app.example.com"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an unknown OAuth member is refused",
+      "input": {
+        "oauth": {
+          "issuer": "https://app.example.com"
+        }
+      },
+      "want": null
+    },
+    {
+      "name": "an OAuth member named in another case is refused",
+      "input": {
+        "oauth": {
+          "publicBaseURL": "https://app.example.com"
+        }
       },
       "want": null
     },

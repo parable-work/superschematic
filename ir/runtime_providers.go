@@ -113,9 +113,17 @@ type RuntimeProvider struct {
 	// loader's alone, and no schema.json holds it.
 	Dir string `json:"-"`
 
-	// Path is the package's directory as the API's config lists it,
-	// relative to the service's directory, in slash form.
+	// Path is the entry of the API's config that lists the provider: its
+	// directory relative to the service's directory, in slash form, or its
+	// npm name (Npm).
 	Path string `json:"path"`
+
+	// Npm is the package's npm name when the API's config lists it by that
+	// name rather than by its directory (D159, #608): the name a
+	// TypeScript server imports it by, which resolves from the service's
+	// node_modules. Dir is where the loader found it there. Empty for a
+	// provider listed by its directory.
+	Npm string `json:"npm,omitempty"`
 
 	// Module is the Go module the directory holds, as its go.mod names it
 	// (D184): the module a Go server imports, whose root package exports

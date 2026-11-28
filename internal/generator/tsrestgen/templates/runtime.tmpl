@@ -13,7 +13,7 @@ import type { Principal } from '{{ .RuntimePackage }}';
 {{- if .HasRuntimeMCP }}
 import type { McpServedTool } from '{{ .RuntimePackage }}/mcp';
 {{- end }}
-import { {{ join .RuntimeImports ", " }} } from '{{ .RuntimePackage }}/postgres';
+import { {{ join .RuntimeImports ", " }} } from '{{ .RuntimePackage }}{{ .RuntimeEntry }}';
 {{- if .RuntimeQueueImports }}
 import { {{ join .RuntimeQueueImports ", " }} } from '{{ .Deps.DatabaseTypesPackage }}{{ .QueuesEntry }}';
 {{- end }}
@@ -200,6 +200,34 @@ export function dispatchAgentMessage(deps: Deps, message: unknown): Promise<void
 /** Hands a message of {{ .Deps.Notifier.Dispatch }} to the notifier as it is: what a worker of it runs. */
 export function notifyMessage(deps: Deps, message: unknown): Promise<void> {
   return deps.notifier.handle(message as NoticeWork);
+}
+
+/**
+ * The prune a worker of {{ .Deps.Notifier.Dispatch }} runs beside its queue's, as it starts
+ * and every five minutes, and at each firing on Workers: every channel
+ * adapter's health asked on its own, which raises channel.down for each
+ * that fails, at most every five minutes, and the deliveries past their
+ * retention deleted (D153, #702).
+ */
+export function notifierUpkeepOf(deps: Deps): (limit: number) => Promise<number> {
+  return notifierUpkeep(deps.notifier, { log: deps.logger.child({ component: 'notifier' }) });
+}
+{{- end }}
+{{- if .HasFileProcessing }}
+
+/**
+ * One pass of the file processor over what {{ .Deps.Database }}'s attachments have pending
+ * (D154, D159, #702): each object's bytes, read from options.files.bucket,
+ * handed to the files slots deps.providers fills, in slot order; its text
+ * recorded as the files' extractedText, which search indexes with its row
+ * (D155), and its preview put beside it. What an implementation's job runs
+ * on a schedule, or an operation after an upload completes.
+ */
+export function processPendingFiles(deps: Deps, options: RuntimeOptions, run: { readonly limit?: number } = {}): Promise<FileProcessingRun> {
+  if (!options.files) {
+    throw new Error({{ tsString (printf "%s: processPendingFiles reads the attachments' objects from the bucket createRuntimeOptions gives as files.bucket, and it gives none" .SchemaName) }});
+  }
+  return processFiles({ log: deps.logger.child({ component: 'files' }), ...options.files, orm: deps.orm, providers: deps.providers }, run);
 }
 {{- end }}
 {{- if .HasSearch }}

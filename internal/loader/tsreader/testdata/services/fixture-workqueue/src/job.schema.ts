@@ -20,7 +20,6 @@ import { Validate, behavior } from "@superschematic/schema";
   overridePermission: "jobs.override",
 })
 @behavior("Assignment", { permission: "jobs.assign" })
-@behavior("Queue", { claim: { from: ["queued"], to: "running" }, priorityField: "priority", match: ["topic"] })
 @behavior("Budget", { meters: { cpuSeconds: { limit: 3600, reserve: 600, reset: "daily" } }, limitPermission: "jobs.budget" })
 @behavior("Retries", {
   classes: { timeout: { attempts: 3 }, invalidOutput: { attempts: 2 }, rejected: "terminal" },

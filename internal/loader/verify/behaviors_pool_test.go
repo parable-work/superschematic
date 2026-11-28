@@ -118,23 +118,6 @@ func TestPoolConfigShapeIsTheDeclarations(t *testing.T) {
 	}
 }
 
-// TestPoolOnAnEngineTypeRefused (D104): Pool is the behaviors' core's
-// alone, which no engine implements, so an engine type's @behavior use of
-// it is refused, naming the table form.
-func TestPoolOnAnEngineTypeRefused(t *testing.T) {
-	const want = "type Note: behavior Pool is implemented by the behaviors' core alone, which runs it on a table, and no engine implements it: write implements Pool<Note, { ... }> on a DB table (D104)"
-	_, err := loadTasks(t, func(doc, _ map[string]any) {
-		doc["types"].(map[string]any)["Note"] = map[string]any{"name": "Note", "role": "DBTable", "behaviors": []any{
-			map[string]any{"name": "Pool", "config": map[string]any{"order": "rank"}},
-		}, "fields": []any{
-			taskField("id", "Identity.UUID", map[string]any{"required": true, "key": true}),
-		}}
-	})
-	if err == nil || !strings.Contains(err.Error(), want) || strings.Count(err.Error(), "behaviors' core alone") != 1 {
-		t.Fatalf("LoadService = %v, want one problem, %q", err, want)
-	}
-}
-
 // TestPoolTableWithoutBudgetLoads (D104): a table that implements Pool and
 // no behavior that implements Capacity loads with no warning, since
 // Capacity answers room for every member of it; it keeps Pool's four owned

@@ -37,7 +37,7 @@ func TestCommerceFixtureLoads(t *testing.T) {
 		t.Errorf("the fixture's warnings =\n%q\nwant none", warnings)
 	}
 	inventory, checkout := db.Types["Inventory"], db.Types["Checkout"]
-	if inventory == nil || inventory.IsEngineType() || !inventory.Optimistic || checkout == nil || !checkout.Optimistic {
+	if inventory == nil || len(inventory.TypeBehaviors()) > 0 || !inventory.Optimistic || checkout == nil || !checkout.Optimistic {
 		t.Fatalf("Inventory = %s, Checkout = %s", marshal(t, inventory), marshal(t, checkout))
 	}
 	uses := func(td *ir.TypeDef) []string {

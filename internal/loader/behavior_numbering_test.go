@@ -37,7 +37,7 @@ func TestNumberingFixtureLoads(t *testing.T) {
 		t.Errorf("the fixture's warnings =\n%q\nwant none", warnings)
 	}
 	invoice, ticket := db.Types["Invoice"], db.Types["Ticket"]
-	if invoice == nil || invoice.IsEngineType() || !invoice.Optimistic || ticket == nil || !ticket.Optimistic {
+	if invoice == nil || len(invoice.TypeBehaviors()) > 0 || !invoice.Optimistic || ticket == nil || !ticket.Optimistic {
 		t.Fatalf("Invoice = %s, Ticket = %s", marshal(t, invoice), marshal(t, ticket))
 	}
 	if refs := invoice.FieldBehaviors(); len(refs) != 1 || refs[0].Name != "Numbering" || refs[0].Field != "number" ||

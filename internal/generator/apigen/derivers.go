@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/goutil"
+	ir "github.com/parable-work/superschematic/ir"
 )
 
 // The derivers of a Go API (D146): deps.go declares Derivers, a field per
@@ -12,8 +13,55 @@ import (
 // tables, typed by the field through the database's Go types, a struct of
 // the inputs of each, and DeriversConstructor, the signature of the
 // implementation's NewDerivers. A deriver's entrypoint hands each stale
-// field to its method. A Go API's deriver fills tables that implement
-// Derived alone: one of engine types is refused (stack.DeriverLanguages).
+// field to its method.
+
+// DeriverInfo is a deriver of an API (D146): its @deriver class, the
+// subject it acts as and the permissions it holds, the tables whose Derived
+// fields it fills, and how it runs unless an environment changes it. The
+// API's generators write a typed method for each derived field of its
+// tables, and its entrypoint hands each stale field to it.
+type DeriverInfo struct {
+	// Name is the @deriver class.
+	Name string
+
+	// Subject is the principal's subject, the deriver's deployable name
+	// (ir.DeriverDeployableName), and Permissions the permissions it
+	// holds, sorted: each table's name and each Derived config's
+	// permission, of which a deriver of tables holds the configs' alone
+	// (DerivedPermissions of each entrypoint).
+	Subject     string
+	Permissions []string
+
+	// Concurrency is how many answers it runs at a time, and BatchSize
+	// how many stale fields a pull asks for: the decorator's, or the
+	// defaults.
+	Concurrency int
+	BatchSize   int
+
+	// Schemas are the tables it fills, in the decorator's order, or sorted
+	// by name when it names none.
+	Schemas []DerivedSchema
+}
+
+// DerivedSchema is a table a deriver fills: its type, the permission its
+// Derived config names, and its derived fields, sorted by name.
+type DerivedSchema struct {
+	Name       string
+	Type       *ir.TypeDef
+	Permission string
+	Fields     []DerivedField
+}
+
+// DerivedField is one derived field of a table: the own field a model
+// fills, the own fields it is derived from, in the config's order, and the
+// config's instruction and model label.
+type DerivedField struct {
+	Name        string
+	Field       *ir.FieldDef
+	From        []*ir.FieldDef
+	Instruction string
+	Model       string
+}
 
 // DeriversFunc is the function an implementation of an API with derivers
 // declares, of the generated DeriversConstructor's type, which a deriver's

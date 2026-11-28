@@ -24,7 +24,6 @@ var deployableKinds = []ir.DeployableKind{
 	ir.DeployableSite,
 	ir.DeployableBucket,
 	ir.DeployableWorker,
-	ir.DeployableRunner,
 	ir.DeployableDeriver,
 	ir.DeployableMemoryStore,
 	ir.DeployableApp,

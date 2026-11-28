@@ -70,7 +70,7 @@ func checkBlueprintConfig(schema *ir.Schema, td *ir.TypeDef, ref ir.BehaviorRef,
 	}
 	at := "schema " + config.Schema
 	child := schema.Types[config.Schema]
-	if child == nil || child.Role != ir.RoleDBTable || child.JsonField || child.IsEngineType() {
+	if child == nil || child.Role != ir.RoleDBTable || child.JsonField {
 		fail("%s is not a table of %s", at, schema.Name)
 		return
 	}

@@ -614,7 +614,13 @@ The endpoint authenticates as the API's other routes do: the identity
 service of the user model, or the router's `authenticate`, from a
 `Bearer` session or a cookie. It needs a caller when a route of the API
 does, so without a session it answers 401 with the problem document; an
-API whose routes are all public serves it to anyone. Each caller's list
+API whose routes are all public serves it to anyone. An API that is its
+own OAuth authorization server (`@userSessions({ oauth })`, TypeScript,
+[#695](https://github.com/parable-work/superschematic/issues/695)) also
+takes an OAuth access token, and its 401 carries `WWW-Authenticate:
+Bearer resource_metadata="..."`, so Claude's connectors sign in from the
+endpoint's URL alone
+([OAuth](/superschematic/guides/users-and-sessions/#oauth-connecting-claude-and-other-clients)). Each caller's list
 holds the tools whose routes it may call: a tool whose operation needs a
 permission the caller lacks is not listed, and a call of it is the
 invalid-params error. Each call goes through its route's authenticator,
@@ -976,54 +982,20 @@ A deployment sets a policy the declarations leave out through the
 engine's `tools.invocation`: a built-in tool's by its name (`delete`,
 `defineSchema`), and a behavior operation's by
 `<Behavior>.<operation>` (`Payments.capturePayment`,
-`acme.Rating.rate`), which takes the place of its declaration's. A
-generated server's engine takes them from the engine database's
-`outputs.engine.tools.invocation`:
-
-```yaml
-outputs:
-  engine:
-    tools:
-      invocation:
-        Payments.openPayment: ask
-        Payments.capturePayment: ask
-        Payments.voidPayment: ask
-        Payments.refundPayment: ask
-        Payments.refundFor: ask
-        Stock.receiveStock: ask
-        Stock.adjustStock: ask
-        Stock.countStock: ask
-      hidden:
-        - Stock.listStockMovements
-```
-
-The build refuses a name that is neither an engine tool nor an operation
-a behavior the engine types compose declares, and a value the binary's
-policy does not hold, naming each; the engine document carries the map,
-and an engine refuses at open a behavior operation it does not run. D70
-leaves the commerce operations that move money or stock unmarked in the
-core's declarations, so that they register under any distribution's
-policy, and requires the deployment to mark them: a build whose engine
-types compose `Payments` or `Stock` is refused unless `invocation` names
-a policy for each of `Payments.openPayment`, `capturePayment`,
-`voidPayment`, `refundPayment` and `refundFor`, and `Stock.receiveStock`,
-`adjustStock` and `countStock`, naming each it lacks.
+`acme.Rating.rate`), which takes the place of its declaration's, given
+when the engine opens (`EngineOptions.tools.invocation`). No generated
+server opens the engine: a schema config's `outputs.engine`, which set
+these for an engine database, is refused (D103), and a table's behavior
+operations are an API's tools, whose `@mcp` sets each one's
+`invocationPolicy`
+([Selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)).
 
 `tools.hidden` lists behavior operations the tools leave out: a service
 calls them through the API or in-process, and no agent is offered them.
 A hidden tool reads `hidden: true` with its reason, and a call by its
 MCP handle is a tool the namespace does not have; the operation itself
-still runs through the engine's API. The build refuses a name no
-composed behavior declares, and the engine document adds, wherever
-`Payments` is composed, its service operations: `listPaymentActions` and
-`recordPaymentEvent`, which a provider's adapter calls, and
-`settleRefundFor`, which a refunded instance calls on its refund. An
-engine opened by hand (`EngineOptions.tools.hidden`) hides only what it
-is given. Three generated servers, in Go, Rust and TypeScript, list the
-same tools with the same policies over one commerce database
-(`TestCommerceServersAnswerOneScriptAlike`), and
-[selling and booking](/superschematic/guides/commerce/#mcp-tools-and-agents)
-says why each of these operations asks.
+still runs through the engine's API. An engine hides only what it is
+given (`EngineOptions.tools.hidden`).
 
 The engine's hidden record adds `hiddenBy` after `hiddenReason`, which
 the generators' `tools/schema.json` does not write: each cause the

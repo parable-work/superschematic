@@ -70,7 +70,7 @@ path_param!(pub user_id);
 path_param!(pub role_id);
 
 /// The nav's links to the account, users and roles pages the caller may
-/// see, after the resources' and the engine's: Users and Roles to a caller
+/// see, after the resources': Users and Roles to a caller
 /// whose permissions hold `identity.users.read` and `identity.roles.read`,
 /// then the account and a sign-out button. A caller who is not signed in
 /// gets the sign-in page, in the nav only: the index

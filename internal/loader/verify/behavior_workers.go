@@ -23,7 +23,7 @@ func CheckBehaviorWorkers(schema *ir.Schema, in Input) *Result {
 // checkBehaviorWorkers validates the API's @behaviorWorker classes (D103):
 // each is in an API, names no queue of its own, and names a table of the
 // API's database (its authDb, or its one DB dependency, in.Database) that
-// the API imports from it, which is a table and no engine type, and whose
+// the API imports from it, which is a table, and whose
 // behaviors arm deadlines, hear its writes or emit events (D104), so the
 // database holds a queue the worker runs; and an API runs a table's
 // behaviors from one worker. A worker of a table whose behaviors emit
@@ -91,9 +91,6 @@ func checkBehaviorWorkers(schema *ir.Schema, in Input, r *Result) {
 			continue
 		case td.Role != ir.RoleDBTable || td.JsonField:
 			r.errorf("", "%s: @behaviorWorker names %s, which is not a table of %s: a behavior worker runs a table's behaviors (D103)", worker.Name, typeName, in.Database.Name)
-			continue
-		case td.IsEngineType():
-			r.errorf("", "%s: @behaviorWorker names %s, an engine type of %s (D58), whose engine runs its timed work; a behavior worker runs a table's behaviors (D103)", worker.Name, typeName, in.Database.Name)
 			continue
 		case !runsDeadlines(td, in.Database, reg) && in.Database.BehaviorQueueOf(typeName, ir.BehaviorQueueChanges) == nil && in.Database.BehaviorQueueOf(typeName, ir.BehaviorQueueEvents) == nil:
 			r.errorf("", "%s: @behaviorWorker names %s, whose behaviors arm no deadlines, hear no writes and emit no events, so the worker has nothing to run (D103, D104)", worker.Name, typeName)

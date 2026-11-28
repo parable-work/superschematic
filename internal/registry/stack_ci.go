@@ -94,37 +94,6 @@ type CIStack struct {
 	// and a check job builds each site.
 	Sites map[string]CISite
 
-	// EngineArchives are the project engine crates of the stack's engine
-	// databases whose types compose a behavior the core's engine archive
-	// does not run, the work queue's, a commerce one or an extension's
-	// (D58), by database: the directory of the crate's ffi member, which
-	// exports the engine's C ABI over the project's behaviors, under the
-	// output root at engine/rust/<db>/ffi, where the build writes it. A check job builds
-	// each one's archive after the build and compiles each Go server on
-	// the database against it, in place of the core's the release ships.
-	EngineArchives map[string]string
-
-	// EngineCheckout is the superschematic checkout the naming file's
-	// [paths] engine keys name (D58), relative to the repository root,
-	// when some environment of the stack runs an engine and the checkout
-	// lies in the repository; empty otherwise. The checkout's engine
-	// crates reach superscalar's core by path, in a checkout of its own
-	// under the checkout's third_party/, which git does not hold, and its
-	// TypeScript packages export a dist/ no checkout holds either. So a
-	// check job stands up that superscalar checkout before it builds a
-	// project's engine archive, and, for a stack with TypeScript
-	// deployables, builds the checkout's superscalar binding, HTTP runtime
-	// and engine packages, which the output root's workspace takes in
-	// place of the published ones, before it type-checks against them: what
-	// make setup builds on a developer's machine.
-	EngineCheckout string
-
-	// EngineCheckoutTypeScript is true when the naming file's [paths]
-	// engine_typescript names the engine package of EngineCheckout, so the
-	// output root's workspace takes the checkout's packages: only then does
-	// a check job build their dist/.
-	EngineCheckoutTypeScript bool
-
 	// RulesCheckout is the superschematic checkout the naming file's
 	// [paths] rules_go or rules_typescript names (D103), relative to the
 	// repository root, when a deployable of the stack connects to a

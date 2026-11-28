@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/parable-work/superschematic/internal/buildplan"
 	"github.com/parable-work/superschematic/internal/generator"
@@ -552,14 +552,15 @@ func TestActionlint(t *testing.T) {
 }
 
 // lint runs actionlint over a workflow when it is installed, and shellcheck
-// over its scripts when that is.
+// over its scripts when that is, with testdata/actionlint.yaml naming the
+// goldens' self-hosted runner labels.
 func lint(t *testing.T, path string) {
 	t.Helper()
 	bin, err := exec.LookPath("actionlint")
 	if err != nil {
 		return
 	}
-	if out, err := exec.Command(bin, "-no-color", path).CombinedOutput(); err != nil {
+	if out, err := exec.Command(bin, "-no-color", "-config-file", filepath.Join("testdata", "actionlint.yaml"), path).CombinedOutput(); err != nil {
 		t.Errorf("actionlint %s: %v\n%s", path, err, out)
 	}
 }

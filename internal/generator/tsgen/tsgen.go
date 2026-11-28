@@ -306,13 +306,6 @@ type ModuleOutput struct {
 	// when the schema has no User table.
 	IdentityDescriptor string
 
-	// EngineDocument is the schema's engine document (D58), the object
-	// literal engine.ts exports as engineDocument, which package.json
-	// exports as "./engine" and index.ts does not re-export, so a client
-	// of the types does not load it. Empty when no type of the DB schema
-	// composes a behavior.
-	EngineDocument string
-
 	// Queues are the schema's queues (D53), which queues.ts writes as data
 	// the HTTP runtime's queue client reads, and package.json exports as
 	// "./queues". A queue whose message the client cannot hold yet is
@@ -456,11 +449,6 @@ type Options struct {
 	// none.
 	Registry *registry.Registry
 
-	// EngineDocument is the schema's engine document (D58), as
-	// GenerateContext.EngineDocument builds it, which engine.ts exports.
-	// Nil writes no engine.ts.
-	EngineDocument []byte
-
 	// SQLite is whether the DB service lists the sqlite dialect, whose
 	// statements each queue in queues.ts then carries beside Postgres's
 	// (D53, amended), and whose repositories orm-sqlite.ts holds (D182).
@@ -573,7 +561,6 @@ func Generate(schema *ir.Schema, opts Options) (*ModuleOutput, error) {
 	if output.StateMachines, err = stateMachines(schema, imported.enumDefs); err != nil {
 		return nil, err
 	}
-	output.EngineDocument = strings.TrimSuffix(string(opts.EngineDocument), "\n")
 	if output.Behaviors, err = behaviortypes.Build(schema, opts.Registry); err != nil {
 		return nil, err
 	}

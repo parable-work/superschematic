@@ -116,21 +116,10 @@ func leaseProblem(schema *ir.Schema, td *ir.TypeDef, ttlMs, heartbeatMs *int64, 
 		}
 	}
 	if directOn {
-		return "directOn sends a directive when the target of a link moves on, a revision of Revisions or a release of Branches, which waits for Revisions and Branches on the core (D103, step 4)"
+		return "directOn sends a directive when a link's target gains a revision or a release, which the core does not hear on a table: a release is a @versioned table's since Branches folded into @versioned (D103), and the core reads no version graph"
 	}
 	if sweepMs {
-		return "sweepMs is how often the engine's runner swept the lapsed leases: a table's lease expires at its own deadline, which the API's behavior worker runs when it falls due (D103), so a table's Lease takes no sweepMs"
+		return "sweepMs is how often a sweep found the lapsed leases: a table's lease expires at its own deadline, which the API's behavior worker runs when it falls due (D103), so a table's Lease takes no sweepMs"
 	}
 	return ""
-}
-
-// checkEngineLeaseConfig refuses, on an engine type, status, which a
-// table's Lease alone takes (D104). The declaration is shared, so the
-// configSchema accepts it; the engine's Lease refuses it too, and the build
-// says so first, naming the table form. A config the configSchema refuses
-// is reported by checkTypeBehaviors and left alone here.
-func checkEngineLeaseConfig(td *ir.TypeDef, ref ir.BehaviorRef, r *Result) {
-	if configNames(ref.Config, "status") {
-		r.errorf(td.Owner, "type %s: @behavior Lease names status, the Workflow field a table's Lease moves (implements Lease<%s, C>, D104); an engine type's Lease moves its one Workflow, so leave status out", td.Name, td.Name)
-	}
 }

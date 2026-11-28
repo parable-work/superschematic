@@ -6,6 +6,8 @@
 DROP INDEX IF EXISTS uq_user_role_grant_user_role CASCADE;
 DROP INDEX IF EXISTS idx_user_api_key_user CASCADE;
 DROP INDEX IF EXISTS idx_session_user CASCADE;
+DROP INDEX IF EXISTS idx_oauth_token_grant CASCADE;
+DROP INDEX IF EXISTS idx_oauth_grant_user CASCADE;
 
 -- Drop join tables first
 
@@ -16,6 +18,10 @@ DROP TABLE IF EXISTS user_api_key CASCADE;
 DROP TABLE IF EXISTS "user" CASCADE;
 DROP TABLE IF EXISTS "session" CASCADE;
 DROP TABLE IF EXISTS role CASCADE;
+DROP TABLE IF EXISTS oauth_token CASCADE;
+DROP TABLE IF EXISTS oauth_grant CASCADE;
+DROP TABLE IF EXISTS oauth_code CASCADE;
+DROP TABLE IF EXISTS oauth_client CASCADE;
 
 -- Note: Extensions are not dropped automatically
 -- To drop extensions, run:

@@ -2,6 +2,7 @@ package registry
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path"
 	"regexp"
@@ -58,7 +59,7 @@ const (
 	// runs code, named as a settings element names one, with the packages
 	// its image installs and the Dockerfile that extends it.
 	stackImageSchema = `{"type":"object","required":["of"],"additionalProperties":false,"properties":{"of":` + stackRefSchema + `,` +
-		`"job":{"type":"string","minLength":1},"worker":{"type":"string","minLength":1},"deriver":{"type":"string","minLength":1},"app":{"type":"string","minLength":1},"runner":{"const":true},` +
+		`"job":{"type":"string","minLength":1},"worker":{"type":"string","minLength":1},"deriver":{"type":"string","minLength":1},"app":{"type":"string","minLength":1},` +
 		`"packages":{"type":"array","minItems":1,"items":{"type":"string","minLength":1}},"extend":{"type":"string","minLength":1}}}`
 )
 
@@ -88,16 +89,15 @@ var (
 	// Every key of @environment's argument other than those named here
 	// holds the values of the target the environment names, under the
 	// target's name (`gcp: { project, region }`). A settings element's keys
-	// other than of, job, worker, runner, deriver, app, platform, env,
-	// schedule, timeZone, enabled, onDeploy, instances and concurrency are
-	// the platform settings. job names a job of the API of; schedule, timeZone
+	// other than of, job, worker, deriver, app, platform, env, schedule,
+	// timeZone, enabled, onDeploy, instances and concurrency are the
+	// platform settings. job names a job of the API of; schedule, timeZone
 	// and enabled change that job's schedule (D52), and onDeploy runs it on
 	// every deploy (D52, amended). worker names a worker of the API of;
-	// enabled, instances and concurrency change how it runs (D53). runner,
-	// true, names the engine's runner of the DB of; enabled turns it on or
-	// off (D58). deriver names a deriver of the API of; enabled, instances
-	// and concurrency change how it runs (D74). app names an app of the API
-	// of; enabled turns it on or off (D78). enabled beside a MemoryStore
+	// enabled, instances and concurrency change how it runs (D53). deriver
+	// names a deriver of the API of; enabled, instances and concurrency
+	// change how it runs (D74). app names an app of the API of; enabled turns
+	// it on or off (D78). enabled beside a MemoryStore
 	// handle turns the store off, which no platform then places (D75).
 	environmentArgs = json.RawMessage(`{
 		"type": "object",
@@ -114,7 +114,6 @@ var (
 					"of": ` + stackRefSchema + `,
 					"job": {"type": "string", "minLength": 1},
 					"worker": {"type": "string", "minLength": 1},
-					"runner": {"const": true},
 					"deriver": {"type": "string", "minLength": 1},
 					"app": {"type": "string", "minLength": 1},
 					"instances": {"type": "integer", "minimum": 0},
@@ -225,8 +224,8 @@ func applyStack(td *ir.TypeDef, arg any) error {
 }
 
 // deployableImage reads one `images` element (D144): of, with a job, a
-// worker, a deriver, an app or runner beside a handle as a settings
-// element names one, and the image's packages and extend.
+// worker, a deriver or an app beside a handle as a settings element names
+// one, and the image's packages and extend.
 func deployableImage(v any) (*ir.DeployableImage, error) {
 	element, ok := v.(map[string]any)
 	if !ok {
@@ -255,12 +254,6 @@ func deployableImage(v any) (*ir.DeployableImage, error) {
 		case "app":
 			image.Of.App = name
 		}
-	}
-	if runner, _ := element["runner"].(bool); runner {
-		if ref.Service == nil {
-			return nil, fmt.Errorf("runner names the engine's runner of the DB service of names, but of names no service; write `of: <DB handle>, runner: true`")
-		}
-		image.Of.Runner = true
 	}
 	if list, ok := element["packages"].([]any); ok {
 		for _, p := range list {
@@ -349,15 +342,19 @@ func applyEnvironment(td *ir.TypeDef, arg any) error {
 	return nil
 }
 
-// deployableSettings reads one settings element: of, job, worker, runner,
-// deriver, app, platform, env, a job's schedule, timeZone, enabled and
-// onDeploy, a worker's and a deriver's enabled, instances and
-// concurrency, a runner's and an app's enabled, and the platform settings
-// in every other key.
+// errRunnerSettings refuses a settings element's runner (D103). It named
+// the engine's runner of a DB service whose types composed a behavior with
+// @behavior (D58), and a DB type is a table, whose behaviors' timed work
+// its API's @behaviorWorker runs, which a worker's element names.
+var errRunnerSettings = errors.New("runner names the engine's runner of a DB service whose types composed a behavior with @behavior (D58), and a DB type is a table, whose behaviors' deadlines and changes its API's @behaviorWorker runs (D103): name that worker beside its API's handle, or remove runner")
+
+// deployableSettings reads one settings element: of, job, worker, deriver,
+// app, platform, env, a job's schedule, timeZone, enabled and onDeploy, a
+// worker's and a deriver's enabled, instances and concurrency, an app's
+// enabled, and the platform settings in every other key.
 func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) {
 	settings := &ir.DeployableSettings{}
 	var job, worker, deriver, app string
-	var runner bool
 	// A worker's element takes maxInstances, mode and idle as its own
 	// (D53, D145); on any other element each is the platform's setting of
 	// that name, as a Cloud Run server's maxInstances is.
@@ -379,7 +376,7 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 		case "worker":
 			worker, _ = value.(string)
 		case "runner":
-			runner, _ = value.(bool)
+			return nil, errRunnerSettings
 		case "deriver":
 			deriver, _ = value.(string)
 		case "app":
@@ -460,12 +457,6 @@ func deployableSettings(element map[string]any) (*ir.DeployableSettings, error) 
 			return nil, fmt.Errorf("worker %s names a worker of the API service of names, but of names no service; write `of: <API handle>, worker: %q`", worker, worker)
 		}
 		settings.Of.Worker = worker
-	}
-	if runner {
-		if settings.Of.Service == nil {
-			return nil, fmt.Errorf("runner names the engine's runner of the DB service of names, but of names no service; write `of: <DB handle>, runner: true`")
-		}
-		settings.Of.Runner = true
 	}
 	if deriver != "" {
 		if settings.Of.Service == nil {
@@ -596,9 +587,6 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 				if ref.Worker != "" {
 					r.Errorf(td.Owner, "%s names worker %s of deployable %s; a worker belongs to an API service, so name the API's handle", where, ref.Worker, ref.Deployable)
 				}
-				if ref.Runner {
-					r.Errorf(td.Owner, "%s names the runner of deployable %s; an engine's runner belongs to a DB service, so name the DB's handle", where, ref.Deployable)
-				}
 				if ref.Deriver != "" {
 					r.Errorf(td.Owner, "%s names deriver %s of deployable %s; a deriver belongs to an API service, so name the API's handle", where, ref.Deriver, ref.Deployable)
 				}
@@ -615,12 +603,6 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 			if ref.App != "" && (ref.Job != "" || ref.Worker != "" || ref.Deriver != "") {
 				r.Errorf(td.Owner, "%s names app %s and a job, a worker or a deriver; an element names one", where, ref.App)
 			}
-			if ref.Runner && (ref.Job != "" || ref.Worker != "" || ref.Deriver != "" || ref.App != "") {
-				r.Errorf(td.Owner, "%s names the runner and a job, a worker, a deriver or an app; an element names one", where)
-			}
-			if ref.Runner && ref.Service != nil && ref.Service.Kind != ir.SchemaKindDB {
-				r.Errorf(td.Owner, "%s names the runner of %s, a %s service; an engine's runner belongs to a DB service, so name the DB's handle", where, ref.Service.Name, ref.Service.Kind)
-			}
 		}
 		if td.Stack != nil {
 			for i, ref := range td.Stack.Expose {
@@ -631,9 +613,6 @@ func verifyStack(schema *ir.Schema, r VerifyReporter) {
 				}
 				if ref.Worker != "" {
 					r.Errorf(td.Owner, "%s names worker %s; only a server is exposed", where, ref.Worker)
-				}
-				if ref.Runner {
-					r.Errorf(td.Owner, "%s names an engine's runner; only a server is exposed", where)
 				}
 				if ref.Deriver != "" {
 					r.Errorf(td.Owner, "%s names deriver %s; only a server is exposed", where, ref.Deriver)
@@ -692,10 +671,10 @@ func checkJobSettings(where, owner string, settings *ir.DeployableSettings, r Ve
 		if settings.TimeZone != "" {
 			keys = append(keys, "timeZone")
 		}
-		// A worker, a runner, a deriver, an app and a memory store take
-		// enabled too (D53, D58, D74, D78, D75).
+		// A worker, a deriver, an app and a memory store take enabled too
+		// (D53, D74, D78, D75).
 		memoryStore := settings.Of.Service != nil && settings.Of.Service.Kind == ir.SchemaKindMemoryStore
-		if settings.Enabled != nil && settings.Of.Worker == "" && settings.Of.Deriver == "" && settings.Of.App == "" && !settings.Of.Runner && !memoryStore {
+		if settings.Enabled != nil && settings.Of.Worker == "" && settings.Of.Deriver == "" && settings.Of.App == "" && !memoryStore {
 			keys = append(keys, "enabled")
 		}
 		if settings.OnDeploy != nil {

@@ -20,7 +20,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
@@ -386,9 +385,10 @@ func EmitHandle(servicePath string, cfg *schemaconfig.SchemaConfig, reg *registr
 // servicesRoot, so a schema that imports its siblings' sentinels sees them
 // on disk at program-construction time. Skipped silently: directories
 // without a tsconfig.json (no TypeScript module surface to import), without
-// a schema.config.*, and services of a NoSentinel kind. A sentinel newer than the
-// service config is considered fresh; only the index re-export is
-// re-checked for those.
+// a schema.config.*, and services of a NoSentinel kind. A directory with
+// more than one config form is an error (schemaconfig.Locate). A sentinel
+// newer than the service config is considered fresh; only the index
+// re-export is re-checked for those.
 //
 // The sweep reads configs, not schemas, so it cannot find an API's @envVars
 // class, its jobs, its workers, its derivers or its apps. It keeps the
@@ -412,10 +412,18 @@ func EnsureSiblings(servicesRoot string, opts Options) error {
 		if _, err := os.Stat(filepath.Join(dir, "tsconfig.json")); err != nil {
 			continue
 		}
-		configTime, ok := newestConfigTime(dir)
+		configPath, form, ok, err := schemaconfig.Locate(dir)
+		if err != nil {
+			return fmt.Errorf("service %s: %w", entry.Name(), err)
+		}
 		if !ok {
 			continue
 		}
+		configInfo, err := os.Stat(configPath)
+		if err != nil {
+			return fmt.Errorf("service %s: %w", entry.Name(), err)
+		}
+		configTime := configInfo.ModTime()
 
 		if info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(GeneratedFile))); err == nil && info.ModTime().After(configTime) {
 			if _, err := ensureIndexExport(dir); err != nil {
@@ -424,12 +432,14 @@ func EnsureSiblings(servicesRoot string, opts Options) error {
 			continue
 		}
 
-		cfg, err := schemaconfig.ReadFile(dir, opts.Registry)
-		if errors.Is(err, os.ErrNotExist) {
+		var cfg *schemaconfig.SchemaConfig
+		if form == schemaconfig.FormTS {
 			if opts.ReadTSIdentity == nil {
 				continue
 			}
 			cfg, err = opts.ReadTSIdentity(dir)
+		} else {
+			cfg, err = schemaconfig.ReadFile(dir, opts.Registry)
 		}
 		if err != nil {
 			return fmt.Errorf("service %s: reading config: %w", entry.Name(), err)
@@ -446,23 +456,6 @@ func EnsureSiblings(servicesRoot string, opts Options) error {
 		}
 	}
 	return nil
-}
-
-// newestConfigTime returns the most recent modification time across the
-// service's schema.config.* forms, or ok=false when the directory has none
-// (it is not a schema service).
-func newestConfigTime(servicePath string) (newest time.Time, ok bool) {
-	for _, name := range []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"} {
-		info, err := os.Stat(filepath.Join(servicePath, name))
-		if err != nil {
-			continue
-		}
-		ok = true
-		if info.ModTime().After(newest) {
-			newest = info.ModTime()
-		}
-	}
-	return newest, ok
 }
 
 // writeIfChanged writes content to path only when the current bytes differ,

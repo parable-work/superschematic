@@ -71,8 +71,8 @@ func TestBehaviorWorkerFromTheDataForms(t *testing.T) {
 // TestBehaviorWorkerRefusals (D103): a behavior worker is refused, in
 // these words, outside an API, with a queue of its own, on an API with no
 // one database, over a table the API does not import from it, that it
-// does not declare, that is no table, an engine type or a table whose
-// behaviors arm no deadlines and hear no writes, and beside a second
+// does not declare, that is no table, or a table whose behaviors arm no
+// deadlines and hear no writes, and beside a second
 // worker of its table.
 func TestBehaviorWorkerRefusals(t *testing.T) {
 	const imports = `"imports": [{"package": "@schemas/fixture-timers-db", "types": ["Ticket"]}]`
@@ -99,8 +99,6 @@ func TestBehaviorWorkerRefusals(t *testing.T) {
 			"TicketTimers: @behaviorWorker names Ticket, which fixture-timers-db does not declare"},
 		{"not a table", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `]}`, func(db *ir.Schema) { db.Types["Ticket"].Role = ir.RoleEmbeddedStruct },
 			"TicketTimers: @behaviorWorker names Ticket, which is not a table of fixture-timers-db: a behavior worker runs a table's behaviors (D103)"},
-		{"an engine type", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `]}`, func(db *ir.Schema) { db.Types["Ticket"].Behaviors = []ir.BehaviorRef{{Name: "Comments"}} },
-			"TicketTimers: @behaviorWorker names Ticket, an engine type of fixture-timers-db (D58), whose engine runs its timed work; a behavior worker runs a table's behaviors (D103)"},
 		{"no deadlines and no changes", timersAPIConfig, `{` + imports + `, "workers": [` + worker("TicketTimers") + `]}`, func(db *ir.Schema) {
 			db.Types["Ticket"].Behaviors = db.Types["Ticket"].FieldBehaviors()
 			delete(db.Types, "TicketDeadline")

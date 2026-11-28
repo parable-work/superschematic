@@ -27,6 +27,10 @@ type Descriptor struct {
 	// APIKey is nil in a descriptor written before the UserApiKey table
 	// (D114): its store has no API keys.
 	APIKey *DescriptorAPIKey `json:"apiKey,omitempty"`
+	// OAuth is nil in a descriptor written before the OAuth tables (#695).
+	// The Go server serves no OAuth yet; it reads the member so a
+	// descriptor that has it parses.
+	OAuth *DescriptorOAuth `json:"oauth,omitempty"`
 	// Role and RoleGrant are nil when the schema has no UserRole table.
 	Role      *DescriptorRole      `json:"role,omitempty"`
 	RoleGrant *DescriptorRoleGrant `json:"roleGrant,omitempty"`
@@ -89,6 +93,88 @@ type DescriptorAPIKey struct {
 	} `json:"columns"`
 }
 
+// DescriptorOAuth is the four tables of an OAuth authorization server
+// (#695).
+type DescriptorOAuth struct {
+	Client struct {
+		Table   string `json:"table"`
+		Columns struct {
+			ID           string `json:"id"`
+			ClientID     string `json:"clientId"`
+			Kind         string `json:"kind"`
+			Name         string `json:"name"`
+			URI          string `json:"uri"`
+			RedirectURIs string `json:"redirectUris"`
+			CreatedAt    string `json:"createdAt"`
+			RefreshedAt  string `json:"refreshedAt"`
+			FreshUntil   string `json:"freshUntil"`
+			LastUsedAt   string `json:"lastUsedAt"`
+		} `json:"columns"`
+	} `json:"client"`
+	Grant struct {
+		Table   string `json:"table"`
+		Columns struct {
+			ID          string `json:"id"`
+			User        string `json:"user"`
+			Client      string `json:"client"`
+			Permissions string `json:"permissions"`
+			Resource    string `json:"resource"`
+			CreatedAt   string `json:"createdAt"`
+			ExpiresAt   string `json:"expiresAt"`
+			LastUsedAt  string `json:"lastUsedAt"`
+			RevokedAt   string `json:"revokedAt"`
+		} `json:"columns"`
+	} `json:"grant"`
+	Code struct {
+		Table   string `json:"table"`
+		Columns struct {
+			ID            string `json:"id"`
+			Client        string `json:"client"`
+			User          string `json:"user"`
+			Grant         string `json:"grant"`
+			RedirectURI   string `json:"redirectUri"`
+			CodeChallenge string `json:"codeChallenge"`
+			State         string `json:"state"`
+			Scope         string `json:"scope"`
+			Resource      string `json:"resource"`
+			Nonce         string `json:"nonce"`
+			CodeHash      string `json:"codeHash"`
+			CreatedAt     string `json:"createdAt"`
+			ExpiresAt     string `json:"expiresAt"`
+			UsedAt        string `json:"usedAt"`
+		} `json:"columns"`
+	} `json:"code"`
+	Token struct {
+		Table   string `json:"table"`
+		Columns struct {
+			ID        string `json:"id"`
+			Grant     string `json:"grant"`
+			Kind      string `json:"kind"`
+			TokenHash string `json:"tokenHash"`
+			CreatedAt string `json:"createdAt"`
+			ExpiresAt string `json:"expiresAt"`
+			UsedAt    string `json:"usedAt"`
+			RevokedAt string `json:"revokedAt"`
+		} `json:"columns"`
+	} `json:"token"`
+}
+
+// names adds the member path of each of o's names to names.
+func (o *DescriptorOAuth) names(names map[string]string) {
+	add := func(prefix string, table string, columns any) {
+		names[prefix+".table"] = table
+		v := reflect.ValueOf(columns)
+		for i := 0; i < v.NumField(); i++ {
+			tag := strings.Split(v.Type().Field(i).Tag.Get("json"), ",")[0]
+			names[prefix+".columns."+tag] = v.Field(i).String()
+		}
+	}
+	add("oauth.client", o.Client.Table, o.Client.Columns)
+	add("oauth.grant", o.Grant.Table, o.Grant.Columns)
+	add("oauth.code", o.Code.Table, o.Code.Columns)
+	add("oauth.token", o.Token.Table, o.Token.Columns)
+}
+
 // DescriptorRole is the table with the UserRole trait.
 type DescriptorRole struct {
 	Type    string `json:"type"`
@@ -117,7 +203,8 @@ type DescriptorRoleGrant struct {
 // DescriptorVersion, unknown members, an empty name, a role table without
 // its grant table or the other way round, and a name holding a NUL, which
 // no quoting can carry. A descriptor without apiKey is one written before
-// D114, and is read as it was.
+// D114, and one without oauth one written before #695; each is read as it
+// was.
 func ParseDescriptor(data []byte) (Descriptor, error) {
 	var d Descriptor
 	if err := checkMemberNames(data, reflect.TypeOf(d)); err != nil {
@@ -152,6 +239,9 @@ func ParseDescriptor(data []byte) (Descriptor, error) {
 		names["apiKey.columns.name"], names["apiKey.columns.tokenHash"], names["apiKey.columns.permissions"] = k.Columns.Name, k.Columns.TokenHash, k.Columns.Permissions
 		names["apiKey.columns.createdAt"], names["apiKey.columns.expiresAt"] = k.Columns.CreatedAt, k.Columns.ExpiresAt
 		names["apiKey.columns.lastUsedAt"], names["apiKey.columns.revokedAt"] = k.Columns.LastUsedAt, k.Columns.RevokedAt
+	}
+	if o := d.OAuth; o != nil {
+		o.names(names)
 	}
 	if r := d.Role; r != nil {
 		names["role.type"], names["role.table"], names["role.keyScalar"] = r.Type, r.Table, r.KeyScalar

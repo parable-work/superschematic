@@ -4,11 +4,202 @@ package orm
 
 import (
 	"context"
+	"encoding/json"
 
 	types "example.com/acme/types/go/shop-db"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	rules "github.com/parable-work/superschematic/runtime/rules/go"
 )
+
+// ReadOnlyCheckoutRepositoryInterface is the reads of CheckoutRepositoryInterface (D150).
+type ReadOnlyCheckoutRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CheckoutGetOptions) (*types.Checkout, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Checkout, error)
+	FindOne(ctx context.Context, filter *CheckoutFilter, opts *CheckoutFindOptions) (*types.Checkout, error)
+	FindMany(ctx context.Context, filter *CheckoutFilter, opts *CheckoutFindOptions) ([]*types.Checkout, int, error)
+	FindPage(ctx context.Context, filter *CheckoutFilter, opts *CheckoutPageOptions) (*CheckoutPage, error)
+}
+
+// CheckoutRepositoryInterface defines the contract for Checkout data access.
+type CheckoutRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CheckoutGetOptions) (*types.Checkout, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Checkout, error)
+	FindOne(ctx context.Context, filter *CheckoutFilter, opts *CheckoutFindOptions) (*types.Checkout, error)
+	FindMany(ctx context.Context, filter *CheckoutFilter, opts *CheckoutFindOptions) ([]*types.Checkout, int, error)
+	FindPage(ctx context.Context, filter *CheckoutFilter, opts *CheckoutPageOptions) (*CheckoutPage, error)
+	CreateOne(ctx context.Context, input *CheckoutCreate) (*types.Checkout, error)
+	CreateMany(ctx context.Context, inputs []*CheckoutCreate) ([]*types.Checkout, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *CheckoutUpdate) (*types.Checkout, error)
+	UpdateMany(ctx context.Context, filter *CheckoutFilter, update *CheckoutUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *CheckoutFilter) (int, error)
+	Holds() CheckoutHoldsOperations
+	Timers() CheckoutTimersOperations
+	Payments() CheckoutPaymentsOperations
+	Status() CheckoutStatusOperations
+	Number() CheckoutNumberOperations
+	RunDeadline(ctx context.Context, deadline types.CheckoutDeadline, claim *rules.Claim) (*rules.DeadlineRun, error)
+	RunChange(ctx context.Context, change types.CheckoutChange, claim *rules.Claim) (*rules.ChangeRun, error)
+}
+
+// ReadOnlyCollectionPointRepositoryInterface is the reads of CollectionPointRepositoryInterface (D150).
+type ReadOnlyCollectionPointRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CollectionPointGetOptions) (*types.CollectionPoint, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.CollectionPoint, error)
+	FindOne(ctx context.Context, filter *CollectionPointFilter, opts *CollectionPointFindOptions) (*types.CollectionPoint, error)
+	FindMany(ctx context.Context, filter *CollectionPointFilter, opts *CollectionPointFindOptions) ([]*types.CollectionPoint, int, error)
+	FindPage(ctx context.Context, filter *CollectionPointFilter, opts *CollectionPointPageOptions) (*CollectionPointPage, error)
+}
+
+// CollectionPointRepositoryInterface defines the contract for CollectionPoint data access.
+type CollectionPointRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *CollectionPointGetOptions) (*types.CollectionPoint, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.CollectionPoint, error)
+	FindOne(ctx context.Context, filter *CollectionPointFilter, opts *CollectionPointFindOptions) (*types.CollectionPoint, error)
+	FindMany(ctx context.Context, filter *CollectionPointFilter, opts *CollectionPointFindOptions) ([]*types.CollectionPoint, int, error)
+	FindPage(ctx context.Context, filter *CollectionPointFilter, opts *CollectionPointPageOptions) (*CollectionPointPage, error)
+	CreateOne(ctx context.Context, input *CollectionPointCreate) (*types.CollectionPoint, error)
+	CreateMany(ctx context.Context, inputs []*CollectionPointCreate) ([]*types.CollectionPoint, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *CollectionPointUpdate) (*types.CollectionPoint, error)
+	UpdateMany(ctx context.Context, filter *CollectionPointFilter, update *CollectionPointUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *CollectionPointFilter) (int, error)
+	Calendar() CollectionPointCalendarOperations
+}
+
+// ReadOnlyInventoryRepositoryInterface is the reads of InventoryRepositoryInterface (D150).
+type ReadOnlyInventoryRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *InventoryGetOptions) (*types.Inventory, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Inventory, error)
+	FindOne(ctx context.Context, filter *InventoryFilter, opts *InventoryFindOptions) (*types.Inventory, error)
+	FindMany(ctx context.Context, filter *InventoryFilter, opts *InventoryFindOptions) ([]*types.Inventory, int, error)
+	FindPage(ctx context.Context, filter *InventoryFilter, opts *InventoryPageOptions) (*InventoryPage, error)
+}
+
+// InventoryRepositoryInterface defines the contract for Inventory data access.
+type InventoryRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *InventoryGetOptions) (*types.Inventory, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Inventory, error)
+	FindOne(ctx context.Context, filter *InventoryFilter, opts *InventoryFindOptions) (*types.Inventory, error)
+	FindMany(ctx context.Context, filter *InventoryFilter, opts *InventoryFindOptions) ([]*types.Inventory, int, error)
+	FindPage(ctx context.Context, filter *InventoryFilter, opts *InventoryPageOptions) (*InventoryPage, error)
+	CreateOne(ctx context.Context, input *InventoryCreate) (*types.Inventory, error)
+	CreateMany(ctx context.Context, inputs []*InventoryCreate) ([]*types.Inventory, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *InventoryUpdate) (*types.Inventory, error)
+	UpdateMany(ctx context.Context, filter *InventoryFilter, update *InventoryUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *InventoryFilter) (int, error)
+	Stock() InventoryStockOperations
+}
+
+// ReadOnlyOAuthClientRepositoryInterface is the reads of OAuthClientRepositoryInterface (D150).
+type ReadOnlyOAuthClientRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthClientGetOptions) (*types.OAuthClient, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthClient, error)
+	FindOne(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientFindOptions) (*types.OAuthClient, error)
+	FindMany(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientFindOptions) ([]*types.OAuthClient, int, error)
+	FindPage(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientPageOptions) (*OAuthClientPage, error)
+}
+
+// OAuthClientRepositoryInterface defines the contract for OAuthClient data access.
+type OAuthClientRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthClientGetOptions) (*types.OAuthClient, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthClient, error)
+	FindOne(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientFindOptions) (*types.OAuthClient, error)
+	FindMany(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientFindOptions) ([]*types.OAuthClient, int, error)
+	FindPage(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientPageOptions) (*OAuthClientPage, error)
+	CreateOne(ctx context.Context, input *types.OAuthClient) (*types.OAuthClient, error)
+	CreateMany(ctx context.Context, inputs []*types.OAuthClient) ([]*types.OAuthClient, error)
+	UpsertOne(ctx context.Context, input *types.OAuthClient, on OAuthClientUniqueKey, update *OAuthClientUpdate) (*types.OAuthClient, error)
+	UpsertOneResult(ctx context.Context, input *types.OAuthClient, on OAuthClientUniqueKey, update *OAuthClientUpdate, opts *UpsertOptions) (UpsertResult[*types.OAuthClient], error)
+	UpsertMany(ctx context.Context, inputs []*types.OAuthClient, on OAuthClientUniqueKey, update OAuthClientFields, opts *UpsertOptions) ([]UpsertResult[*types.OAuthClient], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OAuthClientUpdate) (*types.OAuthClient, error)
+	UpdateMany(ctx context.Context, filter *OAuthClientFilter, update *OAuthClientUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OAuthClientFilter) (int, error)
+}
+
+// ReadOnlyOAuthCodeRepositoryInterface is the reads of OAuthCodeRepositoryInterface (D150).
+type ReadOnlyOAuthCodeRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthCodeGetOptions) (*types.OAuthCode, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthCode, error)
+	FindOne(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodeFindOptions) (*types.OAuthCode, error)
+	FindMany(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodeFindOptions) ([]*types.OAuthCode, int, error)
+	FindPage(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodePageOptions) (*OAuthCodePage, error)
+}
+
+// OAuthCodeRepositoryInterface defines the contract for OAuthCode data access.
+type OAuthCodeRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthCodeGetOptions) (*types.OAuthCode, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthCode, error)
+	FindOne(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodeFindOptions) (*types.OAuthCode, error)
+	FindMany(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodeFindOptions) ([]*types.OAuthCode, int, error)
+	FindPage(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodePageOptions) (*OAuthCodePage, error)
+	CreateOne(ctx context.Context, input *types.OAuthCode) (*types.OAuthCode, error)
+	CreateMany(ctx context.Context, inputs []*types.OAuthCode) ([]*types.OAuthCode, error)
+	UpsertOne(ctx context.Context, input *types.OAuthCode, on OAuthCodeUniqueKey, update *OAuthCodeUpdate) (*types.OAuthCode, error)
+	UpsertOneResult(ctx context.Context, input *types.OAuthCode, on OAuthCodeUniqueKey, update *OAuthCodeUpdate, opts *UpsertOptions) (UpsertResult[*types.OAuthCode], error)
+	UpsertMany(ctx context.Context, inputs []*types.OAuthCode, on OAuthCodeUniqueKey, update OAuthCodeFields, opts *UpsertOptions) ([]UpsertResult[*types.OAuthCode], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OAuthCodeUpdate) (*types.OAuthCode, error)
+	UpdateMany(ctx context.Context, filter *OAuthCodeFilter, update *OAuthCodeUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OAuthCodeFilter) (int, error)
+}
+
+// ReadOnlyOAuthGrantRepositoryInterface is the reads of OAuthGrantRepositoryInterface (D150).
+type ReadOnlyOAuthGrantRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthGrantGetOptions) (*types.OAuthGrant, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthGrant, error)
+	FindOne(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantFindOptions) (*types.OAuthGrant, error)
+	FindMany(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantFindOptions) ([]*types.OAuthGrant, int, error)
+	FindPage(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantPageOptions) (*OAuthGrantPage, error)
+}
+
+// OAuthGrantRepositoryInterface defines the contract for OAuthGrant data access.
+type OAuthGrantRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthGrantGetOptions) (*types.OAuthGrant, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthGrant, error)
+	FindOne(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantFindOptions) (*types.OAuthGrant, error)
+	FindMany(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantFindOptions) ([]*types.OAuthGrant, int, error)
+	FindPage(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantPageOptions) (*OAuthGrantPage, error)
+	CreateOne(ctx context.Context, input *types.OAuthGrant) (*types.OAuthGrant, error)
+	CreateMany(ctx context.Context, inputs []*types.OAuthGrant) ([]*types.OAuthGrant, error)
+	UpsertOne(ctx context.Context, input *types.OAuthGrant, on OAuthGrantUniqueKey, update *OAuthGrantUpdate) (*types.OAuthGrant, error)
+	UpsertOneResult(ctx context.Context, input *types.OAuthGrant, on OAuthGrantUniqueKey, update *OAuthGrantUpdate, opts *UpsertOptions) (UpsertResult[*types.OAuthGrant], error)
+	UpsertMany(ctx context.Context, inputs []*types.OAuthGrant, on OAuthGrantUniqueKey, update OAuthGrantFields, opts *UpsertOptions) ([]UpsertResult[*types.OAuthGrant], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OAuthGrantUpdate) (*types.OAuthGrant, error)
+	UpdateMany(ctx context.Context, filter *OAuthGrantFilter, update *OAuthGrantUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OAuthGrantFilter) (int, error)
+}
+
+// ReadOnlyOAuthTokenRepositoryInterface is the reads of OAuthTokenRepositoryInterface (D150).
+type ReadOnlyOAuthTokenRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthTokenGetOptions) (*types.OAuthToken, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthToken, error)
+	FindOne(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenFindOptions) (*types.OAuthToken, error)
+	FindMany(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenFindOptions) ([]*types.OAuthToken, int, error)
+	FindPage(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenPageOptions) (*OAuthTokenPage, error)
+}
+
+// OAuthTokenRepositoryInterface defines the contract for OAuthToken data access.
+type OAuthTokenRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthTokenGetOptions) (*types.OAuthToken, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthToken, error)
+	FindOne(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenFindOptions) (*types.OAuthToken, error)
+	FindMany(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenFindOptions) ([]*types.OAuthToken, int, error)
+	FindPage(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenPageOptions) (*OAuthTokenPage, error)
+	CreateOne(ctx context.Context, input *types.OAuthToken) (*types.OAuthToken, error)
+	CreateMany(ctx context.Context, inputs []*types.OAuthToken) ([]*types.OAuthToken, error)
+	UpsertOne(ctx context.Context, input *types.OAuthToken, on OAuthTokenUniqueKey, update *OAuthTokenUpdate) (*types.OAuthToken, error)
+	UpsertOneResult(ctx context.Context, input *types.OAuthToken, on OAuthTokenUniqueKey, update *OAuthTokenUpdate, opts *UpsertOptions) (UpsertResult[*types.OAuthToken], error)
+	UpsertMany(ctx context.Context, inputs []*types.OAuthToken, on OAuthTokenUniqueKey, update OAuthTokenFields, opts *UpsertOptions) ([]UpsertResult[*types.OAuthToken], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OAuthTokenUpdate) (*types.OAuthToken, error)
+	UpdateMany(ctx context.Context, filter *OAuthTokenFilter, update *OAuthTokenUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OAuthTokenFilter) (int, error)
+}
 
 // ReadOnlyOrderRepositoryInterface is the reads of OrderRepositoryInterface (D150).
 type ReadOnlyOrderRepositoryInterface interface {
@@ -89,6 +280,34 @@ type ProductRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *ProductFilter, update *ProductUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *ProductFilter) (int, error)
+}
+
+// ReadOnlyRefundRepositoryInterface is the reads of RefundRepositoryInterface (D150).
+type ReadOnlyRefundRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RefundGetOptions) (*types.Refund, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Refund, error)
+	FindOne(ctx context.Context, filter *RefundFilter, opts *RefundFindOptions) (*types.Refund, error)
+	FindMany(ctx context.Context, filter *RefundFilter, opts *RefundFindOptions) ([]*types.Refund, int, error)
+	FindPage(ctx context.Context, filter *RefundFilter, opts *RefundPageOptions) (*RefundPage, error)
+}
+
+// RefundRepositoryInterface defines the contract for Refund data access.
+type RefundRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *RefundGetOptions) (*types.Refund, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Refund, error)
+	FindOne(ctx context.Context, filter *RefundFilter, opts *RefundFindOptions) (*types.Refund, error)
+	FindMany(ctx context.Context, filter *RefundFilter, opts *RefundFindOptions) ([]*types.Refund, int, error)
+	FindPage(ctx context.Context, filter *RefundFilter, opts *RefundPageOptions) (*RefundPage, error)
+	CreateOne(ctx context.Context, input *RefundCreate) (*types.Refund, error)
+	CreateMany(ctx context.Context, inputs []*RefundCreate) ([]*types.Refund, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *RefundUpdate) (*types.Refund, error)
+	UpdateMany(ctx context.Context, filter *RefundFilter, update *RefundUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *RefundFilter) (int, error)
+	Approvals() RefundApprovalsOperations
+	Payments() RefundPaymentsOperations
+	Status() RefundStatusOperations
+	Number() RefundNumberOperations
 }
 
 // ReadOnlyRestockRequestRepositoryInterface is the reads of RestockRequestRepositoryInterface (D150).
@@ -198,6 +417,34 @@ type SessionRepositoryInterface interface {
 	UpdateMany(ctx context.Context, filter *SessionFilter, update *SessionUpdate) (int, error)
 	DeleteOne(ctx context.Context, id types.IdentityUUID) error
 	DeleteMany(ctx context.Context, filter *SessionFilter) (int, error)
+}
+
+// ReadOnlyTicketRepositoryInterface is the reads of TicketRepositoryInterface (D150).
+type ReadOnlyTicketRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TicketGetOptions) (*types.Ticket, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Ticket, error)
+	FindOne(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) (*types.Ticket, error)
+	FindMany(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) ([]*types.Ticket, int, error)
+	FindPage(ctx context.Context, filter *TicketFilter, opts *TicketPageOptions) (*TicketPage, error)
+}
+
+// TicketRepositoryInterface defines the contract for Ticket data access.
+type TicketRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *TicketGetOptions) (*types.Ticket, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.Ticket, error)
+	FindOne(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) (*types.Ticket, error)
+	FindMany(ctx context.Context, filter *TicketFilter, opts *TicketFindOptions) ([]*types.Ticket, int, error)
+	FindPage(ctx context.Context, filter *TicketFilter, opts *TicketPageOptions) (*TicketPage, error)
+	CreateOne(ctx context.Context, input *TicketCreate) (*types.Ticket, error)
+	CreateMany(ctx context.Context, inputs []*TicketCreate) ([]*types.Ticket, error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *TicketUpdate) (*types.Ticket, error)
+	UpdateMany(ctx context.Context, filter *TicketFilter, update *TicketUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *TicketFilter) (int, error)
+	Derived() TicketDerivedOperations
+	Provenance() TicketProvenanceOperations
+	Status() TicketStatusOperations
+	RunChange(ctx context.Context, change types.TicketChange, claim *rules.Claim) (*rules.ChangeRun, error)
 }
 
 // ReadOnlyUserRepositoryInterface is the reads of UserRepositoryInterface (D150).
@@ -312,13 +559,22 @@ type UserRoleGrantRepositoryInterface interface {
 // repository's reads, the raw reads and a read-only transaction. It has no
 // write, so a write through it does not compile.
 type ReadOnlyDatabaseInterface interface {
+	GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface
+	GetCollectionPointReadOnlyRepository() ReadOnlyCollectionPointRepositoryInterface
+	GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface
+	GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface
+	GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface
+	GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface
+	GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface
 	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
 	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
+	GetRefundReadOnlyRepository() ReadOnlyRefundRepositoryInterface
 	GetRestockRequestReadOnlyRepository() ReadOnlyRestockRequestRepositoryInterface
 	GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface
 	GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface
 	GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 	GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface
 	GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface
 	GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface
@@ -332,13 +588,22 @@ type ReadOnlyDatabaseInterface interface {
 // ReadOnlyTxInterface is the reads of a transaction (D150): each
 // repository's reads and the raw read.
 type ReadOnlyTxInterface interface {
+	GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface
+	GetCollectionPointReadOnlyRepository() ReadOnlyCollectionPointRepositoryInterface
+	GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface
+	GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface
+	GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface
+	GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface
+	GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface
 	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
 	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
+	GetRefundReadOnlyRepository() ReadOnlyRefundRepositoryInterface
 	GetRestockRequestReadOnlyRepository() ReadOnlyRestockRequestRepositoryInterface
 	GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface
 	GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface
 	GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 	GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface
 	GetUserApiKeyReadOnlyRepository() ReadOnlyUserApiKeyRepositoryInterface
 	GetUserCredentialReadOnlyRepository() ReadOnlyUserCredentialRepositoryInterface
@@ -356,12 +621,28 @@ type DatabaseInterface interface {
 	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
+	GetCheckoutRepository() CheckoutRepositoryInterface
+	GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface
+	GetCollectionPointRepository() CollectionPointRepositoryInterface
+	GetCollectionPointReadOnlyRepository() ReadOnlyCollectionPointRepositoryInterface
+	GetInventoryRepository() InventoryRepositoryInterface
+	GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface
+	GetOAuthClientRepository() OAuthClientRepositoryInterface
+	GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface
+	GetOAuthCodeRepository() OAuthCodeRepositoryInterface
+	GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface
+	GetOAuthGrantRepository() OAuthGrantRepositoryInterface
+	GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface
+	GetOAuthTokenRepository() OAuthTokenRepositoryInterface
+	GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface
 	GetOrderRepository() OrderRepositoryInterface
 	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineRepository() OrderLineRepositoryInterface
 	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
 	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
+	GetRefundRepository() RefundRepositoryInterface
+	GetRefundReadOnlyRepository() ReadOnlyRefundRepositoryInterface
 	GetRestockRequestRepository() RestockRequestRepositoryInterface
 	GetRestockRequestReadOnlyRepository() ReadOnlyRestockRequestRepositoryInterface
 	GetReviewRepository() ReviewRepositoryInterface
@@ -370,6 +651,8 @@ type DatabaseInterface interface {
 	GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
 	GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface
+	GetTicketRepository() TicketRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
 	GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface
 	GetUserApiKeyRepository() UserApiKeyRepositoryInterface
@@ -385,12 +668,28 @@ type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	GetCheckoutRepository() CheckoutRepositoryInterface
+	GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface
+	GetCollectionPointRepository() CollectionPointRepositoryInterface
+	GetCollectionPointReadOnlyRepository() ReadOnlyCollectionPointRepositoryInterface
+	GetInventoryRepository() InventoryRepositoryInterface
+	GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface
+	GetOAuthClientRepository() OAuthClientRepositoryInterface
+	GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface
+	GetOAuthCodeRepository() OAuthCodeRepositoryInterface
+	GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface
+	GetOAuthGrantRepository() OAuthGrantRepositoryInterface
+	GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface
+	GetOAuthTokenRepository() OAuthTokenRepositoryInterface
+	GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface
 	GetOrderRepository() OrderRepositoryInterface
 	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineRepository() OrderLineRepositoryInterface
 	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
 	GetProductRepository() ProductRepositoryInterface
 	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
+	GetRefundRepository() RefundRepositoryInterface
+	GetRefundReadOnlyRepository() ReadOnlyRefundRepositoryInterface
 	GetRestockRequestRepository() RestockRequestRepositoryInterface
 	GetRestockRequestReadOnlyRepository() ReadOnlyRestockRequestRepositoryInterface
 	GetReviewRepository() ReviewRepositoryInterface
@@ -399,6 +698,8 @@ type TxInterface interface {
 	GetRoleReadOnlyRepository() ReadOnlyRoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
 	GetSessionReadOnlyRepository() ReadOnlySessionRepositoryInterface
+	GetTicketRepository() TicketRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
 	GetUserRepository() UserRepositoryInterface
 	GetUserReadOnlyRepository() ReadOnlyUserRepositoryInterface
 	GetUserApiKeyRepository() UserApiKeyRepositoryInterface
@@ -411,45 +712,79 @@ type TxInterface interface {
 
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
 type NoOpDatabase struct {
-	tx             *NoOpTx
-	Order          *NoOpOrderRepository
-	OrderLine      *NoOpOrderLineRepository
-	Product        *NoOpProductRepository
-	RestockRequest *NoOpRestockRequestRepository
-	Review         *NoOpReviewRepository
-	Role           *NoOpRoleRepository
-	Session        *NoOpSessionRepository
-	User           *NoOpUserRepository
-	UserApiKey     *NoOpUserApiKeyRepository
-	UserCredential *NoOpUserCredentialRepository
-	UserRoleGrant  *NoOpUserRoleGrantRepository
+	tx              *NoOpTx
+	Checkout        *NoOpCheckoutRepository
+	CollectionPoint *NoOpCollectionPointRepository
+	Inventory       *NoOpInventoryRepository
+	OAuthClient     *NoOpOAuthClientRepository
+	OAuthCode       *NoOpOAuthCodeRepository
+	OAuthGrant      *NoOpOAuthGrantRepository
+	OAuthToken      *NoOpOAuthTokenRepository
+	Order           *NoOpOrderRepository
+	OrderLine       *NoOpOrderLineRepository
+	Product         *NoOpProductRepository
+	Refund          *NoOpRefundRepository
+	RestockRequest  *NoOpRestockRequestRepository
+	Review          *NoOpReviewRepository
+	Role            *NoOpRoleRepository
+	Session         *NoOpSessionRepository
+	Ticket          *NoOpTicketRepository
+	User            *NoOpUserRepository
+	UserApiKey      *NoOpUserApiKeyRepository
+	UserCredential  *NoOpUserCredentialRepository
+	UserRoleGrant   *NoOpUserRoleGrantRepository
 }
 
 // NoOpTx provides deterministic no-op transaction repository access.
 type NoOpTx struct {
-	Order          *NoOpOrderRepository
-	OrderLine      *NoOpOrderLineRepository
-	Product        *NoOpProductRepository
-	RestockRequest *NoOpRestockRequestRepository
-	Review         *NoOpReviewRepository
-	Role           *NoOpRoleRepository
-	Session        *NoOpSessionRepository
-	User           *NoOpUserRepository
-	UserApiKey     *NoOpUserApiKeyRepository
-	UserCredential *NoOpUserCredentialRepository
-	UserRoleGrant  *NoOpUserRoleGrantRepository
+	Checkout        *NoOpCheckoutRepository
+	CollectionPoint *NoOpCollectionPointRepository
+	Inventory       *NoOpInventoryRepository
+	OAuthClient     *NoOpOAuthClientRepository
+	OAuthCode       *NoOpOAuthCodeRepository
+	OAuthGrant      *NoOpOAuthGrantRepository
+	OAuthToken      *NoOpOAuthTokenRepository
+	Order           *NoOpOrderRepository
+	OrderLine       *NoOpOrderLineRepository
+	Product         *NoOpProductRepository
+	Refund          *NoOpRefundRepository
+	RestockRequest  *NoOpRestockRequestRepository
+	Review          *NoOpReviewRepository
+	Role            *NoOpRoleRepository
+	Session         *NoOpSessionRepository
+	Ticket          *NoOpTicketRepository
+	User            *NoOpUserRepository
+	UserApiKey      *NoOpUserApiKeyRepository
+	UserCredential  *NoOpUserCredentialRepository
+	UserRoleGrant   *NoOpUserRoleGrantRepository
 }
 
 // NewNoOpDatabase creates a no-op database with no-op repositories.
 func NewNoOpDatabase() *NoOpDatabase {
 	tx := &NoOpTx{}
 	db := &NoOpDatabase{tx: tx}
+	db.Checkout = &NoOpCheckoutRepository{}
+	tx.Checkout = db.Checkout
+	db.CollectionPoint = &NoOpCollectionPointRepository{}
+	tx.CollectionPoint = db.CollectionPoint
+	db.Inventory = &NoOpInventoryRepository{}
+	tx.Inventory = db.Inventory
+	db.OAuthClient = &NoOpOAuthClientRepository{}
+	tx.OAuthClient = db.OAuthClient
+	db.OAuthCode = &NoOpOAuthCodeRepository{}
+	tx.OAuthCode = db.OAuthCode
+	db.OAuthGrant = &NoOpOAuthGrantRepository{}
+	tx.OAuthGrant = db.OAuthGrant
+	db.OAuthToken = &NoOpOAuthTokenRepository{}
+	tx.OAuthToken = db.OAuthToken
 	db.Order = &NoOpOrderRepository{}
 	tx.Order = db.Order
 	db.OrderLine = &NoOpOrderLineRepository{}
 	tx.OrderLine = db.OrderLine
 	db.Product = &NoOpProductRepository{}
 	tx.Product = db.Product
+	db.Refund = &NoOpRefundRepository{}
+	tx.Refund = db.Refund
 	db.RestockRequest = &NoOpRestockRequestRepository{}
 	tx.RestockRequest = db.RestockRequest
 	db.Review = &NoOpReviewRepository{}
@@ -458,6 +793,8 @@ func NewNoOpDatabase() *NoOpDatabase {
 	tx.Role = db.Role
 	db.Session = &NoOpSessionRepository{}
 	tx.Session = db.Session
+	db.Ticket = &NoOpTicketRepository{}
+	tx.Ticket = db.Ticket
 	db.User = &NoOpUserRepository{}
 	tx.User = db.User
 	db.UserApiKey = &NoOpUserApiKeyRepository{}
@@ -548,6 +885,774 @@ func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 type noOpRow struct{}
 
 func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
+func (db *NoOpDatabase) GetCheckoutRepository() CheckoutRepositoryInterface {
+	return db.Checkout
+}
+
+func (db *NoOpDatabase) GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface {
+	return db.Checkout
+}
+
+func (tx *NoOpTx) GetCheckoutRepository() CheckoutRepositoryInterface {
+	return tx.Checkout
+}
+
+func (tx *NoOpTx) GetCheckoutReadOnlyRepository() ReadOnlyCheckoutRepositoryInterface {
+	return tx.Checkout
+}
+
+// NoOpCheckoutRepository provides deterministic no-op repository behavior.
+type NoOpCheckoutRepository struct{}
+
+func (r *NoOpCheckoutRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *CheckoutGetOptions) (*types.Checkout, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpCheckoutRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Checkout, error) {
+	return map[types.IdentityUUID]*types.Checkout{}, nil
+}
+
+func (r *NoOpCheckoutRepository) FindOne(_ context.Context, _ *CheckoutFilter, _ *CheckoutFindOptions) (*types.Checkout, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpCheckoutRepository) FindMany(_ context.Context, _ *CheckoutFilter, _ *CheckoutFindOptions) ([]*types.Checkout, int, error) {
+	return []*types.Checkout{}, 0, nil
+}
+
+func (r *NoOpCheckoutRepository) FindPage(_ context.Context, _ *CheckoutFilter, _ *CheckoutPageOptions) (*CheckoutPage, error) {
+	return &CheckoutPage{Rows: []*types.Checkout{}}, nil
+}
+
+func (r *NoOpCheckoutRepository) CreateOne(_ context.Context, input *CheckoutCreate) (*types.Checkout, error) {
+	return input.row(), nil
+}
+
+func (r *NoOpCheckoutRepository) CreateMany(_ context.Context, inputs []*CheckoutCreate) ([]*types.Checkout, error) {
+	rows := make([]*types.Checkout, len(inputs))
+	for i, input := range inputs {
+		rows[i] = input.row()
+	}
+	return rows, nil
+}
+
+// RunDeadline runs no deadline: the no-op repository holds no row.
+func (r *NoOpCheckoutRepository) RunDeadline(_ context.Context, _ types.CheckoutDeadline, _ *rules.Claim) (*rules.DeadlineRun, error) {
+	return &rules.DeadlineRun{Why: rules.WhyGone}, nil
+}
+
+// RunChange runs nothing: the no-op repository holds no row, so a change
+// finds its row gone, which leaves it nothing to write.
+func (r *NoOpCheckoutRepository) RunChange(_ context.Context, _ types.CheckoutChange, _ *rules.Claim) (*rules.ChangeRun, error) {
+	return &rules.ChangeRun{Ran: true, Result: &rules.Result{}}, nil
+}
+
+func (r *NoOpCheckoutRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *CheckoutUpdate) (*types.Checkout, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpCheckoutRepository) UpdateMany(_ context.Context, _ *CheckoutFilter, _ *CheckoutUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpCheckoutRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpCheckoutRepository) DeleteMany(_ context.Context, _ *CheckoutFilter) (int, error) {
+	return 0, nil
+}
+
+// Holds returns operations of Checkout's holds that find no row.
+func (r *NoOpCheckoutRepository) Holds() CheckoutHoldsOperations {
+	return noOpCheckoutHoldsOperations{}
+}
+
+// noOpCheckoutHoldsOperations answers each operation of
+// CheckoutHoldsOperations with ErrNotFound.
+type noOpCheckoutHoldsOperations struct{}
+
+func (noOpCheckoutHoldsOperations) RetakeHolds(_ context.Context, _ types.IdentityUUID, _ json.RawMessage) (*CheckoutHoldsRetakeHoldsResult, error) {
+	var none *CheckoutHoldsRetakeHoldsResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutHoldsOperations) ListHolds(_ context.Context, _ types.IdentityUUID, _ json.RawMessage) (*CheckoutHoldsListHoldsResult, error) {
+	var none *CheckoutHoldsListHoldsResult
+	return none, ErrNotFound
+}
+
+// Timers returns operations of Checkout's timers that find no row.
+func (r *NoOpCheckoutRepository) Timers() CheckoutTimersOperations {
+	return noOpCheckoutTimersOperations{}
+}
+
+// noOpCheckoutTimersOperations answers each operation of
+// CheckoutTimersOperations with ErrNotFound.
+type noOpCheckoutTimersOperations struct{}
+
+func (noOpCheckoutTimersOperations) FireTimer(_ context.Context, _ types.IdentityUUID, _ CheckoutTimersFireTimerParams) (*CheckoutTimersFireTimerResult, error) {
+	var none *CheckoutTimersFireTimerResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutTimersOperations) ResetTimer(_ context.Context, _ types.IdentityUUID, _ CheckoutTimersResetTimerParams) (*CheckoutTimersResetTimerResult, error) {
+	var none *CheckoutTimersResetTimerResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutTimersOperations) SnoozeTimer(_ context.Context, _ types.IdentityUUID, _ CheckoutTimersSnoozeTimerParams) (*CheckoutTimersSnoozeTimerResult, error) {
+	var none *CheckoutTimersSnoozeTimerResult
+	return none, ErrNotFound
+}
+
+// Payments returns operations of Checkout's payments that find no row.
+func (r *NoOpCheckoutRepository) Payments() CheckoutPaymentsOperations {
+	return noOpCheckoutPaymentsOperations{}
+}
+
+// noOpCheckoutPaymentsOperations answers each operation of
+// CheckoutPaymentsOperations with ErrNotFound.
+type noOpCheckoutPaymentsOperations struct{}
+
+func (noOpCheckoutPaymentsOperations) OpenPayment(_ context.Context, _ types.IdentityUUID, _ CheckoutPaymentsOpenPaymentParams) (*CheckoutPaymentsOpenPaymentResult, error) {
+	var none *CheckoutPaymentsOpenPaymentResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutPaymentsOperations) RecordPaymentEvent(_ context.Context, _ types.IdentityUUID, _ CheckoutPaymentsRecordPaymentEventParams) (*CheckoutPaymentsRecordPaymentEventResult, error) {
+	var none *CheckoutPaymentsRecordPaymentEventResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutPaymentsOperations) CapturePayment(_ context.Context, _ types.IdentityUUID, _ CheckoutPaymentsCapturePaymentParams) (*CheckoutPaymentsCapturePaymentResult, error) {
+	var none *CheckoutPaymentsCapturePaymentResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutPaymentsOperations) VoidPayment(_ context.Context, _ types.IdentityUUID, _ CheckoutPaymentsVoidPaymentParams) (*CheckoutPaymentsVoidPaymentResult, error) {
+	var none *CheckoutPaymentsVoidPaymentResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutPaymentsOperations) RefundPayment(_ context.Context, _ types.IdentityUUID, _ CheckoutPaymentsRefundPaymentParams) (*CheckoutPaymentsRefundPaymentResult, error) {
+	var none *CheckoutPaymentsRefundPaymentResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutPaymentsOperations) ListPaymentActions(_ context.Context, _ CheckoutPaymentsListPaymentActionsParams) (*CheckoutPaymentsListPaymentActionsResult, error) {
+	var none *CheckoutPaymentsListPaymentActionsResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutPaymentsOperations) RefundFor(_ context.Context, _ types.IdentityUUID, _ CheckoutPaymentsRefundForParams) (*CheckoutPaymentsRefundForResult, error) {
+	var none *CheckoutPaymentsRefundForResult
+	return none, ErrNotFound
+}
+
+func (noOpCheckoutPaymentsOperations) SettleRefundFor(_ context.Context, _ types.IdentityUUID, _ CheckoutPaymentsSettleRefundForParams) (*CheckoutPaymentsSettleRefundForResult, error) {
+	var none *CheckoutPaymentsSettleRefundForResult
+	return none, ErrNotFound
+}
+
+// Status returns operations of Checkout's status that find no row.
+func (r *NoOpCheckoutRepository) Status() CheckoutStatusOperations {
+	return noOpCheckoutStatusOperations{}
+}
+
+// noOpCheckoutStatusOperations answers each operation of
+// CheckoutStatusOperations with ErrNotFound.
+type noOpCheckoutStatusOperations struct{}
+
+func (noOpCheckoutStatusOperations) Transition(_ context.Context, _ types.IdentityUUID, _ CheckoutStatusTransitionParams) (*CheckoutStatusTransitionResult, error) {
+	var none *CheckoutStatusTransitionResult
+	return none, ErrNotFound
+}
+
+// Number returns operations of Checkout's number that find no row.
+func (r *NoOpCheckoutRepository) Number() CheckoutNumberOperations {
+	return noOpCheckoutNumberOperations{}
+}
+
+// noOpCheckoutNumberOperations answers each operation of
+// CheckoutNumberOperations with ErrNotFound.
+type noOpCheckoutNumberOperations struct{}
+
+func (noOpCheckoutNumberOperations) AssignNumber(_ context.Context, _ types.IdentityUUID, _ json.RawMessage) (*CheckoutNumberAssignNumberResult, error) {
+	var none *CheckoutNumberAssignNumberResult
+	return none, ErrNotFound
+}
+
+func (db *NoOpDatabase) GetCollectionPointRepository() CollectionPointRepositoryInterface {
+	return db.CollectionPoint
+}
+
+func (db *NoOpDatabase) GetCollectionPointReadOnlyRepository() ReadOnlyCollectionPointRepositoryInterface {
+	return db.CollectionPoint
+}
+
+func (tx *NoOpTx) GetCollectionPointRepository() CollectionPointRepositoryInterface {
+	return tx.CollectionPoint
+}
+
+func (tx *NoOpTx) GetCollectionPointReadOnlyRepository() ReadOnlyCollectionPointRepositoryInterface {
+	return tx.CollectionPoint
+}
+
+// NoOpCollectionPointRepository provides deterministic no-op repository behavior.
+type NoOpCollectionPointRepository struct{}
+
+func (r *NoOpCollectionPointRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *CollectionPointGetOptions) (*types.CollectionPoint, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpCollectionPointRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.CollectionPoint, error) {
+	return map[types.IdentityUUID]*types.CollectionPoint{}, nil
+}
+
+func (r *NoOpCollectionPointRepository) FindOne(_ context.Context, _ *CollectionPointFilter, _ *CollectionPointFindOptions) (*types.CollectionPoint, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpCollectionPointRepository) FindMany(_ context.Context, _ *CollectionPointFilter, _ *CollectionPointFindOptions) ([]*types.CollectionPoint, int, error) {
+	return []*types.CollectionPoint{}, 0, nil
+}
+
+func (r *NoOpCollectionPointRepository) FindPage(_ context.Context, _ *CollectionPointFilter, _ *CollectionPointPageOptions) (*CollectionPointPage, error) {
+	return &CollectionPointPage{Rows: []*types.CollectionPoint{}}, nil
+}
+
+func (r *NoOpCollectionPointRepository) CreateOne(_ context.Context, input *CollectionPointCreate) (*types.CollectionPoint, error) {
+	return input.row(), nil
+}
+
+func (r *NoOpCollectionPointRepository) CreateMany(_ context.Context, inputs []*CollectionPointCreate) ([]*types.CollectionPoint, error) {
+	rows := make([]*types.CollectionPoint, len(inputs))
+	for i, input := range inputs {
+		rows[i] = input.row()
+	}
+	return rows, nil
+}
+
+func (r *NoOpCollectionPointRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *CollectionPointUpdate) (*types.CollectionPoint, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpCollectionPointRepository) UpdateMany(_ context.Context, _ *CollectionPointFilter, _ *CollectionPointUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpCollectionPointRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpCollectionPointRepository) DeleteMany(_ context.Context, _ *CollectionPointFilter) (int, error) {
+	return 0, nil
+}
+
+// Calendar returns operations of CollectionPoint's calendar that find no row.
+func (r *NoOpCollectionPointRepository) Calendar() CollectionPointCalendarOperations {
+	return noOpCollectionPointCalendarOperations{}
+}
+
+// noOpCollectionPointCalendarOperations answers each operation of
+// CollectionPointCalendarOperations with ErrNotFound.
+type noOpCollectionPointCalendarOperations struct{}
+
+func (noOpCollectionPointCalendarOperations) SetOpeningHours(_ context.Context, _ types.IdentityUUID, _ CollectionPointCalendarSetOpeningHoursParams) (*CollectionPointCalendarSetOpeningHoursResult, error) {
+	var none *CollectionPointCalendarSetOpeningHoursResult
+	return none, ErrNotFound
+}
+
+func (noOpCollectionPointCalendarOperations) AddClosure(_ context.Context, _ types.IdentityUUID, _ CollectionPointCalendarAddClosureParams) (*CollectionPointCalendarAddClosureResult, error) {
+	var none *CollectionPointCalendarAddClosureResult
+	return none, ErrNotFound
+}
+
+func (noOpCollectionPointCalendarOperations) RemoveClosure(_ context.Context, _ types.IdentityUUID, _ CollectionPointCalendarRemoveClosureParams) (*CollectionPointCalendarRemoveClosureResult, error) {
+	var none *CollectionPointCalendarRemoveClosureResult
+	return none, ErrNotFound
+}
+
+func (noOpCollectionPointCalendarOperations) HoldFor(_ context.Context, _ types.IdentityUUID, _ CollectionPointCalendarHoldForParams) (*CollectionPointCalendarHoldForResult, error) {
+	var none *CollectionPointCalendarHoldForResult
+	return none, ErrNotFound
+}
+
+func (noOpCollectionPointCalendarOperations) CommitFor(_ context.Context, _ types.IdentityUUID, _ CollectionPointCalendarCommitForParams) (*CollectionPointCalendarCommitForResult, error) {
+	var none *CollectionPointCalendarCommitForResult
+	return none, ErrNotFound
+}
+
+func (noOpCollectionPointCalendarOperations) ReleaseFor(_ context.Context, _ types.IdentityUUID, _ CollectionPointCalendarReleaseForParams) (*CollectionPointCalendarReleaseForResult, error) {
+	var none *CollectionPointCalendarReleaseForResult
+	return none, ErrNotFound
+}
+
+func (noOpCollectionPointCalendarOperations) CheckHold(_ context.Context, _ types.IdentityUUID, _ CollectionPointCalendarCheckHoldParams) (*CollectionPointCalendarCheckHoldResult, error) {
+	var none *CollectionPointCalendarCheckHoldResult
+	return none, ErrNotFound
+}
+
+func (noOpCollectionPointCalendarOperations) ListBookings(_ context.Context, _ types.IdentityUUID, _ CollectionPointCalendarListBookingsParams) (*CollectionPointCalendarListBookingsResult, error) {
+	var none *CollectionPointCalendarListBookingsResult
+	return none, ErrNotFound
+}
+
+func (noOpCollectionPointCalendarOperations) FindAvailability(_ context.Context, _ CollectionPointCalendarFindAvailabilityParams) (*CollectionPointCalendarFindAvailabilityResult, error) {
+	var none *CollectionPointCalendarFindAvailabilityResult
+	return none, ErrNotFound
+}
+
+func (db *NoOpDatabase) GetInventoryRepository() InventoryRepositoryInterface {
+	return db.Inventory
+}
+
+func (db *NoOpDatabase) GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface {
+	return db.Inventory
+}
+
+func (tx *NoOpTx) GetInventoryRepository() InventoryRepositoryInterface {
+	return tx.Inventory
+}
+
+func (tx *NoOpTx) GetInventoryReadOnlyRepository() ReadOnlyInventoryRepositoryInterface {
+	return tx.Inventory
+}
+
+// NoOpInventoryRepository provides deterministic no-op repository behavior.
+type NoOpInventoryRepository struct{}
+
+func (r *NoOpInventoryRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *InventoryGetOptions) (*types.Inventory, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpInventoryRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Inventory, error) {
+	return map[types.IdentityUUID]*types.Inventory{}, nil
+}
+
+func (r *NoOpInventoryRepository) FindOne(_ context.Context, _ *InventoryFilter, _ *InventoryFindOptions) (*types.Inventory, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpInventoryRepository) FindMany(_ context.Context, _ *InventoryFilter, _ *InventoryFindOptions) ([]*types.Inventory, int, error) {
+	return []*types.Inventory{}, 0, nil
+}
+
+func (r *NoOpInventoryRepository) FindPage(_ context.Context, _ *InventoryFilter, _ *InventoryPageOptions) (*InventoryPage, error) {
+	return &InventoryPage{Rows: []*types.Inventory{}}, nil
+}
+
+func (r *NoOpInventoryRepository) CreateOne(_ context.Context, input *InventoryCreate) (*types.Inventory, error) {
+	return input.row(), nil
+}
+
+func (r *NoOpInventoryRepository) CreateMany(_ context.Context, inputs []*InventoryCreate) ([]*types.Inventory, error) {
+	rows := make([]*types.Inventory, len(inputs))
+	for i, input := range inputs {
+		rows[i] = input.row()
+	}
+	return rows, nil
+}
+
+func (r *NoOpInventoryRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *InventoryUpdate) (*types.Inventory, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpInventoryRepository) UpdateMany(_ context.Context, _ *InventoryFilter, _ *InventoryUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpInventoryRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpInventoryRepository) DeleteMany(_ context.Context, _ *InventoryFilter) (int, error) {
+	return 0, nil
+}
+
+// Stock returns operations of Inventory's stock that find no row.
+func (r *NoOpInventoryRepository) Stock() InventoryStockOperations {
+	return noOpInventoryStockOperations{}
+}
+
+// noOpInventoryStockOperations answers each operation of
+// InventoryStockOperations with ErrNotFound.
+type noOpInventoryStockOperations struct{}
+
+func (noOpInventoryStockOperations) ReceiveStock(_ context.Context, _ types.IdentityUUID, _ InventoryStockReceiveStockParams) (*InventoryStockReceiveStockResult, error) {
+	var none *InventoryStockReceiveStockResult
+	return none, ErrNotFound
+}
+
+func (noOpInventoryStockOperations) AdjustStock(_ context.Context, _ types.IdentityUUID, _ InventoryStockAdjustStockParams) (*InventoryStockAdjustStockResult, error) {
+	var none *InventoryStockAdjustStockResult
+	return none, ErrNotFound
+}
+
+func (noOpInventoryStockOperations) CountStock(_ context.Context, _ types.IdentityUUID, _ InventoryStockCountStockParams) (*InventoryStockCountStockResult, error) {
+	var none *InventoryStockCountStockResult
+	return none, ErrNotFound
+}
+
+func (noOpInventoryStockOperations) HoldFor(_ context.Context, _ types.IdentityUUID, _ InventoryStockHoldForParams) (*InventoryStockHoldForResult, error) {
+	var none *InventoryStockHoldForResult
+	return none, ErrNotFound
+}
+
+func (noOpInventoryStockOperations) CommitFor(_ context.Context, _ types.IdentityUUID, _ InventoryStockCommitForParams) (*InventoryStockCommitForResult, error) {
+	var none *InventoryStockCommitForResult
+	return none, ErrNotFound
+}
+
+func (noOpInventoryStockOperations) ReleaseFor(_ context.Context, _ types.IdentityUUID, _ InventoryStockReleaseForParams) (*InventoryStockReleaseForResult, error) {
+	var none *InventoryStockReleaseForResult
+	return none, ErrNotFound
+}
+
+func (noOpInventoryStockOperations) ReturnFor(_ context.Context, _ types.IdentityUUID, _ InventoryStockReturnForParams) (*InventoryStockReturnForResult, error) {
+	var none *InventoryStockReturnForResult
+	return none, ErrNotFound
+}
+
+func (noOpInventoryStockOperations) CheckHold(_ context.Context, _ types.IdentityUUID, _ InventoryStockCheckHoldParams) (*InventoryStockCheckHoldResult, error) {
+	var none *InventoryStockCheckHoldResult
+	return none, ErrNotFound
+}
+
+func (noOpInventoryStockOperations) ListStockMovements(_ context.Context, _ types.IdentityUUID, _ InventoryStockListStockMovementsParams) (*InventoryStockListStockMovementsResult, error) {
+	var none *InventoryStockListStockMovementsResult
+	return none, ErrNotFound
+}
+
+func (db *NoOpDatabase) GetOAuthClientRepository() OAuthClientRepositoryInterface {
+	return db.OAuthClient
+}
+
+func (db *NoOpDatabase) GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface {
+	return db.OAuthClient
+}
+
+func (tx *NoOpTx) GetOAuthClientRepository() OAuthClientRepositoryInterface {
+	return tx.OAuthClient
+}
+
+func (tx *NoOpTx) GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface {
+	return tx.OAuthClient
+}
+
+// NoOpOAuthClientRepository provides deterministic no-op repository behavior.
+type NoOpOAuthClientRepository struct{}
+
+func (r *NoOpOAuthClientRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OAuthClientGetOptions) (*types.OAuthClient, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthClientRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthClient, error) {
+	return map[types.IdentityUUID]*types.OAuthClient{}, nil
+}
+
+func (r *NoOpOAuthClientRepository) FindOne(_ context.Context, _ *OAuthClientFilter, _ *OAuthClientFindOptions) (*types.OAuthClient, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthClientRepository) FindMany(_ context.Context, _ *OAuthClientFilter, _ *OAuthClientFindOptions) ([]*types.OAuthClient, int, error) {
+	return []*types.OAuthClient{}, 0, nil
+}
+
+func (r *NoOpOAuthClientRepository) FindPage(_ context.Context, _ *OAuthClientFilter, _ *OAuthClientPageOptions) (*OAuthClientPage, error) {
+	return &OAuthClientPage{Rows: []*types.OAuthClient{}}, nil
+}
+
+func (r *NoOpOAuthClientRepository) CreateOne(_ context.Context, input *types.OAuthClient) (*types.OAuthClient, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthClientRepository) CreateMany(_ context.Context, inputs []*types.OAuthClient) ([]*types.OAuthClient, error) {
+	if inputs == nil {
+		return []*types.OAuthClient{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOAuthClientRepository) UpsertOne(_ context.Context, input *types.OAuthClient, _ OAuthClientUniqueKey, _ *OAuthClientUpdate) (*types.OAuthClient, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthClientRepository) UpsertOneResult(_ context.Context, input *types.OAuthClient, _ OAuthClientUniqueKey, _ *OAuthClientUpdate, _ *UpsertOptions) (UpsertResult[*types.OAuthClient], error) {
+	return UpsertResult[*types.OAuthClient]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOAuthClientRepository) UpsertMany(_ context.Context, inputs []*types.OAuthClient, _ OAuthClientUniqueKey, _ OAuthClientFields, _ *UpsertOptions) ([]UpsertResult[*types.OAuthClient], error) {
+	results := make([]UpsertResult[*types.OAuthClient], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.OAuthClient]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpOAuthClientRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OAuthClientUpdate) (*types.OAuthClient, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthClientRepository) UpdateMany(_ context.Context, _ *OAuthClientFilter, _ *OAuthClientUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOAuthClientRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOAuthClientRepository) DeleteMany(_ context.Context, _ *OAuthClientFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetOAuthCodeRepository() OAuthCodeRepositoryInterface {
+	return db.OAuthCode
+}
+
+func (db *NoOpDatabase) GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface {
+	return db.OAuthCode
+}
+
+func (tx *NoOpTx) GetOAuthCodeRepository() OAuthCodeRepositoryInterface {
+	return tx.OAuthCode
+}
+
+func (tx *NoOpTx) GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface {
+	return tx.OAuthCode
+}
+
+// NoOpOAuthCodeRepository provides deterministic no-op repository behavior.
+type NoOpOAuthCodeRepository struct{}
+
+func (r *NoOpOAuthCodeRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OAuthCodeGetOptions) (*types.OAuthCode, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthCodeRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthCode, error) {
+	return map[types.IdentityUUID]*types.OAuthCode{}, nil
+}
+
+func (r *NoOpOAuthCodeRepository) FindOne(_ context.Context, _ *OAuthCodeFilter, _ *OAuthCodeFindOptions) (*types.OAuthCode, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthCodeRepository) FindMany(_ context.Context, _ *OAuthCodeFilter, _ *OAuthCodeFindOptions) ([]*types.OAuthCode, int, error) {
+	return []*types.OAuthCode{}, 0, nil
+}
+
+func (r *NoOpOAuthCodeRepository) FindPage(_ context.Context, _ *OAuthCodeFilter, _ *OAuthCodePageOptions) (*OAuthCodePage, error) {
+	return &OAuthCodePage{Rows: []*types.OAuthCode{}}, nil
+}
+
+func (r *NoOpOAuthCodeRepository) CreateOne(_ context.Context, input *types.OAuthCode) (*types.OAuthCode, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthCodeRepository) CreateMany(_ context.Context, inputs []*types.OAuthCode) ([]*types.OAuthCode, error) {
+	if inputs == nil {
+		return []*types.OAuthCode{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOAuthCodeRepository) UpsertOne(_ context.Context, input *types.OAuthCode, _ OAuthCodeUniqueKey, _ *OAuthCodeUpdate) (*types.OAuthCode, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthCodeRepository) UpsertOneResult(_ context.Context, input *types.OAuthCode, _ OAuthCodeUniqueKey, _ *OAuthCodeUpdate, _ *UpsertOptions) (UpsertResult[*types.OAuthCode], error) {
+	return UpsertResult[*types.OAuthCode]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOAuthCodeRepository) UpsertMany(_ context.Context, inputs []*types.OAuthCode, _ OAuthCodeUniqueKey, _ OAuthCodeFields, _ *UpsertOptions) ([]UpsertResult[*types.OAuthCode], error) {
+	results := make([]UpsertResult[*types.OAuthCode], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.OAuthCode]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpOAuthCodeRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OAuthCodeUpdate) (*types.OAuthCode, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthCodeRepository) UpdateMany(_ context.Context, _ *OAuthCodeFilter, _ *OAuthCodeUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOAuthCodeRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOAuthCodeRepository) DeleteMany(_ context.Context, _ *OAuthCodeFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetOAuthGrantRepository() OAuthGrantRepositoryInterface {
+	return db.OAuthGrant
+}
+
+func (db *NoOpDatabase) GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface {
+	return db.OAuthGrant
+}
+
+func (tx *NoOpTx) GetOAuthGrantRepository() OAuthGrantRepositoryInterface {
+	return tx.OAuthGrant
+}
+
+func (tx *NoOpTx) GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface {
+	return tx.OAuthGrant
+}
+
+// NoOpOAuthGrantRepository provides deterministic no-op repository behavior.
+type NoOpOAuthGrantRepository struct{}
+
+func (r *NoOpOAuthGrantRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OAuthGrantGetOptions) (*types.OAuthGrant, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthGrantRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthGrant, error) {
+	return map[types.IdentityUUID]*types.OAuthGrant{}, nil
+}
+
+func (r *NoOpOAuthGrantRepository) FindOne(_ context.Context, _ *OAuthGrantFilter, _ *OAuthGrantFindOptions) (*types.OAuthGrant, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthGrantRepository) FindMany(_ context.Context, _ *OAuthGrantFilter, _ *OAuthGrantFindOptions) ([]*types.OAuthGrant, int, error) {
+	return []*types.OAuthGrant{}, 0, nil
+}
+
+func (r *NoOpOAuthGrantRepository) FindPage(_ context.Context, _ *OAuthGrantFilter, _ *OAuthGrantPageOptions) (*OAuthGrantPage, error) {
+	return &OAuthGrantPage{Rows: []*types.OAuthGrant{}}, nil
+}
+
+func (r *NoOpOAuthGrantRepository) CreateOne(_ context.Context, input *types.OAuthGrant) (*types.OAuthGrant, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthGrantRepository) CreateMany(_ context.Context, inputs []*types.OAuthGrant) ([]*types.OAuthGrant, error) {
+	if inputs == nil {
+		return []*types.OAuthGrant{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOAuthGrantRepository) UpsertOne(_ context.Context, input *types.OAuthGrant, _ OAuthGrantUniqueKey, _ *OAuthGrantUpdate) (*types.OAuthGrant, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthGrantRepository) UpsertOneResult(_ context.Context, input *types.OAuthGrant, _ OAuthGrantUniqueKey, _ *OAuthGrantUpdate, _ *UpsertOptions) (UpsertResult[*types.OAuthGrant], error) {
+	return UpsertResult[*types.OAuthGrant]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOAuthGrantRepository) UpsertMany(_ context.Context, inputs []*types.OAuthGrant, _ OAuthGrantUniqueKey, _ OAuthGrantFields, _ *UpsertOptions) ([]UpsertResult[*types.OAuthGrant], error) {
+	results := make([]UpsertResult[*types.OAuthGrant], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.OAuthGrant]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpOAuthGrantRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OAuthGrantUpdate) (*types.OAuthGrant, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthGrantRepository) UpdateMany(_ context.Context, _ *OAuthGrantFilter, _ *OAuthGrantUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOAuthGrantRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOAuthGrantRepository) DeleteMany(_ context.Context, _ *OAuthGrantFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetOAuthTokenRepository() OAuthTokenRepositoryInterface {
+	return db.OAuthToken
+}
+
+func (db *NoOpDatabase) GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface {
+	return db.OAuthToken
+}
+
+func (tx *NoOpTx) GetOAuthTokenRepository() OAuthTokenRepositoryInterface {
+	return tx.OAuthToken
+}
+
+func (tx *NoOpTx) GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface {
+	return tx.OAuthToken
+}
+
+// NoOpOAuthTokenRepository provides deterministic no-op repository behavior.
+type NoOpOAuthTokenRepository struct{}
+
+func (r *NoOpOAuthTokenRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OAuthTokenGetOptions) (*types.OAuthToken, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthTokenRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthToken, error) {
+	return map[types.IdentityUUID]*types.OAuthToken{}, nil
+}
+
+func (r *NoOpOAuthTokenRepository) FindOne(_ context.Context, _ *OAuthTokenFilter, _ *OAuthTokenFindOptions) (*types.OAuthToken, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthTokenRepository) FindMany(_ context.Context, _ *OAuthTokenFilter, _ *OAuthTokenFindOptions) ([]*types.OAuthToken, int, error) {
+	return []*types.OAuthToken{}, 0, nil
+}
+
+func (r *NoOpOAuthTokenRepository) FindPage(_ context.Context, _ *OAuthTokenFilter, _ *OAuthTokenPageOptions) (*OAuthTokenPage, error) {
+	return &OAuthTokenPage{Rows: []*types.OAuthToken{}}, nil
+}
+
+func (r *NoOpOAuthTokenRepository) CreateOne(_ context.Context, input *types.OAuthToken) (*types.OAuthToken, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthTokenRepository) CreateMany(_ context.Context, inputs []*types.OAuthToken) ([]*types.OAuthToken, error) {
+	if inputs == nil {
+		return []*types.OAuthToken{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOAuthTokenRepository) UpsertOne(_ context.Context, input *types.OAuthToken, _ OAuthTokenUniqueKey, _ *OAuthTokenUpdate) (*types.OAuthToken, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthTokenRepository) UpsertOneResult(_ context.Context, input *types.OAuthToken, _ OAuthTokenUniqueKey, _ *OAuthTokenUpdate, _ *UpsertOptions) (UpsertResult[*types.OAuthToken], error) {
+	return UpsertResult[*types.OAuthToken]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOAuthTokenRepository) UpsertMany(_ context.Context, inputs []*types.OAuthToken, _ OAuthTokenUniqueKey, _ OAuthTokenFields, _ *UpsertOptions) ([]UpsertResult[*types.OAuthToken], error) {
+	results := make([]UpsertResult[*types.OAuthToken], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.OAuthToken]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpOAuthTokenRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OAuthTokenUpdate) (*types.OAuthToken, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthTokenRepository) UpdateMany(_ context.Context, _ *OAuthTokenFilter, _ *OAuthTokenUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOAuthTokenRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOAuthTokenRepository) DeleteMany(_ context.Context, _ *OAuthTokenFilter) (int, error) {
+	return 0, nil
+}
 
 func (db *NoOpDatabase) GetOrderRepository() OrderRepositoryInterface {
 	return db.Order
@@ -793,6 +1898,174 @@ func (r *NoOpProductRepository) DeleteOne(_ context.Context, _ types.IdentityUUI
 
 func (r *NoOpProductRepository) DeleteMany(_ context.Context, _ *ProductFilter) (int, error) {
 	return 0, nil
+}
+
+func (db *NoOpDatabase) GetRefundRepository() RefundRepositoryInterface {
+	return db.Refund
+}
+
+func (db *NoOpDatabase) GetRefundReadOnlyRepository() ReadOnlyRefundRepositoryInterface {
+	return db.Refund
+}
+
+func (tx *NoOpTx) GetRefundRepository() RefundRepositoryInterface {
+	return tx.Refund
+}
+
+func (tx *NoOpTx) GetRefundReadOnlyRepository() ReadOnlyRefundRepositoryInterface {
+	return tx.Refund
+}
+
+// NoOpRefundRepository provides deterministic no-op repository behavior.
+type NoOpRefundRepository struct{}
+
+func (r *NoOpRefundRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *RefundGetOptions) (*types.Refund, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRefundRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Refund, error) {
+	return map[types.IdentityUUID]*types.Refund{}, nil
+}
+
+func (r *NoOpRefundRepository) FindOne(_ context.Context, _ *RefundFilter, _ *RefundFindOptions) (*types.Refund, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRefundRepository) FindMany(_ context.Context, _ *RefundFilter, _ *RefundFindOptions) ([]*types.Refund, int, error) {
+	return []*types.Refund{}, 0, nil
+}
+
+func (r *NoOpRefundRepository) FindPage(_ context.Context, _ *RefundFilter, _ *RefundPageOptions) (*RefundPage, error) {
+	return &RefundPage{Rows: []*types.Refund{}}, nil
+}
+
+func (r *NoOpRefundRepository) CreateOne(_ context.Context, input *RefundCreate) (*types.Refund, error) {
+	return input.row(), nil
+}
+
+func (r *NoOpRefundRepository) CreateMany(_ context.Context, inputs []*RefundCreate) ([]*types.Refund, error) {
+	rows := make([]*types.Refund, len(inputs))
+	for i, input := range inputs {
+		rows[i] = input.row()
+	}
+	return rows, nil
+}
+
+func (r *NoOpRefundRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *RefundUpdate) (*types.Refund, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpRefundRepository) UpdateMany(_ context.Context, _ *RefundFilter, _ *RefundUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpRefundRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpRefundRepository) DeleteMany(_ context.Context, _ *RefundFilter) (int, error) {
+	return 0, nil
+}
+
+// Approvals returns operations of Refund's approvals that find no row.
+func (r *NoOpRefundRepository) Approvals() RefundApprovalsOperations {
+	return noOpRefundApprovalsOperations{}
+}
+
+// noOpRefundApprovalsOperations answers each operation of
+// RefundApprovalsOperations with ErrNotFound.
+type noOpRefundApprovalsOperations struct{}
+
+func (noOpRefundApprovalsOperations) SignOff(_ context.Context, _ types.IdentityUUID, _ RefundApprovalsSignOffParams) (*RefundApprovalsSignOffResult, error) {
+	var none *RefundApprovalsSignOffResult
+	return none, ErrNotFound
+}
+
+func (noOpRefundApprovalsOperations) WithdrawSignOff(_ context.Context, _ types.IdentityUUID, _ RefundApprovalsWithdrawSignOffParams) (*RefundApprovalsWithdrawSignOffResult, error) {
+	var none *RefundApprovalsWithdrawSignOffResult
+	return none, ErrNotFound
+}
+
+func (noOpRefundApprovalsOperations) ListSignOffs(_ context.Context, _ types.IdentityUUID, _ RefundApprovalsListSignOffsParams) (*RefundApprovalsListSignOffsResult, error) {
+	var none *RefundApprovalsListSignOffsResult
+	return none, ErrNotFound
+}
+
+// Payments returns operations of Refund's payments that find no row.
+func (r *NoOpRefundRepository) Payments() RefundPaymentsOperations {
+	return noOpRefundPaymentsOperations{}
+}
+
+// noOpRefundPaymentsOperations answers each operation of
+// RefundPaymentsOperations with ErrNotFound.
+type noOpRefundPaymentsOperations struct{}
+
+func (noOpRefundPaymentsOperations) OpenPayment(_ context.Context, _ types.IdentityUUID, _ RefundPaymentsOpenPaymentParams) (*RefundPaymentsOpenPaymentResult, error) {
+	var none *RefundPaymentsOpenPaymentResult
+	return none, ErrNotFound
+}
+
+func (noOpRefundPaymentsOperations) RecordPaymentEvent(_ context.Context, _ types.IdentityUUID, _ RefundPaymentsRecordPaymentEventParams) (*RefundPaymentsRecordPaymentEventResult, error) {
+	var none *RefundPaymentsRecordPaymentEventResult
+	return none, ErrNotFound
+}
+
+func (noOpRefundPaymentsOperations) CapturePayment(_ context.Context, _ types.IdentityUUID, _ RefundPaymentsCapturePaymentParams) (*RefundPaymentsCapturePaymentResult, error) {
+	var none *RefundPaymentsCapturePaymentResult
+	return none, ErrNotFound
+}
+
+func (noOpRefundPaymentsOperations) VoidPayment(_ context.Context, _ types.IdentityUUID, _ RefundPaymentsVoidPaymentParams) (*RefundPaymentsVoidPaymentResult, error) {
+	var none *RefundPaymentsVoidPaymentResult
+	return none, ErrNotFound
+}
+
+func (noOpRefundPaymentsOperations) RefundPayment(_ context.Context, _ types.IdentityUUID, _ RefundPaymentsRefundPaymentParams) (*RefundPaymentsRefundPaymentResult, error) {
+	var none *RefundPaymentsRefundPaymentResult
+	return none, ErrNotFound
+}
+
+func (noOpRefundPaymentsOperations) ListPaymentActions(_ context.Context, _ RefundPaymentsListPaymentActionsParams) (*RefundPaymentsListPaymentActionsResult, error) {
+	var none *RefundPaymentsListPaymentActionsResult
+	return none, ErrNotFound
+}
+
+func (noOpRefundPaymentsOperations) RefundFor(_ context.Context, _ types.IdentityUUID, _ RefundPaymentsRefundForParams) (*RefundPaymentsRefundForResult, error) {
+	var none *RefundPaymentsRefundForResult
+	return none, ErrNotFound
+}
+
+func (noOpRefundPaymentsOperations) SettleRefundFor(_ context.Context, _ types.IdentityUUID, _ RefundPaymentsSettleRefundForParams) (*RefundPaymentsSettleRefundForResult, error) {
+	var none *RefundPaymentsSettleRefundForResult
+	return none, ErrNotFound
+}
+
+// Status returns operations of Refund's status that find no row.
+func (r *NoOpRefundRepository) Status() RefundStatusOperations {
+	return noOpRefundStatusOperations{}
+}
+
+// noOpRefundStatusOperations answers each operation of RefundStatusOperations
+// with ErrNotFound.
+type noOpRefundStatusOperations struct{}
+
+func (noOpRefundStatusOperations) Transition(_ context.Context, _ types.IdentityUUID, _ RefundStatusTransitionParams) (*RefundStatusTransitionResult, error) {
+	var none *RefundStatusTransitionResult
+	return none, ErrNotFound
+}
+
+// Number returns operations of Refund's number that find no row.
+func (r *NoOpRefundRepository) Number() RefundNumberOperations {
+	return noOpRefundNumberOperations{}
+}
+
+// noOpRefundNumberOperations answers each operation of RefundNumberOperations
+// with ErrNotFound.
+type noOpRefundNumberOperations struct{}
+
+func (noOpRefundNumberOperations) AssignNumber(_ context.Context, _ types.IdentityUUID, _ json.RawMessage) (*RefundNumberAssignNumberResult, error) {
+	var none *RefundNumberAssignNumberResult
+	return none, ErrNotFound
 }
 
 func (db *NoOpDatabase) GetRestockRequestRepository() RestockRequestRepositoryInterface {
@@ -1127,6 +2400,146 @@ func (r *NoOpSessionRepository) DeleteMany(_ context.Context, _ *SessionFilter) 
 	return 0, nil
 }
 
+func (db *NoOpDatabase) GetTicketRepository() TicketRepositoryInterface {
+	return db.Ticket
+}
+
+func (db *NoOpDatabase) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
+	return db.Ticket
+}
+
+func (tx *NoOpTx) GetTicketRepository() TicketRepositoryInterface {
+	return tx.Ticket
+}
+
+func (tx *NoOpTx) GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface {
+	return tx.Ticket
+}
+
+// NoOpTicketRepository provides deterministic no-op repository behavior.
+type NoOpTicketRepository struct{}
+
+func (r *NoOpTicketRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *TicketGetOptions) (*types.Ticket, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpTicketRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.Ticket, error) {
+	return map[types.IdentityUUID]*types.Ticket{}, nil
+}
+
+func (r *NoOpTicketRepository) FindOne(_ context.Context, _ *TicketFilter, _ *TicketFindOptions) (*types.Ticket, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpTicketRepository) FindMany(_ context.Context, _ *TicketFilter, _ *TicketFindOptions) ([]*types.Ticket, int, error) {
+	return []*types.Ticket{}, 0, nil
+}
+
+func (r *NoOpTicketRepository) FindPage(_ context.Context, _ *TicketFilter, _ *TicketPageOptions) (*TicketPage, error) {
+	return &TicketPage{Rows: []*types.Ticket{}}, nil
+}
+
+func (r *NoOpTicketRepository) CreateOne(_ context.Context, input *TicketCreate) (*types.Ticket, error) {
+	return input.row(), nil
+}
+
+func (r *NoOpTicketRepository) CreateMany(_ context.Context, inputs []*TicketCreate) ([]*types.Ticket, error) {
+	rows := make([]*types.Ticket, len(inputs))
+	for i, input := range inputs {
+		rows[i] = input.row()
+	}
+	return rows, nil
+}
+
+// RunChange runs nothing: the no-op repository holds no row, so a change
+// finds its row gone, which leaves it nothing to write.
+func (r *NoOpTicketRepository) RunChange(_ context.Context, _ types.TicketChange, _ *rules.Claim) (*rules.ChangeRun, error) {
+	return &rules.ChangeRun{Ran: true, Result: &rules.Result{}}, nil
+}
+
+func (r *NoOpTicketRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *TicketUpdate) (*types.Ticket, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpTicketRepository) UpdateMany(_ context.Context, _ *TicketFilter, _ *TicketUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpTicketRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpTicketRepository) DeleteMany(_ context.Context, _ *TicketFilter) (int, error) {
+	return 0, nil
+}
+
+// Derived returns operations of Ticket's derived that find no row.
+func (r *NoOpTicketRepository) Derived() TicketDerivedOperations {
+	return noOpTicketDerivedOperations{}
+}
+
+// noOpTicketDerivedOperations answers each operation of
+// TicketDerivedOperations with ErrNotFound.
+type noOpTicketDerivedOperations struct{}
+
+func (noOpTicketDerivedOperations) StaleDerivations(_ context.Context, _ TicketDerivedStaleDerivationsParams) (*TicketDerivedStaleDerivationsResult, error) {
+	var none *TicketDerivedStaleDerivationsResult
+	return none, ErrNotFound
+}
+
+func (noOpTicketDerivedOperations) SettleDerivations(_ context.Context, _ TicketDerivedSettleDerivationsParams) (*TicketDerivedSettleDerivationsResult, error) {
+	var none *TicketDerivedSettleDerivationsResult
+	return none, ErrNotFound
+}
+
+func (noOpTicketDerivedOperations) FailedDerivations(_ context.Context, _ TicketDerivedFailedDerivationsParams) (*TicketDerivedFailedDerivationsResult, error) {
+	var none *TicketDerivedFailedDerivationsResult
+	return none, ErrNotFound
+}
+
+func (noOpTicketDerivedOperations) ApplyDerived(_ context.Context, _ types.IdentityUUID, _ TicketDerivedApplyDerivedParams) (*TicketDerivedApplyDerivedResult, error) {
+	var none *TicketDerivedApplyDerivedResult
+	return none, ErrNotFound
+}
+
+func (noOpTicketDerivedOperations) Rederive(_ context.Context, _ types.IdentityUUID, _ TicketDerivedRederiveParams) (*TicketDerivedRederiveResult, error) {
+	var none *TicketDerivedRederiveResult
+	return none, ErrNotFound
+}
+
+// Provenance returns operations of Ticket's provenance that find no row.
+func (r *NoOpTicketRepository) Provenance() TicketProvenanceOperations {
+	return noOpTicketProvenanceOperations{}
+}
+
+// noOpTicketProvenanceOperations answers each operation of
+// TicketProvenanceOperations with ErrNotFound.
+type noOpTicketProvenanceOperations struct{}
+
+func (noOpTicketProvenanceOperations) Accept(_ context.Context, _ types.IdentityUUID, _ TicketProvenanceAcceptParams) (*TicketProvenanceAcceptResult, error) {
+	var none *TicketProvenanceAcceptResult
+	return none, ErrNotFound
+}
+
+func (noOpTicketProvenanceOperations) Reject(_ context.Context, _ types.IdentityUUID, _ TicketProvenanceRejectParams) (*TicketProvenanceRejectResult, error) {
+	var none *TicketProvenanceRejectResult
+	return none, ErrNotFound
+}
+
+// Status returns operations of Ticket's status that find no row.
+func (r *NoOpTicketRepository) Status() TicketStatusOperations {
+	return noOpTicketStatusOperations{}
+}
+
+// noOpTicketStatusOperations answers each operation of TicketStatusOperations
+// with ErrNotFound.
+type noOpTicketStatusOperations struct{}
+
+func (noOpTicketStatusOperations) Transition(_ context.Context, _ types.IdentityUUID, _ TicketStatusTransitionParams) (*TicketStatusTransitionResult, error) {
+	var none *TicketStatusTransitionResult
+	return none, ErrNotFound
+}
+
 func (db *NoOpDatabase) GetUserRepository() UserRepositoryInterface {
 	return db.User
 }
@@ -1456,56 +2869,92 @@ func (r *NoOpUserRoleGrantRepository) DeleteMany(_ context.Context, _ *UserRoleG
 }
 
 var (
-	_ DatabaseInterface                         = (*Database)(nil)
-	_ DatabaseInterface                         = (*NoOpDatabase)(nil)
-	_ ReadOnlyDatabaseInterface                 = (*Database)(nil)
-	_ ReadOnlyDatabaseInterface                 = (*NoOpDatabase)(nil)
-	_ TxInterface                               = (*Tx)(nil)
-	_ TxInterface                               = (*NoOpTx)(nil)
-	_ ReadOnlyTxInterface                       = (*Tx)(nil)
-	_ ReadOnlyTxInterface                       = (*NoOpTx)(nil)
-	_ OrderRepositoryInterface                  = (*OrderRepository)(nil)
-	_ OrderRepositoryInterface                  = (*NoOpOrderRepository)(nil)
-	_ ReadOnlyOrderRepositoryInterface          = (*OrderRepository)(nil)
-	_ ReadOnlyOrderRepositoryInterface          = (*NoOpOrderRepository)(nil)
-	_ OrderLineRepositoryInterface              = (*OrderLineRepository)(nil)
-	_ OrderLineRepositoryInterface              = (*NoOpOrderLineRepository)(nil)
-	_ ReadOnlyOrderLineRepositoryInterface      = (*OrderLineRepository)(nil)
-	_ ReadOnlyOrderLineRepositoryInterface      = (*NoOpOrderLineRepository)(nil)
-	_ ProductRepositoryInterface                = (*ProductRepository)(nil)
-	_ ProductRepositoryInterface                = (*NoOpProductRepository)(nil)
-	_ ReadOnlyProductRepositoryInterface        = (*ProductRepository)(nil)
-	_ ReadOnlyProductRepositoryInterface        = (*NoOpProductRepository)(nil)
-	_ RestockRequestRepositoryInterface         = (*RestockRequestRepository)(nil)
-	_ RestockRequestRepositoryInterface         = (*NoOpRestockRequestRepository)(nil)
-	_ ReadOnlyRestockRequestRepositoryInterface = (*RestockRequestRepository)(nil)
-	_ ReadOnlyRestockRequestRepositoryInterface = (*NoOpRestockRequestRepository)(nil)
-	_ ReviewRepositoryInterface                 = (*ReviewRepository)(nil)
-	_ ReviewRepositoryInterface                 = (*NoOpReviewRepository)(nil)
-	_ ReadOnlyReviewRepositoryInterface         = (*ReviewRepository)(nil)
-	_ ReadOnlyReviewRepositoryInterface         = (*NoOpReviewRepository)(nil)
-	_ RoleRepositoryInterface                   = (*RoleRepository)(nil)
-	_ RoleRepositoryInterface                   = (*NoOpRoleRepository)(nil)
-	_ ReadOnlyRoleRepositoryInterface           = (*RoleRepository)(nil)
-	_ ReadOnlyRoleRepositoryInterface           = (*NoOpRoleRepository)(nil)
-	_ SessionRepositoryInterface                = (*SessionRepository)(nil)
-	_ SessionRepositoryInterface                = (*NoOpSessionRepository)(nil)
-	_ ReadOnlySessionRepositoryInterface        = (*SessionRepository)(nil)
-	_ ReadOnlySessionRepositoryInterface        = (*NoOpSessionRepository)(nil)
-	_ UserRepositoryInterface                   = (*UserRepository)(nil)
-	_ UserRepositoryInterface                   = (*NoOpUserRepository)(nil)
-	_ ReadOnlyUserRepositoryInterface           = (*UserRepository)(nil)
-	_ ReadOnlyUserRepositoryInterface           = (*NoOpUserRepository)(nil)
-	_ UserApiKeyRepositoryInterface             = (*UserApiKeyRepository)(nil)
-	_ UserApiKeyRepositoryInterface             = (*NoOpUserApiKeyRepository)(nil)
-	_ ReadOnlyUserApiKeyRepositoryInterface     = (*UserApiKeyRepository)(nil)
-	_ ReadOnlyUserApiKeyRepositoryInterface     = (*NoOpUserApiKeyRepository)(nil)
-	_ UserCredentialRepositoryInterface         = (*UserCredentialRepository)(nil)
-	_ UserCredentialRepositoryInterface         = (*NoOpUserCredentialRepository)(nil)
-	_ ReadOnlyUserCredentialRepositoryInterface = (*UserCredentialRepository)(nil)
-	_ ReadOnlyUserCredentialRepositoryInterface = (*NoOpUserCredentialRepository)(nil)
-	_ UserRoleGrantRepositoryInterface          = (*UserRoleGrantRepository)(nil)
-	_ UserRoleGrantRepositoryInterface          = (*NoOpUserRoleGrantRepository)(nil)
-	_ ReadOnlyUserRoleGrantRepositoryInterface  = (*UserRoleGrantRepository)(nil)
-	_ ReadOnlyUserRoleGrantRepositoryInterface  = (*NoOpUserRoleGrantRepository)(nil)
+	_ DatabaseInterface                          = (*Database)(nil)
+	_ DatabaseInterface                          = (*NoOpDatabase)(nil)
+	_ ReadOnlyDatabaseInterface                  = (*Database)(nil)
+	_ ReadOnlyDatabaseInterface                  = (*NoOpDatabase)(nil)
+	_ TxInterface                                = (*Tx)(nil)
+	_ TxInterface                                = (*NoOpTx)(nil)
+	_ ReadOnlyTxInterface                        = (*Tx)(nil)
+	_ ReadOnlyTxInterface                        = (*NoOpTx)(nil)
+	_ CheckoutRepositoryInterface                = (*CheckoutRepository)(nil)
+	_ CheckoutRepositoryInterface                = (*NoOpCheckoutRepository)(nil)
+	_ ReadOnlyCheckoutRepositoryInterface        = (*CheckoutRepository)(nil)
+	_ ReadOnlyCheckoutRepositoryInterface        = (*NoOpCheckoutRepository)(nil)
+	_ CollectionPointRepositoryInterface         = (*CollectionPointRepository)(nil)
+	_ CollectionPointRepositoryInterface         = (*NoOpCollectionPointRepository)(nil)
+	_ ReadOnlyCollectionPointRepositoryInterface = (*CollectionPointRepository)(nil)
+	_ ReadOnlyCollectionPointRepositoryInterface = (*NoOpCollectionPointRepository)(nil)
+	_ InventoryRepositoryInterface               = (*InventoryRepository)(nil)
+	_ InventoryRepositoryInterface               = (*NoOpInventoryRepository)(nil)
+	_ ReadOnlyInventoryRepositoryInterface       = (*InventoryRepository)(nil)
+	_ ReadOnlyInventoryRepositoryInterface       = (*NoOpInventoryRepository)(nil)
+	_ OAuthClientRepositoryInterface             = (*OAuthClientRepository)(nil)
+	_ OAuthClientRepositoryInterface             = (*NoOpOAuthClientRepository)(nil)
+	_ ReadOnlyOAuthClientRepositoryInterface     = (*OAuthClientRepository)(nil)
+	_ ReadOnlyOAuthClientRepositoryInterface     = (*NoOpOAuthClientRepository)(nil)
+	_ OAuthCodeRepositoryInterface               = (*OAuthCodeRepository)(nil)
+	_ OAuthCodeRepositoryInterface               = (*NoOpOAuthCodeRepository)(nil)
+	_ ReadOnlyOAuthCodeRepositoryInterface       = (*OAuthCodeRepository)(nil)
+	_ ReadOnlyOAuthCodeRepositoryInterface       = (*NoOpOAuthCodeRepository)(nil)
+	_ OAuthGrantRepositoryInterface              = (*OAuthGrantRepository)(nil)
+	_ OAuthGrantRepositoryInterface              = (*NoOpOAuthGrantRepository)(nil)
+	_ ReadOnlyOAuthGrantRepositoryInterface      = (*OAuthGrantRepository)(nil)
+	_ ReadOnlyOAuthGrantRepositoryInterface      = (*NoOpOAuthGrantRepository)(nil)
+	_ OAuthTokenRepositoryInterface              = (*OAuthTokenRepository)(nil)
+	_ OAuthTokenRepositoryInterface              = (*NoOpOAuthTokenRepository)(nil)
+	_ ReadOnlyOAuthTokenRepositoryInterface      = (*OAuthTokenRepository)(nil)
+	_ ReadOnlyOAuthTokenRepositoryInterface      = (*NoOpOAuthTokenRepository)(nil)
+	_ OrderRepositoryInterface                   = (*OrderRepository)(nil)
+	_ OrderRepositoryInterface                   = (*NoOpOrderRepository)(nil)
+	_ ReadOnlyOrderRepositoryInterface           = (*OrderRepository)(nil)
+	_ ReadOnlyOrderRepositoryInterface           = (*NoOpOrderRepository)(nil)
+	_ OrderLineRepositoryInterface               = (*OrderLineRepository)(nil)
+	_ OrderLineRepositoryInterface               = (*NoOpOrderLineRepository)(nil)
+	_ ReadOnlyOrderLineRepositoryInterface       = (*OrderLineRepository)(nil)
+	_ ReadOnlyOrderLineRepositoryInterface       = (*NoOpOrderLineRepository)(nil)
+	_ ProductRepositoryInterface                 = (*ProductRepository)(nil)
+	_ ProductRepositoryInterface                 = (*NoOpProductRepository)(nil)
+	_ ReadOnlyProductRepositoryInterface         = (*ProductRepository)(nil)
+	_ ReadOnlyProductRepositoryInterface         = (*NoOpProductRepository)(nil)
+	_ RefundRepositoryInterface                  = (*RefundRepository)(nil)
+	_ RefundRepositoryInterface                  = (*NoOpRefundRepository)(nil)
+	_ ReadOnlyRefundRepositoryInterface          = (*RefundRepository)(nil)
+	_ ReadOnlyRefundRepositoryInterface          = (*NoOpRefundRepository)(nil)
+	_ RestockRequestRepositoryInterface          = (*RestockRequestRepository)(nil)
+	_ RestockRequestRepositoryInterface          = (*NoOpRestockRequestRepository)(nil)
+	_ ReadOnlyRestockRequestRepositoryInterface  = (*RestockRequestRepository)(nil)
+	_ ReadOnlyRestockRequestRepositoryInterface  = (*NoOpRestockRequestRepository)(nil)
+	_ ReviewRepositoryInterface                  = (*ReviewRepository)(nil)
+	_ ReviewRepositoryInterface                  = (*NoOpReviewRepository)(nil)
+	_ ReadOnlyReviewRepositoryInterface          = (*ReviewRepository)(nil)
+	_ ReadOnlyReviewRepositoryInterface          = (*NoOpReviewRepository)(nil)
+	_ RoleRepositoryInterface                    = (*RoleRepository)(nil)
+	_ RoleRepositoryInterface                    = (*NoOpRoleRepository)(nil)
+	_ ReadOnlyRoleRepositoryInterface            = (*RoleRepository)(nil)
+	_ ReadOnlyRoleRepositoryInterface            = (*NoOpRoleRepository)(nil)
+	_ SessionRepositoryInterface                 = (*SessionRepository)(nil)
+	_ SessionRepositoryInterface                 = (*NoOpSessionRepository)(nil)
+	_ ReadOnlySessionRepositoryInterface         = (*SessionRepository)(nil)
+	_ ReadOnlySessionRepositoryInterface         = (*NoOpSessionRepository)(nil)
+	_ TicketRepositoryInterface                  = (*TicketRepository)(nil)
+	_ TicketRepositoryInterface                  = (*NoOpTicketRepository)(nil)
+	_ ReadOnlyTicketRepositoryInterface          = (*TicketRepository)(nil)
+	_ ReadOnlyTicketRepositoryInterface          = (*NoOpTicketRepository)(nil)
+	_ UserRepositoryInterface                    = (*UserRepository)(nil)
+	_ UserRepositoryInterface                    = (*NoOpUserRepository)(nil)
+	_ ReadOnlyUserRepositoryInterface            = (*UserRepository)(nil)
+	_ ReadOnlyUserRepositoryInterface            = (*NoOpUserRepository)(nil)
+	_ UserApiKeyRepositoryInterface              = (*UserApiKeyRepository)(nil)
+	_ UserApiKeyRepositoryInterface              = (*NoOpUserApiKeyRepository)(nil)
+	_ ReadOnlyUserApiKeyRepositoryInterface      = (*UserApiKeyRepository)(nil)
+	_ ReadOnlyUserApiKeyRepositoryInterface      = (*NoOpUserApiKeyRepository)(nil)
+	_ UserCredentialRepositoryInterface          = (*UserCredentialRepository)(nil)
+	_ UserCredentialRepositoryInterface          = (*NoOpUserCredentialRepository)(nil)
+	_ ReadOnlyUserCredentialRepositoryInterface  = (*UserCredentialRepository)(nil)
+	_ ReadOnlyUserCredentialRepositoryInterface  = (*NoOpUserCredentialRepository)(nil)
+	_ UserRoleGrantRepositoryInterface           = (*UserRoleGrantRepository)(nil)
+	_ UserRoleGrantRepositoryInterface           = (*NoOpUserRoleGrantRepository)(nil)
+	_ ReadOnlyUserRoleGrantRepositoryInterface   = (*UserRoleGrantRepository)(nil)
+	_ ReadOnlyUserRoleGrantRepositoryInterface   = (*NoOpUserRoleGrantRepository)(nil)
 )

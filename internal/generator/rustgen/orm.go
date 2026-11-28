@@ -66,15 +66,16 @@ type ORMInfo struct {
 
 	// References and Attachments are whether the database keeps references
 	// (a @references table, or a table whose Comments ref blocks reach
-	// rows) and files (an @attachments table), which the Postgres
-	// repositories read through references() and attachments() (D154,
-	// D185).
+	// rows) and files (an @attachments table), which the Postgres and
+	// the SQLite repositories read through references() and attachments()
+	// (D154, D185, #611).
 	References  bool
 	Attachments bool
 
 	// Calendar and Searchable are whether a table of the database is a
 	// calendar source (D152) or @searchable (D155), which the runtime's
-	// orm::calendar and orm::search_tables read on Postgres (D188).
+	// orm::calendar and orm::search_tables read on Postgres (D188) and on
+	// SQLite (#615).
 	Calendar   bool
 	Searchable bool
 
@@ -206,7 +207,7 @@ type ormDefinition struct {
 	ClearHistoryActor string     `json:"clearHistoryActor,omitempty"`
 	Tables            []ormTable `json:"tables"`
 	// References and Attachments are the database's references and files
-	// (D154), on Postgres alone.
+	// (D154), in each dialect (#611).
 	References  *rustRowReferences `json:"references,omitempty"`
 	Attachments *rustAttachments   `json:"attachments,omitempty"`
 }
@@ -241,7 +242,7 @@ type ormTable struct {
 	Access   string       `json:"access,omitempty"`
 	// Calendar are the table's @calendarSource declarations (D152), and
 	// Searchable its search index (D155), which the runtime's calendar and
-	// search read (D188); on Postgres alone.
+	// search read on Postgres (D188) and on SQLite (#615).
 	Calendar   []rustCalendarSource `json:"calendar,omitempty"`
 	Searchable *rustSearchable      `json:"searchable,omitempty"`
 	// Events are the table's @event declarations, and Notifier what the
@@ -754,6 +755,11 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 					k = k.SQLite()
 					onSQLite.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 				}
+				// The calendar and search read the same tables on SQLite
+				// (#615), the search's words in the FTS5 table beside the
+				// index (D186).
+				onSQLite.Calendar = onPostgres.Calendar
+				onSQLite.Searchable = sqliteSearchable(onPostgres.Searchable)
 			}
 			sqlite.Tables = append(sqlite.Tables, onSQLite)
 		}
@@ -770,6 +776,21 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 		return nil, err
 	}
 	info.References, info.Attachments = postgres.References != nil, postgres.Attachments != nil
+	if opts.SQLite {
+		// On SQLite too (#611): the sub-tables, columns and triggers are
+		// the same, and a reference may point at a table with a
+		// repository there.
+		onSQLite := map[string]bool{}
+		for name := range repository {
+			onSQLite[name] = true
+		}
+		for _, refused := range info.SQLiteRefused {
+			delete(onSQLite, refused.Type)
+		}
+		if sqlite.References, sqlite.Attachments, err = rowFeaturesOf(schema, tables, onSQLite); err != nil {
+			return nil, err
+		}
+	}
 	if info.Rules {
 		encoded, err := json.MarshalIndent(layout, "", "  ")
 		if err != nil {

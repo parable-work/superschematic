@@ -469,6 +469,23 @@ async fn iam_sends_the_metadata_servers_token_over_tls() {
         .unwrap();
     store.close().await;
 
+    // A bundle whose first certificate is another CA's still holds the
+    // server's: every certificate of it is read.
+    let mut bundle = tls.clone();
+    bundle.ca = Some(format!(
+        "{}\n{}",
+        include_str!("testdata/memorystore/other-ca.pem"),
+        tls.ca.as_deref().unwrap_or_default()
+    ));
+    let store = open_with(&bundle, RedisOptions::new().with_metadata_host(&metadata))
+        .await
+        .unwrap();
+    assert!(
+        store.available(),
+        "the bundle's second CA signs the server's"
+    );
+    store.close().await;
+
     // A wrong CA is no server the store trusts.
     let mut wrong = tls.clone();
     wrong.ca = Some(include_str!("testdata/memorystore/other-ca.pem").to_string());

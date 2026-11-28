@@ -10,6 +10,7 @@ import (
 	"text/template"
 
 	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/generator/patterndialect"
 )
 
 // customTemplateFuncs returns the pygen-specific template helpers. The enum
@@ -28,6 +29,7 @@ func customTemplateFuncs(output *ModuleOutput) template.FuncMap {
 		"pythonFieldName":       toPythonFieldName,
 		"pythonString":          pythonString,
 		"pythonRawString":       pythonRawString,
+		"pythonPattern":         pythonPattern,
 		"pythonComment":         pythonComment,
 		"pythonScalarType":      pythonScalarType,
 		"pythonScalarSymbol":    pythonScalarSymbol,
@@ -367,6 +369,12 @@ func pythonString(s string) string {
 	s = strings.ReplaceAll(s, "\"", "\\\"")
 	s = strings.ReplaceAll(s, "\n", "\\n")
 	return asciiArrows(s)
+}
+
+// pythonPattern is a schema pattern, RE2's syntax, rewritten so re.compile
+// with no flags matches what RE2 matches (patterndialect).
+func pythonPattern(pattern any) string {
+	return patterndialect.Python(fmt.Sprint(pattern))
 }
 
 // pythonRawString escapes only double quotes for use inside a raw r"..."

@@ -86,11 +86,23 @@ export function openCorpusEngine(path: string, clock: { now: number }, ids: () =
   return openEngine(options);
 }
 
+// The fixtures that compose Links, Search, Queue or Branches, which the
+// loader refuses since D103 folded them into schema features: the engine
+// reads its copies of them (runtime/engine/testdata/documents).
+const ENGINE_COPIES = new Set([
+  'fixture-branches-json',
+  'fixture-cross-instance-json',
+  'fixture-numbering-json',
+  'fixture-reactions-json',
+  'fixture-search-json',
+  'fixture-workqueue-json',
+]);
+
 function fixture(service: string, file: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(new URL(`../../../../internal/loader/testdata/services/${service}/src/${file}.schema.json`, import.meta.url), 'utf8')) as Record<
-    string,
-    unknown
-  >;
+  const path = ENGINE_COPIES.has(service)
+    ? `../../../engine/testdata/documents/${service}/${file}.schema.json`
+    : `../../../../internal/loader/testdata/services/${service}/src/${file}.schema.json`;
+  return JSON.parse(readFileSync(new URL(path, import.meta.url), 'utf8')) as Record<string, unknown>;
 }
 
 // workQueueType reads one type of fixture-workqueue-json as a schema of its own.

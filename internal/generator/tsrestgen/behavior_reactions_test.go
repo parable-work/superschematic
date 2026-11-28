@@ -156,7 +156,7 @@ func TestGenerateChangeWorkers(t *testing.T) {
 		}
 	}
 	bare.Endpoints = endpoints
-	want := "tsrestgen: worker ProjectReactions runs Project's changes, through the repositories fixture-reactions-db's TypeScript types export for Postgres (D103); enable outputs.types.typescript in fixture-reactions-db's config"
+	want := "tsrestgen: worker ProjectReactions runs Project's changes, through the repositories fixture-reactions-db's TypeScript types export (D103); enable outputs.types.typescript in fixture-reactions-db's config"
 	if err := bare.SetDeps(DepsInfo{Database: reactionsDB, Dialect: "postgres"}); err == nil || err.Error() != want {
 		t.Errorf("SetDeps = %v,\nwant %s", err, want)
 	}

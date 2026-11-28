@@ -9,7 +9,7 @@ import (
 
 	"github.com/parable-work/superschematic/internal/loader"
 	ir "github.com/parable-work/superschematic/ir"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // withoutScalarDefaults returns a copy of schema whose counters have no

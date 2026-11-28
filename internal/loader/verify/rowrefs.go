@@ -56,10 +56,10 @@ func checkRowFeatures(schema *ir.Schema, in Input, r *Result) {
 
 // plainTable reports whether td is a table of the database whose rows the
 // repositories read with statements of their own: no view, queue, JSON
-// type, graph member, engine type or sub-table the loader added.
+// type, graph member or sub-table the loader added.
 func plainTable(td *ir.TypeDef) bool {
 	return td.Role == ir.RoleDBTable && td.Projection == nil && td.Queue == nil && !td.JsonField &&
-		td.GraphMember == nil && !codegen.IsEngineType(td) && td.BehaviorTable == nil && td.BehaviorQueue == nil && td.RowTable == nil && !td.SearchIndex
+		td.GraphMember == nil && td.BehaviorTable == nil && td.BehaviorQueue == nil && td.RowTable == nil && !td.SearchIndex
 }
 
 // oneKey is td's one key field, or nil when it has none or several.

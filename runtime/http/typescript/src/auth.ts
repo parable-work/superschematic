@@ -46,8 +46,12 @@ export interface Principal {
    * Absent for a user, who reaches rows through roles and row rules.
    */
   readonly grants?: readonly GrantReach[];
-  /** The credential the call came with, for the access log (D114, D156): an API key's or a grant's id; absent for a session. */
-  readonly credential?: { readonly kind: 'apiKey' | 'grant'; readonly id: string };
+  /**
+   * The credential the call came with, for the access log (D114, D156): an
+   * API key's, a grant's or an OAuth grant's id (#695); absent for a
+   * session.
+   */
+  readonly credential?: { readonly kind: 'apiKey' | 'grant' | 'oauth'; readonly id: string };
   /**
    * How the authenticator verified the principal for this call (D200),
    * which an Approvals requirement's proof reads: when its session last

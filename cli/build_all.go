@@ -406,7 +406,9 @@ func runBuildAllHooks(ctx context.Context, hooks []registry.BuildAllHook, bc reg
 // package's service field, and a package under no service's directory fails
 // the build rather than entering the graph unowned. dirs are the
 // extensions' package directories (registry.PackageDir), whose packages
-// enter the graph too.
+// enter the graph too, and so do the runtime provider packages each API's
+// config lists (D159, #608), with an edge from the API package that links
+// each one.
 func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []buildplan.Service, dirs []registry.PackageDir) error {
 	extra := make([]schemadeps.PackageDir, len(dirs))
 	for i, d := range dirs {
@@ -422,7 +424,11 @@ func emitSchemaDeps(cmd *cobra.Command, outputRoot, copyPath string, services []
 			producers[filepath.ToSlash(rel)] = service.Name
 		}
 	}
-	if err := schemadeps.EmitFromDist(outputRoot, producers, copyPath, extra...); err != nil {
+	providers, err := graphProviders(services)
+	if err != nil {
+		return fmt.Errorf("emitting %s: %w", schemadeps.DepsFileName, err)
+	}
+	if err := schemadeps.EmitWithProviders(outputRoot, producers, copyPath, providers, extra...); err != nil {
 		return fmt.Errorf("emitting %s: %w", schemadeps.DepsFileName, err)
 	}
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  Wrote %s\n", schemadeps.DepsPath(outputRoot))

@@ -35,8 +35,8 @@ func TestLoadAddsBehaviorFields(t *testing.T) {
 	if got, want := names, []string{"id", "reference", "status", "statusEnteredAt", "paymentStatus", "paymentStatusEnteredAt"}; !slices.Equal(got, want) {
 		t.Fatalf("Shipment's fields = %v, want %v", got, want)
 	}
-	if !shipment.Optimistic || shipment.IsEngineType() {
-		t.Errorf("Shipment: optimistic %v, engine type %v; want a table with _version", shipment.Optimistic, shipment.IsEngineType())
+	if !shipment.Optimistic || len(shipment.TypeBehaviors()) > 0 {
+		t.Errorf("Shipment: optimistic %v, @behavior %v; want a table with _version", shipment.Optimistic, len(shipment.TypeBehaviors()) > 0)
 	}
 	if fd := shipment.Fields[4]; fd.Behavior == nil || fd.Behavior.Use != "paymentStatus" || !fd.Behavior.Value || fd.SQLName != "" {
 		t.Errorf("paymentStatus = %+v, behavior %+v", fd, fd.Behavior)

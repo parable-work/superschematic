@@ -9,6 +9,7 @@ require (
 	github.com/parable-work/superschematic/extensions/gcp v0.0.0
 	github.com/parable-work/superschematic/extensions/pulumi v0.0.0
 	github.com/parable-work/superschematic/extensions/resolvers v0.0.0
+	github.com/parable-work/superschematic/ir v0.0.0
 )
 
 require (
@@ -110,7 +111,6 @@ require (
 	github.com/opentracing/basictracer-go v1.1.0 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/parable-work/superscalar/go v0.0.0-20261119204639-51d50302d5dd // indirect
-	github.com/parable-work/superschematic/ir v0.0.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pgavlin/fx v0.1.6 // indirect
 	github.com/pgavlin/fx/v2 v2.0.12 // indirect
@@ -156,6 +156,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go.yaml.in/yaml/v4 v4.0.0-rc.2 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/mod v0.38.0 // indirect

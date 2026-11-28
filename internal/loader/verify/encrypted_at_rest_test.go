@@ -90,8 +90,6 @@ func TestEncryptedFieldsRefusals(t *testing.T) {
 		}, "the database generates PlaidItem.seq; give the table a UUID key, or a key each create sets"},
 		{"the user model", func(td *ir.TypeDef, _ *ir.FieldDef) { td.User = &ir.UserTrait{} },
 			"the identity stores read and write the user model's tables without the ORMs"},
-		{"an engine type", func(td *ir.TypeDef, _ *ir.FieldDef) { td.Behaviors = []ir.BehaviorRef{{Name: "Workflow"}} },
-			"PlaidItem composes behaviors, so the engine keeps its rows, and the engine does not encrypt a field"},
 		{"a version graph", func(td *ir.TypeDef, _ *ir.FieldDef) { td.VersionGraph = &ir.VersionGraphConfig{} },
 			"a version graph's runtimes do not encrypt a field"},
 		{"a @jsonField type", func(td *ir.TypeDef, _ *ir.FieldDef) { td.JsonField = true },

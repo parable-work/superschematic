@@ -774,8 +774,8 @@ fn admit<T>(admitted: Result<T, StatusCode>, link: Link, links: &mut Vec<Link>, 
 {{- if .ConsoleHooks }}
 
 /// A link the console's own pages add to the nav and the index, after the
-/// resources' lists: the engine's types (`engine_pages::nav_link`), the
-/// account, users and roles (`identity_pages::nav_links`). A `post` link is
+/// resources' lists: the account, users and roles
+/// (`identity_pages::nav_links`). A `post` link is
 /// a button that posts to `href`, as signing out does. A `nav_only` link,
 /// such as signing in, is the nav's alone, and the index leaves it out, as
 /// it does a `post` link: the index has its own link to sign in.
@@ -793,9 +793,6 @@ pub struct NavLink {
 #[memoize]
 async fn console_links(cx: &Cx) -> Vec<NavLink> {
     let mut links = Vec::new();
-{{- if .EnginePages }}
-    links.extend(crate::engine_pages::nav_link(cx).await);
-{{- end }}
 {{- if .IdentityPages }}
     links.extend(crate::identity_pages::nav_links(cx).await);
 {{- end }}
@@ -806,16 +803,7 @@ async fn console_links(cx: &Cx) -> Vec<NavLink> {
 /// each step's label and link, the last the page itself. None for a page
 /// that is not theirs, whose trail the resources' tree gives.
 async fn console_trail(cx: &Cx, path: &str) -> Option<Vec<(String, Option<String>)>> {
-{{- if and .EnginePages .IdentityPages }}
-    match crate::engine_pages::trail(cx, path).await {
-        Some(steps) => Some(steps),
-        None => crate::identity_pages::trail(cx, path).await,
-    }
-{{- else if .EnginePages }}
-    crate::engine_pages::trail(cx, path).await
-{{- else }}
     crate::identity_pages::trail(cx, path).await
-{{- end }}
 }
 {{- end }}
 

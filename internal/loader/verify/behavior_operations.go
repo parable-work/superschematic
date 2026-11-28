@@ -482,9 +482,6 @@ func behaviorOperationsTable(set *ir.OperationSet, db *ir.Schema, reg *registry.
 	case td.Role != ir.RoleDBTable || td.JsonField:
 		r.errorf("", "%s: @behaviorOperations names %s, which is not a table of %s: a set serves a table one of whose fields is a behavior (D103)", set.Name, typeName, db.Name)
 		return nil, false
-	case td.IsEngineType():
-		r.errorf("", "%s: @behaviorOperations names %s, an engine type of %s (D58), whose engine serves its operations; a set serves a table one of whose fields is a behavior (D103)", set.Name, typeName, db.Name)
-		return nil, false
 	case len(td.TableBehaviors()) == 0:
 		r.errorf("", "%s: @behaviorOperations names %s, a table of %s that composes no behavior; a set serves a table that does, such as status: Workflow<{ ... }> or implements Timers<%s, { ... }> (D103)", set.Name, typeName, db.Name, typeName)
 		return nil, false

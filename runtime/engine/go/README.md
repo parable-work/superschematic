@@ -46,13 +46,12 @@ superschematic_engine_abi::export_engine_c_abi!(behaviors = behaviors);
 scripts/engine-archive.sh --crate <the crate> --out <dir>   # then CGO_LDFLAGS="-L<dir> ..."
 ```
 
-The build writes that crate itself: for a schema whose types compose an
-extension's behavior, the `projectengine` generator's
-`engine/rust/<schema>` holds it as its `ffi` member, over the library's
-`behaviors()` (`--crate <output root>/engine/rust/<schema>/ffi`). Its
-engine's config passes the engine document's `tools`, the binary's
-invocation policy and vendor keys, without which the engine refuses an
-extension's operation that names a value of the extension's policy.
+No build writes that crate now: a DB type is a table, whose behaviors
+the behaviors' core runs (D103's step 7), so a host that runs other
+behaviors on the engine builds its own. Its engine's config passes the
+tools options, the invocation policy and vendor keys, without which the
+engine refuses an extension's operation that names a value of the
+extension's policy.
 
 `-L<dir>` comes first on cgo's link line, so the project's archive is the
 one linked. The crate depends on the ABI's library alone, never on the

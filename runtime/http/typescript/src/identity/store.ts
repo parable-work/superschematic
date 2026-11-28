@@ -147,6 +147,8 @@ export interface NewApiKeyRow {
   readonly expiresAt: Date;
 }
 
+import type { OAuthStore } from './oauthstore.js';
+
 /**
  * The storage interface. Mutations the user model ties together run in one
  * transaction: setPassword with its revocations, setDisabled with the
@@ -217,6 +219,14 @@ export interface IdentityStore {
    * not_found.
    */
   revokeApiKey(userId: string, keyId: string, at: Date): Promise<void>;
+
+  /**
+   * The OAuth authorization server's storage (#695), over the same
+   * database; undefined when the descriptor names no OAuth tables, or for
+   * a store that keeps none. Disabling a user revokes their OAuth grants
+   * with their sessions and API keys.
+   */
+  oauth?(): OAuthStore | undefined;
 
   /** Whether the schema has a UserRole table. Without one, userRoles answers none and the other role methods refuse no_roles. */
   hasRoles(): boolean;

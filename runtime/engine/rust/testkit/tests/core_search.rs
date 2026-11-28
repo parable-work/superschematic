@@ -970,11 +970,11 @@ fn search_can_be_added_to_and_removed_from_a_schema_with_instances() {
 #[test]
 fn it_runs_the_notes_document_its_title_weighing_more_and_its_embedder_pulls_their_text() {
     // core-behaviors.test.ts: fixture-search-json, whose notes are
-    // searched.
+    // searched, the engine's copy of it since the loader refuses Search.
     for target in targets("search_notes_document") {
         let engine = target.open_core();
         let path = repository()
-            .join("internal/loader/testdata/services/fixture-search-json/src/note.schema.json");
+            .join("runtime/engine/testdata/documents/fixture-search-json/note.schema.json");
         let document: Value =
             serde_json::from_str(&std::fs::read_to_string(&path).expect("the notes document"))
                 .expect("JSON");

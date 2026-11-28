@@ -278,6 +278,21 @@ it runs anything. It creates the table when it is missing (`service` the
 primary key, `model_hash`, `documents`, `layout` and `versions` as text,
 `published_at` the time of the write) and replaces its one row.
 
+```
+superschematic-migrate record [--model] [--database-url URL]
+```
+
+`record` prints the record a database holds (`LoadRecord`), as the
+document above, and with `--model` the model the record is of, the one
+`status --model` prints, each read with the other in one read-only
+transaction (`Runner.LoadRecordedModel`). It refuses a database with no
+record, and one whose service has a plan in progress or is at another
+model than the record's. A SQLite file is opened to read it alone, and
+one that does not exist is refused. `superschematic migrate export` reads
+a runtime database through it, to write the compiled project a build
+takes the database over with (D117). The table stays after that move: no
+compiled server reads it, and no plan of a build drops it.
+
 ## `status`
 
 ```

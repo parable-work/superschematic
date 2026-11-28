@@ -652,10 +652,8 @@ type Reference struct {
 
 // TableTypes are the types of schema the ORMs keep tables of, sorted by
 // name: those of role DBTable, but a @jsonField type, a base class (whose
-// fields arrive on each subclass), a type with no field and an engine type,
-// which the engine keeps (D58).
+// fields arrive on each subclass) and a type with no field.
 func TableTypes(schema *ir.Schema) []*ir.TypeDef {
-	schema = codegen.WithoutEngineTypes(schema)
 	bases := codegen.BaseTypeNames(schema)
 	var defs []*ir.TypeDef
 	for _, td := range schema.Types {
@@ -752,7 +750,6 @@ func TablesModelled(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]Ta
 // tablesOf models schema's tables, and gives why each it cannot model
 // cannot, stopping at the first when first is true.
 func tablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema, first bool) ([]TableModel, map[string]error) {
-	schema = codegen.WithoutEngineTypes(schema)
 	scalars := ScalarClasses(schema)
 	sqlTypes := ScalarSQLTypes(schema)
 	enums := EnumNames(schema, dependencies)

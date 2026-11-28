@@ -10,7 +10,7 @@
 // adds to or overrides what each is built with (#702).
 
 import type { Principal } from '@superschematic/http-runtime';
-import { AGENT_PERMISSIONS, type AgentRunRequest, type Agents, type NoticeWork, type SearchIndexing, callSearchTool, createAgents, createInbound, createNotifier, indexSearch, notifierRoutes, searchMcpTool, searchRoutes } from '@superschematic/http-runtime/postgres';
+import { AGENT_PERMISSIONS, type AgentRunRequest, type Agents, type NoticeWork, type SearchIndexing, callSearchTool, createAgents, createInbound, createNotifier, indexSearch, notifierRoutes, notifierUpkeep, searchMcpTool, searchRoutes } from '@superschematic/http-runtime/postgres';
 import { agentRunRequestQueue, noticeWorkQueue, runRequestQueue } from '@schemas/work-db-types/queues';
 import { channelSlots } from './providers';
 import type { AgentOptions, Deps, DepsBase, RuntimeOptions, RuntimeOptionsConstructor } from './deps';
@@ -116,6 +116,17 @@ export function dispatchAgentMessage(deps: Deps, message: unknown): Promise<void
 /** Hands a message of NoticeWork to the notifier as it is: what a worker of it runs. */
 export function notifyMessage(deps: Deps, message: unknown): Promise<void> {
   return deps.notifier.handle(message as NoticeWork);
+}
+
+/**
+ * The prune a worker of NoticeWork runs beside its queue's, as it starts
+ * and every five minutes, and at each firing on Workers: every channel
+ * adapter's health asked on its own, which raises channel.down for each
+ * that fails, at most every five minutes, and the deliveries past their
+ * retention deleted (D153, #702).
+ */
+export function notifierUpkeepOf(deps: Deps): (limit: number) => Promise<number> {
+  return notifierUpkeep(deps.notifier, { log: deps.logger.child({ component: 'notifier' }) });
 }
 
 /** Rebuilds the index row of the row a message of SearchIndexing names: what a worker of it runs. */

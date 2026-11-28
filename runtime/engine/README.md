@@ -39,10 +39,10 @@ it through a binding:
   on axum").
 
 A behavior is a Rust type (the `Behavior` trait): the core's and the work
-queue's are in every binding, and an extension's is a crate of its own,
-which the project's engine crate the `projectengine` generator writes
-compiles in, with a C ABI archive and a Node-API addon over it for Go and
-TypeScript servers ("Behaviors").
+queue's are in every binding, and another is a crate of its own, which a
+host builds an archive or an addon over ("Behaviors"). No generated
+server opens the engine now: a DB type is a table, whose behaviors the
+behaviors' core runs (D103's step 7).
 
 Until the cutover (D58, milestone 14) `@superschematic/engine` was a
 TypeScript implementation of the engine, which the Rust engine was held
@@ -106,8 +106,8 @@ written in TypeScript, for tests ("Behaviors").
 ### A TypeScript server: `./server`
 
 `@superschematic/engine/server` is what a server opens and mounts (D58),
-the twin of the Go binding below, and what a generated TypeScript server
-imports: it loads the addon's facade (`src/native`) and the HTTP runtime.
+the twin of the Go binding below: it loads the addon's facade
+(`src/native`) and the HTTP runtime.
 
 - `openEngineInBackground(options, { setup, retryMinMs, retryMaxMs,
   onError, onOpen })` opens the engine with `openEngineAsync`, off the
@@ -1743,12 +1743,8 @@ An implementation is a Rust type (D58): the `Behavior` trait of
 `superschematic-engine` (`rust/engine/src/behaviors/`), its declaration,
 a config typed in Rust and its hooks (`Hooks`), each optional. The core's
 are `rust/behaviors`, the work queue's `runtime/engine-workqueue/rust`, and
-an extension's a crate of its own, on the same API (acme.Rating is
-`examples/acme-schematic/crates/behaviors`): the `projectengine` generator
-writes a project's engine crate over the extension's crates for a schema
-that composes one, which a Rust server links, whose `ffi/` member is the
-archive a Go server links and whose `napi/` member the addon a TypeScript
-server loads (the engine option `addon`). This section describes the
+another a crate of its own, on the same API, which a host links in an
+archive or an addon of its own (the engine option `addon`). This section describes the
 interface in its TypeScript form, `@superschematic/engine/testing`, whose
 members are the trait's under their TypeScript names: a test defines a
 behavior with `defineBehavior`, which the test addon's bridge runs
@@ -4681,7 +4677,7 @@ shutdown)` in the Rust engine's `background` feature, which calls the
 engine on the blocking pool and waits on the storage's notifier. Each
 pages a schema's stale fields, answers a page `concurrency` at a time,
 settles it in one call, and settles an answer that throws or panics as a
-failure. A stack's `@deriver` deployables run them.
+failure.
 
 #### Provenance
 
@@ -5194,10 +5190,9 @@ default, so the C archive and the Node-API addon leave axum out) is the
 adapter a Rust server mounts the engine's routes with (D58).
 `superschematic_engine::axum::router(engine, options)` returns an axum
 `Router` with the path of each route under `options.prefix`, which the
-server merges into its own. A Rust server depends on the crate with its
-`postgres` and `axum` features, at `[paths] engine_rust`; the feature
-takes axum 0.8.9, tokio 1.52.2 and tower 0.5.3, the generated servers'
-versions.
+server merges into its own. A Rust host depends on the crate with its
+`postgres` and `axum` features; the feature takes axum 0.8.9, tokio
+1.52.2 and tower 0.5.3, the generated servers' versions.
 
 ```rust
 use std::sync::Arc;
@@ -5269,8 +5264,7 @@ let app = Router::new().merge(routes).fallback_service(api_router);
   `timeoutSeconds` do: a request that takes longer, from its body's read
   through the caller to the engine's call, is 504 `gateway_timeout`, the
   HTTP runtimes' problem (`"title": "Gateway Timeout"`, `"detail":
-  "Gateway Timeout"`). None unless set; a generated Rust server sets the
-  server's 30 seconds. A call still waiting for a blocking thread at the
+  "Gateway Timeout"`). None unless set. A call still waiting for a blocking thread at the
   deadline never starts; one already running runs on to its end, so a
   write whose client got the timeout may still commit, and the client
   reads it back before it tries again.
@@ -5703,19 +5697,13 @@ openEngine({
   values, as the compiler's `Finalize` does. The core's behaviors name
   none, so they register under any policy; a deployment marks the ones
   it wants confirmed, such as the commerce operations that move money or
-  stock (D70), through `invocation`. A generated server takes it from
-  the engine database's `outputs.engine.tools.invocation`, which the
-  build requires to name each commerce operation that moves money or
-  stock wherever `Payments` or `Stock` is composed (D70, amended).
+  stock (D70), through `invocation`.
 - `hidden` lists behavior operations, by `<Behavior>.<operation>`, that
   the tools leave out: a service calls them through the API or
   in-process, and no agent is offered them. Such a tool reads `hidden:
   true` with its reason, and a call by its MCP handle is
-  `UnknownToolError`; the operation still runs through `instances`. A
-  generated server's engine document hides Payments' service operations
-  (`listPaymentActions`, `recordPaymentEvent`, `settleRefundFor`) beside
-  the database's `outputs.engine.tools.hidden`; an engine opened by hand
-  hides only what it is given.
+  `UnknownToolError`; the operation still runs through `instances`. An
+  engine hides only what it is given.
 - `keys` are `apigen.ToolKeys` (section 3.14 of `docs/extension-model.md`):
   the key a property names its scalar under, the `_meta` key of a tool's
   guidance, and keys written at the root of every argument schema.
@@ -5989,55 +5977,14 @@ The work-queue package's worker (`runtime/engine-workqueue/README.md`,
 ### Typed wrappers
 
 The client is generic over schema names and takes `unknown` data and
-parameters. `superschematic engine-client --out <file.ts> <schema file>...`
-(D49; the CLI reference has the command) writes a
-module that types it for given schemas, from their documents and the
-behavior declarations the binary registers:
-
-```ts
-import { EngineClient } from '@superschematic/engine/client';
-import { taskClient } from './engine.client.ts';
-
-const tasks = taskClient(new EngineClient({ baseUrl, auth }));
-const task = await tasks.create(
-  { title: 'Index', kind: 'build', detail: { target: 'index' } },     // TaskFields: detail is a BuildDetail for kind build
-  { id: 't1', behaviors: { Links: { project: 'p1' } } }              // TaskCreateParams: project is a required link
-);
-task.behaviors.Workflow.status;                                       // TaskState
-await tasks.transition('t1', { to: 'doing' });                        // to: TaskState
-await tasks.listLinked({ name: 'project', id: 'p1' });                // a schema-level operation; name: TaskLinkName
-const { result, seq } = await tasks.operate('t1', 'addBlocker', { schema: 'Spec', id: 's1' });
-```
-
-- Per schema: `<T>Fields` (own fields, a create's data), `<T>` (a read's
-  data, the own fields), `<T>Behaviors` (a read's behaviors: by behavior
-  name, each behavior that declares a field, its fields `readonly`,
-  optional where the engine can leave one out), `<T>Patch`, `<T>CreateParams` and
-  `<T>Preconditions` by behavior name, `<T><Op>Params` and
-  `<T><Op>Result` per operation, `<T>Operations`, `<T>Vetoes` with
-  `is<T>Veto`, and the wrapper `<Schema>Client` with its factory.
-- The core's behaviors narrow what their declarations say under their
-  configs: `Workflow` the status and `transition`'s states (`<T>State`);
-  `Links` its names (`<T>LinkName`), the create parameters as
-  `createParamsSchema(config)` narrows them, and the `targets` field per
-  link with its target's schema; `Dependencies` the blocker schemas, a
-  blocker's schema required when the type's own is not among them;
-  `Rollups` each rollup's value by its function; `Revisions` a
-  proposal's patch (`<T>Patch`) and a revision's data (`<T>Fields`);
-  `Variants` the own fields as a union by `by`, with `field` typed per
-  value and none for another value. `Comments`, `Dependencies` and
-  `Assignment` type their fields, and the work-queue behaviors type each
-  of theirs: `Lease`'s holder and times, `Budget`'s meters by the
-  config's names, `Retries`' counts by the config's classes. Any other
-  behavior keeps its declaration's shapes and its fields are `unknown`.
-- The generator narrows the create parameters in Go, and the engine in
-  `createParamsSchema`; `runtime/engine/testdata/client_codegen_parity.json`,
-  which `go test ./internal/generator/engineclientgen -update` writes,
-  holds the two to one shape, and the field types to what reads return
-  (`test/client-codegen.test.ts`).
-- A scalar is typed as its JSON on the wire, not by its library's symbol:
-  `Temporal.DateTime` is a string, `Generic.JSON` `unknown`, an object
-  scalar `JSONObject`.
+parameters. The command that typed it for given schemas, `superschematic
+engine-client`, went with engine types (D103's step 7).
+`test/client-codegen.test.ts` still runs the modules it wrote
+(`test/generated/`) against an engine, and its `typos()` holds a
+misspelled field, state, link and parameter to a compile error;
+`testdata/client_codegen_parity.json` holds the create parameters it
+narrowed to the engine's `createParamsSchema`. Both stay as they were
+until the engine goes.
 
 ## Development
 
@@ -6072,10 +6019,8 @@ and `test/client-stream.test.ts` drive the client against an engine
 served in process, its fetch handing each request to the app's;
 `test/client-types.test.ts` holds the client's types to the server's and
 reads the built client for imports. `test/client-codegen.test.ts` runs
-the modules `superschematic engine-client` writes (`test/generated/`,
-which `go test ./internal/generator/engineclientgen -update` rewrites)
-against an engine, and its `typos()` holds a misspelled field, state,
-link and parameter to a compile error. The work queue's suite
+the modules `superschematic engine-client` wrote (`test/generated/`,
+"Typed wrappers") against an engine. The work queue's suite
 (`runtime/engine-workqueue/typescript`) runs the same way, its behaviors
 the addon's, by name.
 
@@ -6110,7 +6055,7 @@ exports Node.js and Bun load, the twin of the C ABI's
 
 ```rust
 fn behaviors() -> superschematic_engine_napi::BehaviorSet {
-    superschematic_engine_behaviors::core().with(acme_behaviors::Rating)
+    superschematic_engine_behaviors::core().with(my_behaviors::Rating)
 }
 superschematic_engine_napi::export_engine_napi!(behaviors = behaviors);
 ```
@@ -6120,11 +6065,10 @@ each other one its options' `behaviors` name, in their order; a name the
 addon is not built with is refused, naming the ones it has. The library
 exports nothing itself, so a crate that expands the macro depends on no
 other addon crate. `rust/addon` (`superschematic-engine-addon`) is the
-core's addon, over the core's behaviors and the work queue's. A project
-whose schemas compose an extension's behaviors builds its own from the
-`napi/` member of the engine crate the `projectengine` generator writes
-(`engine/rust/<schema>/napi`, over that crate's `behaviors()`), and an
-engine opens on it when the host names its file: the engine option
+core's addon, over the core's behaviors and the work queue's. A host
+whose engine runs other behaviors builds its own, a cdylib that expands
+`export_engine_napi!` over them, and an engine opens on it when the host
+names its file: the engine option
 `addon` (`openEngineAsync({ ..., addon })`), or
 `SUPERSCHEMATIC_ENGINE_ADDON` for every engine the process opens that
 names none. A named file that does not load is refused; no other addon is

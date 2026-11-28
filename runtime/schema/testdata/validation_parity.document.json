@@ -882,6 +882,18 @@
     },
     "PatternMatrix": {
       "properties": {
+        "caseless": {
+          "$ref": "#/definitions/string",
+          "x-validatePattern": "(?i)^[a-z]+$"
+        },
+        "digit": {
+          "$ref": "#/definitions/string",
+          "x-validatePattern": "^\\d$"
+        },
+        "dotAll": {
+          "$ref": "#/definitions/string",
+          "x-validatePattern": "(?s)^a.b$"
+        },
         "glyph": {
           "$ref": "#/definitions/string",
           "x-validatePattern": "^.$"
@@ -903,6 +915,24 @@
           "type": "array",
           "x-validatePattern": "^.$"
         },
+        "letters": {
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array",
+          "x-validatePattern": "^\\pL$"
+        },
+        "lineEnd": {
+          "$ref": "#/definitions/string",
+          "x-validatePattern": "^[a-z]+$"
+        },
+        "lines": {
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array",
+          "x-validatePattern": "(?m)^b$"
+        },
         "pair": {
           "$ref": "#/definitions/string",
           "x-validatePattern": "^[^a-z]{2}$"
@@ -921,6 +951,21 @@
         "spaced": {
           "$ref": "#/definitions/string",
           "x-validatePattern": "^\\w\\W\\w$"
+        },
+        "spaces": {
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array",
+          "x-validatePattern": "^\\s$"
+        },
+        "textEnd": {
+          "$ref": "#/definitions/string",
+          "x-validatePattern": "\\Aab\\z"
+        },
+        "wordChar": {
+          "$ref": "#/definitions/string",
+          "x-validatePattern": "^\\w$"
         }
       },
       "type": "object",

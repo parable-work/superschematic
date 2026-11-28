@@ -76,11 +76,13 @@ impl Db {
     }
 
     /// A message's state, its attempts, its last error, and the seconds
-    /// until it is due.
+    /// until it is due, in whole milliseconds: julianday is a double of
+    /// days, so a difference of two is off by tens of microseconds, and an
+    /// exact 250ms read in the same millisecond comes out as 0.2500087.
     fn row(&self, id: &str) -> (String, i64, Option<String>, f64) {
         self.connection()
             .query_row(
-                "SELECT state, attempts, last_error, (julianday(due_at) - julianday('now')) * 86400 FROM order_placed_queue WHERE id = ?1",
+                "SELECT state, attempts, last_error, round((julianday(due_at) - julianday('now')) * 86400, 3) FROM order_placed_queue WHERE id = ?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
             )
@@ -220,7 +222,7 @@ async fn a_delayed_message_waits_out_its_delay() {
     let soonest: f64 = db
         .connection()
         .query_row(
-            "SELECT (julianday(due_at) - julianday('now')) * 86400 FROM order_placed_queue WHERE quantity = 3",
+            "SELECT round((julianday(due_at) - julianday('now')) * 86400, 3) FROM order_placed_queue WHERE quantity = 3",
             [],
             |row| row.get(0),
         )
@@ -345,7 +347,7 @@ async fn extend_release_and_an_expired_claim() {
     let expires: f64 = db
         .connection()
         .query_row(
-            "SELECT (julianday(claim_expires_at) - julianday('now')) * 86400 FROM order_placed_queue",
+            "SELECT round((julianday(claim_expires_at) - julianday('now')) * 86400, 3) FROM order_placed_queue",
             [],
             |r| r.get(0),
         )

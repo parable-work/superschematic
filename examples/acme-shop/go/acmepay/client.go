@@ -30,7 +30,7 @@ func (e *APIError) Error() string {
 }
 
 // IntentRequest is what an intent is made for: an amount in a currency's
-// minor units, the shop's reference (the checkout's id) and the engine's
+// minor units, the shop's reference (the checkout's id) and Payments'
 // attempt, which come back on every event about it.
 type IntentRequest struct {
 	Amount    int64  `json:"amount"`
@@ -61,7 +61,7 @@ func (c *Client) CancelIntent(ctx context.Context, key, id string) (Intent, erro
 }
 
 // RefundRequest is a refund of an amount of an intent's captured money,
-// with the shop's reference and the engine's refund it pays.
+// with the shop's reference and Payments' refund it pays.
 type RefundRequest struct {
 	PaymentIntent string `json:"paymentIntent"`
 	Amount        int64  `json:"amount"`

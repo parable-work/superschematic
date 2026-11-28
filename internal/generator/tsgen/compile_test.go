@@ -198,7 +198,6 @@ func behaviorsPackage(t *testing.T) tsPackageCase {
 		"export const read: TicketBehaviors = " + behaviortypestest.TicketBehaviors + ";\n\n" +
 		"export const status: TicketState = read.Workflow.status;\n" +
 		"export const average: unknown = read['acme.Rating'].ratingAverage;\n" +
-		"export const reviewers: number = read.Links.targets.reviewers?.length ?? 0;\n" +
 		"// @ts-expect-error Ticket's Workflow has no state closed.\n" +
 		"export const closed: TicketState = 'closed';\n"
 	return tsPackageCase{

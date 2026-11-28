@@ -78,10 +78,6 @@ const TicketBehaviors = `{
   "Comments": { "messages": 2, "lastMessageAt": 1790790800000, "threads": { "open": 1, "resolved": 0 }, "composing": ["ana"], "unread": 1 },
   "Revisions": { "revision": 3 },
   "Dependencies": { "blocked": false },
-  "Links": { "targets": {
-    "project": { "schema": "projects", "id": "launch" },
-    "reviewers": [ { "schema": "people", "id": "ana" }, { "schema": "people", "id": "bo" } ],
-    "spec": { "schema": "documents", "id": "brief", "revision": 2, "latest": 3, "stale": true } } },
   "Timers": { "deadlines": { "respond": { "dueAt": 1790805100324, "fired": true, "firedAt": 1790805160000, "outcome": "moved" } } },
   "Approvals": { "gates": { "done": { "signedBy": ["ana"] } } },
   "Numbering": { "seq": 7, "label": "TCK-0007" },

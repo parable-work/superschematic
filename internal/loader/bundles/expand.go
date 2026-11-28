@@ -78,7 +78,7 @@ func expandType(schema *ir.Schema, td *ir.TypeDef, reg *registry.Registry) error
 		return fmt.Errorf("type %s implements the bundle %s, and a bundle is implemented by a DB table, which %s is not (D103)", td.Name, first, td.Name)
 	}
 	if len(td.TypeBehaviors()) > 0 {
-		return fmt.Errorf("type %s implements the bundle %s beside @behavior %s: a bundle's parts are a table's uses, which an engine type does not take (D103)", td.Name, first, td.TypeBehaviors()[0].Name)
+		return fmt.Errorf("type %s implements the bundle %s beside @behavior %s, which a DB type does not take: a bundle's parts are a table's uses (D103)", td.Name, first, td.TypeBehaviors()[0].Name)
 	}
 	var seen []string
 	for _, ref := range td.Bundles {

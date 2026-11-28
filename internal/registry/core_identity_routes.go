@@ -28,11 +28,11 @@ func identityRouteDecorators() []DecoratorSpec {
 }
 
 // applyUserSessions reads @userSessions({ path?, login?, register?,
-// registration?, defaultRoles?, firstUser?, apiKeys? }). login is true and
+// registration?, defaultRoles?, firstUser?, apiKeys?, oauth? }). login is true and
 // register false when absent, and register needs the login; registration,
 // defaultRoles and firstUser (D81) need register. apiKeys (D114), false
 // when absent, needs the login too: a key is made by a caller with a
-// session.
+// session. oauth (#695) needs the login too: a person signs in to consent.
 func applyUserSessions(args []any, set *ir.OperationSet) error {
 	const name = "userSessions"
 	if err := identityRoutesDeclared(name, set); err != nil {
@@ -75,6 +75,11 @@ func applyUserSessions(args []any, set *ir.OperationSet) error {
 		"apiKeys": func(v any) error {
 			return identityRoutesFlag(name, "apiKeys", v, &apiKeys)
 		},
+		"oauth": func(v any) error {
+			oauth, err := identityRoutesOAuth(v)
+			cfg.OAuth = oauth
+			return err
+		},
 	})
 	if err != nil {
 		return err
@@ -91,6 +96,9 @@ func applyUserSessions(args []any, set *ir.OperationSet) error {
 	}
 	if apiKeys && !login {
 		return ArgErrorf(0, "@userSessions: apiKeys needs the login, since a key is made by a caller signed in with a session; drop apiKeys: true or login: false")
+	}
+	if cfg.OAuth != nil && !login {
+		return ArgErrorf(0, "@userSessions: oauth needs the login, since a person signs in to consent; drop oauth or login: false")
 	}
 	cfg.NoLogin, cfg.Register, cfg.APIKeys = !login, register, apiKeys
 	set.UserSessions = cfg
@@ -161,7 +169,104 @@ func identityRoutesFirstUser(v any) (*ir.IdentityFirstUser, error) {
 	return first, nil
 }
 
-// applyUserAdministration reads @userAdministration({ path?, apiKeys? }).
+// identityRoutesOAuth reads oauth (#695): true for every default, false
+// for none, or { accessTokenTtlSeconds?, refreshTokenTtlSeconds?,
+// grantMaxTtlSeconds?, clients?: { metadataDocuments?, registration? },
+// consentPath? }. Each lifetime is a positive whole number of seconds, an
+// access token's shorter than a refresh token's and a refresh token's no
+// longer than the grant's, and the two kinds of client are not both off.
+func identityRoutesOAuth(v any) (*ir.IdentityOAuthConfig, error) {
+	if flag, ok := v.(bool); ok {
+		if !flag {
+			return nil, nil
+		}
+		return &ir.IdentityOAuthConfig{}, nil
+	}
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, ArgErrorf(0, "@userSessions oauth must be true or an object literal: { accessTokenTtlSeconds?, refreshTokenTtlSeconds?, grantMaxTtlSeconds?, clients?, consentPath? }")
+	}
+	cfg := &ir.IdentityOAuthConfig{}
+	seconds := func(key string, value any, dst *int64) error {
+		n, ok := value.(float64)
+		if !ok {
+			if i, isInt := value.(int); isInt {
+				n, ok = float64(i), true
+			} else if i, isInt := value.(int64); isInt {
+				n, ok = float64(i), true
+			}
+		}
+		if !ok || n < 1 || n != float64(int64(n)) || n > 1<<53 {
+			return ArgErrorf(0, "@userSessions oauth.%s must be a positive whole number of seconds", key)
+		}
+		*dst = int64(n)
+		return nil
+	}
+	for _, key := range sortedKeys(obj) {
+		value := obj[key]
+		var err error
+		switch key {
+		case "accessTokenTtlSeconds":
+			err = seconds(key, value, &cfg.AccessTokenTTLSeconds)
+		case "refreshTokenTtlSeconds":
+			err = seconds(key, value, &cfg.RefreshTokenTTLSeconds)
+		case "grantMaxTtlSeconds":
+			err = seconds(key, value, &cfg.GrantMaxTTLSeconds)
+		case "consentPath":
+			path, ok := value.(string)
+			if !ok || path == "" {
+				err = ArgErrorf(0, "@userSessions oauth.consentPath must be a non-empty string, the path or URL of the project's consent page")
+			}
+			cfg.ConsentPath = path
+		case "clients":
+			cfg.Clients, err = identityRoutesOAuthClients(value)
+		default:
+			err = ArgErrorf(0, "@userSessions oauth has unknown key %q; it takes accessTokenTtlSeconds, clients, consentPath, grantMaxTtlSeconds and refreshTokenTtlSeconds", key)
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	switch {
+	case cfg.AccessTokenTTL() >= cfg.RefreshTokenTTL():
+		return nil, ArgErrorf(0, "@userSessions oauth: an access token's lifetime (%d s) must be shorter than a refresh token's (%d s)", cfg.AccessTokenTTL(), cfg.RefreshTokenTTL())
+	case cfg.RefreshTokenTTL() > cfg.GrantMaxTTL():
+		return nil, ArgErrorf(0, "@userSessions oauth: a refresh token's lifetime (%d s) must be no longer than a grant's (%d s)", cfg.RefreshTokenTTL(), cfg.GrantMaxTTL())
+	case !cfg.MetadataDocuments() && !cfg.Registration():
+		return nil, ArgErrorf(0, "@userSessions oauth.clients turns off both kinds of client, so no client could connect; keep metadataDocuments or registration")
+	}
+	return cfg, nil
+}
+
+// identityRoutesOAuthClients reads oauth.clients: { metadataDocuments?,
+// registration? }, each true or false.
+func identityRoutesOAuthClients(v any) (*ir.IdentityOAuthClients, error) {
+	obj, ok := v.(map[string]any)
+	if !ok {
+		return nil, ArgErrorf(0, "@userSessions oauth.clients must be an object literal: { metadataDocuments?, registration? }")
+	}
+	clients := &ir.IdentityOAuthClients{}
+	for _, key := range sortedKeys(obj) {
+		var dst **bool
+		switch key {
+		case "metadataDocuments":
+			dst = &clients.MetadataDocuments
+		case "registration":
+			dst = &clients.Registration
+		default:
+			return nil, ArgErrorf(0, "@userSessions oauth.clients has unknown key %q; it takes metadataDocuments and registration", key)
+		}
+		flag, ok := obj[key].(bool)
+		if !ok {
+			return nil, ArgErrorf(0, "@userSessions oauth.clients.%s must be true or false", key)
+		}
+		*dst = &flag
+	}
+	return clients, nil
+}
+
+// applyUserAdministration reads @userAdministration({ path?, apiKeys?,
+// oauth? }).
 func applyUserAdministration(args []any, set *ir.OperationSet) error {
 	const name = "userAdministration"
 	if err := identityRoutesDeclared(name, set); err != nil {
@@ -171,6 +276,7 @@ func applyUserAdministration(args []any, set *ir.OperationSet) error {
 	err := identityRoutesConfig(name, args, map[string]func(any) error{
 		"path":    func(v any) error { return identityRoutesPath(name, v, &cfg.Path) },
 		"apiKeys": func(v any) error { return identityRoutesFlag(name, "apiKeys", v, &cfg.APIKeys) },
+		"oauth":   func(v any) error { return identityRoutesFlag(name, "oauth", v, &cfg.OAuth) },
 	})
 	if err != nil {
 		return err

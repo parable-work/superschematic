@@ -182,20 +182,10 @@ type Service struct {
 	// runs the database runs a worker that drains each (D151).
 	BehaviorQueues map[string]ir.BehaviorQueue
 
-	// Engine reports that a DB service is an engine database (D58): a type
-	// of it composes a behavior. The servers of the APIs that connect to it
-	// open the engine on its database, and the stack runs the engine's
-	// runner over it, a deployable of its own.
-	Engine bool
-
-	// Derived are the names of a DB service's engine types that compose
-	// Derived (D73), sorted. A deriver's schemas are among those of its
-	// API's database (D74), or among its DerivedTables.
-	Derived []string
-
 	// DerivedTables are the names of a DB service's tables that implement
-	// Derived (D103), sorted. A deriver fills them through the tables'
-	// repositories (D146), as it fills engine types through the engine.
+	// Derived (D103), sorted. A deriver's schemas are among those of its
+	// API's database, which it fills through the tables' repositories
+	// (D146).
 	DerivedTables []string
 
 	// Vectors reports that a DB service has a vector(n) column, an

@@ -376,15 +376,8 @@ type APIOutput struct {
 	// directive, since a replace in the ORM's go.mod does not reach it.
 	UpstreamVersionGraph bool
 
-	// Engine is the API's engine database (D58), nil when its database
-	// holds no engine type: a server of the API opens the engine on it and
-	// mounts its routes, and the permission catalog lists the permissions
-	// the engine's permission policy asks of each engine type.
-	Engine *EngineInfo
-
-	// TableDerivers are the API's derivers that fill tables that implement
-	// Derived (D146), sorted by name; those that fill engine types are
-	// Engine's.
+	// TableDerivers are the API's derivers, each of which fills tables
+	// that implement Derived (D146), sorted by name.
 	TableDerivers []DeriverInfo
 
 	// GoDerivers are the derivers of a Go API's server output (D146), its
@@ -568,9 +561,6 @@ type APIOutput struct {
 	SchemaRuntimeReplacePath string
 	PtrReplacePath           string
 	VersionGraphReplacePath  string
-	// EngineReplacePath replaces the engine's Go binding, which Deps holds
-	// an engine of when the API has an engine database (D58).
-	EngineReplacePath string
 	// RulesReplacePath replaces the rules module, which the ORM of a
 	// database whose tables' fields are behaviors requires, and which
 	// behaviors.go imports (D103; Deps.Rules).
@@ -948,11 +938,6 @@ type Options struct {
 	// operation needs it.
 	IdempotencyTable *ir.IdempotencyTable
 
-	// Engine is the API's engine database (D58), nil when its database
-	// holds no engine type. The generator package reads it from the
-	// database's IR and config.
-	Engine *EngineInfo
-
 	// TableDerivers are the API's derivers that fill tables that implement
 	// Derived (D146), which the generator package reads from the
 	// database's IR.
@@ -1016,7 +1001,6 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		Timestamp:           opts.Clock.RFC3339(),
 		SystemUserUUID:      "00000000-0000-4000-8000-000000000000",
 		UUIDTypeExpr:        resolveUUIDTypeExpr(schema),
-		Engine:              opts.Engine,
 		TableDerivers:       opts.TableDerivers,
 	}
 
@@ -1144,10 +1128,8 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 // permissionCatalog is the API's permissions.json, from every endpoint, the
 // user model's included, a behavior operation's with the permissions its
 // behavior's config names, which the core checks (D103), any other with
-// the permissions writes says the core checks on its writes (D104), and
-// from the engine its server mounts, whose permission policy asks
-// <Type>.<action> of each engine type (D58), or "" when none names a
-// permission.
+// the permissions writes says the core checks on its writes (D104), or ""
+// when none names a permission.
 func permissionCatalog(output *APIOutput, schema *ir.Schema, writes func(op *ir.FieldDef) []string) (string, error) {
 	operations := make([]permcatalog.Operation, len(output.Endpoints))
 	for i, endpoint := range output.Endpoints {
@@ -1167,15 +1149,7 @@ func permissionCatalog(output *APIOutput, schema *ir.Schema, writes func(op *ir.
 			Identity:    endpoint.IdentityOperation != "",
 		}
 	}
-	var engine []permcatalog.EnginePermission
-	if output.Engine.PermissionPolicy() {
-		for _, typ := range output.Engine.Types {
-			for _, action := range EnginePermissionActions {
-				engine = append(engine, permcatalog.EnginePermission{Database: output.Engine.Database, Namespace: output.Engine.Namespace, Schema: typ, Action: action})
-			}
-		}
-	}
-	catalog, ok := permcatalog.Build(output.SchemaName, schema.AuthDB, operations, engine...)
+	catalog, ok := permcatalog.Build(output.SchemaName, schema.AuthDB, operations)
 	if !ok {
 		return "", nil
 	}

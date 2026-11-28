@@ -37,7 +37,7 @@ func TestDerivedFixtureLoads(t *testing.T) {
 		t.Errorf("the fixture's warnings =\n%q\nwant none", warnings)
 	}
 	ticket, article := db.Types["Ticket"], db.Types["Article"]
-	if ticket == nil || ticket.IsEngineType() || !ticket.Optimistic || article == nil || !article.Optimistic {
+	if ticket == nil || len(ticket.TypeBehaviors()) > 0 || !ticket.Optimistic || article == nil || !article.Optimistic {
 		t.Fatalf("Ticket = %s, Article = %s", marshal(t, ticket), marshal(t, article))
 	}
 	var uses []string
