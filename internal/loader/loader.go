@@ -851,6 +851,11 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 	if len(refused) > 0 {
 		return nil, refused[0]
 	}
+	// After the pass, which holds each field a seed row names to the
+	// table's, the fields the expansions filled among them (#625).
+	if err := validateSeedRowValues(schema, vin.ExternalEnums); err != nil {
+		return nil, err
+	}
 	added := versiongraph.Expand(schema)
 	added = append(added, identity.Expand(schema)...)
 	added = append(added, identity.ExpandRoutes(schema, vin.AuthDB, vin.Naming.OrDefault().IdentityPermissionPrefix)...)

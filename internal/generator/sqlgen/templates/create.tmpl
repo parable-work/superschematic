@@ -283,6 +283,15 @@ CREATE SCHEMA IF NOT EXISTS {{ $view.QuotedPool }};
 {{ $seed.InsertSQL }};
 {{- end }}
 {{- end }}
+{{- if .SeedRows }}
+
+-- Seed the rows each table's @seedRows declares: a row whose key the
+-- table holds already is left as it is
+{{- range $row := .SeedRows }}
+
+{{ $row.InsertSQL }};
+{{- end }}
+{{- end }}
 {{- template "rawSQL" (rawSQLAt .RawSQL "indexes") }}
 {{- define "rawSQL" }}
 {{- if .Pieces }}

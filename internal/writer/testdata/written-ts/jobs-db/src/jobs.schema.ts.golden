@@ -1,4 +1,4 @@
-import { AutoGenerate, Relation, User, UserRole, accessGrants, attachments, channelIdentities, conversations, key, notifier, party, queue, references, runRequests, unique } from "@superschematic/db";
+import { AutoGenerate, Relation, User, UserRole, accessGrants, attachments, channelIdentities, conversations, key, notifier, party, queue, references, runRequests, seedRows, unique } from "@superschematic/db";
 import { Default, Nullable } from "@superschematic/schema";
 import { Contact as ContactScalars, Identity, Temporal } from "superscalar";
 
@@ -20,6 +20,9 @@ export abstract class AttachmentReleased {}
 @channelIdentities()
 export abstract class ChannelIdentity {}
 
+// A user's reply by text may only acknowledge, since a sender id can be
+// spoofed; by email it may run what its sender may (#625).
+@seedRows<ChannelTrust>([{ channelKind: "sms", level: "low", permissions: [] }, { channelKind: "email", level: "standard", permissions: null }])
 @notifier("channelTrust")
 export abstract class ChannelTrust {}
 
@@ -93,7 +96,10 @@ export abstract class Report {
 }
 
 // A named set of permissions, and the rows a grant of it reaches from its
-// target (D156).
+// target (D156). The roles are seed rows, which the migrations write
+// (#625): a contractor reaches the job its grant names and writes reports
+// on it; the office may message parties and settle triage.
+@seedRows<Role>([{ name: "contractor", permissions: ["reports.write"], reaches: ["Report:job"] }, { name: "office", permissions: ["parties.message", "parties.triage"], reaches: null }])
 export abstract class Role implements UserRole {
   @key
   id: AutoGenerate<Identity.UUID>;

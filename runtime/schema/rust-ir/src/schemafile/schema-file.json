@@ -7381,6 +7381,28 @@
       ],
       "type": "object"
     },
+    "SeedRows": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rows": {
+          "items": {
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "rows"
+      ],
+      "type": "object"
+    },
     "ServerDecl": {
       "additionalProperties": false,
       "properties": {
@@ -8051,6 +8073,9 @@
             "$ref": "#/$defs/RoleSeed"
           },
           "type": "array"
+        },
+        "seedRows": {
+          "$ref": "#/$defs/SeedRows"
         },
         "server": {
           "$ref": "#/$defs/ServerDecl"

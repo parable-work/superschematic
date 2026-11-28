@@ -145,6 +145,8 @@ var modelFixtures = []string{
 	filepath.Join(sqlgenFixtures, "fixture-fenced-db"),
 	// A variant field's check (D149).
 	filepath.Join(sqlgenFixtures, "fixture-variant-field-db"),
+	// Rows a table holds from its first migration on (#625).
+	filepath.Join(sqlgenFixtures, "fixture-seed-rows-db"),
 	vectorsFixture,
 	shopDir,
 }

@@ -86,8 +86,9 @@ func inspectFile(t *testing.T, runner, path string) *Inspection {
 // (D116), for every fixture whose SQLite model builds and for the shop. The
 // file is made by the runner applying the plan from an empty database,
 // which is create.sql (CreateSQL), so it holds the runner's state tables
-// too, which are no part of the model. Roles are rows, which the read does
-// not see: a schema that seeds roles plans their seeding, and nothing else.
+// too, which are no part of the model. Seeded roles and rows are rows,
+// which the read does not see: a schema that seeds them plans their
+// seeding, and nothing else.
 func TestReadDatabaseRoundTrip(t *testing.T) {
 	runner := migrationRunner(t)
 	schemas := map[string]*ir.Schema{"shop-db": planCase{}.load(t, sqliteShop), "types-db": sqliteTypesSchema()}
@@ -174,8 +175,8 @@ func buildByHand(t *testing.T, runner, path, name string) {
 }
 
 // holdsModel fails unless the file at path reads, against want, as want
-// but for its roles, which are rows, with no step between the two: the
-// file holds want's schema.
+// but for its seeded roles and rows, with no step between the two but
+// their seeding: the file holds want's schema.
 func holdsModel(t *testing.T, runner, path string, want *Model) {
 	t.Helper()
 	db, err := ReadDatabase(inspectFile(t, runner, path), want, nil, nil)
@@ -187,15 +188,15 @@ func holdsModel(t *testing.T, runner, path string, want *Model) {
 		t.Fatal(err)
 	}
 	for _, step := range plan.Steps {
-		if step.Op != string(opSeedRole) {
+		if step.Op != string(opSeedRole) && step.Op != string(opSeedRow) {
 			t.Errorf("step %d %s %s:\n%s", step.Index, step.Op, step.Subject, strings.Join(step.Statements, ";\n"))
 		}
 	}
-	if len(plan.Steps) != len(want.Roles) {
-		t.Errorf("the plan has %d steps, and the model seeds %d roles", len(plan.Steps), len(want.Roles))
+	if len(plan.Steps) != len(want.Roles)+len(want.Rows) {
+		t.Errorf("the plan has %d steps, and the model seeds %d roles and %d rows", len(plan.Steps), len(want.Roles), len(want.Rows))
 	}
 	rest := *want
-	rest.Roles = nil
+	rest.Roles, rest.Rows = nil, nil
 	wantJSON, err := rest.CanonicalJSON()
 	if err != nil {
 		t.Fatal(err)
