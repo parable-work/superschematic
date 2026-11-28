@@ -3,7 +3,6 @@ package writer
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
@@ -11,18 +10,20 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-// agentsOnly is fixture-agent-runs-db's orchestration file without its
-// @event and @references declarations, which the writer does not write
-// back yet (D153's and D154's left), so it round-trips on its own.
-func agentsOnly(t *testing.T) string {
+// agentRunsSources are fixture-agent-runs-db's files: the orchestration,
+// with its @event and @references declarations (D153, D154), and the
+// tables and the notifier beside it.
+func agentRunsSources(t *testing.T) map[string]string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(tsFixtures, "fixture-agent-runs-db", "src", "agents.schema.ts"))
-	if err != nil {
-		t.Fatal(err)
+	files := map[string]string{}
+	for _, name := range []string{"agents.schema.ts", "work.schema.ts"} {
+		data, err := os.ReadFile(filepath.Join(tsFixtures, "fixture-agent-runs-db", "src", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		files[name] = string(data)
 	}
-	source := regexp.MustCompile(`(?m)^@(event|references)<[^\n]*\n`).ReplaceAllString(string(data), "")
-	source = regexp.MustCompile(`(?m)^  (event|references),\n`).ReplaceAllString(source, "")
-	return source
+	return files
 }
 
 // loadSources loads a TypeScript service of kind named name whose src
@@ -55,16 +56,16 @@ func loadSources(t *testing.T, name string, kind ir.SchemaKind, files map[string
 // part, and an operation's @autonomy as @autonomy(class, mode?); reading
 // each written schema back, in every format, gives the same IR.
 func TestTSWriterWritesAgentOrchestration(t *testing.T) {
-	db := loadSources(t, "fixture-agents-orchestration-db", ir.SchemaKindDB, map[string]string{"agents.schema.ts": agentsOnly(t)})
+	db := loadSources(t, "fixture-agents-orchestration-db", ir.SchemaKindDB, agentRunsSources(t))
 	source := writtenSource(t, db, FormatTS)
 	for _, want := range []string{
 		"@versioned\n@agents(\"definitions\")\nexport abstract class Agent {}",
-		"@agents(\"runs\")\nexport abstract class AgentRun implements Lease<AgentRun,",
+		"@agents(\"runs\")\n@references<AgentRun>()\nexport abstract class AgentRun implements Lease<AgentRun,",
 		"@queue()\n@agents(\"requests\")\nexport abstract class AgentRunRequest {}",
 		"@agents(\"policies\")\nexport abstract class AutonomyPolicy {}",
-		"@agents(\"approvals\")\nexport abstract class AgentApproval {",
-		"@agents(\"controls\")\nexport abstract class AgentControl implements Budget<AgentControl,",
-		`import { AutoGenerate, Budget, Lease, Relation, Retries, Workflow, agents, key, queue, versioned } from "@superschematic/db";`,
+		"@agents(\"approvals\")\n@event<AgentApproval>({ kind: \"approval.requested\", title: \"summary\", urgency: \"urgent\" })\nexport abstract class AgentApproval {",
+		"@agents(\"controls\")\n@event<AgentControl>({ kind: \"agent.budgetWarning\", urgency: \"normal\" })\nexport abstract class AgentControl implements Budget<AgentControl,",
+		`import { AutoGenerate, Budget, Lease, Relation, Retries, Workflow, agents, event, key, queue, references, versioned } from "@superschematic/db";`,
 	} {
 		if !strings.Contains(source, want) {
 			t.Errorf("written TS lacks %q:\n%s", want, source)

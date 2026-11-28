@@ -244,7 +244,10 @@ async function notices(db: SqlDatabase): Promise<void> {
   const PHONE = '+15550100001';
   await system.channelIdentity.createOne({ kind: 'phone', address: PHONE, principal: ALICE, trust: 'verified', verifiedAt: new Date() } as never);
   await system.channelIdentity.createOne({ kind: 'phone', address: '+15550100002', principal: BOB, trust: 'verified', verifiedAt: new Date() } as never);
-  await system.noticePreference.createOne({ principal: null, eventKind: '*', urgency: '*', channels: ['sms'] } as never);
+  // Everyone's preference is the schema's seed row (#625), which noticesSQL
+  // wrote: SMS, then email. Only SMS is configured here, so the test keeps
+  // everyone to SMS by updating that row rather than adding a second one.
+  check((await system.noticePreference.updateMany({ principal: { isNull: true } } as never, { channels: ['sms'] } as never)) === 1, 'the seeded default preference is there');
   await system.noticeRoute.createOne({ name: 'Overdue', eventKind: 'ticket.overdue', recipients: [{ path: 'owner' }, { path: 'watchers' }], escalation: [{ afterSeconds: 600, channels: ['sms'] }] } as never);
   const ticket = (await system.ticket.createOne({ title: 'Boiler pressure low', status: 'open', owner: ALICE, watchers: [BOB], audience: 'private' } as never)).id as string;
 

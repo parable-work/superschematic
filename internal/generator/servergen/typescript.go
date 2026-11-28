@@ -557,6 +557,12 @@ type TypeScriptAPI struct {
 	// worker's and a deriver's API.
 	Graphs []TypeScriptGraphUse
 
+	// AttachmentsBucket is the member of Deps that holds the bucket the
+	// API's file operations sign a URL of (#723): main.ts hands it to the
+	// router as RouterOptions.attachmentsBucket. Empty for an API that
+	// serves none, and for a job's, a worker's and a deriver's.
+	AttachmentsBucket string
+
 	// Calls are Deps' clients.
 	Calls []TypeScriptCall
 
@@ -1104,6 +1110,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 				return nil, fmt.Errorf("stack %s: %s %s serves %s, whose %s (%s) run through Deps.orm, the repositories of %s, and the %s opens none", in.Stack, s.Kind, in.Server, o.SchemaName, strings.TrimPrefix(what, "the "), decisions, o.Deps.Database, s.Kind)
 			}
 			api.Behaviors = true
+			// A table's files sign their URLs of the bucket the set names
+			// (#723).
+			api.AttachmentsBucket = o.RowFeatureBucketField()
 		}
 		if s.Worker != nil {
 			if api.Database == nil {
@@ -1338,6 +1347,10 @@ func (a *TypeScriptAPI) RouterOptions() []string {
 			members = append(members, fmt.Sprintf("%s: new %s(%s(%s))", use.Member, use.Graph.Class, use.Pool, a.Database.Var))
 		}
 		out = append(out, "graphs: { "+strings.Join(members, ", ")+" }")
+	}
+	if a.AttachmentsBucket != "" {
+		// Its file operations sign their URLs of the bucket (#723).
+		out = append(out, "attachmentsBucket: "+a.Deps+"."+a.AttachmentsBucket)
 	}
 	return out
 }

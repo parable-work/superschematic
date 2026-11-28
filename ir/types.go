@@ -219,6 +219,11 @@ type TypeDef struct {
 	// for every other type. See [RoleSeed].
 	SeedRoles []*RoleSeed `json:"seedRoles,omitempty" yaml:"seedRoles,omitempty"`
 
+	// SeedRows are the rows a DB table's @seedRows declares (#625, #667),
+	// which create.sql inserts and a migration plan inserts when new. Nil
+	// for every other type. See [SeedRows].
+	SeedRows *SeedRows `json:"seedRows,omitempty" yaml:"seedRows,omitempty"`
+
 	// Mergeable marks a DB table whose repository folds one row into
 	// another, the core Mergeable trait (D147): mergeInto repoints every
 	// relation of the schema that references the row merged away, deletes
@@ -772,6 +777,13 @@ type FieldDef struct {
 	// Nil for every authored operation. The data forms have no key for
 	// it. See [GraphOperation].
 	GraphOperation *GraphOperation `json:"graphOperation,omitempty" yaml:"graphOperation,omitempty" jsonschema:"-"`
+
+	// RowFeatureOperation marks an operation the loader added for a
+	// @rowFeatureOperations set (#723, D154): a server routes it to a
+	// generated handler that runs it through the database's references
+	// and attachments. Nil for every authored operation. The data forms
+	// have no key for it. See [RowFeatureOperation].
+	RowFeatureOperation *RowFeatureOperation `json:"rowFeatureOperation,omitempty" yaml:"rowFeatureOperation,omitempty" jsonschema:"-"`
 
 	// TableOperation is @tableOperation (D106): the operation reads or
 	// writes one table through its @source views, with a handler the build

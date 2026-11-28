@@ -11,6 +11,7 @@ import {
   notifier,
   queue,
   references,
+  seedRows,
   unique
 } from "@superschematic/db";
 
@@ -95,12 +96,25 @@ export abstract class Delivery {}
 @notifier("routes")
 export abstract class NoticeRoute {}
 
+// Everyone hears by SMS, then email, unless their own row says otherwise:
+// a row of no principal, seed data (#625), identified by whom and what it
+// is for, since no unique constraint holds the rows.
+@seedRows<NoticePreference>(
+  [{ principal: null, eventKind: "*", urgency: "*", channels: ["sms", "email"] }],
+  { key: ["principal", "eventKind", "urgency"] }
+)
 @notifier("preferences")
 export abstract class NoticePreference {}
 
 @notifier("subscriptions")
 export abstract class Subscription {}
 
+// A text may only acknowledge, since its sender id can be spoofed; an
+// email may run what its sender may. Keyed by the unique channel kind.
+@seedRows<ChannelTrust>([
+  { channelKind: "sms", level: "low", permissions: [] },
+  { channelKind: "email", level: "standard", permissions: null },
+])
 @notifier("channelTrust")
 export abstract class ChannelTrust {}
 

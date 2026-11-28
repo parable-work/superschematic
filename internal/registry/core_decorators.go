@@ -210,6 +210,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// The roles a UserRole table holds from its first migration on
 	// (core_seed_roles.go, D88).
 	specs = append(specs, seedRolesDecorator())
+	// The rows any DB table holds from its first migration on
+	// (core_seed_rows.go, #625).
+	specs = append(specs, seedRowsDecorator())
 
 	// An API service's derivers, which fill the Derived fields of its
 	// engine database's types (core_derivers.go, D74).
@@ -372,6 +375,9 @@ func coreDecorators(r *Registry) []DecoratorSpec {
 	// A version graph's operations (D138), on a class with no members
 	// (core_graph_operations.go), which takes the same clause.
 	specs = append(specs, graphOperationsDecorator())
+	// A table's references and files (#723, D154), on a class with no
+	// members (core_rowfeature_operations.go), which takes the same clause.
+	specs = append(specs, rowFeatureOperationsDecorator())
 	flag(TargetOperationSet, "auth", []string{pkgAPI}, func(n Node) { n.OperationSet.Auth = true })
 	flag(TargetOperationSet, "publicRoute", []string{pkgAPI}, func(n Node) { n.OperationSet.Public = true })
 	specs = append(specs, DecoratorSpec{

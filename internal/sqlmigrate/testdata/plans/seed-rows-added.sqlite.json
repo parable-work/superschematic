@@ -1,0 +1,21 @@
+{
+  "dialect": "sqlite",
+  "from": "3fbd51ffb3895d28f47398c0ca8e3bde4df27f692e2fea3fcadb9c9ae7eb6748",
+  "hash": "280fbc5a6b1b156dc96eaa9b1cb3c0fca911575b05a8f2155ee870659bf90d01",
+  "service": "shop-db",
+  "steps": [
+    {
+      "index": 1,
+      "op": "seedRow",
+      "phase": "expand",
+      "statements": [
+        "INSERT INTO \"label\" (\"name\", \"color\")\nSELECT 'gift', 'green'\nWHERE NOT EXISTS (SELECT 1 FROM \"label\" WHERE \"name\" = 'gift')\nON CONFLICT DO NOTHING"
+      ],
+      "subject": "row/label/{\"name\":\"gift\"}",
+      "transactional": true
+    }
+  ],
+  "to": "728e048cbfd8a8ec8c187b957582909bf0288efb59e509421c3014b5a01ddda4",
+  "toModel": null,
+  "version": 1
+}

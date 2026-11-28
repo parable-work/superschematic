@@ -74,6 +74,8 @@ export interface IdentityPrincipal {
   /** The OAuth grant's id (#695) when an access token authenticated the request; absent or empty otherwise. */
   readonly oauthGrantId?: string;
   readonly transport: Transport;
+  /** When the session signed in, its createdAt in epoch milliseconds (D200); absent for an API key's principal, which signs no one in. */
+  readonly signedInAt?: number;
 }
 
 // The operations' inputs and results, by the contract's field names
@@ -667,6 +669,7 @@ export class IdentityService {
       sessionId: session.id,
       apiKeyId: '',
       transport,
+      signedInAt: session.createdAt.getTime(),
     };
   }
 

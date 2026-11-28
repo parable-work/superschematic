@@ -66,8 +66,21 @@ func (e *emitter) renderScalar(name, owner string) string {
 		e.failf("%s: scalar %q is not namespaced; TypeScript schemas can only reference %s scalars", owner, name, naming.Active().ScalarNpmPackage)
 		return name
 	}
-	e.importSymbol(e.scalarPackage(name, name[:i], owner), name[:i])
-	return name
+	namespace := name[:i]
+	pkg := e.scalarPackage(name, namespace, owner)
+	if !e.declares(namespace) {
+		e.importSymbol(pkg, namespace)
+		return name
+	}
+	// A class of the schema shares the namespace's name, as a @party table
+	// named Contact does (D157): the namespace is imported under an alias,
+	// which the reader knows it by.
+	alias := namespace + "Scalars"
+	for n := 2; e.declares(alias); n++ {
+		alias = fmt.Sprintf("%sScalars%d", namespace, n)
+	}
+	e.importSymbol(pkg, namespace+" as "+alias)
+	return alias + name[i:]
 }
 
 // scalarPackage returns the npm package a scalar's namespace is imported

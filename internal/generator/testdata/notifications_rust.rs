@@ -281,16 +281,6 @@ impl Scalars for Catalog {
     }
 }
 
-/// Sets `row` on the rows of `table` that `filter` finds, or creates it
-/// when none does: a row the database's seed rows may already hold.
-async fn ensure(r: &TxRepositories<'_, '_>, table: &str, filter: Value, row: Value) -> Result<(), BoxError> {
-    let repository = r.table(table)?;
-    if repository.update_many(Some(&values(filter)), &values(row.clone())).await? == 0 {
-        repository.create_one(&values(row)).await?;
-    }
-    Ok(())
-}
-
 type Expand = runtime::orm::notify::Expand;
 
 /// A schema of its own holding fixture-notifications-db's tables, the
@@ -398,29 +388,9 @@ async fn world(options: Options) -> World {
                         .await?;
                 }
             }
-            // The default preference and the channels' trust, set whether
-            // the database's seed rows hold them already or not.
-            ensure(
-                r,
-                "NoticePreference",
-                json!({ "principal": { "isNull": true }, "eventKind": { "eq": "*" }, "urgency": { "eq": "*" } }),
-                json!({ "principal": null, "eventKind": "*", "urgency": "*", "channels": ["sms", "email"] }),
-            )
-            .await?;
-            ensure(
-                r,
-                "ChannelTrust",
-                json!({ "channelKind": { "eq": "sms" } }),
-                json!({ "channelKind": "sms", "level": "low", "permissions": [] }),
-            )
-            .await?;
-            ensure(
-                r,
-                "ChannelTrust",
-                json!({ "channelKind": { "eq": "email" } }),
-                json!({ "channelKind": "email", "level": "standard", "permissions": null }),
-            )
-            .await?;
+            // Everyone's preference (SMS, then email) and each channel
+            // kind's trust (SMS low, email standard) are the schema's seed
+            // rows (#625), which create.sql and create.sqlite.sql wrote.
             r.table("NoticeRoute")?
                 .create_one(&values(json!({
                     "name": "Overdue tickets page their people",

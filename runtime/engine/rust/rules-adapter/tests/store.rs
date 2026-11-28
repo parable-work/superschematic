@@ -16,8 +16,9 @@ mod common;
 use serde_json::{json, Map, Value};
 use superschematic_rules::Code;
 use superschematic_rules_adapter::{
-    Caller, ChangeRun, Claim, CreateOptions, Deadline, DeadlineRun, Error, EventRun,
-    ExecuteOptions, Host, Layout, Owned, QueuedEvent, Refusal, Row, SubRow, TableChange,
+    Caller, ChangeRun, Claim, Column, CreateOptions, Deadline, DeadlineRun, Error, EventRun,
+    ExecuteOptions, Host, Layout, Owned, Permissions, QueuedEvent, Refusal, Row, SubRow,
+    TableChange,
 };
 
 use common::{iso, p, Param};
@@ -3189,4 +3190,164 @@ async fn expired_wrens(db: &mut Db, host: &Host<'_>, expired: &Value, held: &[i6
 async fn job_version(db: &mut Db, host: &Host<'_>, key: &str) -> i64 {
     let row = db.read(host, "Job", key).await.expect("read");
     row.expect("a row").version
+}
+
+on_each_dialect!(a_permissions_read_answers_from_the_identity_tables);
+
+/// The identity runtime's users, as their key columns hold them.
+const ANN: &str = "0e5c7d2a-4b1f-4c3e-9a8d-7f6e5d4c3b2a";
+const BEN: &str = "1f6d8e3b-5c2a-4d4f-8b9e-8a7f6e5d4c3b";
+const CAM: &str = "2a7e9f4c-6d3b-4e5a-9caf-9b8a7f6e5d4c";
+const DOV: &str = "3b8fa05d-7e4c-4f6b-8db0-ac9b8a7f6e5d";
+const EVE: &str = "4c9ab16e-8f5d-4a7c-9ec1-bdac9b8a7f6e";
+const NOBODY: &str = "5dabc27f-9a6e-4b8d-8fd2-cebdac9b8a7f";
+
+/// Where fixture-approvals-identity-db's layout names its identity tables
+/// (behaviorlayout.Permissions).
+fn identity_permissions() -> Permissions {
+    Permissions {
+        users: "account".into(),
+        user: Column::new("id", "id", "Identity.UUID"),
+        credentials: "user_credential".into(),
+        credential_user: "user_id".into(),
+        disabled_at: "disabled_at".into(),
+        pending_at: "pending_at".into(),
+        grants: "user_role_grant".into(),
+        grant_user: "user_id".into(),
+        grant_role: "role_id".into(),
+        roles: "role".into(),
+        role_key: "id".into(),
+        role_permissions: "permissions".into(),
+    }
+}
+
+/// The identity tables as sqlgen writes them: ann holds two roles, which
+/// share a permission; ben holds none; cam holds one and is disabled; dov
+/// holds one and waits for approval; eve holds one and has no credential.
+async fn identity_tables(db: &mut Db) {
+    let postgres = db.postgres();
+    let (uuid, texts, ts) = if postgres {
+        ("UUID", "TEXT[]", "TIMESTAMPTZ")
+    } else {
+        ("TEXT", "TEXT", "TEXT")
+    };
+    let list = |items: &[&str]| {
+        if postgres {
+            let quoted: Vec<String> = items.iter().map(|p| format!("'{p}'")).collect();
+            format!("ARRAY[{}]::TEXT[]", quoted.join(", "))
+        } else {
+            format!("'{}'", serde_json::to_string(items).expect("a list"))
+        }
+    };
+    let now = if postgres {
+        "now()"
+    } else {
+        "'2026-01-02T03:04:05Z'"
+    };
+    let mut statements = vec![
+        format!("CREATE TABLE \"account\" (id {uuid} PRIMARY KEY, email TEXT)"),
+        format!("CREATE TABLE \"user_credential\" (id {uuid} PRIMARY KEY, user_id {uuid}, disabled_at {ts}, pending_at {ts})"),
+        format!("CREATE TABLE \"role\" (id {uuid} PRIMARY KEY, name TEXT, permissions {texts})"),
+        format!("CREATE TABLE \"user_role_grant\" (id {uuid} PRIMARY KEY, user_id {uuid}, role_id {uuid})"),
+    ];
+    for (i, user) in [ANN, BEN, CAM, DOV, EVE].iter().enumerate() {
+        statements.push(format!(
+            "INSERT INTO \"account\" (id, email) VALUES ('{user}', 'user{i}@example.com')"
+        ));
+    }
+    let credentials = [
+        (ANN, "NULL", "NULL"),
+        (BEN, "NULL", "NULL"),
+        (CAM, now, "NULL"),
+        (DOV, "NULL", now),
+    ];
+    for (i, (user, disabled, pending)) in credentials.iter().enumerate() {
+        statements.push(format!("INSERT INTO \"user_credential\" (id, user_id, disabled_at, pending_at) VALUES ('00000000-0000-4000-8000-00000000000{i}', '{user}', {disabled}, {pending})"));
+    }
+    let (reviewer, lead) = (
+        "00000000-0000-4000-8000-0000000000a1",
+        "00000000-0000-4000-8000-0000000000a2",
+    );
+    statements.push(format!(
+        "INSERT INTO \"role\" (id, name, permissions) VALUES ('{reviewer}', 'reviewer', {})",
+        list(&["changes.read", "changes.approve"])
+    ));
+    statements.push(format!(
+        "INSERT INTO \"role\" (id, name, permissions) VALUES ('{lead}', 'lead', {})",
+        list(&["changes.approve", "changes.lead"])
+    ));
+    let grants = [
+        (ANN, reviewer),
+        (ANN, lead),
+        (CAM, reviewer),
+        (DOV, reviewer),
+        (EVE, lead),
+    ];
+    for (i, (user, role)) in grants.iter().enumerate() {
+        statements.push(format!("INSERT INTO \"user_role_grant\" (id, user_id, role_id) VALUES ('00000000-0000-4000-8000-0000000000b{i}', '{user}', '{role}')"));
+    }
+    for statement in statements {
+        db.exec(&statement, &[]).await;
+    }
+}
+
+/// The core's permissions read (D200) through the adapter, as Approvals'
+/// recheckPermission makes it: a user holds the permissions of every role
+/// a grant gives them, each once; a user with no grant, a disabled one and
+/// a pending one hold none; a subject no user row holds, or that is no
+/// UUID, is left out. A layout that names no identity tables answers no
+/// subject.
+async fn a_permissions_read_answers_from_the_identity_tables(mut db: Db) {
+    for ddl in common::job_ddl(db.postgres()) {
+        db.exec(&ddl, &[]).await;
+    }
+    identity_tables(&mut db).await;
+    let core = common::core();
+    let mut layout = Layout::new([common::job_table()]);
+    layout.permissions = Some(identity_permissions());
+    let none = ExecuteOptions::default();
+    let ann = wire(ANN);
+    let params = json!({"subjects": [ann, BEN, CAM, DOV, EVE, NOBODY, "no-uuid"]});
+    let host = Host::new(&core, &layout).with_clock(|| 9_000_000);
+    let held = db
+        .operate_table(
+            &host,
+            "Job",
+            "Finder",
+            "permissions",
+            params.clone(),
+            alice(),
+            &none,
+        )
+        .await
+        .expect("read");
+    let mut want = Map::new();
+    want.insert(
+        ann,
+        json!(["changes.read", "changes.approve", "changes.lead"]),
+    );
+    for subject in [BEN, CAM, DOV] {
+        want.insert(subject.to_owned(), json!([]));
+    }
+    want.insert(EVE.to_owned(), json!(["changes.approve", "changes.lead"]));
+    assert_eq!(held, Value::Object(want));
+    let bare = Layout::new([common::job_table()]);
+    let host = Host::new(&core, &bare).with_clock(|| 9_000_000);
+    let held = db
+        .operate_table(
+            &host,
+            "Job",
+            "Finder",
+            "permissions",
+            params,
+            alice(),
+            &none,
+        )
+        .await
+        .expect("read");
+    assert_eq!(
+        held,
+        json!({}),
+        "a layout with no identity tables answers no subject"
+    );
 }

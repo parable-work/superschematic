@@ -28,7 +28,7 @@ route too, with a credential of its own beside the end user's
 | `@requirePermission([...])` on a method | a caller holding one of the permissions |
 | `@requireOwnership` on a method | a caller, as `@auth` does; whether the caller owns the resource is for your implementation to check |
 | `@publicRoute` on a method | nothing: anyone may call it, even in an `Authenticated` set or a set with a service clause |
-| `@auth`, `@requirePermission([...])` or `@publicRoute` on a `@behaviorOperations` or `@graphOperations` class | as on a method, for every route the class serves; on a `@behaviorOperations` class the behaviors' core then checks the permissions the behavior's config names against the caller's ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations), [A version graph's operations](/superschematic/guides/api-routes/#who-may-call)) |
+| `@auth`, `@requirePermission([...])` or `@publicRoute` on a `@behaviorOperations`, `@graphOperations` or `@rowFeatureOperations` class | as on a method, for every route the class serves; on a `@behaviorOperations` class the behaviors' core then checks the permissions the behavior's config names against the caller's ([A table's behavior operations](/superschematic/guides/api-routes/#a-tables-behavior-operations), [A version graph's operations](/superschematic/guides/api-routes/#who-may-call)) |
 | `@requireService` or `@allowService` on the set or the method | a listed calling service, in place of or beside the end user ([Service callers](#service-callers)) |
 | none of these | nothing: anyone may call it |
 

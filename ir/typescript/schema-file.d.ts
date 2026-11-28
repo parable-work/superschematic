@@ -636,6 +636,7 @@ export interface OperationSet {
   operations: FieldDef[];
   permissions?: string[];
   public?: boolean;
+  rowFeatureOperations?: RowFeatureOperationsConfig;
   serviceCallers?: ServiceCallers;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
@@ -655,6 +656,7 @@ export interface OperationSetFile {
   operations: FieldDef[];
   permissions?: string[];
   public?: boolean;
+  rowFeatureOperations?: RowFeatureOperationsConfig;
   serviceCallers?: ServiceCallers;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
@@ -808,6 +810,13 @@ export interface RoleSeed {
   permissions: string[];
 }
 
+export interface RowFeatureOperationsConfig {
+  bucket?: string;
+  operations?: string[];
+  permissions?: { [key: string]: string[] };
+  type: string;
+}
+
 export interface RowReferencesDef {
   cleared?: string;
   maxPerRow?: number;
@@ -875,6 +884,11 @@ export interface SearchableDef {
   queue: string;
   scope?: string;
   title: string;
+}
+
+export interface SeedRows {
+  key?: string[];
+  rows: { [key: string]: unknown }[];
 }
 
 export interface ServerDecl {
@@ -1039,6 +1053,7 @@ export interface TypeDef {
   runRequests?: RunRequestsDef;
   searchable?: SearchableDef;
   seedRoles?: RoleSeed[];
+  seedRows?: SeedRows;
   server?: ServerDecl;
   source?: SourceRef;
   sqlName?: string;

@@ -206,6 +206,11 @@ type EndpointInfo struct {
 	// operation, over RouterOptions.orm and the graph's facade in
 	// RouterOptions.graphs, and the implementation has no method for it.
 	Graph *GraphRoute
+	// RowFeature is the row feature operation the endpoint runs (#723),
+	// nil for every other: the router mounts it with the runtime's
+	// rowFeatureOperation over RouterOptions.orm, and the implementation
+	// has no method for it.
+	RowFeature *RowFeatureRoute
 }
 
 // TableRoute is a table operation (D106) as the router mounts it: the
@@ -894,9 +899,9 @@ func (o *APIOutput) TableHandlers() []string {
 // RouterOptions.orm, the repositories of the API's database: a table's
 // behavior operations (D103), the table operations (D106) and a version
 // graph's operations (D138), which read the root and the graph's refs
-// through them.
+// through them, and a table's references and files (#723).
 func (o *APIOutput) RouterNeedsORM() bool {
-	return o.HasBehaviors() || o.HasTableOperations() || o.HasGraphs()
+	return o.HasBehaviors() || o.HasTableOperations() || o.HasGraphs() || o.HasRowFeatures()
 }
 
 // ORMOperations names what the router runs through RouterOptions.orm, with
@@ -911,6 +916,9 @@ func (o *APIOutput) ORMOperations() (what, decisions string) {
 	}
 	if o.HasGraphs() {
 		names, ids = append(names, "the graph operations"), append(ids, "D138")
+	}
+	if o.HasRowFeatures() {
+		names, ids = append(names, "the references and files"), append(ids, "#723")
 	}
 	switch len(names) {
 	case 0:
@@ -1084,8 +1092,14 @@ func (o *APIOutput) RuntimeImport() string {
 	if o.HasPages {
 		values = append(values, "readPage")
 	}
+	if o.HasRowFeatures() {
+		values = append(values, "rowFeatureOperation")
+	}
 	values = append(values, o.TableHandlers()...)
 	var types []string
+	if o.RowFeatureBucket() != "" {
+		types = append(types, "Bucket")
+	}
 	if o.HasFilters {
 		types = append(types, "FilterSpec")
 	}
@@ -1098,6 +1112,9 @@ func (o *APIOutput) RuntimeImport() string {
 	}
 	if o.HasPrincipalRateLimit {
 		types = append(types, "PrincipalRateLimitStore")
+	}
+	if o.HasRowFeatures() {
+		types = append(types, "RowFeatureOperation")
 	}
 	if o.HasTableOperations() {
 		types = append(types, "TableOperation")
@@ -1245,6 +1262,19 @@ func Generate(schema *ir.Schema, apiOutput *apigen.APIOutput, opts Options) (*AP
 		// over RouterOptions.orm and RouterOptions.graphs.
 		if op := ep.GraphOperation(); op != nil {
 			endpoint, err := b.graphEndpoint(ep, op, output)
+			if err != nil {
+				return nil, err
+			}
+			endpoint.Key = keyOf(ep)
+			output.Endpoints = append(output.Endpoints, endpoint)
+			continue
+		}
+		// A row feature operation runs through the database's references
+		// and attachments (#723), with the runtime's handler and no
+		// implementation method: the interfaces leave it out, and the
+		// router mounts it over RouterOptions.orm.
+		if ep.Operation != nil && ep.Operation.RowFeatureOperation != nil {
+			endpoint, err := b.rowFeatureEndpoint(ep, ep.Operation.RowFeatureOperation)
 			if err != nil {
 				return nil, err
 			}

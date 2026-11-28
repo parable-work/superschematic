@@ -1,0 +1,33 @@
+import { AutoGenerate, Calendar, Holds, Relation, Workflow, key } from "@superschematic/db";
+import { Nullable } from "@superschematic/schema";
+import { Identity, Temporal } from "superscalar";
+
+// A booking that holds a slot of its desk while it waits (D70, D103's step
+// 4): entering held takes the slot through the contract Supply the desk
+// implements, booked commits it, expired and cancelled let it go.
+export abstract class Booking implements Holds<Booking, { commitOn: ["booked"]; holds: { slot: { interval: { end: "slotEnd"; start: "slotStart" }; link: "desk" } }; releaseOn: ["expired", "cancelled"]; takeOn: ["held"] }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  title: string;
+
+  slotStart: Temporal.DateTime;
+
+  slotEnd: Temporal.DateTime;
+
+  desk: Nullable<Relation<Desk>>;
+
+  status: Workflow<{ initial: "draft"; states: ["draft", "held", "booked", "expired", "cancelled"]; transitions: [{ from: "draft"; to: "held" }, { from: "held"; to: "booked" }, { from: "held"; to: "expired" }, { from: "held"; to: "cancelled" }, { from: "draft"; to: "cancelled" }] }>;
+}
+
+// A desk whose time Calendar opens (D70, D103's step 4): weekday hours in
+// Europe/London, one booking at a time, a quarter-hour grid, holds of a
+// quarter of an hour to two hours, and its own hours and closures set by a
+// caller holding desk.manage. Its record of each booking it holds, its
+// closures and its own settings are sub-tables of the row.
+export abstract class Desk implements Calendar<Desk, { capacity: 1; hours: { fri: [["09:00", "17:30"]]; mon: [["09:00", "17:30"]]; thu: [["09:00", "17:30"]]; tue: [["09:00", "17:30"]]; wed: [["09:00", "17:30"]] }; maxMs: 7200000; minMs: 900000; permission: "desk.manage"; slotMs: 900000; timeZone: "Europe/London" }> {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  title: string;
+}

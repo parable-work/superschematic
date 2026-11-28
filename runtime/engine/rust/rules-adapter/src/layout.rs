@@ -33,6 +33,11 @@ pub struct Layout {
     /// command over the layout. Empty for a layout whose uses name none.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub declarations: Vec<serde_json::Value>,
+    /// Where the adapter answers the core's permissions read (D200): the
+    /// database's identity tables; `None` for a layout that names none,
+    /// whose reads answer no subject.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permissions: Option<Permissions>,
     // Read by the host loop, which a build with no store leaves out.
     #[serde(skip)]
     #[cfg_attr(
@@ -80,6 +85,7 @@ impl Layout {
                 .map(|table| (table.type_name.clone(), table))
                 .collect(),
             declarations: Vec::new(),
+            permissions: None,
             checked: Checks::default(),
         }
     }
@@ -502,6 +508,32 @@ impl Operation {
         self.answers_row = Some(member.into());
         self
     }
+}
+
+/// Where the adapter answers the core's permissions read (D200,
+/// `ReadRequest::Permissions`): the identity tables of the layout's
+/// database, each table and column unquoted, as
+/// `behaviorlayout.Permissions` writes them.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Permissions {
+    /// The user table, and its key column, which a subject binds as.
+    pub users: String,
+    pub user: Column,
+    /// The UserCredential table, its user's column, and the columns that,
+    /// set, hold the user to no permission.
+    pub credentials: String,
+    pub credential_user: String,
+    pub disabled_at: String,
+    pub pending_at: String,
+    /// The UserRoleGrant table, and its user's and its role's columns.
+    pub grants: String,
+    pub grant_user: String,
+    pub grant_role: String,
+    /// The UserRole table, its key column, and its list of permissions.
+    pub roles: String,
+    pub role_key: String,
+    pub role_permissions: String,
 }
 
 #[cfg(test)]
