@@ -1470,10 +1470,35 @@ export const createWorkers: WorkersConstructor = deps => ({
 | text is extracted when an upload completes, and a preview is made on a file's first view | search indexes the text whether or not anyone opens the file; most files are never viewed, so a preview made at upload would mostly go unseen |
 
 Extraction and previews are a file processor's, the `files` interface of
-[Runtime providers](/superschematic/guides/runtime-providers/) (D159),
-which attachments do not call yet: `complete` asks a file's extraction and
-`download` its preview, and `pending` and `processed` are what a processor
-reads and records.
+[Runtime providers](/superschematic/guides/runtime-providers/) (D159):
+`complete` asks a file's extraction and `download` its preview, and
+`pending` and `processed` are what a processor reads and records.
+`processFiles` of the runtime's `./postgres` and `./d1` entries makes one
+pass over what is pending (#702): it reads each object's bytes from the
+bucket, hands them to the processors the environment's `files` slots
+name, in slot order, the first that reads the media type and answers,
+records the text as `extractedText` on every file that names the object,
+and puts the preview beside it, at `previewObjectOf(object)`. A file no
+processor reads, one past `maxBytes` (25 MiB) and one a processor throws
+on are recorded `failed` and not asked again. A generated TypeScript API
+whose database declares `@attachments` and whose config names a `files`
+slot exports `processPendingFiles(deps, options)`, which an
+implementation's job runs on a schedule, or an operation after an upload
+completes, with the bucket in `createRuntimeOptions`' `files`:
+
+```ts
+export const createRuntimeOptions: RuntimeOptionsConstructor = deps => ({ files: { bucket: deps.uploads } });
+
+export const createJobs: JobsConstructor = deps => ({
+  processFiles: async () => void (await api.processPendingFiles(deps, createRuntimeOptions(deps))),
+});
+```
+
+A `@searchable` table that indexes its attachments (the default) hears
+the write of a file's text through its triggers and indexes the text with
+the row, so search finds the row by its files' words. Such a table needs
+a file processor: the stack refuses an environment that runs the API
+with no `files` slot set (`no-provider`).
 
 In Rust, the generated repositories open the same operations,
 `references()` and `attachments()`, over the same tables and statements,

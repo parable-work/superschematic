@@ -356,6 +356,10 @@ func (r *resolver) bindField(d *deployable, f *field) *ir.Binding {
 				return nil
 			}
 		}
+		if !f.required && r.unreadProviderSetting(d, f.name) {
+			// No provider the environment names reads it (D159, #608).
+			return nil
+		}
 		return &ir.Binding{Field: f.name, Source: ir.BindingSecret, Secret: ir.SecretID(f.declaring, f.name)}
 	case set && value.Parameter != "" && value.Value != nil:
 		fail(CodeInvalidSettings, "environment %s sets %s on %s %s to both a value and parameter %s", d.settings.envFrom[f.name], f.name, d.res.Kind, d.res.Name, value.Parameter)

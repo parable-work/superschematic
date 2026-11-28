@@ -57,7 +57,7 @@ import type { {{ join .DatabaseTypeImports ", " }} } from '{{ .Deps.DatabaseType
 import type { {{ .Deps.ORM }}{{ if .WorkerEvents }}, {{ .DepsTx }}{{ end }} } from '{{ .Deps.DatabaseTypesPackage }}/orm';
 {{- end }}
 {{- if .DepsRuntimeTypes }}
-import type { {{ join .DepsRuntimeTypes ", " }} } from '{{ .RuntimePackage }}/postgres';
+import type { {{ join .DepsRuntimeTypes ", " }} } from '{{ .RuntimePackage }}{{ .RuntimeEntry }}';
 {{- end }}
 {{- if .HasProviders }}
 import type { Providers } from '{{ .RuntimePackage }}/providers';
@@ -216,6 +216,10 @@ export interface RuntimeOptions {
 {{- if .HasSearch }}
   /** Search's (D155), for its route, its MCP tool and its indexing queue's handler: each table's permission, embeddings. */
   readonly search?: SearchOptions & { readonly base?: string };
+{{- end }}
+{{- if .HasFileProcessing }}
+  /** The file processor's (D154, D159), for processPendingFiles: the bucket the attachments' objects are in, the preview's size, the largest file read. */
+  readonly files?: Omit<FileProcessingOptions, 'orm' | 'providers'>;
 {{- end }}
 }
 

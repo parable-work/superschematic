@@ -374,6 +374,10 @@ export {
   type RowTableDefinition,
   type Upload,
 } from './rowfeatures.js';
+// The file processor's wiring (D154, D159, #702): what attachments have
+// pending, handed to the environment's files slots, the text and preview
+// recorded with processed.
+export { DEFAULT_PROCESS_LIMIT, DEFAULT_PROCESS_MAX_BYTES, processFiles, type FileProcessingOptions, type FileProcessingRun } from './file-processing.js';
 // Grants and the access log (D156): the authenticator of a grant's token,
 // the making, revoking and reading of grants, and the log's writer.
 export {
@@ -488,6 +492,9 @@ export {
 // The notifier's routes (D153, D157): each channel slot's relay callbacks and
 // the in-app inbox, which a generated server mounts.
 export { notifierRoutes, slotSegment, type NotifierRoutesOptions } from './notify-routes.js';
+// The notifier's upkeep on a schedule (D153, #702): every adapter's health
+// asked on its own, and the deliveries pruned, by the dispatch worker.
+export { HEALTH_CHECK_EVERY_MS, notifierUpkeep, type NotifierUpkeepOptions } from './notify-upkeep.js';
 // Agent orchestration (D158): the dispatcher of agent runs, their tokens,
 // autonomy, budgets and stop switches, over the @agents tables.
 export {

@@ -185,9 +185,10 @@ func TestGenerateBehaviorWorker(t *testing.T) {
 }
 
 // TestBehaviorWorkerNeedsTheRepositories: a behavior worker runs its
-// table's deadlines and changes through Deps.orm, on Postgres, so Deps
-// over a database that lists sqlite first, or without the repositories, is
-// refused, naming the worker, the table and what it runs.
+// table's deadlines and changes through Deps.orm, so Deps without the
+// repositories is refused, naming the worker, the table and what it runs.
+// Over a database that lists sqlite first it claims over the SqlDatabase
+// (#702), so the repositories there are enough.
 func TestBehaviorWorkerNeedsTheRepositories(t *testing.T) {
 	for name, tc := range map[string]struct {
 		deps DepsInfo
@@ -195,11 +196,11 @@ func TestBehaviorWorkerNeedsTheRepositories(t *testing.T) {
 	}{
 		"sqlite first": {
 			DepsInfo{Database: timersDB, Dialect: SQLiteDialect, ORM: "FixtureTimersDbOrm", DatabaseTypesPackage: "@schemas/fixture-timers-db-types"},
-			"tsrestgen: worker TicketTimers runs Ticket's deadlines and changes, and fixture-timers-db lists sqlite first: a TypeScript behavior worker claims its queues on Postgres alone, and one on a SQLite file or D1 is not built (D103, D116); on SQLite an app's worker runs the ./orm/sqlite entry's runDeadline and runChange over sqliteQueue's claims (D186)",
+			"",
 		},
 		"no TypeScript types": {
 			DepsInfo{Database: timersDB, Dialect: "postgres"},
-			"tsrestgen: worker TicketTimers runs Ticket's deadlines and changes, through the repositories fixture-timers-db's TypeScript types export for Postgres (D103); enable outputs.types.typescript in fixture-timers-db's config",
+			"tsrestgen: worker TicketTimers runs Ticket's deadlines and changes, through the repositories fixture-timers-db's TypeScript types export (D103); enable outputs.types.typescript in fixture-timers-db's config",
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -213,7 +214,11 @@ func TestBehaviorWorkerNeedsTheRepositories(t *testing.T) {
 				}
 			}
 			output.Endpoints = endpoints
-			if err := output.SetDeps(tc.deps); err == nil || err.Error() != tc.want {
+			err := output.SetDeps(tc.deps)
+			switch {
+			case tc.want == "" && err != nil:
+				t.Errorf("SetDeps = %v, want none", err)
+			case tc.want != "" && (err == nil || err.Error() != tc.want):
 				t.Errorf("SetDeps = %v,\nwant %s", err, tc.want)
 			}
 		})

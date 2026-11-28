@@ -35,6 +35,10 @@ type Descriptor struct {
 	// APIKey is the UserApiKey table (D114). A descriptor written before it
 	// has none, and a store built from one has no API keys.
 	APIKey *APIKey `json:"apiKey,omitempty"`
+	// OAuth is the tables of the API's OAuth authorization server (#695).
+	// A descriptor written before them has none, and a store built from
+	// one serves no OAuth.
+	OAuth *OAuth `json:"oauth,omitempty"`
 	// Role and RoleGrant are nil when the schema has no UserRole table.
 	Role      *Role      `json:"role,omitempty"`
 	RoleGrant *RoleGrant `json:"roleGrant,omitempty"`
@@ -148,6 +152,96 @@ type APIKeyColumns struct {
 	ExpiresAt   string `json:"expiresAt"`
 	LastUsedAt  string `json:"lastUsedAt"`
 	RevokedAt   string `json:"revokedAt"`
+}
+
+// OAuth is the four tables the loader adds for an OAuth authorization
+// server (#695).
+type OAuth struct {
+	Client OAuthClient `json:"client"`
+	Grant  OAuthGrant  `json:"grant"`
+	Code   OAuthCode   `json:"code"`
+	Token  OAuthToken  `json:"token"`
+}
+
+// OAuthClient is the OAuthClient table.
+type OAuthClient struct {
+	Table   string             `json:"table"`
+	Columns OAuthClientColumns `json:"columns"`
+}
+
+// OAuthClientColumns are every column of the OAuthClient table.
+type OAuthClientColumns struct {
+	ID           string `json:"id"`
+	ClientID     string `json:"clientId"`
+	Kind         string `json:"kind"`
+	Name         string `json:"name"`
+	URI          string `json:"uri"`
+	RedirectURIs string `json:"redirectUris"`
+	CreatedAt    string `json:"createdAt"`
+	RefreshedAt  string `json:"refreshedAt"`
+	FreshUntil   string `json:"freshUntil"`
+	LastUsedAt   string `json:"lastUsedAt"`
+}
+
+// OAuthGrant is the OAuthGrant table.
+type OAuthGrant struct {
+	Table   string            `json:"table"`
+	Columns OAuthGrantColumns `json:"columns"`
+}
+
+// OAuthGrantColumns are every column of the OAuthGrant table.
+type OAuthGrantColumns struct {
+	ID          string `json:"id"`
+	User        string `json:"user"`
+	Client      string `json:"client"`
+	Permissions string `json:"permissions"`
+	Resource    string `json:"resource"`
+	CreatedAt   string `json:"createdAt"`
+	ExpiresAt   string `json:"expiresAt"`
+	LastUsedAt  string `json:"lastUsedAt"`
+	RevokedAt   string `json:"revokedAt"`
+}
+
+// OAuthCode is the OAuthCode table.
+type OAuthCode struct {
+	Table   string           `json:"table"`
+	Columns OAuthCodeColumns `json:"columns"`
+}
+
+// OAuthCodeColumns are every column of the OAuthCode table.
+type OAuthCodeColumns struct {
+	ID            string `json:"id"`
+	Client        string `json:"client"`
+	User          string `json:"user"`
+	Grant         string `json:"grant"`
+	RedirectURI   string `json:"redirectUri"`
+	CodeChallenge string `json:"codeChallenge"`
+	State         string `json:"state"`
+	Scope         string `json:"scope"`
+	Resource      string `json:"resource"`
+	Nonce         string `json:"nonce"`
+	CodeHash      string `json:"codeHash"`
+	CreatedAt     string `json:"createdAt"`
+	ExpiresAt     string `json:"expiresAt"`
+	UsedAt        string `json:"usedAt"`
+}
+
+// OAuthToken is the OAuthToken table.
+type OAuthToken struct {
+	Table   string            `json:"table"`
+	Columns OAuthTokenColumns `json:"columns"`
+}
+
+// OAuthTokenColumns are every column of the OAuthToken table.
+type OAuthTokenColumns struct {
+	ID        string `json:"id"`
+	Grant     string `json:"grant"`
+	Kind      string `json:"kind"`
+	TokenHash string `json:"tokenHash"`
+	CreatedAt string `json:"createdAt"`
+	ExpiresAt string `json:"expiresAt"`
+	UsedAt    string `json:"usedAt"`
+	RevokedAt string `json:"revokedAt"`
 }
 
 // JSON is the descriptor as written to identity/<schema>.json and into the
@@ -267,6 +361,10 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 		return Descriptor{}, apiKey.err
 	}
 
+	if d.OAuth, err = describeOAuth(schema, userTable); err != nil {
+		return Descriptor{}, err
+	}
+
 	if roleTable == nil {
 		return d, nil
 	}
@@ -302,6 +400,93 @@ func describe(schema *ir.Schema, userTable, roleTable *ir.TypeDef) (Descriptor, 
 	}
 	if grant.err != nil {
 		return Descriptor{}, grant.err
+	}
+	return d, nil
+}
+
+// describeOAuth describes the four tables of the OAuth authorization
+// server (#695).
+func describeOAuth(schema *ir.Schema, userTable *ir.TypeDef) (*OAuth, error) {
+	tables := map[string]*ir.TypeDef{}
+	for _, name := range []string{ir.IdentityOAuthClientTable, ir.IdentityOAuthGrantTable, ir.IdentityOAuthCodeTable, ir.IdentityOAuthTokenTable} {
+		td, err := added(schema, name)
+		if err != nil {
+			return nil, err
+		}
+		tables[name] = td
+	}
+	clientTable, grantTable := tables[ir.IdentityOAuthClientTable], tables[ir.IdentityOAuthGrantTable]
+	client := columnsOf(schema, clientTable)
+	grant := columnsOf(schema, grantTable)
+	code := columnsOf(schema, tables[ir.IdentityOAuthCodeTable])
+	token := columnsOf(schema, tables[ir.IdentityOAuthTokenTable])
+	d := &OAuth{
+		Client: OAuthClient{
+			Table: codegen.ToSnakeCase(clientTable.Name),
+			Columns: OAuthClientColumns{
+				ID:           client.column(client.key()),
+				ClientID:     client.column(client.field(ir.IdentityOAuthClientIDField)),
+				Kind:         client.column(client.field(ir.IdentityOAuthClientKindField)),
+				Name:         client.column(client.field(ir.IdentityOAuthClientNameField)),
+				URI:          client.column(client.field(ir.IdentityOAuthClientURIField)),
+				RedirectURIs: client.column(client.field(ir.IdentityOAuthClientRedirectURIsField)),
+				CreatedAt:    client.column(client.field(ir.IdentityOAuthClientCreatedAtField)),
+				RefreshedAt:  client.column(client.field(ir.IdentityOAuthClientRefreshedAtField)),
+				FreshUntil:   client.column(client.field(ir.IdentityOAuthClientFreshUntilField)),
+				LastUsedAt:   client.column(client.field(ir.IdentityOAuthClientLastUsedAtField)),
+			},
+		},
+		Grant: OAuthGrant{
+			Table: codegen.ToSnakeCase(grantTable.Name),
+			Columns: OAuthGrantColumns{
+				ID:          grant.column(grant.key()),
+				User:        grant.relation(ir.IdentityOAuthGrantUserField, userTable),
+				Client:      grant.relation(ir.IdentityOAuthGrantClientField, clientTable),
+				Permissions: grant.column(grant.field(ir.IdentityOAuthGrantPermissionsField)),
+				Resource:    grant.column(grant.field(ir.IdentityOAuthGrantResourceField)),
+				CreatedAt:   grant.column(grant.field(ir.IdentityOAuthGrantCreatedAtField)),
+				ExpiresAt:   grant.column(grant.field(ir.IdentityOAuthGrantExpiresAtField)),
+				LastUsedAt:  grant.column(grant.field(ir.IdentityOAuthGrantLastUsedAtField)),
+				RevokedAt:   grant.column(grant.field(ir.IdentityOAuthGrantRevokedAtField)),
+			},
+		},
+		Code: OAuthCode{
+			Table: codegen.ToSnakeCase(tables[ir.IdentityOAuthCodeTable].Name),
+			Columns: OAuthCodeColumns{
+				ID:            code.column(code.key()),
+				Client:        code.relation(ir.IdentityOAuthCodeClientField, clientTable),
+				User:          code.relation(ir.IdentityOAuthCodeUserField, userTable),
+				Grant:         code.relation(ir.IdentityOAuthCodeGrantField, grantTable),
+				RedirectURI:   code.column(code.field(ir.IdentityOAuthCodeRedirectURIField)),
+				CodeChallenge: code.column(code.field(ir.IdentityOAuthCodeChallengeField)),
+				State:         code.column(code.field(ir.IdentityOAuthCodeStateField)),
+				Scope:         code.column(code.field(ir.IdentityOAuthCodeScopeField)),
+				Resource:      code.column(code.field(ir.IdentityOAuthCodeResourceField)),
+				Nonce:         code.column(code.field(ir.IdentityOAuthCodeNonceField)),
+				CodeHash:      code.column(code.field(ir.IdentityOAuthCodeCodeHashField)),
+				CreatedAt:     code.column(code.field(ir.IdentityOAuthCodeCreatedAtField)),
+				ExpiresAt:     code.column(code.field(ir.IdentityOAuthCodeExpiresAtField)),
+				UsedAt:        code.column(code.field(ir.IdentityOAuthCodeUsedAtField)),
+			},
+		},
+		Token: OAuthToken{
+			Table: codegen.ToSnakeCase(tables[ir.IdentityOAuthTokenTable].Name),
+			Columns: OAuthTokenColumns{
+				ID:        token.column(token.key()),
+				Grant:     token.relation(ir.IdentityOAuthTokenGrantField, grantTable),
+				Kind:      token.column(token.field(ir.IdentityOAuthTokenKindField)),
+				TokenHash: token.column(token.field(ir.IdentityOAuthTokenTokenHashField)),
+				CreatedAt: token.column(token.field(ir.IdentityOAuthTokenCreatedAtField)),
+				ExpiresAt: token.column(token.field(ir.IdentityOAuthTokenExpiresAtField)),
+				UsedAt:    token.column(token.field(ir.IdentityOAuthTokenUsedAtField)),
+				RevokedAt: token.column(token.field(ir.IdentityOAuthTokenRevokedAtField)),
+			},
+		},
+	}
+	for _, c := range []*columns{client, grant, code, token} {
+		if c.err != nil {
+			return nil, c.err
+		}
 	}
 	return d, nil
 }

@@ -248,6 +248,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Dialects = sqlDialects(cfg)
 		vin.GoServer = goServer(cfg)
 		vin.TypeScriptServer = typeScriptServer(cfg)
+		vin.MCPServer = mcpServer(cfg)
 		vin.TypesLanguages = typesLanguages(cfg)
 		vin.RustOutput = rustOutput(cfg)
 
@@ -315,6 +316,7 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 		vin.Dialects = sqlDialects(cfg)
 		vin.GoServer = goServer(cfg)
 		vin.TypeScriptServer = typeScriptServer(cfg)
+		vin.MCPServer = mcpServer(cfg)
 		vin.RustOutput = rustOutput(cfg)
 	}
 

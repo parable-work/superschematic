@@ -3339,6 +3339,415 @@
       }
     },
     {
+      "checks": [
+        {
+          "column": "client_id",
+          "minLength": 1,
+          "name": "ck_oauth_client_client_id"
+        }
+      ],
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "OAuthClient.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "client_id",
+          "origin": "OAuthClient.clientId",
+          "type": "TEXT"
+        },
+        {
+          "name": "kind",
+          "origin": "OAuthClient.kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "name",
+          "origin": "OAuthClient.name",
+          "type": "TEXT"
+        },
+        {
+          "name": "uri",
+          "nullable": true,
+          "origin": "OAuthClient.uri",
+          "type": "TEXT"
+        },
+        {
+          "default": "'[]'",
+          "element": "TEXT",
+          "holds": "list",
+          "name": "redirect_uris",
+          "origin": "OAuthClient.redirectUris",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "OAuthClient.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "refreshed_at",
+          "nullable": true,
+          "origin": "OAuthClient.refreshedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "fresh_until",
+          "nullable": true,
+          "origin": "OAuthClient.freshUntil",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_used_at",
+          "nullable": true,
+          "origin": "OAuthClient.lastUsedAt",
+          "type": "TEXT"
+        }
+      ],
+      "kind": "entity",
+      "name": "oauth_client",
+      "origin": "OAuthClient",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "oauth_client_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "client_id"
+          ],
+          "name": "oauth_client_client_id_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "OAuthCode.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "client_id",
+          "origin": "OAuthCode.client",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "nullable": true,
+          "origin": "OAuthCode.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "grant_id",
+          "nullable": true,
+          "origin": "OAuthCode.grant",
+          "type": "TEXT"
+        },
+        {
+          "name": "redirect_uri",
+          "origin": "OAuthCode.redirectUri",
+          "type": "TEXT"
+        },
+        {
+          "name": "code_challenge",
+          "origin": "OAuthCode.codeChallenge",
+          "type": "TEXT"
+        },
+        {
+          "name": "state",
+          "nullable": true,
+          "origin": "OAuthCode.state",
+          "type": "TEXT"
+        },
+        {
+          "name": "scope",
+          "nullable": true,
+          "origin": "OAuthCode.scope",
+          "type": "TEXT"
+        },
+        {
+          "name": "resource",
+          "origin": "OAuthCode.resource",
+          "type": "TEXT"
+        },
+        {
+          "name": "nonce",
+          "origin": "OAuthCode.nonce",
+          "type": "TEXT"
+        },
+        {
+          "name": "code_hash",
+          "nullable": true,
+          "origin": "OAuthCode.codeHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "OAuthCode.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "expires_at",
+          "origin": "OAuthCode.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "used_at",
+          "nullable": true,
+          "origin": "OAuthCode.usedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "client_id"
+          ],
+          "name": "fk_oauth_code_client_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "oauth_client"
+        },
+        {
+          "columns": [
+            "grant_id"
+          ],
+          "name": "fk_oauth_code_grant_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "oauth_grant"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_oauth_code_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "kind": "entity",
+      "name": "oauth_code",
+      "origin": "OAuthCode",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "oauth_code_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "code_hash"
+          ],
+          "name": "oauth_code_code_hash_key"
+        }
+      ]
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "OAuthGrant.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "user_id",
+          "origin": "OAuthGrant.user",
+          "type": "TEXT"
+        },
+        {
+          "name": "client_id",
+          "origin": "OAuthGrant.client",
+          "type": "TEXT"
+        },
+        {
+          "element": "TEXT",
+          "holds": "list",
+          "name": "permissions",
+          "nullable": true,
+          "origin": "OAuthGrant.permissions",
+          "type": "TEXT"
+        },
+        {
+          "name": "resource",
+          "origin": "OAuthGrant.resource",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "OAuthGrant.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "expires_at",
+          "origin": "OAuthGrant.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "last_used_at",
+          "nullable": true,
+          "origin": "OAuthGrant.lastUsedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "OAuthGrant.revokedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "client_id"
+          ],
+          "name": "fk_oauth_grant_client_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "oauth_client"
+        },
+        {
+          "columns": [
+            "user_id"
+          ],
+          "name": "fk_oauth_grant_user_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "account"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "user_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_oauth_grant_user"
+        }
+      ],
+      "kind": "entity",
+      "name": "oauth_grant",
+      "origin": "OAuthGrant",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "oauth_grant_pkey"
+      }
+    },
+    {
+      "columns": [
+        {
+          "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
+          "name": "id",
+          "origin": "OAuthToken.id",
+          "type": "TEXT"
+        },
+        {
+          "name": "grant_id",
+          "origin": "OAuthToken.grant",
+          "type": "TEXT"
+        },
+        {
+          "name": "kind",
+          "origin": "OAuthToken.kind",
+          "type": "TEXT"
+        },
+        {
+          "name": "token_hash",
+          "origin": "OAuthToken.tokenHash",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "created_at",
+          "origin": "OAuthToken.createdAt",
+          "type": "TEXT"
+        },
+        {
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))",
+          "name": "expires_at",
+          "origin": "OAuthToken.expiresAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "used_at",
+          "nullable": true,
+          "origin": "OAuthToken.usedAt",
+          "type": "TEXT"
+        },
+        {
+          "name": "revoked_at",
+          "nullable": true,
+          "origin": "OAuthToken.revokedAt",
+          "type": "TEXT"
+        }
+      ],
+      "foreignKeys": [
+        {
+          "columns": [
+            "grant_id"
+          ],
+          "name": "fk_oauth_token_grant_id",
+          "onDelete": "CASCADE",
+          "refColumns": [
+            "id"
+          ],
+          "refTable": "oauth_grant"
+        }
+      ],
+      "indexes": [
+        {
+          "columns": [
+            "grant_id"
+          ],
+          "method": "BTREE",
+          "name": "idx_oauth_token_grant"
+        }
+      ],
+      "kind": "entity",
+      "name": "oauth_token",
+      "origin": "OAuthToken",
+      "primaryKey": {
+        "columns": [
+          "id"
+        ],
+        "name": "oauth_token_pkey"
+      },
+      "uniques": [
+        {
+          "columns": [
+            "token_hash"
+          ],
+          "name": "oauth_token_token_hash_key"
+        }
+      ]
+    },
+    {
       "columns": [
         {
           "default": "(lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' || substr(hex(randomblob(2)), 2) || '-' || substr('89ab', 1 + (random() \u0026 3), 1) || substr(hex(randomblob(2)), 2) || '-' || hex(randomblob(6))))",
@@ -5688,6 +6097,30 @@
       "name": "trg_notice_route_references_clear",
       "origin": "NoticeRoute",
       "table": "notice_route"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_oauth_client_references_clear\" AFTER DELETE ON \"oauth_client\" FOR EACH ROW\nBEGIN\n  -- The references to the row of OAuthClient deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  DELETE FROM \"agent_run_references\" WHERE \"target_table\" = 'OAuthClient' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_oauth_client_references_clear",
+      "origin": "OAuthClient",
+      "table": "oauth_client"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_oauth_code_references_clear\" AFTER DELETE ON \"oauth_code\" FOR EACH ROW\nBEGIN\n  -- The references to the row of OAuthCode deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  DELETE FROM \"agent_run_references\" WHERE \"target_table\" = 'OAuthCode' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_oauth_code_references_clear",
+      "origin": "OAuthCode",
+      "table": "oauth_code"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_oauth_grant_references_clear\" AFTER DELETE ON \"oauth_grant\" FOR EACH ROW\nBEGIN\n  -- The references to the row of OAuthGrant deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  DELETE FROM \"agent_run_references\" WHERE \"target_table\" = 'OAuthGrant' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_oauth_grant_references_clear",
+      "origin": "OAuthGrant",
+      "table": "oauth_grant"
+    },
+    {
+      "definition": "CREATE TRIGGER \"trg_oauth_token_references_clear\" AFTER DELETE ON \"oauth_token\" FOR EACH ROW\nBEGIN\n  -- The references to the row of OAuthToken deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  DELETE FROM \"agent_run_references\" WHERE \"target_table\" = 'OAuthToken' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",
+      "name": "trg_oauth_token_references_clear",
+      "origin": "OAuthToken",
+      "table": "oauth_token"
     },
     {
       "definition": "CREATE TRIGGER \"trg_reply_references_clear\" AFTER DELETE ON \"reply\" FOR EACH ROW\nBEGIN\n  -- The references to the row of Reply deleted (D154, D182), cleared,\n  -- and the row that held each told on its cleared queue.\n  DELETE FROM \"agent_run_references\" WHERE \"target_table\" = 'Reply' AND \"target_key\" = CAST(OLD.\"id\" AS TEXT);\nEND",

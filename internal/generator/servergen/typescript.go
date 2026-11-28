@@ -368,10 +368,14 @@ type TypeScriptWorker struct {
 	// (HandlerOptions). The entrypoint calls no createWorkers then. Empty
 	// for a worker the implementation handles. Transcripts is set for the
 	// dispatcher's requests queue, whose prune also deletes the
-	// transcripts past their retention (agents.prune).
+	// transcripts past their retention (agents.prune). Upkeep is set for
+	// the notifier's dispatch queue, whose prune also asks every channel
+	// adapter's health on its schedule and deletes the deliveries past
+	// their retention (notifierUpkeepOf, #702).
 	Handler        string
 	HandlerOptions bool
 	Transcripts    bool
+	Upkeep         bool
 }
 
 // Messages names what a behavior worker's messages carry, for its main's
@@ -577,8 +581,11 @@ type TypeScriptAPI struct {
 	IdempotencyStore string
 
 	// Secrets are the Secret<T> fields of its config, which a Worker binds
-	// as Secrets Store secrets and fetch.ts awaits per isolate (D64).
-	Secrets []string
+	// as Secrets Store secrets and fetch.ts awaits per isolate (D64), and
+	// OptionalSecrets those of them that are optional, whose binding the
+	// Worker may lack (#702).
+	Secrets         []string
+	OptionalSecrets []string
 
 	// MCPConfirmationKey is the expression of its config that holds the key
 	// its MCP endpoint signs confirmations with, which its router is built
@@ -881,9 +888,10 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		s.Worker.planRuntimeHandler(o, w)
 		if w.Behavior != nil {
 			// A behavior worker runs its table's deadlines and changes
-			// through the repositories, on Postgres alone (D103).
-			if !o.DepsORM() || o.DepsSQLite() {
-				return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, a behavior worker (D103), which runs %s through the repositories %s's TypeScript types export for Postgres, and %s has none: a TypeScript behavior worker claims its queues on Postgres alone, and one on a SQLite file or D1 is not built (D116)", in.Stack, in.Server, w.Name, o.SchemaName, w.Behavior.Runs(), o.Deps.Database, o.SchemaName)
+			// through the repositories, claimed over the pool, or over the
+			// SQLite file or the D1 binding (D103, #702).
+			if !o.DepsORM() {
+				return nil, fmt.Errorf("stack %s: worker %s runs %s of %s, a behavior worker (D103), which runs %s through the repositories %s's TypeScript types export, and %s has none; enable outputs.types.typescript in %s's config", in.Stack, in.Server, w.Name, o.SchemaName, w.Behavior.Runs(), o.Deps.Database, o.SchemaName, o.Deps.Database)
 			}
 			s.Worker.Behavior = w.Behavior
 			s.Worker.QueuesFunc = w.QueuesFunc()
@@ -970,6 +978,9 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 			for _, f := range a.Config.Fields {
 				if f.Secret {
 					api.Secrets = append(api.Secrets, f.Key)
+					if !f.Required {
+						api.OptionalSecrets = append(api.OptionalSecrets, f.Key)
+					}
 				}
 			}
 		}
@@ -1008,12 +1019,6 @@ func PlanTypeScript(in TypeScriptInput) (*TypeScriptServer, error) {
 		}
 		if o.HasServiceCallers && !background && (api.Callers == "" || api.Config == "") {
 			return nil, fmt.Errorf("stack %s: server %s serves %s, whose operations have a service clause, and whose config has no callers field", in.Stack, in.Server, o.SchemaName)
-		}
-		if db := o.Deps.Database; db != "" && s.Workers && o.DepsSQLite() && s.Worker != nil {
-			// A worker on Workers claims on Postgres through Hyperdrive; D1
-			// is reached through a binding, and no claim loop runs on it
-			// (D53, amended, D92).
-			return nil, fmt.Errorf("stack %s: worker %s of %s claims the queue of %s, which lists sqlite first, and an environment places the worker on Cloudflare Workers, whose drain.ts claims on Postgres through Hyperdrive alone; list postgres first in %s's outputs.sql.dialects, or place the worker where a SQLite file is its database, as under stack dev (D92)", in.Stack, in.Server, o.SchemaName, db, db)
 		}
 		if db := o.Deps.Database; db != "" {
 			d := databases[db]
@@ -1522,6 +1527,19 @@ func (s *TypeScriptServer) ReadsBindings() bool {
 	return s.APIsWithConfig() || s.AnyCORS() || s.Identity()
 }
 
+// OptionalSecretBindings are the optional Secret<T> fields of every API's
+// config, sorted: of SecretBindings, those a Worker may have no binding of,
+// a provider's secret setting where the environment's provider of its slot
+// reads none (D159, #702).
+func (s *TypeScriptServer) OptionalSecretBindings() []string {
+	var out []string
+	for _, a := range s.APIs {
+		out = append(out, a.OptionalSecrets...)
+	}
+	slices.Sort(out)
+	return slices.Compact(out)
+}
+
 // SecretBindings are the Secret<T> fields of every API's config, sorted:
 // the Secrets Store secret bindings fetch.ts awaits once per isolate
 // (D64).
@@ -1582,12 +1600,13 @@ func (s *TypeScriptServer) WorkersImports() []string {
 
 // WakesQueues reports whether a Workers entrypoint installs the queue
 // wakes its Worker's QUEUE_WAKES binding names and hands each invocation's
-// waitUntil the wakes it sent (D151): one that reaches a Postgres database
-// through Hyperdrive, on which a worker on Workers claims, so its enqueues,
-// its deadlines and its events may leave a worker a message due before
-// the worker's next firing.
+// waitUntil the wakes it sent (D151): one that reaches a database, a
+// Postgres one through Hyperdrive or a D1 one through its binding, on
+// either of which a worker on Workers claims (#702), so its enqueues, its
+// deadlines and its events may leave a worker a message due before the
+// worker's next firing.
 func (s *TypeScriptServer) WakesQueues() bool {
-	return s.Workers && len(s.PostgresDatabases()) > 0
+	return s.Workers && len(s.Databases) > 0
 }
 
 // QueueWakeClass is the class a worker's drain.ts exports, the worker's

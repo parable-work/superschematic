@@ -224,6 +224,982 @@ var ErrPageKey = errors.New("orm: the page key names no row of its sort")
 // Type-Safe Field Selectors and Options
 // ========================================
 
+// OAuthClientFields specifies which OAuthClient fields to select
+type OAuthClientFields struct {
+	Id           bool
+	ClientId     bool
+	Kind         bool
+	Name         bool
+	Uri          bool
+	RedirectUris bool
+	CreatedAt    bool
+	RefreshedAt  bool
+	FreshUntil   bool
+	LastUsedAt   bool
+}
+
+// ToStringSlice converts OAuthClientFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f OAuthClientFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.ClientId {
+		fields = append(fields, "client_id")
+	}
+	if f.Kind {
+		fields = append(fields, "kind")
+	}
+	if f.Name {
+		fields = append(fields, "name")
+	}
+	if f.Uri {
+		fields = append(fields, "uri")
+	}
+	if f.RedirectUris {
+		fields = append(fields, "redirect_uris")
+	}
+	if f.CreatedAt {
+		fields = append(fields, "created_at")
+	}
+	if f.RefreshedAt {
+		fields = append(fields, "refreshed_at")
+	}
+	if f.FreshUntil {
+		fields = append(fields, "fresh_until")
+	}
+	if f.LastUsedAt {
+		fields = append(fields, "last_used_at")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f OAuthClientFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	return true
+}
+
+// All returns a OAuthClientFields with all fields selected
+func (OAuthClientFields) All() OAuthClientFields {
+	return OAuthClientFields{
+		Id:           true,
+		ClientId:     true,
+		Kind:         true,
+		Name:         true,
+		Uri:          true,
+		RedirectUris: true,
+		CreatedAt:    true,
+		RefreshedAt:  true,
+		FreshUntil:   true,
+		LastUsedAt:   true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (OAuthClientFields) Minimal() OAuthClientFields {
+	return OAuthClientFields{
+		Id:   true,
+		Name: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (OAuthClientFields) WithoutAudit() OAuthClientFields {
+	return OAuthClientFields{
+		Id:           true,
+		ClientId:     true,
+		Kind:         true,
+		Name:         true,
+		Uri:          true,
+		RedirectUris: true,
+		RefreshedAt:  true,
+		FreshUntil:   true,
+		LastUsedAt:   true,
+	}
+}
+
+// OAuthClientOrderByField represents a field that can be used for ordering
+type OAuthClientOrderByField string
+
+const (
+	OAuthClientOrderById           OAuthClientOrderByField = "id"
+	OAuthClientOrderByClientId     OAuthClientOrderByField = "client_id"
+	OAuthClientOrderByKind         OAuthClientOrderByField = "kind"
+	OAuthClientOrderByName         OAuthClientOrderByField = "name"
+	OAuthClientOrderByUri          OAuthClientOrderByField = "uri"
+	OAuthClientOrderByRedirectUris OAuthClientOrderByField = "redirect_uris"
+	OAuthClientOrderByCreatedAt    OAuthClientOrderByField = "created_at"
+	OAuthClientOrderByRefreshedAt  OAuthClientOrderByField = "refreshed_at"
+	OAuthClientOrderByFreshUntil   OAuthClientOrderByField = "fresh_until"
+	OAuthClientOrderByLastUsedAt   OAuthClientOrderByField = "last_used_at"
+)
+
+// OAuthClientOrderBy specifies ordering for OAuthClient queries
+type OAuthClientOrderBy struct {
+	Field OAuthClientOrderByField
+	Desc  bool
+}
+
+// OAuthClientGetOptions contains options for OAuthClient GetOne operations
+type OAuthClientGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OAuthClientFields
+}
+
+// OAuthClientFindOptions contains options for OAuthClient Find operations
+type OAuthClientFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OAuthClientFields
+	// OrderBy specifies sorting order
+	OrderBy []OAuthClientOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// OAuthClientSortField is a field FindPage orders OAuthClient rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type OAuthClientSortField string
+
+const (
+	OAuthClientSortById          OAuthClientSortField = "id"
+	OAuthClientSortByClientId    OAuthClientSortField = "clientId"
+	OAuthClientSortByKind        OAuthClientSortField = "kind"
+	OAuthClientSortByName        OAuthClientSortField = "name"
+	OAuthClientSortByUri         OAuthClientSortField = "uri"
+	OAuthClientSortByCreatedAt   OAuthClientSortField = "createdAt"
+	OAuthClientSortByRefreshedAt OAuthClientSortField = "refreshedAt"
+	OAuthClientSortByFreshUntil  OAuthClientSortField = "freshUntil"
+	OAuthClientSortByLastUsedAt  OAuthClientSortField = "lastUsedAt"
+)
+
+// OAuthClientSort is the order FindPage reads OAuthClient rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type OAuthClientSort struct {
+	Field OAuthClientSortField
+	Desc  bool
+}
+
+// ParseOAuthClientSort reads a sort as a page request writes it, "clientId" or
+// "-clientId": an error for a field OAuthClient cannot be sorted by.
+func ParseOAuthClientSort(text string) (OAuthClientSort, error) {
+	parsed := OAuthClientSort{Field: OAuthClientSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case OAuthClientSortById, OAuthClientSortByClientId, OAuthClientSortByKind, OAuthClientSortByName, OAuthClientSortByUri, OAuthClientSortByCreatedAt, OAuthClientSortByRefreshedAt, OAuthClientSortByFreshUntil, OAuthClientSortByLastUsedAt:
+		return parsed, nil
+	}
+	return OAuthClientSort{}, fmt.Errorf("orm: OAuthClient sorts by id, clientId, kind, name, uri, createdAt, refreshedAt, freshUntil and lastUsedAt, not %q", text)
+}
+
+// OAuthClientUniqueKey names a unique key of OAuthClient that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type OAuthClientUniqueKey string
+
+const (
+	OAuthClientUniqueById       OAuthClientUniqueKey = "id"
+	OAuthClientUniqueByClientId OAuthClientUniqueKey = "clientId"
+)
+
+// OAuthClientPageKey is the position of a OAuthClient row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type OAuthClientPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *OAuthClientPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the OAuthClient key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// oAuthClientPageKeyOf is row's key: its id.
+func oAuthClientPageKeyOf(row *types.OAuthClient) *OAuthClientPageKey {
+	key := &OAuthClientPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// OAuthClientPageOptions are FindPage's options.
+type OAuthClientPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields OAuthClientFields
+	// Sort is the order the rows are read in.
+	Sort OAuthClientSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *OAuthClientPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// OAuthClientPage is a page of OAuthClient rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type OAuthClientPage struct {
+	Rows []*types.OAuthClient
+	Next *OAuthClientPageKey
+}
+
+// OAuthCodeFields specifies which OAuthCode fields to select
+type OAuthCodeFields struct {
+	Id            bool
+	RedirectUri   bool
+	CodeChallenge bool
+	State         bool
+	Scope         bool
+	Resource      bool
+	Nonce         bool
+	CodeHash      bool
+	CreatedAt     bool
+	ExpiresAt     bool
+	UsedAt        bool
+	// Client selects the client_id foreign key field
+	Client bool
+	// ClientNested selects fields for the related OAuthClient
+	ClientNested OAuthClientFields
+	// User selects the user_id foreign key field
+	User bool
+	// UserNested selects fields for the related User
+	UserNested UserFields
+	// Grant selects the grant_id foreign key field
+	Grant bool
+	// GrantNested selects fields for the related OAuthGrant
+	GrantNested OAuthGrantFields
+}
+
+// ToStringSlice converts OAuthCodeFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f OAuthCodeFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Client {
+		fields = append(fields, "client_id")
+	}
+	if f.User {
+		fields = append(fields, "user_id")
+	}
+	if f.Grant {
+		fields = append(fields, "grant_id")
+	}
+	if f.RedirectUri {
+		fields = append(fields, "redirect_uri")
+	}
+	if f.CodeChallenge {
+		fields = append(fields, "code_challenge")
+	}
+	if f.State {
+		fields = append(fields, "state")
+	}
+	if f.Scope {
+		fields = append(fields, "scope")
+	}
+	if f.Resource {
+		fields = append(fields, "resource")
+	}
+	if f.Nonce {
+		fields = append(fields, "nonce")
+	}
+	if f.CodeHash {
+		fields = append(fields, "code_hash")
+	}
+	if f.CreatedAt {
+		fields = append(fields, "created_at")
+	}
+	if f.ExpiresAt {
+		fields = append(fields, "expires_at")
+	}
+	if f.UsedAt {
+		fields = append(fields, "used_at")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f OAuthCodeFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.ClientNested.IsZero() {
+		return false
+	}
+	if !f.UserNested.IsZero() {
+		return false
+	}
+	if !f.GrantNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a OAuthCodeFields with all fields selected
+func (OAuthCodeFields) All() OAuthCodeFields {
+	return OAuthCodeFields{
+		Id:            true,
+		RedirectUri:   true,
+		CodeChallenge: true,
+		State:         true,
+		Scope:         true,
+		Resource:      true,
+		Nonce:         true,
+		CodeHash:      true,
+		CreatedAt:     true,
+		ExpiresAt:     true,
+		UsedAt:        true,
+		Client:        true,
+		User:          true,
+		Grant:         true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (OAuthCodeFields) Minimal() OAuthCodeFields {
+	return OAuthCodeFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (OAuthCodeFields) WithoutAudit() OAuthCodeFields {
+	return OAuthCodeFields{
+		Id:            true,
+		RedirectUri:   true,
+		CodeChallenge: true,
+		State:         true,
+		Scope:         true,
+		Resource:      true,
+		Nonce:         true,
+		CodeHash:      true,
+		ExpiresAt:     true,
+		UsedAt:        true,
+	}
+}
+
+// OAuthCodeOrderByField represents a field that can be used for ordering
+type OAuthCodeOrderByField string
+
+const (
+	OAuthCodeOrderById            OAuthCodeOrderByField = "id"
+	OAuthCodeOrderByRedirectUri   OAuthCodeOrderByField = "redirect_uri"
+	OAuthCodeOrderByCodeChallenge OAuthCodeOrderByField = "code_challenge"
+	OAuthCodeOrderByState         OAuthCodeOrderByField = "state"
+	OAuthCodeOrderByScope         OAuthCodeOrderByField = "scope"
+	OAuthCodeOrderByResource      OAuthCodeOrderByField = "resource"
+	OAuthCodeOrderByNonce         OAuthCodeOrderByField = "nonce"
+	OAuthCodeOrderByCodeHash      OAuthCodeOrderByField = "code_hash"
+	OAuthCodeOrderByCreatedAt     OAuthCodeOrderByField = "created_at"
+	OAuthCodeOrderByExpiresAt     OAuthCodeOrderByField = "expires_at"
+	OAuthCodeOrderByUsedAt        OAuthCodeOrderByField = "used_at"
+)
+
+// OAuthCodeOrderBy specifies ordering for OAuthCode queries
+type OAuthCodeOrderBy struct {
+	Field OAuthCodeOrderByField
+	Desc  bool
+}
+
+// OAuthCodeGetOptions contains options for OAuthCode GetOne operations
+type OAuthCodeGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OAuthCodeFields
+}
+
+// OAuthCodeFindOptions contains options for OAuthCode Find operations
+type OAuthCodeFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OAuthCodeFields
+	// OrderBy specifies sorting order
+	OrderBy []OAuthCodeOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// OAuthCodeSortField is a field FindPage orders OAuthCode rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type OAuthCodeSortField string
+
+const (
+	OAuthCodeSortById            OAuthCodeSortField = "id"
+	OAuthCodeSortByRedirectUri   OAuthCodeSortField = "redirectUri"
+	OAuthCodeSortByCodeChallenge OAuthCodeSortField = "codeChallenge"
+	OAuthCodeSortByState         OAuthCodeSortField = "state"
+	OAuthCodeSortByScope         OAuthCodeSortField = "scope"
+	OAuthCodeSortByResource      OAuthCodeSortField = "resource"
+	OAuthCodeSortByNonce         OAuthCodeSortField = "nonce"
+	OAuthCodeSortByCodeHash      OAuthCodeSortField = "codeHash"
+	OAuthCodeSortByCreatedAt     OAuthCodeSortField = "createdAt"
+	OAuthCodeSortByExpiresAt     OAuthCodeSortField = "expiresAt"
+	OAuthCodeSortByUsedAt        OAuthCodeSortField = "usedAt"
+)
+
+// OAuthCodeSort is the order FindPage reads OAuthCode rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type OAuthCodeSort struct {
+	Field OAuthCodeSortField
+	Desc  bool
+}
+
+// ParseOAuthCodeSort reads a sort as a page request writes it, "redirectUri" or
+// "-redirectUri": an error for a field OAuthCode cannot be sorted by.
+func ParseOAuthCodeSort(text string) (OAuthCodeSort, error) {
+	parsed := OAuthCodeSort{Field: OAuthCodeSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case OAuthCodeSortById, OAuthCodeSortByRedirectUri, OAuthCodeSortByCodeChallenge, OAuthCodeSortByState, OAuthCodeSortByScope, OAuthCodeSortByResource, OAuthCodeSortByNonce, OAuthCodeSortByCodeHash, OAuthCodeSortByCreatedAt, OAuthCodeSortByExpiresAt, OAuthCodeSortByUsedAt:
+		return parsed, nil
+	}
+	return OAuthCodeSort{}, fmt.Errorf("orm: OAuthCode sorts by id, redirectUri, codeChallenge, state, scope, resource, nonce, codeHash, createdAt, expiresAt and usedAt, not %q", text)
+}
+
+// OAuthCodeUniqueKey names a unique key of OAuthCode that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type OAuthCodeUniqueKey string
+
+const (
+	OAuthCodeUniqueById       OAuthCodeUniqueKey = "id"
+	OAuthCodeUniqueByCodeHash OAuthCodeUniqueKey = "codeHash"
+)
+
+// OAuthCodePageKey is the position of a OAuthCode row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type OAuthCodePageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *OAuthCodePageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the OAuthCode key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// oAuthCodePageKeyOf is row's key: its id.
+func oAuthCodePageKeyOf(row *types.OAuthCode) *OAuthCodePageKey {
+	key := &OAuthCodePageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// OAuthCodePageOptions are FindPage's options.
+type OAuthCodePageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields OAuthCodeFields
+	// Sort is the order the rows are read in.
+	Sort OAuthCodeSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *OAuthCodePageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// OAuthCodePage is a page of OAuthCode rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type OAuthCodePage struct {
+	Rows []*types.OAuthCode
+	Next *OAuthCodePageKey
+}
+
+// OAuthGrantFields specifies which OAuthGrant fields to select
+type OAuthGrantFields struct {
+	Id          bool
+	Permissions bool
+	Resource    bool
+	CreatedAt   bool
+	ExpiresAt   bool
+	LastUsedAt  bool
+	RevokedAt   bool
+	// User selects the user_id foreign key field
+	User bool
+	// UserNested selects fields for the related User
+	UserNested UserFields
+	// Client selects the client_id foreign key field
+	Client bool
+	// ClientNested selects fields for the related OAuthClient
+	ClientNested OAuthClientFields
+}
+
+// ToStringSlice converts OAuthGrantFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f OAuthGrantFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.User {
+		fields = append(fields, "user_id")
+	}
+	if f.Client {
+		fields = append(fields, "client_id")
+	}
+	if f.Permissions {
+		fields = append(fields, "permissions")
+	}
+	if f.Resource {
+		fields = append(fields, "resource")
+	}
+	if f.CreatedAt {
+		fields = append(fields, "created_at")
+	}
+	if f.ExpiresAt {
+		fields = append(fields, "expires_at")
+	}
+	if f.LastUsedAt {
+		fields = append(fields, "last_used_at")
+	}
+	if f.RevokedAt {
+		fields = append(fields, "revoked_at")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f OAuthGrantFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.UserNested.IsZero() {
+		return false
+	}
+	if !f.ClientNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a OAuthGrantFields with all fields selected
+func (OAuthGrantFields) All() OAuthGrantFields {
+	return OAuthGrantFields{
+		Id:          true,
+		Permissions: true,
+		Resource:    true,
+		CreatedAt:   true,
+		ExpiresAt:   true,
+		LastUsedAt:  true,
+		RevokedAt:   true,
+		User:        true,
+		Client:      true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (OAuthGrantFields) Minimal() OAuthGrantFields {
+	return OAuthGrantFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (OAuthGrantFields) WithoutAudit() OAuthGrantFields {
+	return OAuthGrantFields{
+		Id:          true,
+		Permissions: true,
+		Resource:    true,
+		ExpiresAt:   true,
+		LastUsedAt:  true,
+		RevokedAt:   true,
+	}
+}
+
+// OAuthGrantOrderByField represents a field that can be used for ordering
+type OAuthGrantOrderByField string
+
+const (
+	OAuthGrantOrderById          OAuthGrantOrderByField = "id"
+	OAuthGrantOrderByPermissions OAuthGrantOrderByField = "permissions"
+	OAuthGrantOrderByResource    OAuthGrantOrderByField = "resource"
+	OAuthGrantOrderByCreatedAt   OAuthGrantOrderByField = "created_at"
+	OAuthGrantOrderByExpiresAt   OAuthGrantOrderByField = "expires_at"
+	OAuthGrantOrderByLastUsedAt  OAuthGrantOrderByField = "last_used_at"
+	OAuthGrantOrderByRevokedAt   OAuthGrantOrderByField = "revoked_at"
+)
+
+// OAuthGrantOrderBy specifies ordering for OAuthGrant queries
+type OAuthGrantOrderBy struct {
+	Field OAuthGrantOrderByField
+	Desc  bool
+}
+
+// OAuthGrantGetOptions contains options for OAuthGrant GetOne operations
+type OAuthGrantGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OAuthGrantFields
+}
+
+// OAuthGrantFindOptions contains options for OAuthGrant Find operations
+type OAuthGrantFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OAuthGrantFields
+	// OrderBy specifies sorting order
+	OrderBy []OAuthGrantOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// OAuthGrantSortField is a field FindPage orders OAuthGrant rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type OAuthGrantSortField string
+
+const (
+	OAuthGrantSortById         OAuthGrantSortField = "id"
+	OAuthGrantSortByResource   OAuthGrantSortField = "resource"
+	OAuthGrantSortByCreatedAt  OAuthGrantSortField = "createdAt"
+	OAuthGrantSortByExpiresAt  OAuthGrantSortField = "expiresAt"
+	OAuthGrantSortByLastUsedAt OAuthGrantSortField = "lastUsedAt"
+	OAuthGrantSortByRevokedAt  OAuthGrantSortField = "revokedAt"
+)
+
+// OAuthGrantSort is the order FindPage reads OAuthGrant rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type OAuthGrantSort struct {
+	Field OAuthGrantSortField
+	Desc  bool
+}
+
+// ParseOAuthGrantSort reads a sort as a page request writes it, "resource" or
+// "-resource": an error for a field OAuthGrant cannot be sorted by.
+func ParseOAuthGrantSort(text string) (OAuthGrantSort, error) {
+	parsed := OAuthGrantSort{Field: OAuthGrantSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case OAuthGrantSortById, OAuthGrantSortByResource, OAuthGrantSortByCreatedAt, OAuthGrantSortByExpiresAt, OAuthGrantSortByLastUsedAt, OAuthGrantSortByRevokedAt:
+		return parsed, nil
+	}
+	return OAuthGrantSort{}, fmt.Errorf("orm: OAuthGrant sorts by id, resource, createdAt, expiresAt, lastUsedAt and revokedAt, not %q", text)
+}
+
+// OAuthGrantUniqueKey names a unique key of OAuthGrant that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type OAuthGrantUniqueKey string
+
+const (
+	OAuthGrantUniqueById OAuthGrantUniqueKey = "id"
+)
+
+// OAuthGrantPageKey is the position of a OAuthGrant row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type OAuthGrantPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *OAuthGrantPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the OAuthGrant key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// oAuthGrantPageKeyOf is row's key: its id.
+func oAuthGrantPageKeyOf(row *types.OAuthGrant) *OAuthGrantPageKey {
+	key := &OAuthGrantPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// OAuthGrantPageOptions are FindPage's options.
+type OAuthGrantPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields OAuthGrantFields
+	// Sort is the order the rows are read in.
+	Sort OAuthGrantSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *OAuthGrantPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// OAuthGrantPage is a page of OAuthGrant rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type OAuthGrantPage struct {
+	Rows []*types.OAuthGrant
+	Next *OAuthGrantPageKey
+}
+
+// OAuthTokenFields specifies which OAuthToken fields to select
+type OAuthTokenFields struct {
+	Id        bool
+	Kind      bool
+	TokenHash bool
+	CreatedAt bool
+	ExpiresAt bool
+	UsedAt    bool
+	RevokedAt bool
+	// Grant selects the grant_id foreign key field
+	Grant bool
+	// GrantNested selects fields for the related OAuthGrant
+	GrantNested OAuthGrantFields
+}
+
+// ToStringSlice converts OAuthTokenFields to []string for internal use.
+// Fields are returned in OrderedMembers order to match scan order.
+func (f OAuthTokenFields) ToStringSlice() []string {
+	var fields []string
+	if f.Id {
+		fields = append(fields, "id")
+	}
+	if f.Grant {
+		fields = append(fields, "grant_id")
+	}
+	if f.Kind {
+		fields = append(fields, "kind")
+	}
+	if f.TokenHash {
+		fields = append(fields, "token_hash")
+	}
+	if f.CreatedAt {
+		fields = append(fields, "created_at")
+	}
+	if f.ExpiresAt {
+		fields = append(fields, "expires_at")
+	}
+	if f.UsedAt {
+		fields = append(fields, "used_at")
+	}
+	if f.RevokedAt {
+		fields = append(fields, "revoked_at")
+	}
+	return fields
+}
+
+// IsZero returns true if no fields are selected
+func (f OAuthTokenFields) IsZero() bool {
+	if len(f.ToStringSlice()) != 0 {
+		return false
+	}
+	if !f.GrantNested.IsZero() {
+		return false
+	}
+	return true
+}
+
+// All returns a OAuthTokenFields with all fields selected
+func (OAuthTokenFields) All() OAuthTokenFields {
+	return OAuthTokenFields{
+		Id:        true,
+		Kind:      true,
+		TokenHash: true,
+		CreatedAt: true,
+		ExpiresAt: true,
+		UsedAt:    true,
+		RevokedAt: true,
+		Grant:     true,
+	}
+}
+
+// Minimal returns commonly needed fields (id and name-like fields)
+func (OAuthTokenFields) Minimal() OAuthTokenFields {
+	return OAuthTokenFields{
+		Id: true,
+	}
+}
+
+// WithoutAudit returns all non-audit fields
+func (OAuthTokenFields) WithoutAudit() OAuthTokenFields {
+	return OAuthTokenFields{
+		Id:        true,
+		Kind:      true,
+		TokenHash: true,
+		ExpiresAt: true,
+		UsedAt:    true,
+		RevokedAt: true,
+	}
+}
+
+// OAuthTokenOrderByField represents a field that can be used for ordering
+type OAuthTokenOrderByField string
+
+const (
+	OAuthTokenOrderById        OAuthTokenOrderByField = "id"
+	OAuthTokenOrderByKind      OAuthTokenOrderByField = "kind"
+	OAuthTokenOrderByTokenHash OAuthTokenOrderByField = "token_hash"
+	OAuthTokenOrderByCreatedAt OAuthTokenOrderByField = "created_at"
+	OAuthTokenOrderByExpiresAt OAuthTokenOrderByField = "expires_at"
+	OAuthTokenOrderByUsedAt    OAuthTokenOrderByField = "used_at"
+	OAuthTokenOrderByRevokedAt OAuthTokenOrderByField = "revoked_at"
+)
+
+// OAuthTokenOrderBy specifies ordering for OAuthToken queries
+type OAuthTokenOrderBy struct {
+	Field OAuthTokenOrderByField
+	Desc  bool
+}
+
+// OAuthTokenGetOptions contains options for OAuthToken GetOne operations
+type OAuthTokenGetOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OAuthTokenFields
+}
+
+// OAuthTokenFindOptions contains options for OAuthToken Find operations
+type OAuthTokenFindOptions struct {
+	// Fields specifies which fields to select (if zero, selects all fields)
+	Fields OAuthTokenFields
+	// OrderBy specifies sorting order
+	OrderBy []OAuthTokenOrderBy
+	// Limit limits the number of results (default 100)
+	Limit int
+	// Offset skips the first N results (for pagination)
+	Offset int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+	// SkipCount reads the rows without counting them first: FindMany's
+	// total is then -1 (D89).
+	SkipCount bool
+}
+
+// OAuthTokenSortField is a field FindPage orders OAuthToken rows by, by its
+// schema name (D60, amended): its primary key, or a column of one value of
+// text, a number or a time.
+type OAuthTokenSortField string
+
+const (
+	OAuthTokenSortById        OAuthTokenSortField = "id"
+	OAuthTokenSortByKind      OAuthTokenSortField = "kind"
+	OAuthTokenSortByTokenHash OAuthTokenSortField = "tokenHash"
+	OAuthTokenSortByCreatedAt OAuthTokenSortField = "createdAt"
+	OAuthTokenSortByExpiresAt OAuthTokenSortField = "expiresAt"
+	OAuthTokenSortByUsedAt    OAuthTokenSortField = "usedAt"
+	OAuthTokenSortByRevokedAt OAuthTokenSortField = "revokedAt"
+)
+
+// OAuthTokenSort is the order FindPage reads OAuthToken rows in: Field,
+// ascending, or descending when Desc; ties break by id in the same
+// direction. The zero value orders by id, ascending.
+type OAuthTokenSort struct {
+	Field OAuthTokenSortField
+	Desc  bool
+}
+
+// ParseOAuthTokenSort reads a sort as a page request writes it, "kind" or
+// "-kind": an error for a field OAuthToken cannot be sorted by.
+func ParseOAuthTokenSort(text string) (OAuthTokenSort, error) {
+	parsed := OAuthTokenSort{Field: OAuthTokenSortField(strings.TrimPrefix(text, "-")), Desc: strings.HasPrefix(text, "-")}
+	switch parsed.Field {
+	case OAuthTokenSortById, OAuthTokenSortByKind, OAuthTokenSortByTokenHash, OAuthTokenSortByCreatedAt, OAuthTokenSortByExpiresAt, OAuthTokenSortByUsedAt, OAuthTokenSortByRevokedAt:
+		return parsed, nil
+	}
+	return OAuthTokenSort{}, fmt.Errorf("orm: OAuthToken sorts by id, kind, tokenHash, createdAt, expiresAt, usedAt and revokedAt, not %q", text)
+}
+
+// OAuthTokenUniqueKey names a unique key of OAuthToken that UpsertOne and
+// UpsertMany are keyed by (D79, D89): its primary key, a @unique field, or a
+// unique @index, by its fields joined by ",".
+type OAuthTokenUniqueKey string
+
+const (
+	OAuthTokenUniqueById        OAuthTokenUniqueKey = "id"
+	OAuthTokenUniqueByTokenHash OAuthTokenUniqueKey = "tokenHash"
+)
+
+// OAuthTokenPageKey is the position of a OAuthToken row in a FindPage order: the
+// row's id, as a cursor holds it, {"id": ...}. FindPage reads the row's
+// value of its sort field from the table, so a key is the same in every order
+// and its length is the id's, whatever the row holds (D60, amended).
+type OAuthTokenPageKey struct {
+	Id types.IdentityUUID `json:"id"`
+}
+
+// arg is the key's id as the repository writes its column. A key without
+// one is ErrPageKey.
+func (k *OAuthTokenPageKey) arg() (any, error) {
+	var zeroKey types.IdentityUUID
+	if k.Id == zeroKey {
+		return nil, fmt.Errorf("%w: the OAuthToken key holds no id", ErrPageKey)
+	}
+	return k.Id.ToUUID(), nil
+}
+
+// oAuthTokenPageKeyOf is row's key: its id.
+func oAuthTokenPageKeyOf(row *types.OAuthToken) *OAuthTokenPageKey {
+	key := &OAuthTokenPageKey{}
+	if row.Id != nil {
+		key.Id = *row.Id
+	}
+	return key
+}
+
+// OAuthTokenPageOptions are FindPage's options.
+type OAuthTokenPageOptions struct {
+	// Fields specifies which fields to select, as FindMany's do; zero is an
+	// error. A page reads the id too, which Next holds.
+	Fields OAuthTokenFields
+	// Sort is the order the rows are read in.
+	Sort OAuthTokenSort
+	// After is the key of the last row of the page before, nil for the first page.
+	After *OAuthTokenPageKey
+	// Limit is the rows a page holds: 1 or more, 100 when 0.
+	Limit int
+	// IncludeDeleted includes soft-deleted records in results (default false)
+	IncludeDeleted bool
+}
+
+// OAuthTokenPage is a page of OAuthToken rows in FindPage's order: at most
+// Limit rows, and Next, the key of the last of them, when more rows follow.
+type OAuthTokenPage struct {
+	Rows []*types.OAuthToken
+	Next *OAuthTokenPageKey
+}
+
 // RoleFields specifies which Role fields to select
 type RoleFields struct {
 	Id          bool
@@ -1458,6 +2434,2856 @@ type UserRoleGrantPage struct {
 // Filters and Update Structs
 // ========================================
 
+// OAuthClientFilter provides filtering for OAuthClient queries
+type OAuthClientFilter struct {
+	Id           *UUIDFilter
+	ClientId     *StringFilter
+	Kind         *StringFilter
+	Name         *StringFilter
+	Uri          *StringFilter
+	RedirectUris *ArrayStringFilter
+	CreatedAt    *DateTimeFilter
+	RefreshedAt  *DateTimeFilter
+	FreshUntil   *DateTimeFilter
+	LastUsedAt   *DateTimeFilter
+	// OauthCodes keeps the rows that some OAuthCode row the filter
+	// finds points at by its client (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	OauthCodes *OAuthCodeFilter
+	// OauthGrants keeps the rows that some OAuthGrant row the filter
+	// finds points at by its client (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	OauthGrants *OAuthGrantFilter
+	// ReferencedByOAuthCodeClient filters on the presence or absence of a
+	// OAuthCode whose client points at this row.
+	ReferencedByOAuthCodeClient *ReferencedByFilter
+	// ReferencedByOAuthGrantClient filters on the presence or absence of a
+	// OAuthGrant whose client points at this row.
+	ReferencedByOAuthGrantClient *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []OAuthClientFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []OAuthClientFilter
+}
+
+// OAuthClientUpdate provides fields that can be updated
+type OAuthClientUpdate struct {
+	ClientId           *string
+	Kind               *string
+	Name               *string
+	Uri                *string
+	UriSetNull         bool
+	RedirectUris       *[]string
+	RefreshedAt        *types.TemporalDateTime
+	RefreshedAtSetNull bool
+	FreshUntil         *types.TemporalDateTime
+	FreshUntilSetNull  bool
+	LastUsedAt         *types.TemporalDateTime
+	LastUsedAtSetNull  bool
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewOAuthClientSnapshotUpdate maps every mutable field from a complete
+// OAuthClient value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewOAuthClientSnapshotUpdate(input *types.OAuthClient) *OAuthClientUpdate {
+	update := &OAuthClientUpdate{}
+	if input == nil {
+		return update
+	}
+	update.ClientId = &input.ClientId
+	update.Kind = &input.Kind
+	update.Name = &input.Name
+	var zeroUri string
+	if input.Uri == zeroUri {
+		update.UriSetNull = true
+	} else {
+		update.Uri = &input.Uri
+	}
+	update.RedirectUris = &input.RedirectUris
+	if input.RefreshedAt == nil {
+		update.RefreshedAtSetNull = true
+	} else {
+		update.RefreshedAt = input.RefreshedAt
+	}
+	if input.FreshUntil == nil {
+		update.FreshUntilSetNull = true
+	} else {
+		update.FreshUntil = input.FreshUntil
+	}
+	if input.LastUsedAt == nil {
+		update.LastUsedAtSetNull = true
+	} else {
+		update.LastUsedAt = input.LastUsedAt
+	}
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *OAuthClientUpdate) ApplyTo(row *types.OAuthClient) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.ClientId != nil {
+		row.ClientId = *u.ClientId
+	}
+	if u.Kind != nil {
+		row.Kind = *u.Kind
+	}
+	if u.Name != nil {
+		row.Name = *u.Name
+	}
+	if u.UriSetNull {
+		var zeroUri string
+		row.Uri = zeroUri
+	} else if u.Uri != nil {
+		row.Uri = *u.Uri
+	}
+	if u.RedirectUris != nil {
+		row.RedirectUris = *u.RedirectUris
+	}
+	if u.RefreshedAtSetNull {
+		row.RefreshedAt = nil
+	} else if u.RefreshedAt != nil {
+		row.RefreshedAt = u.RefreshedAt
+	}
+	if u.FreshUntilSetNull {
+		row.FreshUntil = nil
+	} else if u.FreshUntil != nil {
+		row.FreshUntil = u.FreshUntil
+	}
+	if u.LastUsedAtSetNull {
+		row.LastUsedAt = nil
+	} else if u.LastUsedAt != nil {
+		row.LastUsedAt = u.LastUsedAt
+	}
+}
+
+// OAuthClientFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func OAuthClientFilterConditions(filter *OAuthClientFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a OAuthClientFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *OAuthClientFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *OAuthClientFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_client.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `oauth_client.id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_client.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.ClientId != nil {
+		if f.ClientId.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.client_id = $%d`, paramNum))
+			*args = append(*args, *f.ClientId.Eq)
+		}
+		if f.ClientId.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.client_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.ClientId.Ne)
+		}
+		if len(f.ClientId.In) > 0 {
+			placeholders := make([]string, len(f.ClientId.In))
+			for i, value := range f.ClientId.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.client_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ClientId.NotIn) > 0 {
+			placeholders := make([]string, len(f.ClientId.NotIn))
+			for i, value := range f.ClientId.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_client.client_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.ClientId.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.client_id ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.ClientId.ILike+"%")
+		}
+		if f.ClientId.IsNull != nil {
+			if *f.ClientId.IsNull {
+				conditions = append(conditions, `oauth_client.client_id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_client.client_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Kind != nil {
+		if f.Kind.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.kind = $%d`, paramNum))
+			*args = append(*args, *f.Kind.Eq)
+		}
+		if f.Kind.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.kind IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Kind.Ne)
+		}
+		if len(f.Kind.In) > 0 {
+			placeholders := make([]string, len(f.Kind.In))
+			for i, value := range f.Kind.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.kind IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Kind.NotIn) > 0 {
+			placeholders := make([]string, len(f.Kind.NotIn))
+			for i, value := range f.Kind.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_client.kind IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Kind.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.kind ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Kind.ILike+"%")
+		}
+		if f.Kind.IsNull != nil {
+			if *f.Kind.IsNull {
+				conditions = append(conditions, `oauth_client.kind IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_client.kind IS NOT NULL`)
+			}
+		}
+	}
+	if f.Name != nil {
+		if f.Name.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client."name" = $%d`, paramNum))
+			*args = append(*args, *f.Name.Eq)
+		}
+		if f.Name.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client."name" IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Name.Ne)
+		}
+		if len(f.Name.In) > 0 {
+			placeholders := make([]string, len(f.Name.In))
+			for i, value := range f.Name.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_client."name" IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Name.NotIn) > 0 {
+			placeholders := make([]string, len(f.Name.NotIn))
+			for i, value := range f.Name.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_client."name" IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Name.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client."name" ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Name.ILike+"%")
+		}
+		if f.Name.IsNull != nil {
+			if *f.Name.IsNull {
+				conditions = append(conditions, `oauth_client."name" IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_client."name" IS NOT NULL`)
+			}
+		}
+	}
+	if f.Uri != nil {
+		if f.Uri.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.uri = $%d`, paramNum))
+			*args = append(*args, *f.Uri.Eq)
+		}
+		if f.Uri.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.uri IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Uri.Ne)
+		}
+		if len(f.Uri.In) > 0 {
+			placeholders := make([]string, len(f.Uri.In))
+			for i, value := range f.Uri.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.uri IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Uri.NotIn) > 0 {
+			placeholders := make([]string, len(f.Uri.NotIn))
+			for i, value := range f.Uri.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_client.uri IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Uri.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.uri ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Uri.ILike+"%")
+		}
+		if f.Uri.IsNull != nil {
+			if *f.Uri.IsNull {
+				conditions = append(conditions, `oauth_client.uri IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_client.uri IS NOT NULL`)
+			}
+		}
+	}
+	if f.CreatedAt != nil {
+		if f.CreatedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.created_at = $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Eq)
+		}
+		if f.CreatedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.created_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Ne)
+		}
+		if f.CreatedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.created_at > $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gt)
+		}
+		if f.CreatedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.created_at >= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gte)
+		}
+		if f.CreatedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.created_at < $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lt)
+		}
+		if f.CreatedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.created_at <= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lte)
+		}
+		if f.CreatedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.created_at >= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.created_at <= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CreatedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.NotIn))
+			for i, value := range f.CreatedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_client.created_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedAt.IsNull != nil {
+			if *f.CreatedAt.IsNull {
+				conditions = append(conditions, `oauth_client.created_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_client.created_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.RefreshedAt != nil {
+		if f.RefreshedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.refreshed_at = $%d`, paramNum))
+			*args = append(*args, *f.RefreshedAt.Eq)
+		}
+		if f.RefreshedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.refreshed_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.RefreshedAt.Ne)
+		}
+		if f.RefreshedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.refreshed_at > $%d`, paramNum))
+			*args = append(*args, *f.RefreshedAt.Gt)
+		}
+		if f.RefreshedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.refreshed_at >= $%d`, paramNum))
+			*args = append(*args, *f.RefreshedAt.Gte)
+		}
+		if f.RefreshedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.refreshed_at < $%d`, paramNum))
+			*args = append(*args, *f.RefreshedAt.Lt)
+		}
+		if f.RefreshedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.refreshed_at <= $%d`, paramNum))
+			*args = append(*args, *f.RefreshedAt.Lte)
+		}
+		if f.RefreshedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.refreshed_at >= $%d`, paramNum))
+			*args = append(*args, f.RefreshedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.refreshed_at <= $%d`, paramNum))
+			*args = append(*args, f.RefreshedAt.Between.End)
+		}
+		if len(f.RefreshedAt.In) > 0 {
+			placeholders := make([]string, len(f.RefreshedAt.In))
+			for i, value := range f.RefreshedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.refreshed_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.RefreshedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.RefreshedAt.NotIn))
+			for i, value := range f.RefreshedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_client.refreshed_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.RefreshedAt.IsNull != nil {
+			if *f.RefreshedAt.IsNull {
+				conditions = append(conditions, `oauth_client.refreshed_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_client.refreshed_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.FreshUntil != nil {
+		if f.FreshUntil.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.fresh_until = $%d`, paramNum))
+			*args = append(*args, *f.FreshUntil.Eq)
+		}
+		if f.FreshUntil.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.fresh_until IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.FreshUntil.Ne)
+		}
+		if f.FreshUntil.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.fresh_until > $%d`, paramNum))
+			*args = append(*args, *f.FreshUntil.Gt)
+		}
+		if f.FreshUntil.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.fresh_until >= $%d`, paramNum))
+			*args = append(*args, *f.FreshUntil.Gte)
+		}
+		if f.FreshUntil.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.fresh_until < $%d`, paramNum))
+			*args = append(*args, *f.FreshUntil.Lt)
+		}
+		if f.FreshUntil.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.fresh_until <= $%d`, paramNum))
+			*args = append(*args, *f.FreshUntil.Lte)
+		}
+		if f.FreshUntil.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.fresh_until >= $%d`, paramNum))
+			*args = append(*args, f.FreshUntil.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.fresh_until <= $%d`, paramNum))
+			*args = append(*args, f.FreshUntil.Between.End)
+		}
+		if len(f.FreshUntil.In) > 0 {
+			placeholders := make([]string, len(f.FreshUntil.In))
+			for i, value := range f.FreshUntil.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.fresh_until IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.FreshUntil.NotIn) > 0 {
+			placeholders := make([]string, len(f.FreshUntil.NotIn))
+			for i, value := range f.FreshUntil.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_client.fresh_until IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.FreshUntil.IsNull != nil {
+			if *f.FreshUntil.IsNull {
+				conditions = append(conditions, `oauth_client.fresh_until IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_client.fresh_until IS NOT NULL`)
+			}
+		}
+	}
+	if f.LastUsedAt != nil {
+		if f.LastUsedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.last_used_at = $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Eq)
+		}
+		if f.LastUsedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.last_used_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Ne)
+		}
+		if f.LastUsedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.last_used_at > $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Gt)
+		}
+		if f.LastUsedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.last_used_at >= $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Gte)
+		}
+		if f.LastUsedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.last_used_at < $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Lt)
+		}
+		if f.LastUsedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.last_used_at <= $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Lte)
+		}
+		if f.LastUsedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.last_used_at >= $%d`, paramNum))
+			*args = append(*args, f.LastUsedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.last_used_at <= $%d`, paramNum))
+			*args = append(*args, f.LastUsedAt.Between.End)
+		}
+		if len(f.LastUsedAt.In) > 0 {
+			placeholders := make([]string, len(f.LastUsedAt.In))
+			for i, value := range f.LastUsedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_client.last_used_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.LastUsedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.LastUsedAt.NotIn))
+			for i, value := range f.LastUsedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_client.last_used_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.LastUsedAt.IsNull != nil {
+			if *f.LastUsedAt.IsNull {
+				conditions = append(conditions, `oauth_client.last_used_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_client.last_used_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.OauthCodes != nil {
+		before := len(*args)
+		through := f.OauthCodes.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_client.id IN (SELECT oauth_code.client_id FROM oauth_code%s)`, where))
+	}
+	if f.OauthGrants != nil {
+		before := len(*args)
+		through := f.OauthGrants.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_client.id IN (SELECT oauth_grant.client_id FROM oauth_grant%s)`, where))
+	}
+	if f.ReferencedByOAuthCodeClient != nil {
+		probe := `SELECT 1 FROM oauth_code WHERE oauth_code.client_id = oauth_client.id`
+		if f.ReferencedByOAuthCodeClient.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+	if f.ReferencedByOAuthGrantClient != nil {
+		probe := `SELECT 1 FROM oauth_grant WHERE oauth_grant.client_id = oauth_client.id`
+		if f.ReferencedByOAuthGrantClient.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
+// OAuthCodeFilter provides filtering for OAuthCode queries
+type OAuthCodeFilter struct {
+	Id            *UUIDFilter
+	RedirectUri   *StringFilter
+	CodeChallenge *StringFilter
+	State         *StringFilter
+	Scope         *StringFilter
+	Resource      *StringFilter
+	Nonce         *StringFilter
+	CodeHash      *StringFilter
+	CreatedAt     *DateTimeFilter
+	ExpiresAt     *DateTimeFilter
+	UsedAt        *DateTimeFilter
+	// ClientID allows filtering by foreign key
+	ClientID *UUIDFilter
+	// UserID allows filtering by foreign key
+	UserID *UUIDFilter
+	// GrantID allows filtering by foreign key
+	GrantID *UUIDFilter
+	// Client keeps the rows whose client is among the OAuthClient rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Client *OAuthClientFilter
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose user is null is not kept.
+	User *UserFilter
+	// Grant keeps the rows whose grant is among the OAuthGrant rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows, so a row whose grant is null is not kept.
+	Grant *OAuthGrantFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []OAuthCodeFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []OAuthCodeFilter
+}
+
+// OAuthCodeUpdate provides fields that can be updated
+type OAuthCodeUpdate struct {
+	RedirectUri     *string
+	CodeChallenge   *string
+	State           *string
+	StateSetNull    bool
+	Scope           *string
+	ScopeSetNull    bool
+	Resource        *string
+	Nonce           *string
+	CodeHash        *types.CryptoSHA256
+	CodeHashSetNull bool
+	ExpiresAt       *types.TemporalDateTime
+	UsedAt          *types.TemporalDateTime
+	UsedAtSetNull   bool
+	// ClientID allows updating the foreign key for client
+	ClientID *types.IdentityUUID
+	// UserID allows updating the foreign key for user
+	UserID        *types.IdentityUUID
+	UserIDSetNull bool
+	// GrantID allows updating the foreign key for grant
+	GrantID        *types.IdentityUUID
+	GrantIDSetNull bool
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewOAuthCodeSnapshotUpdate maps every mutable field from a complete
+// OAuthCode value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewOAuthCodeSnapshotUpdate(input *types.OAuthCode) *OAuthCodeUpdate {
+	update := &OAuthCodeUpdate{}
+	if input == nil {
+		return update
+	}
+	update.RedirectUri = &input.RedirectUri
+	update.CodeChallenge = &input.CodeChallenge
+	var zeroState string
+	if input.State == zeroState {
+		update.StateSetNull = true
+	} else {
+		update.State = &input.State
+	}
+	var zeroScope string
+	if input.Scope == zeroScope {
+		update.ScopeSetNull = true
+	} else {
+		update.Scope = &input.Scope
+	}
+	update.Resource = &input.Resource
+	update.Nonce = &input.Nonce
+	if input.CodeHash == nil {
+		update.CodeHashSetNull = true
+	} else {
+		update.CodeHash = input.CodeHash
+	}
+	update.ExpiresAt = &input.ExpiresAt
+	if input.UsedAt == nil {
+		update.UsedAtSetNull = true
+	} else {
+		update.UsedAt = input.UsedAt
+	}
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *OAuthCodeUpdate) ApplyTo(row *types.OAuthCode) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.RedirectUri != nil {
+		row.RedirectUri = *u.RedirectUri
+	}
+	if u.CodeChallenge != nil {
+		row.CodeChallenge = *u.CodeChallenge
+	}
+	if u.StateSetNull {
+		var zeroState string
+		row.State = zeroState
+	} else if u.State != nil {
+		row.State = *u.State
+	}
+	if u.ScopeSetNull {
+		var zeroScope string
+		row.Scope = zeroScope
+	} else if u.Scope != nil {
+		row.Scope = *u.Scope
+	}
+	if u.Resource != nil {
+		row.Resource = *u.Resource
+	}
+	if u.Nonce != nil {
+		row.Nonce = *u.Nonce
+	}
+	if u.CodeHashSetNull {
+		row.CodeHash = nil
+	} else if u.CodeHash != nil {
+		row.CodeHash = u.CodeHash
+	}
+	if u.ExpiresAt != nil {
+		row.ExpiresAt = *u.ExpiresAt
+	}
+	if u.UsedAtSetNull {
+		row.UsedAt = nil
+	} else if u.UsedAt != nil {
+		row.UsedAt = u.UsedAt
+	}
+	if u.ClientID != nil {
+		row.Client.Id = u.ClientID
+	}
+	if u.UserIDSetNull {
+		row.User = nil
+	} else if u.UserID != nil {
+		if row.User == nil {
+			row.User = &types.User{}
+		}
+		row.User.Id = u.UserID
+	}
+	if u.GrantIDSetNull {
+		row.Grant = nil
+	} else if u.GrantID != nil {
+		if row.Grant == nil {
+			row.Grant = &types.OAuthGrant{}
+		}
+		row.Grant.Id = u.GrantID
+	}
+}
+
+// OAuthCodeFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func OAuthCodeFilterConditions(filter *OAuthCodeFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a OAuthCodeFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *OAuthCodeFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *OAuthCodeFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `oauth_code.id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.RedirectUri != nil {
+		if f.RedirectUri.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.redirect_uri = $%d`, paramNum))
+			*args = append(*args, *f.RedirectUri.Eq)
+		}
+		if f.RedirectUri.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.redirect_uri IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.RedirectUri.Ne)
+		}
+		if len(f.RedirectUri.In) > 0 {
+			placeholders := make([]string, len(f.RedirectUri.In))
+			for i, value := range f.RedirectUri.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.redirect_uri IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.RedirectUri.NotIn) > 0 {
+			placeholders := make([]string, len(f.RedirectUri.NotIn))
+			for i, value := range f.RedirectUri.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.redirect_uri IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.RedirectUri.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.redirect_uri ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.RedirectUri.ILike+"%")
+		}
+		if f.RedirectUri.IsNull != nil {
+			if *f.RedirectUri.IsNull {
+				conditions = append(conditions, `oauth_code.redirect_uri IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.redirect_uri IS NOT NULL`)
+			}
+		}
+	}
+	if f.CodeChallenge != nil {
+		if f.CodeChallenge.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.code_challenge = $%d`, paramNum))
+			*args = append(*args, *f.CodeChallenge.Eq)
+		}
+		if f.CodeChallenge.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.code_challenge IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CodeChallenge.Ne)
+		}
+		if len(f.CodeChallenge.In) > 0 {
+			placeholders := make([]string, len(f.CodeChallenge.In))
+			for i, value := range f.CodeChallenge.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.code_challenge IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CodeChallenge.NotIn) > 0 {
+			placeholders := make([]string, len(f.CodeChallenge.NotIn))
+			for i, value := range f.CodeChallenge.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.code_challenge IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.CodeChallenge.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.code_challenge ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.CodeChallenge.ILike+"%")
+		}
+		if f.CodeChallenge.IsNull != nil {
+			if *f.CodeChallenge.IsNull {
+				conditions = append(conditions, `oauth_code.code_challenge IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.code_challenge IS NOT NULL`)
+			}
+		}
+	}
+	if f.State != nil {
+		if f.State.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.state = $%d`, paramNum))
+			*args = append(*args, *f.State.Eq)
+		}
+		if f.State.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.state IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.State.Ne)
+		}
+		if len(f.State.In) > 0 {
+			placeholders := make([]string, len(f.State.In))
+			for i, value := range f.State.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.state IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.State.NotIn) > 0 {
+			placeholders := make([]string, len(f.State.NotIn))
+			for i, value := range f.State.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.state IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.State.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.state ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.State.ILike+"%")
+		}
+		if f.State.IsNull != nil {
+			if *f.State.IsNull {
+				conditions = append(conditions, `oauth_code.state IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.state IS NOT NULL`)
+			}
+		}
+	}
+	if f.Scope != nil {
+		if f.Scope.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.scope = $%d`, paramNum))
+			*args = append(*args, *f.Scope.Eq)
+		}
+		if f.Scope.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.scope IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Scope.Ne)
+		}
+		if len(f.Scope.In) > 0 {
+			placeholders := make([]string, len(f.Scope.In))
+			for i, value := range f.Scope.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.scope IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Scope.NotIn) > 0 {
+			placeholders := make([]string, len(f.Scope.NotIn))
+			for i, value := range f.Scope.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.scope IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Scope.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.scope ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Scope.ILike+"%")
+		}
+		if f.Scope.IsNull != nil {
+			if *f.Scope.IsNull {
+				conditions = append(conditions, `oauth_code.scope IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.scope IS NOT NULL`)
+			}
+		}
+	}
+	if f.Resource != nil {
+		if f.Resource.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.resource = $%d`, paramNum))
+			*args = append(*args, *f.Resource.Eq)
+		}
+		if f.Resource.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.resource IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Resource.Ne)
+		}
+		if len(f.Resource.In) > 0 {
+			placeholders := make([]string, len(f.Resource.In))
+			for i, value := range f.Resource.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.resource IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Resource.NotIn) > 0 {
+			placeholders := make([]string, len(f.Resource.NotIn))
+			for i, value := range f.Resource.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.resource IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Resource.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.resource ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Resource.ILike+"%")
+		}
+		if f.Resource.IsNull != nil {
+			if *f.Resource.IsNull {
+				conditions = append(conditions, `oauth_code.resource IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.resource IS NOT NULL`)
+			}
+		}
+	}
+	if f.Nonce != nil {
+		if f.Nonce.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.nonce = $%d`, paramNum))
+			*args = append(*args, *f.Nonce.Eq)
+		}
+		if f.Nonce.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.nonce IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Nonce.Ne)
+		}
+		if len(f.Nonce.In) > 0 {
+			placeholders := make([]string, len(f.Nonce.In))
+			for i, value := range f.Nonce.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.nonce IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Nonce.NotIn) > 0 {
+			placeholders := make([]string, len(f.Nonce.NotIn))
+			for i, value := range f.Nonce.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.nonce IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Nonce.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.nonce ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Nonce.ILike+"%")
+		}
+		if f.Nonce.IsNull != nil {
+			if *f.Nonce.IsNull {
+				conditions = append(conditions, `oauth_code.nonce IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.nonce IS NOT NULL`)
+			}
+		}
+	}
+	if f.CodeHash != nil {
+		if f.CodeHash.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.code_hash = $%d`, paramNum))
+			*args = append(*args, *f.CodeHash.Eq)
+		}
+		if f.CodeHash.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.code_hash IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CodeHash.Ne)
+		}
+		if len(f.CodeHash.In) > 0 {
+			placeholders := make([]string, len(f.CodeHash.In))
+			for i, value := range f.CodeHash.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.code_hash IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CodeHash.NotIn) > 0 {
+			placeholders := make([]string, len(f.CodeHash.NotIn))
+			for i, value := range f.CodeHash.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.code_hash IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.CodeHash.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.code_hash ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.CodeHash.ILike+"%")
+		}
+		if f.CodeHash.IsNull != nil {
+			if *f.CodeHash.IsNull {
+				conditions = append(conditions, `oauth_code.code_hash IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.code_hash IS NOT NULL`)
+			}
+		}
+	}
+	if f.CreatedAt != nil {
+		if f.CreatedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.created_at = $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Eq)
+		}
+		if f.CreatedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.created_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Ne)
+		}
+		if f.CreatedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.created_at > $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gt)
+		}
+		if f.CreatedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.created_at >= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gte)
+		}
+		if f.CreatedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.created_at < $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lt)
+		}
+		if f.CreatedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.created_at <= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lte)
+		}
+		if f.CreatedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.created_at >= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.created_at <= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CreatedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.NotIn))
+			for i, value := range f.CreatedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.created_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedAt.IsNull != nil {
+			if *f.CreatedAt.IsNull {
+				conditions = append(conditions, `oauth_code.created_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.created_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.ExpiresAt != nil {
+		if f.ExpiresAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.expires_at = $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Eq)
+		}
+		if f.ExpiresAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.expires_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Ne)
+		}
+		if f.ExpiresAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.expires_at > $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Gt)
+		}
+		if f.ExpiresAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.expires_at >= $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Gte)
+		}
+		if f.ExpiresAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.expires_at < $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Lt)
+		}
+		if f.ExpiresAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.expires_at <= $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Lte)
+		}
+		if f.ExpiresAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.expires_at >= $%d`, paramNum))
+			*args = append(*args, f.ExpiresAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.expires_at <= $%d`, paramNum))
+			*args = append(*args, f.ExpiresAt.Between.End)
+		}
+		if len(f.ExpiresAt.In) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.In))
+			for i, value := range f.ExpiresAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.expires_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ExpiresAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.NotIn))
+			for i, value := range f.ExpiresAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.expires_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.ExpiresAt.IsNull != nil {
+			if *f.ExpiresAt.IsNull {
+				conditions = append(conditions, `oauth_code.expires_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.expires_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UsedAt != nil {
+		if f.UsedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.used_at = $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Eq)
+		}
+		if f.UsedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.used_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Ne)
+		}
+		if f.UsedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.used_at > $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Gt)
+		}
+		if f.UsedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.used_at >= $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Gte)
+		}
+		if f.UsedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.used_at < $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Lt)
+		}
+		if f.UsedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.used_at <= $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Lte)
+		}
+		if f.UsedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.used_at >= $%d`, paramNum))
+			*args = append(*args, f.UsedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.used_at <= $%d`, paramNum))
+			*args = append(*args, f.UsedAt.Between.End)
+		}
+		if len(f.UsedAt.In) > 0 {
+			placeholders := make([]string, len(f.UsedAt.In))
+			for i, value := range f.UsedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.used_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.UsedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.UsedAt.NotIn))
+			for i, value := range f.UsedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.used_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.UsedAt.IsNull != nil {
+			if *f.UsedAt.IsNull {
+				conditions = append(conditions, `oauth_code.used_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.used_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.ClientID != nil {
+		if f.ClientID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.client_id = $%d`, paramNum))
+			*args = append(*args, f.ClientID.Eq.ToUUID())
+		}
+		if f.ClientID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.client_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.ClientID.Ne.ToUUID())
+		}
+		if len(f.ClientID.In) > 0 {
+			placeholders := make([]string, len(f.ClientID.In))
+			for i, id := range f.ClientID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.client_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ClientID.NotIn) > 0 {
+			placeholders := make([]string, len(f.ClientID.NotIn))
+			for i, id := range f.ClientID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.client_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.ClientID.IsNull != nil {
+			if *f.ClientID.IsNull {
+				conditions = append(conditions, `oauth_code.client_id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.client_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.UserID != nil {
+		if f.UserID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.user_id = $%d`, paramNum))
+			*args = append(*args, f.UserID.Eq.ToUUID())
+		}
+		if f.UserID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.user_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.UserID.Ne.ToUUID())
+		}
+		if len(f.UserID.In) > 0 {
+			placeholders := make([]string, len(f.UserID.In))
+			for i, id := range f.UserID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.user_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.UserID.NotIn) > 0 {
+			placeholders := make([]string, len(f.UserID.NotIn))
+			for i, id := range f.UserID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.user_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.UserID.IsNull != nil {
+			if *f.UserID.IsNull {
+				conditions = append(conditions, `oauth_code.user_id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.user_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.GrantID != nil {
+		if f.GrantID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.grant_id = $%d`, paramNum))
+			*args = append(*args, f.GrantID.Eq.ToUUID())
+		}
+		if f.GrantID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.grant_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.GrantID.Ne.ToUUID())
+		}
+		if len(f.GrantID.In) > 0 {
+			placeholders := make([]string, len(f.GrantID.In))
+			for i, id := range f.GrantID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_code.grant_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.GrantID.NotIn) > 0 {
+			placeholders := make([]string, len(f.GrantID.NotIn))
+			for i, id := range f.GrantID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_code.grant_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.GrantID.IsNull != nil {
+			if *f.GrantID.IsNull {
+				conditions = append(conditions, `oauth_code.grant_id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_code.grant_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Client != nil {
+		before := len(*args)
+		through := f.Client.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_code.client_id IN (SELECT oauth_client.id FROM oauth_client%s)`, where))
+	}
+	if f.User != nil {
+		before := len(*args)
+		through := f.User.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_code.user_id IN (SELECT "user".id FROM "user"%s)`, where))
+	}
+	if f.Grant != nil {
+		before := len(*args)
+		through := f.Grant.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_code.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
+// OAuthGrantFilter provides filtering for OAuthGrant queries
+type OAuthGrantFilter struct {
+	Id          *UUIDFilter
+	Permissions *ArrayStringFilter
+	Resource    *StringFilter
+	CreatedAt   *DateTimeFilter
+	ExpiresAt   *DateTimeFilter
+	LastUsedAt  *DateTimeFilter
+	RevokedAt   *DateTimeFilter
+	// UserID allows filtering by foreign key
+	UserID *UUIDFilter
+	// ClientID allows filtering by foreign key
+	ClientID *UUIDFilter
+	// User keeps the rows whose user is among the User rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	User *UserFilter
+	// Client keeps the rows whose client is among the OAuthClient rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Client *OAuthClientFilter
+	// OauthCodes keeps the rows that some OAuthCode row the filter
+	// finds points at by its grant (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	OauthCodes *OAuthCodeFilter
+	// OauthTokens keeps the rows that some OAuthToken row the filter
+	// finds points at by its grant (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	OauthTokens *OAuthTokenFilter
+	// ReferencedByOAuthCodeGrant filters on the presence or absence of a
+	// OAuthCode whose grant points at this row.
+	ReferencedByOAuthCodeGrant *ReferencedByFilter
+	// ReferencedByOAuthTokenGrant filters on the presence or absence of a
+	// OAuthToken whose grant points at this row.
+	ReferencedByOAuthTokenGrant *ReferencedByFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []OAuthGrantFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []OAuthGrantFilter
+}
+
+// OAuthGrantUpdate provides fields that can be updated
+type OAuthGrantUpdate struct {
+	Permissions        *[]string
+	PermissionsSetNull bool
+	Resource           *string
+	ExpiresAt          *types.TemporalDateTime
+	LastUsedAt         *types.TemporalDateTime
+	LastUsedAtSetNull  bool
+	RevokedAt          *types.TemporalDateTime
+	RevokedAtSetNull   bool
+	// UserID allows updating the foreign key for user
+	UserID *types.IdentityUUID
+	// ClientID allows updating the foreign key for client
+	ClientID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewOAuthGrantSnapshotUpdate maps every mutable field from a complete
+// OAuthGrant value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewOAuthGrantSnapshotUpdate(input *types.OAuthGrant) *OAuthGrantUpdate {
+	update := &OAuthGrantUpdate{}
+	if input == nil {
+		return update
+	}
+	if input.Permissions == nil {
+		update.PermissionsSetNull = true
+	} else {
+		update.Permissions = &input.Permissions
+	}
+	update.Resource = &input.Resource
+	update.ExpiresAt = &input.ExpiresAt
+	if input.LastUsedAt == nil {
+		update.LastUsedAtSetNull = true
+	} else {
+		update.LastUsedAt = input.LastUsedAt
+	}
+	if input.RevokedAt == nil {
+		update.RevokedAtSetNull = true
+	} else {
+		update.RevokedAt = input.RevokedAt
+	}
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *OAuthGrantUpdate) ApplyTo(row *types.OAuthGrant) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.PermissionsSetNull {
+		row.Permissions = nil
+	} else if u.Permissions != nil {
+		row.Permissions = *u.Permissions
+	}
+	if u.Resource != nil {
+		row.Resource = *u.Resource
+	}
+	if u.ExpiresAt != nil {
+		row.ExpiresAt = *u.ExpiresAt
+	}
+	if u.LastUsedAtSetNull {
+		row.LastUsedAt = nil
+	} else if u.LastUsedAt != nil {
+		row.LastUsedAt = u.LastUsedAt
+	}
+	if u.RevokedAtSetNull {
+		row.RevokedAt = nil
+	} else if u.RevokedAt != nil {
+		row.RevokedAt = u.RevokedAt
+	}
+	if u.UserID != nil {
+		row.User.Id = u.UserID
+	}
+	if u.ClientID != nil {
+		row.Client.Id = u.ClientID
+	}
+}
+
+// OAuthGrantFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func OAuthGrantFilterConditions(filter *OAuthGrantFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a OAuthGrantFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *OAuthGrantFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *OAuthGrantFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_grant.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `oauth_grant.id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_grant.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Resource != nil {
+		if f.Resource.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.resource = $%d`, paramNum))
+			*args = append(*args, *f.Resource.Eq)
+		}
+		if f.Resource.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.resource IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Resource.Ne)
+		}
+		if len(f.Resource.In) > 0 {
+			placeholders := make([]string, len(f.Resource.In))
+			for i, value := range f.Resource.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.resource IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Resource.NotIn) > 0 {
+			placeholders := make([]string, len(f.Resource.NotIn))
+			for i, value := range f.Resource.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_grant.resource IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Resource.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.resource ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Resource.ILike+"%")
+		}
+		if f.Resource.IsNull != nil {
+			if *f.Resource.IsNull {
+				conditions = append(conditions, `oauth_grant.resource IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_grant.resource IS NOT NULL`)
+			}
+		}
+	}
+	if f.CreatedAt != nil {
+		if f.CreatedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.created_at = $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Eq)
+		}
+		if f.CreatedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.created_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Ne)
+		}
+		if f.CreatedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.created_at > $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gt)
+		}
+		if f.CreatedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.created_at >= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gte)
+		}
+		if f.CreatedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.created_at < $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lt)
+		}
+		if f.CreatedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.created_at <= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lte)
+		}
+		if f.CreatedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.created_at >= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.created_at <= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CreatedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.NotIn))
+			for i, value := range f.CreatedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_grant.created_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedAt.IsNull != nil {
+			if *f.CreatedAt.IsNull {
+				conditions = append(conditions, `oauth_grant.created_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_grant.created_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.ExpiresAt != nil {
+		if f.ExpiresAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.expires_at = $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Eq)
+		}
+		if f.ExpiresAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.expires_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Ne)
+		}
+		if f.ExpiresAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.expires_at > $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Gt)
+		}
+		if f.ExpiresAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.expires_at >= $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Gte)
+		}
+		if f.ExpiresAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.expires_at < $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Lt)
+		}
+		if f.ExpiresAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.expires_at <= $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Lte)
+		}
+		if f.ExpiresAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.expires_at >= $%d`, paramNum))
+			*args = append(*args, f.ExpiresAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.expires_at <= $%d`, paramNum))
+			*args = append(*args, f.ExpiresAt.Between.End)
+		}
+		if len(f.ExpiresAt.In) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.In))
+			for i, value := range f.ExpiresAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.expires_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ExpiresAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.NotIn))
+			for i, value := range f.ExpiresAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_grant.expires_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.ExpiresAt.IsNull != nil {
+			if *f.ExpiresAt.IsNull {
+				conditions = append(conditions, `oauth_grant.expires_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_grant.expires_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.LastUsedAt != nil {
+		if f.LastUsedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.last_used_at = $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Eq)
+		}
+		if f.LastUsedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.last_used_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Ne)
+		}
+		if f.LastUsedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.last_used_at > $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Gt)
+		}
+		if f.LastUsedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.last_used_at >= $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Gte)
+		}
+		if f.LastUsedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.last_used_at < $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Lt)
+		}
+		if f.LastUsedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.last_used_at <= $%d`, paramNum))
+			*args = append(*args, *f.LastUsedAt.Lte)
+		}
+		if f.LastUsedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.last_used_at >= $%d`, paramNum))
+			*args = append(*args, f.LastUsedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.last_used_at <= $%d`, paramNum))
+			*args = append(*args, f.LastUsedAt.Between.End)
+		}
+		if len(f.LastUsedAt.In) > 0 {
+			placeholders := make([]string, len(f.LastUsedAt.In))
+			for i, value := range f.LastUsedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.last_used_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.LastUsedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.LastUsedAt.NotIn))
+			for i, value := range f.LastUsedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_grant.last_used_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.LastUsedAt.IsNull != nil {
+			if *f.LastUsedAt.IsNull {
+				conditions = append(conditions, `oauth_grant.last_used_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_grant.last_used_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.RevokedAt != nil {
+		if f.RevokedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.revoked_at = $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Eq)
+		}
+		if f.RevokedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.revoked_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Ne)
+		}
+		if f.RevokedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.revoked_at > $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Gt)
+		}
+		if f.RevokedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.revoked_at >= $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Gte)
+		}
+		if f.RevokedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.revoked_at < $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Lt)
+		}
+		if f.RevokedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.revoked_at <= $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Lte)
+		}
+		if f.RevokedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.revoked_at >= $%d`, paramNum))
+			*args = append(*args, f.RevokedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.revoked_at <= $%d`, paramNum))
+			*args = append(*args, f.RevokedAt.Between.End)
+		}
+		if len(f.RevokedAt.In) > 0 {
+			placeholders := make([]string, len(f.RevokedAt.In))
+			for i, value := range f.RevokedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.revoked_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.RevokedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.RevokedAt.NotIn))
+			for i, value := range f.RevokedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_grant.revoked_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.RevokedAt.IsNull != nil {
+			if *f.RevokedAt.IsNull {
+				conditions = append(conditions, `oauth_grant.revoked_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_grant.revoked_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UserID != nil {
+		if f.UserID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.user_id = $%d`, paramNum))
+			*args = append(*args, f.UserID.Eq.ToUUID())
+		}
+		if f.UserID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.user_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.UserID.Ne.ToUUID())
+		}
+		if len(f.UserID.In) > 0 {
+			placeholders := make([]string, len(f.UserID.In))
+			for i, id := range f.UserID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.user_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.UserID.NotIn) > 0 {
+			placeholders := make([]string, len(f.UserID.NotIn))
+			for i, id := range f.UserID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_grant.user_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.UserID.IsNull != nil {
+			if *f.UserID.IsNull {
+				conditions = append(conditions, `oauth_grant.user_id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_grant.user_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.ClientID != nil {
+		if f.ClientID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.client_id = $%d`, paramNum))
+			*args = append(*args, f.ClientID.Eq.ToUUID())
+		}
+		if f.ClientID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.client_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.ClientID.Ne.ToUUID())
+		}
+		if len(f.ClientID.In) > 0 {
+			placeholders := make([]string, len(f.ClientID.In))
+			for i, id := range f.ClientID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_grant.client_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ClientID.NotIn) > 0 {
+			placeholders := make([]string, len(f.ClientID.NotIn))
+			for i, id := range f.ClientID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_grant.client_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.ClientID.IsNull != nil {
+			if *f.ClientID.IsNull {
+				conditions = append(conditions, `oauth_grant.client_id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_grant.client_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.User != nil {
+		before := len(*args)
+		through := f.User.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_grant.user_id IN (SELECT "user".id FROM "user"%s)`, where))
+	}
+	if f.Client != nil {
+		before := len(*args)
+		through := f.Client.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_grant.client_id IN (SELECT oauth_client.id FROM oauth_client%s)`, where))
+	}
+	if f.OauthCodes != nil {
+		before := len(*args)
+		through := f.OauthCodes.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_grant.id IN (SELECT oauth_code.grant_id FROM oauth_code%s)`, where))
+	}
+	if f.OauthTokens != nil {
+		before := len(*args)
+		through := f.OauthTokens.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_grant.id IN (SELECT oauth_token.grant_id FROM oauth_token%s)`, where))
+	}
+	if f.ReferencedByOAuthCodeGrant != nil {
+		probe := `SELECT 1 FROM oauth_code WHERE oauth_code.grant_id = oauth_grant.id`
+		if f.ReferencedByOAuthCodeGrant.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+	if f.ReferencedByOAuthTokenGrant != nil {
+		probe := `SELECT 1 FROM oauth_token WHERE oauth_token.grant_id = oauth_grant.id`
+		if f.ReferencedByOAuthTokenGrant.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
+// OAuthTokenFilter provides filtering for OAuthToken queries
+type OAuthTokenFilter struct {
+	Id        *UUIDFilter
+	Kind      *StringFilter
+	TokenHash *StringFilter
+	CreatedAt *DateTimeFilter
+	ExpiresAt *DateTimeFilter
+	UsedAt    *DateTimeFilter
+	RevokedAt *DateTimeFilter
+	// GrantID allows filtering by foreign key
+	GrantID *UUIDFilter
+	// Grant keeps the rows whose grant is among the OAuthGrant rows
+	// the filter finds (D90): one condition, the foreign key in the keys of
+	// those rows.
+	Grant *OAuthGrantFilter
+	// AllOf keeps the rows every one of its filters finds, beside the
+	// filter's other conditions (D99): each filter's conditions are ANDed
+	// with them, so two AnyOf groups, each in a filter of its own, must
+	// both hold. A filter of no condition adds none, and so does an empty
+	// AllOf.
+	AllOf []OAuthTokenFilter
+	// AnyOf keeps the rows any of its filters finds, each filter's
+	// conditions ANDed and the filters ORed, beside the filter's other
+	// conditions (D90). A filter of no condition keeps every row, and so
+	// does an empty AnyOf.
+	AnyOf []OAuthTokenFilter
+}
+
+// OAuthTokenUpdate provides fields that can be updated
+type OAuthTokenUpdate struct {
+	Kind             *string
+	TokenHash        *types.CryptoSHA256
+	ExpiresAt        *types.TemporalDateTime
+	UsedAt           *types.TemporalDateTime
+	UsedAtSetNull    bool
+	RevokedAt        *types.TemporalDateTime
+	RevokedAtSetNull bool
+	// GrantID allows updating the foreign key for grant
+	GrantID *types.IdentityUUID
+	// UpdatedBy is automatically set if not provided and user is in context
+	UpdatedBy *types.IdentityUUID
+}
+
+// NewOAuthTokenSnapshotUpdate maps every mutable field from a complete
+// OAuthToken value. It is intended for source-of-truth replacement flows;
+// nullable zero values clear their columns instead of leaving stale data.
+func NewOAuthTokenSnapshotUpdate(input *types.OAuthToken) *OAuthTokenUpdate {
+	update := &OAuthTokenUpdate{}
+	if input == nil {
+		return update
+	}
+	update.Kind = &input.Kind
+	update.TokenHash = &input.TokenHash
+	update.ExpiresAt = &input.ExpiresAt
+	if input.UsedAt == nil {
+		update.UsedAtSetNull = true
+	} else {
+		update.UsedAt = input.UsedAt
+	}
+	if input.RevokedAt == nil {
+		update.RevokedAtSetNull = true
+	} else {
+		update.RevokedAt = input.RevokedAt
+	}
+	return update
+}
+
+// ApplyTo writes every set and SetNull field onto row. A nil receiver or row
+// is a no-op. SetNull wins when both a value and SetNull are present.
+func (u *OAuthTokenUpdate) ApplyTo(row *types.OAuthToken) {
+	if u == nil || row == nil {
+		return
+	}
+	if u.Kind != nil {
+		row.Kind = *u.Kind
+	}
+	if u.TokenHash != nil {
+		row.TokenHash = *u.TokenHash
+	}
+	if u.ExpiresAt != nil {
+		row.ExpiresAt = *u.ExpiresAt
+	}
+	if u.UsedAtSetNull {
+		row.UsedAt = nil
+	} else if u.UsedAt != nil {
+		row.UsedAt = u.UsedAt
+	}
+	if u.RevokedAtSetNull {
+		row.RevokedAt = nil
+	} else if u.RevokedAt != nil {
+		row.RevokedAt = u.RevokedAt
+	}
+	if u.GrantID != nil {
+		row.Grant.Id = u.GrantID
+	}
+}
+
+// OAuthTokenFilterConditions are the filter's conditions for a query of
+// the caller's own, each column qualified by its table: each value is
+// appended to args, its placeholder numbered after those already there.
+// FindMany's WHERE is them joined by AND. A nil filter has none.
+func OAuthTokenFilterConditions(filter *OAuthTokenFilter, args *[]any) []string {
+	return filter.conditions(args, len(*args))
+}
+
+// buildWhereClause builds a WHERE clause from a OAuthTokenFilter: its
+// conditions joined by AND, or nothing when it has none.
+func (f *OAuthTokenFilter) buildWhereClause(args *[]interface{}, paramOffset int) string {
+	conditions := f.conditions(args, paramOffset)
+	if len(conditions) == 0 {
+		return ""
+	}
+	return " WHERE " + strings.Join(conditions, " AND ")
+}
+
+// conditions are the filter's conditions, each value appended to args, its
+// placeholder numbered from paramOffset+1.
+func (f *OAuthTokenFilter) conditions(args *[]interface{}, paramOffset int) []string {
+	if f == nil {
+		return nil
+	}
+
+	var conditions []string
+	paramNum := paramOffset
+	if f.Id != nil {
+		if f.Id.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.id = $%d`, paramNum))
+			*args = append(*args, f.Id.Eq.ToUUID())
+		}
+		if f.Id.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.Id.Ne.ToUUID())
+		}
+		if len(f.Id.In) > 0 {
+			placeholders := make([]string, len(f.Id.In))
+			for i, id := range f.Id.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Id.NotIn) > 0 {
+			placeholders := make([]string, len(f.Id.NotIn))
+			for i, id := range f.Id.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_token.id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Id.IsNull != nil {
+			if *f.Id.IsNull {
+				conditions = append(conditions, `oauth_token.id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_token.id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Kind != nil {
+		if f.Kind.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.kind = $%d`, paramNum))
+			*args = append(*args, *f.Kind.Eq)
+		}
+		if f.Kind.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.kind IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.Kind.Ne)
+		}
+		if len(f.Kind.In) > 0 {
+			placeholders := make([]string, len(f.Kind.In))
+			for i, value := range f.Kind.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.kind IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.Kind.NotIn) > 0 {
+			placeholders := make([]string, len(f.Kind.NotIn))
+			for i, value := range f.Kind.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_token.kind IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.Kind.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.kind ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.Kind.ILike+"%")
+		}
+		if f.Kind.IsNull != nil {
+			if *f.Kind.IsNull {
+				conditions = append(conditions, `oauth_token.kind IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_token.kind IS NOT NULL`)
+			}
+		}
+	}
+	if f.TokenHash != nil {
+		if f.TokenHash.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.token_hash = $%d`, paramNum))
+			*args = append(*args, *f.TokenHash.Eq)
+		}
+		if f.TokenHash.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.token_hash IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.TokenHash.Ne)
+		}
+		if len(f.TokenHash.In) > 0 {
+			placeholders := make([]string, len(f.TokenHash.In))
+			for i, value := range f.TokenHash.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.token_hash IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.TokenHash.NotIn) > 0 {
+			placeholders := make([]string, len(f.TokenHash.NotIn))
+			for i, value := range f.TokenHash.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_token.token_hash IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.TokenHash.ILike != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.token_hash ILIKE $%d`, paramNum))
+			*args = append(*args, "%"+*f.TokenHash.ILike+"%")
+		}
+		if f.TokenHash.IsNull != nil {
+			if *f.TokenHash.IsNull {
+				conditions = append(conditions, `oauth_token.token_hash IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_token.token_hash IS NOT NULL`)
+			}
+		}
+	}
+	if f.CreatedAt != nil {
+		if f.CreatedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.created_at = $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Eq)
+		}
+		if f.CreatedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.created_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Ne)
+		}
+		if f.CreatedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.created_at > $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gt)
+		}
+		if f.CreatedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.created_at >= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Gte)
+		}
+		if f.CreatedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.created_at < $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lt)
+		}
+		if f.CreatedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.created_at <= $%d`, paramNum))
+			*args = append(*args, *f.CreatedAt.Lte)
+		}
+		if f.CreatedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.created_at >= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.created_at <= $%d`, paramNum))
+			*args = append(*args, f.CreatedAt.Between.End)
+		}
+		if len(f.CreatedAt.In) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.In))
+			for i, value := range f.CreatedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.created_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.CreatedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.CreatedAt.NotIn))
+			for i, value := range f.CreatedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_token.created_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.CreatedAt.IsNull != nil {
+			if *f.CreatedAt.IsNull {
+				conditions = append(conditions, `oauth_token.created_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_token.created_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.ExpiresAt != nil {
+		if f.ExpiresAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.expires_at = $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Eq)
+		}
+		if f.ExpiresAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.expires_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Ne)
+		}
+		if f.ExpiresAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.expires_at > $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Gt)
+		}
+		if f.ExpiresAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.expires_at >= $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Gte)
+		}
+		if f.ExpiresAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.expires_at < $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Lt)
+		}
+		if f.ExpiresAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.expires_at <= $%d`, paramNum))
+			*args = append(*args, *f.ExpiresAt.Lte)
+		}
+		if f.ExpiresAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.expires_at >= $%d`, paramNum))
+			*args = append(*args, f.ExpiresAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.expires_at <= $%d`, paramNum))
+			*args = append(*args, f.ExpiresAt.Between.End)
+		}
+		if len(f.ExpiresAt.In) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.In))
+			for i, value := range f.ExpiresAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.expires_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.ExpiresAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.ExpiresAt.NotIn))
+			for i, value := range f.ExpiresAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_token.expires_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.ExpiresAt.IsNull != nil {
+			if *f.ExpiresAt.IsNull {
+				conditions = append(conditions, `oauth_token.expires_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_token.expires_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.UsedAt != nil {
+		if f.UsedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.used_at = $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Eq)
+		}
+		if f.UsedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.used_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Ne)
+		}
+		if f.UsedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.used_at > $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Gt)
+		}
+		if f.UsedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.used_at >= $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Gte)
+		}
+		if f.UsedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.used_at < $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Lt)
+		}
+		if f.UsedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.used_at <= $%d`, paramNum))
+			*args = append(*args, *f.UsedAt.Lte)
+		}
+		if f.UsedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.used_at >= $%d`, paramNum))
+			*args = append(*args, f.UsedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.used_at <= $%d`, paramNum))
+			*args = append(*args, f.UsedAt.Between.End)
+		}
+		if len(f.UsedAt.In) > 0 {
+			placeholders := make([]string, len(f.UsedAt.In))
+			for i, value := range f.UsedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.used_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.UsedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.UsedAt.NotIn))
+			for i, value := range f.UsedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_token.used_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.UsedAt.IsNull != nil {
+			if *f.UsedAt.IsNull {
+				conditions = append(conditions, `oauth_token.used_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_token.used_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.RevokedAt != nil {
+		if f.RevokedAt.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.revoked_at = $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Eq)
+		}
+		if f.RevokedAt.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.revoked_at IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Ne)
+		}
+		if f.RevokedAt.Gt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.revoked_at > $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Gt)
+		}
+		if f.RevokedAt.Gte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.revoked_at >= $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Gte)
+		}
+		if f.RevokedAt.Lt != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.revoked_at < $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Lt)
+		}
+		if f.RevokedAt.Lte != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.revoked_at <= $%d`, paramNum))
+			*args = append(*args, *f.RevokedAt.Lte)
+		}
+		if f.RevokedAt.Between != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.revoked_at >= $%d`, paramNum))
+			*args = append(*args, f.RevokedAt.Between.Start)
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.revoked_at <= $%d`, paramNum))
+			*args = append(*args, f.RevokedAt.Between.End)
+		}
+		if len(f.RevokedAt.In) > 0 {
+			placeholders := make([]string, len(f.RevokedAt.In))
+			for i, value := range f.RevokedAt.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.revoked_at IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.RevokedAt.NotIn) > 0 {
+			placeholders := make([]string, len(f.RevokedAt.NotIn))
+			for i, value := range f.RevokedAt.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, value)
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_token.revoked_at IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.RevokedAt.IsNull != nil {
+			if *f.RevokedAt.IsNull {
+				conditions = append(conditions, `oauth_token.revoked_at IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_token.revoked_at IS NOT NULL`)
+			}
+		}
+	}
+	if f.GrantID != nil {
+		if f.GrantID.Eq != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.grant_id = $%d`, paramNum))
+			*args = append(*args, f.GrantID.Eq.ToUUID())
+		}
+		if f.GrantID.Ne != nil {
+			paramNum++
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.grant_id IS DISTINCT FROM $%d`, paramNum))
+			*args = append(*args, f.GrantID.Ne.ToUUID())
+		}
+		if len(f.GrantID.In) > 0 {
+			placeholders := make([]string, len(f.GrantID.In))
+			for i, id := range f.GrantID.In {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`oauth_token.grant_id IN (%s)`, strings.Join(placeholders, ", ")))
+		}
+		if len(f.GrantID.NotIn) > 0 {
+			placeholders := make([]string, len(f.GrantID.NotIn))
+			for i, id := range f.GrantID.NotIn {
+				paramNum++
+				placeholders[i] = fmt.Sprintf("$%d", paramNum)
+				*args = append(*args, id.ToUUID())
+			}
+			conditions = append(conditions, fmt.Sprintf(`(oauth_token.grant_id IN (%s)) IS NOT TRUE`, strings.Join(placeholders, ", ")))
+		}
+		if f.GrantID.IsNull != nil {
+			if *f.GrantID.IsNull {
+				conditions = append(conditions, `oauth_token.grant_id IS NULL`)
+			} else {
+				conditions = append(conditions, `oauth_token.grant_id IS NOT NULL`)
+			}
+		}
+	}
+	if f.Grant != nil {
+		before := len(*args)
+		through := f.Grant.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`oauth_token.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)`, where))
+	}
+
+	// AllOf's filters' conditions are the filter's own, ANDed (D99), each
+	// one's placeholders numbered after the last.
+	for i := range f.AllOf {
+		before := len(*args)
+		conditions = append(conditions, f.AllOf[i].conditions(args, paramNum)...)
+		paramNum += len(*args) - before
+	}
+
+	if len(f.AnyOf) > 0 {
+		start := len(*args)
+		branches := make([]string, 0, len(f.AnyOf))
+		every := false
+		for i := range f.AnyOf {
+			before := len(*args)
+			branch := f.AnyOf[i].conditions(args, paramNum)
+			paramNum += len(*args) - before
+			if len(branch) == 0 {
+				every = true
+				continue
+			}
+			branches = append(branches, "("+strings.Join(branch, " AND ")+")")
+		}
+		if every {
+			// A branch of no condition keeps every row, and so does the
+			// whole: the other branches' parameters go too. AnyOf is the
+			// last condition, so no placeholder follows theirs.
+			*args = (*args)[:start]
+		} else {
+			conditions = append(conditions, "("+strings.Join(branches, " OR ")+")")
+		}
+	}
+
+	return conditions
+}
+
 // RoleFilter provides filtering for Role queries
 type RoleFilter struct {
 	Id          *UUIDFilter
@@ -2224,6 +6050,14 @@ type UserFilter struct {
 	Email       *StringFilter
 	DisplayName *StringFilter
 	CreatedAt   *DateTimeFilter
+	// OauthCodes keeps the rows that some OAuthCode row the filter
+	// finds points at by its user (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	OauthCodes *OAuthCodeFilter
+	// OauthGrants keeps the rows that some OAuthGrant row the filter
+	// finds points at by its user (D108, D180): one condition, the key
+	// in the foreign keys of those rows.
+	OauthGrants *OAuthGrantFilter
 	// Sessions keeps the rows that some Session row the filter
 	// finds points at by its user (D108, D180): one condition, the key
 	// in the foreign keys of those rows.
@@ -2240,6 +6074,12 @@ type UserFilter struct {
 	// finds points at by its user (D108, D180): one condition, the key
 	// in the foreign keys of those rows.
 	UserRoleGrants *UserRoleGrantFilter
+	// ReferencedByOAuthCodeUser filters on the presence or absence of a
+	// OAuthCode whose user points at this row.
+	ReferencedByOAuthCodeUser *ReferencedByFilter
+	// ReferencedByOAuthGrantUser filters on the presence or absence of a
+	// OAuthGrant whose user points at this row.
+	ReferencedByOAuthGrantUser *ReferencedByFilter
 	// ReferencedBySessionUser filters on the presence or absence of a
 	// Session whose user points at this row.
 	ReferencedBySessionUser *ReferencedByFilter
@@ -2513,6 +6353,26 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			}
 		}
 	}
+	if f.OauthCodes != nil {
+		before := len(*args)
+		through := f.OauthCodes.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"user".id IN (SELECT oauth_code.user_id FROM oauth_code%s)`, where))
+	}
+	if f.OauthGrants != nil {
+		before := len(*args)
+		through := f.OauthGrants.conditions(args, paramNum)
+		paramNum += len(*args) - before
+		where := ""
+		if len(through) > 0 {
+			where = " WHERE " + strings.Join(through, " AND ")
+		}
+		conditions = append(conditions, fmt.Sprintf(`"user".id IN (SELECT oauth_grant.user_id FROM oauth_grant%s)`, where))
+	}
 	if f.Sessions != nil {
 		before := len(*args)
 		through := f.Sessions.conditions(args, paramNum)
@@ -2552,6 +6412,22 @@ func (f *UserFilter) conditions(args *[]interface{}, paramOffset int) []string {
 			where = " WHERE " + strings.Join(through, " AND ")
 		}
 		conditions = append(conditions, fmt.Sprintf(`"user".id IN (SELECT user_role_grant.user_id FROM user_role_grant%s)`, where))
+	}
+	if f.ReferencedByOAuthCodeUser != nil {
+		probe := `SELECT 1 FROM oauth_code WHERE oauth_code.user_id = "user".id`
+		if f.ReferencedByOAuthCodeUser.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
+	}
+	if f.ReferencedByOAuthGrantUser != nil {
+		probe := `SELECT 1 FROM oauth_grant WHERE oauth_grant.user_id = "user".id`
+		if f.ReferencedByOAuthGrantUser.Exists {
+			conditions = append(conditions, fmt.Sprintf(`EXISTS (%s)`, probe))
+		} else {
+			conditions = append(conditions, fmt.Sprintf(`NOT EXISTS (%s)`, probe))
+		}
 	}
 	if f.ReferencedBySessionUser != nil {
 		probe := `SELECT 1 FROM "session" WHERE "session".user_id = "user".id`

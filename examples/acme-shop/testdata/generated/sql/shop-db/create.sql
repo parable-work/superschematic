@@ -294,6 +294,71 @@ CREATE TABLE inventory_stock_movements (
 
 COMMENT ON TABLE inventory_stock_movements IS 'On a table, every change of what is on hand, append-only, keyed by its sequence from 1: its kind, its delta, what was on hand after it, its reason and reference, the claim and item it was for, who made it and when. onHand always equals the sum of the deltas.';
 
+CREATE TABLE oauth_client (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  "name" TEXT NOT NULL,
+  uri TEXT,
+  redirect_uris TEXT[] DEFAULT '{}' NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  refreshed_at TIMESTAMPTZ,
+  fresh_until TIMESTAMPTZ,
+  last_used_at TIMESTAMPTZ,
+  UNIQUE (client_id),
+  CONSTRAINT ck_oauth_client_client_id CHECK (length(client_id) >= 1)
+);
+
+COMMENT ON TABLE oauth_client IS 'An OAuth client: a metadata document''s, cached, or one that registered.';
+
+CREATE TABLE oauth_code (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  client_id UUID NOT NULL,
+  user_id UUID,
+  grant_id UUID,
+  redirect_uri TEXT NOT NULL,
+  code_challenge TEXT NOT NULL,
+  state TEXT,
+  scope TEXT,
+  resource TEXT NOT NULL,
+  nonce TEXT NOT NULL,
+  code_hash VARCHAR(64),
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  expires_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  used_at TIMESTAMPTZ,
+  UNIQUE (code_hash)
+);
+
+COMMENT ON TABLE oauth_code IS 'An OAuth authorization request: pending while its user consents, then the code its client redeems once.';
+
+CREATE TABLE oauth_grant (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  user_id UUID NOT NULL,
+  client_id UUID NOT NULL,
+  permissions TEXT[],
+  resource TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  expires_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  last_used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ
+);
+
+COMMENT ON TABLE oauth_grant IS 'An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.';
+
+CREATE TABLE oauth_token (
+  id UUID DEFAULT gen_random_uuid() NOT NULL PRIMARY KEY,
+  grant_id UUID NOT NULL,
+  kind TEXT NOT NULL,
+  token_hash VARCHAR(64) NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  expires_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  used_at TIMESTAMPTZ,
+  revoked_at TIMESTAMPTZ,
+  UNIQUE (token_hash)
+);
+
+COMMENT ON TABLE oauth_token IS 'An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.';
+
 CREATE TABLE "order" (
   created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP NOT NULL,
   updated_at TIMESTAMPTZ,
@@ -876,6 +941,42 @@ ALTER TABLE inventory_stock_movements
   REFERENCES inventory(id)
   ON DELETE CASCADE;
 
+ALTER TABLE oauth_code
+  ADD CONSTRAINT fk_oauth_code_client_id
+  FOREIGN KEY (client_id)
+  REFERENCES oauth_client(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE oauth_code
+  ADD CONSTRAINT fk_oauth_code_user_id
+  FOREIGN KEY (user_id)
+  REFERENCES "user"(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE oauth_code
+  ADD CONSTRAINT fk_oauth_code_grant_id
+  FOREIGN KEY (grant_id)
+  REFERENCES oauth_grant(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE oauth_grant
+  ADD CONSTRAINT fk_oauth_grant_user_id
+  FOREIGN KEY (user_id)
+  REFERENCES "user"(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE oauth_grant
+  ADD CONSTRAINT fk_oauth_grant_client_id
+  FOREIGN KEY (client_id)
+  REFERENCES oauth_client(id)
+  ON DELETE CASCADE;
+
+ALTER TABLE oauth_token
+  ADD CONSTRAINT fk_oauth_token_grant_id
+  FOREIGN KEY (grant_id)
+  REFERENCES oauth_grant(id)
+  ON DELETE CASCADE;
+
 ALTER TABLE "order"
   ADD CONSTRAINT fk_order_customer_id
   FOREIGN KEY (customer_id)
@@ -1019,6 +1120,10 @@ CREATE UNIQUE INDEX idx_collection_point_calendar_settings_collection_point_name
 CREATE UNIQUE INDEX idx_inventory_stock_holds_inventory_record ON inventory_stock_holds USING BTREE (inventory_id, record);
 
 CREATE UNIQUE INDEX idx_inventory_stock_movements_inventory_seq ON inventory_stock_movements USING BTREE (inventory_id, seq);
+
+CREATE INDEX idx_oauth_grant_user ON oauth_grant USING BTREE (user_id);
+
+CREATE INDEX idx_oauth_token_grant ON oauth_token USING BTREE (grant_id);
 
 CREATE INDEX idx_order_customer_placed_at ON "order" USING BTREE (customer_id, placed_at);
 

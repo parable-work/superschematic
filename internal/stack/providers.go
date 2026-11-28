@@ -111,6 +111,64 @@ func (r *resolver) slotProvider(d *deployable, svc *Service, slot string, bindin
 	return p, ok
 }
 
+// unreadProviderSetting reports whether field is a setting of a provider
+// slot of an API deployable d serves, the field named after the slot and
+// a key that one of the API's providers of the slot's interface reads
+// (ir.ProviderConfigField), that no provider d's environment names reads:
+// the slot is unset, or names a provider with no such key. Such a field
+// is no secret of the environment, so `stack secrets set` does not ask for
+// it and a deploy does not wait on it (D159, #608). A slot bound to a
+// parameter or to no string names no provider the build can tell, and
+// keeps every setting; resolveProviders refuses it.
+func (r *resolver) unreadProviderSetting(d *deployable, field string) bool {
+	setting := false
+	for _, served := range d.res.Services {
+		svc := r.services[served.Name]
+		if svc == nil || svc.Kind != ir.SchemaKindAPI {
+			continue
+		}
+		for _, slot := range sortedKeys(svc.ProviderSlots) {
+			named, known := r.slotValue(d, slot)
+			for _, p := range svc.Providers {
+				if p == nil || p.Implements != svc.ProviderSlots[slot] {
+					continue
+				}
+				for _, key := range p.Config {
+					if ir.ProviderConfigField(slot, key.Key) != field {
+						continue
+					}
+					if !known || p.Name == named {
+						return false
+					}
+					setting = true
+				}
+			}
+		}
+	}
+	return setting
+}
+
+// slotValue returns the provider deployable d's environment names in
+// slot, its literal or the field's default, "" when it names none, and
+// false when the environment binds it to something else.
+func (r *resolver) slotValue(d *deployable, slot string) (string, bool) {
+	value, set := d.settings.env[slot]
+	switch {
+	case set && value.Parameter != "":
+		return "", false
+	case set:
+		if value.Value == nil {
+			return "", true
+		}
+		name, ok := value.Value.(string)
+		return name, ok
+	}
+	if f := d.fields[slot]; f != nil && f.def != nil {
+		return *f.def, true
+	}
+	return "", true
+}
+
 // checkCoverage refuses deployable d of API svc when the API uses a
 // feature that needs a runtime interface none of the slots d fills
 // provides (D159): notifications with no channel adapter, agents with no

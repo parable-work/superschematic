@@ -205,8 +205,8 @@ func (e Extension) platforms() []registry.PlatformSpec {
 // to another Worker (calls.go), its edges to a bucket (r2.go) and its sql
 // edges to a D1 database (d1.go) or a database on Hyperdrive
 // (hyperdrive.go), a job's the same from Cron and a worker's from the
-// drainer, but to D1, on which no worker claims, whose connectors read
-// nothing of the caller's platform (cron.go, drainer.go), and a site's
+// drainer, whose connectors read nothing of the caller's platform
+// (cron.go, drainer.go), and a site's
 // edge to a server on Workers (sites.go).
 func connectors() []registry.ConnectorSpec {
 	return []registry.ConnectorSpec{
@@ -222,6 +222,7 @@ func connectors() []registry.ConnectorSpec {
 		{Name: DrainerHyperdriveConnector, Edge: ir.EdgeSQL, From: Drainer, To: HyperdrivePlatform, Connect: connectHyperdrive},
 		{Name: DrainerHTTPConnector, Edge: ir.EdgeHTTP, From: Drainer, To: Workers, Connect: connectWorkers},
 		{Name: DrainerR2Connector, Edge: ir.EdgeBucket, From: Drainer, To: R2, Connect: connectR2},
+		{Name: DrainerD1Connector, Edge: ir.EdgeSQL, From: Drainer, To: D1Platform, Connect: connectD1},
 	}
 }
 

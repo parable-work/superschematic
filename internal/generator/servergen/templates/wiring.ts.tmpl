@@ -212,6 +212,22 @@ function openDatabase(service: string, field: string, db: DatabaseConnection): S
 }
 {{- end }}
 
+{{- define "ts-d1-database" -}}
+/**
+ * The D1 database of the database field named field: the d1 binding its
+ * value names, which the Worker's platform writes beside the field's
+ * variables (D64). A connection string or a Cloud SQL configuration is
+ * refused: a Worker reaches its database through a D1 binding alone.
+ */
+function d1Database(field: string, db: DatabaseConnection): SqlDatabase {
+  if (!('d1' in db)) {
+    const what = 'url' in db ? 'a connection string' : 'a Cloud SQL connector configuration';
+    throw new Error(`${field} is ${what}, and a Worker reaches its database through a D1 binding alone: set ${field}_D1_BINDING and ${field}_D1_DATABASE`);
+  }
+  return binding(env, db.d1.binding, 'd1');
+}
+{{- end }}
+
 {{- define "ts-hyperdrive" -}}
 /**
  * The pool of the database field named field, whose DB service lists

@@ -26,7 +26,7 @@
 // @schemas/ts-notes-implementation, at typescript/ts-notes
 
 import { createLogger, type DatabaseConnection } from '@superschematic/http-runtime';
-import { openSqlite, sqliteFile, sqliteQueue, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
+import { claimsOver, openSqlite, sqliteFile, type SqliteDatabase } from '@superschematic/http-runtime/sqlite';
 import { runWorker, workerConcurrency, workerDrain } from '@superschematic/http-runtime/worker';
 import { startTelemetry } from '@superschematic/http-runtime/telemetry';
 import { noteWrittenQueue } from '@schemas/ts-notes-db-types/queues';
@@ -66,7 +66,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   };
   const workers = await construct('ts-notes', 'workers', () => tsNotesImpl.createWorkers(tsNotesDeps));
   const concurrency = workerConcurrency(2);
-  const queue = sqliteQueue(tsNotesDbDatabase, noteWrittenQueue);
+  const queue = claimsOver(tsNotesDbDatabase, noteWrittenQueue);
   logger.info('worker started', { api: 'ts-notes', class: 'IndexNotes', queue: queue.name, concurrency });
   await runWorker(
     {

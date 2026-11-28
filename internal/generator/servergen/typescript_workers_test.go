@@ -213,7 +213,7 @@ func TestTypeScriptWorkersEntrypointWiring(t *testing.T) {
 		"import { binding, perIsolate, requestIP, serviceFetch, stackEnvOf, stackEnvWithSecrets } from '@superschematic/http-runtime/workers';",
 		"import { openR2Bucket } from '@superschematic/http-runtime/r2';",
 		"// shop-api's config holds Secret<T> fields, which a Worker reads only within\n// a request, so the isolate's first request loads it.",
-		"const values = await stackEnvWithSecrets(env, ['STRIPE_KEY']);",
+		"const values = await stackEnvWithSecrets(env, ['STRIPE_KEY'], ['STRIPE_KEY']);",
 		"const shopApiConfig = configure('shop-api', () => shopApiApi.loadEnvConfig(values));",
 		"const shopApiOrigins = configure('shop-api', () => loadCors('SHOP_API_CORS', values));",
 		"const shopPricingClient = newShopPricingClient(shopApiConfig.SHOP_PRICING_SERVICE);",

@@ -39,7 +39,7 @@ import { {{ if .CloudSQL }}{{ end }}connectPostgres, ping } from '{{ .Naming.HTT
 import type { Pool } from 'pg';
 {{- end }}
 {{- if .AccessImports }}
-import { {{ join .AccessImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import { {{ join .AccessImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}{{ .AccessEntry }}';
 {{- end }}
 {{- if .SQLiteDatabases }}
 import { ping as pingSqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';

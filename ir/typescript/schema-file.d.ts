@@ -466,6 +466,19 @@ export interface IdentityFirstUser {
   role: string;
 }
 
+export interface IdentityOAuthClients {
+  metadataDocuments?: boolean;
+  registration?: boolean;
+}
+
+export interface IdentityOAuthConfig {
+  accessTokenTtlSeconds?: number;
+  clients?: IdentityOAuthClients;
+  consentPath?: string;
+  grantMaxTtlSeconds?: number;
+  refreshTokenTtlSeconds?: number;
+}
+
 export interface ImageConstraints {
   maxAspectRatio?: number;
   maxHeight?: number;
@@ -1088,6 +1101,7 @@ export interface UnionFile {
 
 export interface UserAdministrationConfig {
   apiKeys?: boolean;
+  oauth?: boolean;
   path?: string;
 }
 
@@ -1099,6 +1113,7 @@ export interface UserSessionsConfig {
   defaultRoles?: string[];
   firstUser?: IdentityFirstUser;
   noLogin?: boolean;
+  oauth?: IdentityOAuthConfig;
   path?: string;
   register?: boolean;
   registration?: string;

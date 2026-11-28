@@ -28,8 +28,9 @@ import (
 // bundle, the API's config as bindings (bundleVersion), and two plain_text
 // bindings the runtime reads: WORKER_CONCURRENCY, how many messages a
 // firing handles at a time, and WORKER_DRAIN_SECONDS. Its database is on
-// Hyperdrive (hyperdrive.go): D1 refuses a worker's claims
-// (PlatformSpec.NoQueueClaims).
+// Hyperdrive (hyperdrive.go), or on D1 (d1.go), whose queues its drain.ts
+// claims over the d1 binding, each claim in the binding's turn with the
+// repositories' (D189, #702).
 //
 // A behavior worker (D103, D151) is a drainer too: its drain.ts runs its
 // table's deadline, change and event queues at each firing, each claiming

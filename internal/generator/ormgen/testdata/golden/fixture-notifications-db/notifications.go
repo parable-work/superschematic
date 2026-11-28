@@ -29,7 +29,7 @@ themselves, held to its audience and their grants (D156, D180).
 
 // notifierDefinitions are the notifier's tables by part and the database's
 // tables, which the notifier runs on.
-var notifierDefinitions = notifications.MustParse(`{"parts":{"channelIdentities":{"type":"ChannelIdentity","table":"channel_identity","columns":{"address":{"name":"address"},"codeAttempts":{"name":"code_attempts"},"codeExpiresAt":{"name":"code_expires_at","sqlite":"time"},"codeHash":{"name":"code_hash"},"codePurpose":{"name":"code_purpose"},"createdAt":{"name":"created_at","sqlite":"time"},"id":{"name":"id","uuid":true},"kind":{"name":"kind"},"optedOutAt":{"name":"opted_out_at","sqlite":"time"},"principal":{"name":"principal","uuid":true},"principalKind":{"name":"principal_kind"},"principalTable":{"name":"principal_table"},"revokedAt":{"name":"revoked_at","sqlite":"time"},"trust":{"name":"trust"},"verifiedAt":{"name":"verified_at","sqlite":"time"}}},"channelTrust":{"type":"ChannelTrust","table":"channel_trust","columns":{"channelKind":{"name":"channel_kind"},"id":{"name":"id","uuid":true},"level":{"name":"level"},"permissions":{"name":"permissions","sqlite":"json"}}},"deliveries":{"type":"Delivery","table":"delivery","columns":{"acknowledgedAt":{"name":"acknowledged_at","sqlite":"time"},"address":{"name":"address"},"attempt":{"name":"attempt"},"channelKind":{"name":"channel_kind"},"deliveredAt":{"name":"delivered_at","sqlite":"time"},"detail":{"name":"detail"},"dueAt":{"name":"due_at","sqlite":"time"},"endedAt":{"name":"ended_at","sqlite":"time"},"failedAt":{"name":"failed_at","sqlite":"time"},"id":{"name":"id","uuid":true},"notice":{"name":"notice","uuid":true},"providerMessageId":{"name":"provider_message_id"},"purpose":{"name":"purpose"},"queuedAt":{"name":"queued_at","sqlite":"time"},"readAt":{"name":"read_at","sqlite":"time"},"recipient":{"name":"recipient","uuid":true},"sentAt":{"name":"sent_at","sqlite":"time"},"slot":{"name":"slot"},"state":{"name":"state"}}},"inbox":{"type":"Notice","table":"notice","columns":{"acknowledgedAt":{"name":"acknowledged_at","sqlite":"time"},"acknowledgedVia":{"name":"acknowledged_via"},"body":{"name":"body"},"createdAt":{"name":"created_at","sqlite":"time"},"digestedAt":{"name":"digested_at","sqlite":"time"},"escalation":{"name":"escalation"},"eventId":{"name":"event_id","uuid":true},"eventKind":{"name":"event_kind"},"id":{"name":"id","uuid":true},"payload":{"name":"payload","sqlite":"json"},"readAt":{"name":"read_at","sqlite":"time"},"recipient":{"name":"recipient","uuid":true},"recipientKind":{"name":"recipient_kind"},"reference":{"name":"reference"},"route":{"name":"route","uuid":true},"state":{"name":"state"},"subjectKey":{"name":"subject_key"},"subjectTable":{"name":"subject_table"},"title":{"name":"title"},"urgency":{"name":"urgency"}}},"preferences":{"type":"NoticePreference","table":"notice_preference","columns":{"channels":{"name":"channels","sqlite":"json"},"digest":{"name":"digest"},"eventKind":{"name":"event_kind"},"id":{"name":"id","uuid":true},"principal":{"name":"principal","uuid":true},"quietEnd":{"name":"quiet_end"},"quietStart":{"name":"quiet_start"},"timeZone":{"name":"time_zone"},"urgency":{"name":"urgency"}}},"replies":{"type":"Reply","table":"reply","columns":{"address":{"name":"address"},"body":{"name":"body"},"channelKind":{"name":"channel_kind"},"detail":{"name":"detail"},"id":{"name":"id","uuid":true},"identity":{"name":"identity","uuid":true},"interpreter":{"name":"interpreter"},"notice":{"name":"notice","uuid":true},"outcome":{"name":"outcome"},"principal":{"name":"principal","uuid":true},"providerMessageId":{"name":"provider_message_id"},"receivedAt":{"name":"received_at","sqlite":"time"},"reference":{"name":"reference"},"slot":{"name":"slot"},"undo":{"name":"undo","sqlite":"json"},"undoneAt":{"name":"undone_at","sqlite":"time"},"verb":{"name":"verb"}}},"routes":{"type":"NoticeRoute","table":"notice_route","columns":{"createdAt":{"name":"created_at","sqlite":"time"},"createdBy":{"name":"created_by","uuid":true},"enabled":{"name":"enabled","sqlite":"bool"},"escalation":{"name":"escalation","sqlite":"json"},"eventKind":{"name":"event_kind"},"filter":{"name":"filter","sqlite":"json"},"id":{"name":"id","uuid":true},"name":{"name":"\"name\""},"recipients":{"name":"recipients","sqlite":"json"},"subjectTable":{"name":"subject_table"},"urgency":{"name":"urgency"}}},"subscriptions":{"type":"Subscription","table":"subscription","columns":{"channels":{"name":"channels","sqlite":"json"},"createdAt":{"name":"created_at","sqlite":"time"},"enabled":{"name":"enabled","sqlite":"bool"},"filter":{"name":"filter","sqlite":"json"},"id":{"name":"id","uuid":true},"lastSentAt":{"name":"last_sent_at","sqlite":"time"},"name":{"name":"\"name\""},"nextAt":{"name":"next_at","sqlite":"time"},"principal":{"name":"principal","uuid":true},"rule":{"name":"rule"},"start":{"name":"\"start\""},"subjectTable":{"name":"subject_table"},"timeZone":{"name":"time_zone"},"titleField":{"name":"title_field"}}}},"tables":{"Account":{"key":"id"},"Approval":{"key":"id","events":[{"kind":"approval.requested","title":"summary","urgency":"urgent"}]},"ChannelIdentity":{"key":"id","part":"channelIdentities"},"ChannelTrust":{"key":"id","part":"channelTrust"},"Delivery":{"key":"id","part":"deliveries"},"Notice":{"key":"id","part":"inbox"},"NoticePreference":{"key":"id","part":"preferences"},"NoticeRoute":{"key":"id","part":"routes"},"Reply":{"key":"id","part":"replies"},"Role":{"key":"id"},"Session":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"Subscription":{"key":"id","part":"subscriptions"},"Ticket":{"key":"id","events":[{"kind":"ticket.assigned","payload":["title","status"],"title":"title"},{"kind":"ticket.overdue","payload":["title"],"title":"title","urgency":"urgent"},{"kind":"ticket.summary","title":"title","urgency":"digest"},{"kind":"reference.cleared","title":"title","urgency":"record"}]},"UserApiKey":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"UserCredential":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"UserRoleGrant":{"key":"id","relations":{"role":{"target":"Role","member":"role"},"user":{"target":"Account","member":"user"}}}}}`)
+var notifierDefinitions = notifications.MustParse(`{"parts":{"channelIdentities":{"type":"ChannelIdentity","table":"channel_identity","columns":{"address":{"name":"address"},"codeAttempts":{"name":"code_attempts"},"codeExpiresAt":{"name":"code_expires_at","sqlite":"time"},"codeHash":{"name":"code_hash"},"codePurpose":{"name":"code_purpose"},"createdAt":{"name":"created_at","sqlite":"time"},"id":{"name":"id","uuid":true},"kind":{"name":"kind"},"optedOutAt":{"name":"opted_out_at","sqlite":"time"},"principal":{"name":"principal","uuid":true},"principalKind":{"name":"principal_kind"},"principalTable":{"name":"principal_table"},"revokedAt":{"name":"revoked_at","sqlite":"time"},"trust":{"name":"trust"},"verifiedAt":{"name":"verified_at","sqlite":"time"}}},"channelTrust":{"type":"ChannelTrust","table":"channel_trust","columns":{"channelKind":{"name":"channel_kind"},"id":{"name":"id","uuid":true},"level":{"name":"level"},"permissions":{"name":"permissions","sqlite":"json"}}},"deliveries":{"type":"Delivery","table":"delivery","columns":{"acknowledgedAt":{"name":"acknowledged_at","sqlite":"time"},"address":{"name":"address"},"attempt":{"name":"attempt"},"channelKind":{"name":"channel_kind"},"deliveredAt":{"name":"delivered_at","sqlite":"time"},"detail":{"name":"detail"},"dueAt":{"name":"due_at","sqlite":"time"},"endedAt":{"name":"ended_at","sqlite":"time"},"failedAt":{"name":"failed_at","sqlite":"time"},"id":{"name":"id","uuid":true},"notice":{"name":"notice","uuid":true},"providerMessageId":{"name":"provider_message_id"},"purpose":{"name":"purpose"},"queuedAt":{"name":"queued_at","sqlite":"time"},"readAt":{"name":"read_at","sqlite":"time"},"recipient":{"name":"recipient","uuid":true},"sentAt":{"name":"sent_at","sqlite":"time"},"slot":{"name":"slot"},"state":{"name":"state"}}},"inbox":{"type":"Notice","table":"notice","columns":{"acknowledgedAt":{"name":"acknowledged_at","sqlite":"time"},"acknowledgedVia":{"name":"acknowledged_via"},"body":{"name":"body"},"createdAt":{"name":"created_at","sqlite":"time"},"digestedAt":{"name":"digested_at","sqlite":"time"},"escalation":{"name":"escalation"},"eventId":{"name":"event_id","uuid":true},"eventKind":{"name":"event_kind"},"id":{"name":"id","uuid":true},"payload":{"name":"payload","sqlite":"json"},"readAt":{"name":"read_at","sqlite":"time"},"recipient":{"name":"recipient","uuid":true},"recipientKind":{"name":"recipient_kind"},"reference":{"name":"reference"},"route":{"name":"route","uuid":true},"state":{"name":"state"},"subjectKey":{"name":"subject_key"},"subjectTable":{"name":"subject_table"},"title":{"name":"title"},"urgency":{"name":"urgency"}}},"preferences":{"type":"NoticePreference","table":"notice_preference","columns":{"channels":{"name":"channels","sqlite":"json"},"digest":{"name":"digest"},"eventKind":{"name":"event_kind"},"id":{"name":"id","uuid":true},"principal":{"name":"principal","uuid":true},"quietEnd":{"name":"quiet_end"},"quietStart":{"name":"quiet_start"},"timeZone":{"name":"time_zone"},"urgency":{"name":"urgency"}}},"replies":{"type":"Reply","table":"reply","columns":{"address":{"name":"address"},"body":{"name":"body"},"channelKind":{"name":"channel_kind"},"detail":{"name":"detail"},"id":{"name":"id","uuid":true},"identity":{"name":"identity","uuid":true},"interpreter":{"name":"interpreter"},"notice":{"name":"notice","uuid":true},"outcome":{"name":"outcome"},"principal":{"name":"principal","uuid":true},"providerMessageId":{"name":"provider_message_id"},"receivedAt":{"name":"received_at","sqlite":"time"},"reference":{"name":"reference"},"slot":{"name":"slot"},"undo":{"name":"undo","sqlite":"json"},"undoneAt":{"name":"undone_at","sqlite":"time"},"verb":{"name":"verb"}}},"routes":{"type":"NoticeRoute","table":"notice_route","columns":{"createdAt":{"name":"created_at","sqlite":"time"},"createdBy":{"name":"created_by","uuid":true},"enabled":{"name":"enabled","sqlite":"bool"},"escalation":{"name":"escalation","sqlite":"json"},"eventKind":{"name":"event_kind"},"filter":{"name":"filter","sqlite":"json"},"id":{"name":"id","uuid":true},"name":{"name":"\"name\""},"recipients":{"name":"recipients","sqlite":"json"},"subjectTable":{"name":"subject_table"},"urgency":{"name":"urgency"}}},"subscriptions":{"type":"Subscription","table":"subscription","columns":{"channels":{"name":"channels","sqlite":"json"},"createdAt":{"name":"created_at","sqlite":"time"},"enabled":{"name":"enabled","sqlite":"bool"},"filter":{"name":"filter","sqlite":"json"},"id":{"name":"id","uuid":true},"lastSentAt":{"name":"last_sent_at","sqlite":"time"},"name":{"name":"\"name\""},"nextAt":{"name":"next_at","sqlite":"time"},"principal":{"name":"principal","uuid":true},"rule":{"name":"rule"},"start":{"name":"\"start\""},"subjectTable":{"name":"subject_table"},"timeZone":{"name":"time_zone"},"titleField":{"name":"title_field"}}}},"tables":{"Account":{"key":"id"},"Approval":{"key":"id","events":[{"kind":"approval.requested","title":"summary","urgency":"urgent"}]},"ChannelIdentity":{"key":"id","part":"channelIdentities"},"ChannelTrust":{"key":"id","part":"channelTrust"},"Delivery":{"key":"id","part":"deliveries"},"Notice":{"key":"id","part":"inbox"},"NoticePreference":{"key":"id","part":"preferences"},"NoticeRoute":{"key":"id","part":"routes"},"OAuthClient":{"key":"id"},"OAuthCode":{"key":"id","relations":{"client":{"target":"OAuthClient","member":"client"},"grant":{"target":"OAuthGrant","member":"grant"},"user":{"target":"Account","member":"user"}}},"OAuthGrant":{"key":"id","relations":{"client":{"target":"OAuthClient","member":"client"},"user":{"target":"Account","member":"user"}}},"OAuthToken":{"key":"id","relations":{"grant":{"target":"OAuthGrant","member":"grant"}}},"Reply":{"key":"id","part":"replies"},"Role":{"key":"id"},"Session":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"Subscription":{"key":"id","part":"subscriptions"},"Ticket":{"key":"id","events":[{"kind":"ticket.assigned","payload":["title","status"],"title":"title"},{"kind":"ticket.overdue","payload":["title"],"title":"title","urgency":"urgent"},{"kind":"ticket.summary","title":"title","urgency":"digest"},{"kind":"reference.cleared","title":"title","urgency":"record"}]},"UserApiKey":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"UserCredential":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"UserRoleGrant":{"key":"id","relations":{"role":{"target":"Role","member":"role"},"user":{"target":"Account","member":"user"}}}}}`)
 
 // Notifications is the database as the notifier runs through it (D190).
 func (db *Database) Notifications() notifications.Host {
@@ -57,6 +57,10 @@ type notifierRepositories interface {
 	GetNoticeRepository() NoticeRepositoryInterface
 	GetNoticePreferenceRepository() NoticePreferenceRepositoryInterface
 	GetNoticeRouteRepository() NoticeRouteRepositoryInterface
+	GetOAuthClientRepository() OAuthClientRepositoryInterface
+	GetOAuthCodeRepository() OAuthCodeRepositoryInterface
+	GetOAuthGrantRepository() OAuthGrantRepositoryInterface
+	GetOAuthTokenRepository() OAuthTokenRepositoryInterface
 	GetReplyRepository() ReplyRepositoryInterface
 	GetRoleRepository() RoleRepositoryInterface
 	GetSessionRepository() SessionRepositoryInterface
@@ -417,6 +421,30 @@ func (h notifierHost) Record(ctx context.Context, typeName, key string) (map[str
 			return nil, false, nil
 		}
 		return notifierRecord(repositories.GetNoticeRouteRepository().GetOne(ctx, id, nil))
+	case "OAuthClient":
+		id, ok := notifierKey[types.IdentityUUID](key)
+		if !ok {
+			return nil, false, nil
+		}
+		return notifierRecord(repositories.GetOAuthClientRepository().GetOne(ctx, id, nil))
+	case "OAuthCode":
+		id, ok := notifierKey[types.IdentityUUID](key)
+		if !ok {
+			return nil, false, nil
+		}
+		return notifierRecord(repositories.GetOAuthCodeRepository().GetOne(ctx, id, nil))
+	case "OAuthGrant":
+		id, ok := notifierKey[types.IdentityUUID](key)
+		if !ok {
+			return nil, false, nil
+		}
+		return notifierRecord(repositories.GetOAuthGrantRepository().GetOne(ctx, id, nil))
+	case "OAuthToken":
+		id, ok := notifierKey[types.IdentityUUID](key)
+		if !ok {
+			return nil, false, nil
+		}
+		return notifierRecord(repositories.GetOAuthTokenRepository().GetOne(ctx, id, nil))
 	case "Reply":
 		id, ok := notifierKey[types.IdentityUUID](key)
 		if !ok {
@@ -527,6 +555,34 @@ func (h notifierHost) Find(ctx context.Context, typeName string, filter json.Raw
 			return nil, err
 		}
 		rows, _, err := repositories.GetNoticeRouteRepository().FindMany(ctx, where, &NoticeRouteFindOptions{Fields: NoticeRouteFields{}.All(), Limit: limit, SkipCount: true})
+		return notifierRows(rows, err)
+	case "OAuthClient":
+		var where *OAuthClientFilter
+		if err := notifierDecode(filter, &where); err != nil {
+			return nil, err
+		}
+		rows, _, err := repositories.GetOAuthClientRepository().FindMany(ctx, where, &OAuthClientFindOptions{Fields: OAuthClientFields{}.All(), Limit: limit, SkipCount: true})
+		return notifierRows(rows, err)
+	case "OAuthCode":
+		var where *OAuthCodeFilter
+		if err := notifierDecode(filter, &where); err != nil {
+			return nil, err
+		}
+		rows, _, err := repositories.GetOAuthCodeRepository().FindMany(ctx, where, &OAuthCodeFindOptions{Fields: OAuthCodeFields{}.All(), Limit: limit, SkipCount: true})
+		return notifierRows(rows, err)
+	case "OAuthGrant":
+		var where *OAuthGrantFilter
+		if err := notifierDecode(filter, &where); err != nil {
+			return nil, err
+		}
+		rows, _, err := repositories.GetOAuthGrantRepository().FindMany(ctx, where, &OAuthGrantFindOptions{Fields: OAuthGrantFields{}.All(), Limit: limit, SkipCount: true})
+		return notifierRows(rows, err)
+	case "OAuthToken":
+		var where *OAuthTokenFilter
+		if err := notifierDecode(filter, &where); err != nil {
+			return nil, err
+		}
+		rows, _, err := repositories.GetOAuthTokenRepository().FindMany(ctx, where, &OAuthTokenFindOptions{Fields: OAuthTokenFields{}.All(), Limit: limit, SkipCount: true})
 		return notifierRows(rows, err)
 	case "Reply":
 		var where *ReplyFilter
@@ -678,6 +734,50 @@ func (h notifierHost) Update(ctx context.Context, typeName, key string, update j
 			return err
 		}
 		_, err := repositories.GetNoticeRouteRepository().UpdateOne(ctx, id, &set)
+		return err
+	case "OAuthClient":
+		id, ok := notifierKey[types.IdentityUUID](key)
+		if !ok {
+			return ErrNotFound
+		}
+		var set OAuthClientUpdate
+		if err := notifierDecode(update, &set); err != nil {
+			return err
+		}
+		_, err := repositories.GetOAuthClientRepository().UpdateOne(ctx, id, &set)
+		return err
+	case "OAuthCode":
+		id, ok := notifierKey[types.IdentityUUID](key)
+		if !ok {
+			return ErrNotFound
+		}
+		var set OAuthCodeUpdate
+		if err := notifierDecode(update, &set); err != nil {
+			return err
+		}
+		_, err := repositories.GetOAuthCodeRepository().UpdateOne(ctx, id, &set)
+		return err
+	case "OAuthGrant":
+		id, ok := notifierKey[types.IdentityUUID](key)
+		if !ok {
+			return ErrNotFound
+		}
+		var set OAuthGrantUpdate
+		if err := notifierDecode(update, &set); err != nil {
+			return err
+		}
+		_, err := repositories.GetOAuthGrantRepository().UpdateOne(ctx, id, &set)
+		return err
+	case "OAuthToken":
+		id, ok := notifierKey[types.IdentityUUID](key)
+		if !ok {
+			return ErrNotFound
+		}
+		var set OAuthTokenUpdate
+		if err := notifierDecode(update, &set); err != nil {
+			return err
+		}
+		_, err := repositories.GetOAuthTokenRepository().UpdateOne(ctx, id, &set)
 		return err
 	case "Reply":
 		id, ok := notifierKey[types.IdentityUUID](key)
