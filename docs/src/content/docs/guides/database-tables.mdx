@@ -1334,11 +1334,10 @@ goes, and a file's delete enqueues its object's release unless another
 file of the sub-table still names it, so a statement that deletes the
 files of one object releases it once. Of a statement that deletes a
 holder and a row it points at, a cleared message may name the holder
-the same statement deleted, which its worker finds gone. Go's and Rust's
-repositories on SQLite read neither sub-table yet: a service that lists
-`sqlite` and declares either builds with Go's types, whose `References()`
-and `Attachments()` there answer `ErrSQLiteUnsupported`
-([Go on SQLite](#go-on-sqlite)), and is refused with Rust's.
+the same statement deleted, which its worker finds gone. Rust's
+repositories on SQLite read and write both sub-tables (#611), as the
+[Rust](#rust) section shows. Go's there answer `ErrSQLiteUnsupported`
+from `References()` and `Attachments()` ([Go on SQLite](#go-on-sqlite)).
 
 ### References and backlinks
 
@@ -1437,6 +1436,25 @@ let orm = Repositories::new(&tx)?.acting(Some(user)).with_access(AccessCaller::o
 let backlinks = orm.references()?.referenced_by(&RowRef::new("Issue", &key), None).await?;
 let (file, upload) = orm.attachments()?.begin(&begin, bucket.as_ref(), None).await?;
 tx.commit().await?;
+```
+
+On a SQLite file (#611) the SQLite repositories open them too, over a
+`rusqlite::Connection` in the caller's transaction, which a write that
+takes a lock opens with `TransactionBehavior::Immediate`. They run the
+same statements in SQLite's words: a parameter `?n`, `CAST(... AS TEXT)`,
+the clock as RFC 3339 text, and a ref block found through `json_each`.
+They take no advisory lock, since the transaction holds the file's write
+lock. The members that touch only the file answer at once; `begin`,
+`complete`, `download` and `release` reach the bucket and are async, the
+file's statements running when first polled:
+
+```rust
+database.write(|connection| {
+    let orm = sqlite::Repositories::new(connection)?.acting(Some(user)).with_access(AccessCaller::of(Some(&principal)));
+    let backlinks = orm.references()?.referenced_by(&RowRef::new("Issue", &key), None)?;
+    let filed = orm.attachments()?.file(&onto)?;
+    Ok::<_, orm::Error>((backlinks, filed))
+})?;
 ```
 
 ### In Go

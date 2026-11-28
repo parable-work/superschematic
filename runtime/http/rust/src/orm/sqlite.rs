@@ -128,8 +128,9 @@ impl<'a> Repositories<'a> {
     }
 
     /// The repositories keeping every read and write to what `caller` sees
-    /// (D156): for a party or an agent run, the rows its grants reach. An
-    /// `@audience` table is Postgres's alone.
+    /// (D156): an `@audience` table's rows whose audience, a JSON array a
+    /// trigger keeps, holds the caller (D182, #611), and for a party or an
+    /// agent run the rows its grants reach.
     #[must_use]
     pub fn with_access(mut self, caller: AccessCaller) -> Self {
         self.session.access = Some(caller);
@@ -184,6 +185,24 @@ impl<'a> Repositories<'a> {
     /// The session the repositories act in.
     pub fn session(&self) -> &Session<'a> {
         &self.session
+    }
+
+    /// The definition of the database the repositories serve.
+    pub fn definition(&self) -> &'a Definition {
+        self.definition
+    }
+
+    /// The references of the database's rows (D154, #611), as the
+    /// repositories read: an [`Error::Invalid`] for a database that keeps
+    /// none.
+    pub fn references(&self) -> Result<super::rowfeatures::sqlite::References<'_, 'a>, Error> {
+        super::rowfeatures::sqlite::References::new(self)
+    }
+
+    /// The files of the database's rows (D154, #611), as the repositories
+    /// read: an [`Error::Invalid`] for a database that holds none.
+    pub fn attachments(&self) -> Result<super::rowfeatures::sqlite::Attachments<'_, 'a>, Error> {
+        super::rowfeatures::sqlite::Attachments::new(self)
     }
 
     /// The repository of the table type `name`.
@@ -288,10 +307,17 @@ impl Tables {
         &self.database
     }
 
+    /// The definition of the database's tables.
+    pub fn definition(&self) -> Result<&'static Definition, Error> {
+        (self.definition)()
+    }
+
     /// Runs `operation` for `principal` in one transaction of the file: a
     /// write's on the writing connection, which commits when the operation
     /// answers and rolls back when it refuses, and a read's on a reading
-    /// one. On tokio the work runs on its blocking pool.
+    /// one, but a read that may reveal an `Encrypted<T>` value, whose
+    /// access-log row it writes (D156). On tokio the work runs on its
+    /// blocking pool.
     pub async fn serve(
         &self,
         operation: &'static TableOperation,
@@ -316,7 +342,9 @@ impl Tables {
             }
             repositories.table_operation(operation, principal.as_ref(), &request)
         };
-        if operation.writes() {
+        // A read that may reveal a value writes its access-log row (D156),
+        // which a reading connection, opened read-only, cannot.
+        if operation.writes() || !operation.reveal.is_empty() {
             self.database.write_async(work).await
         } else {
             self.database.read_async(work).await

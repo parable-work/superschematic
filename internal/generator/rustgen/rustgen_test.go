@@ -68,10 +68,10 @@ func TestWriteTypesGolden(t *testing.T) {
 		// the API's views read the database's union.
 		{service: "fixture-variant-field-db", sqlite: true},
 		{service: "fixture-variant-field-api", deps: []string{"fixture-variant-field-db"}},
-		// References and attachments (D154, D185): the Postgres definition in
-		// src/orm.rs carries them, and the repositories open references()
-		// and attachments().
-		{service: "fixture-references-db", core: true},
+		// References and attachments (D154, D185): the Postgres and the
+		// SQLite definitions in src/orm.rs carry them (#611), and the
+		// repositories of each dialect open references() and attachments().
+		{service: "fixture-references-db", core: true, sqlite: true},
 		// Search across tables (D155, D188): each @searchable table's index
 		// in the Postgres definition, which orm::search_tables reads.
 		{service: "fixture-search-db", core: true},
