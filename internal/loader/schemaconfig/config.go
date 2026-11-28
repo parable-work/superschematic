@@ -4,10 +4,11 @@
 // the JSON Schema generated from @superschematic/schema-config.
 //
 // The TypeScript form (schema.config.ts) is read statically by the tsreader
-// off the defineConfig({...}) object literal; the data forms decode directly
-// into SchemaConfig here. Either way the shape contract is the same package:
-// @superschematic/schema-config declares it, gen-json-schema projects it to the
-// embedded JSON Schema, and this package enforces it.
+// off the defineConfig({...}) object literal, which it converts to the JSON
+// the data forms write and decodes through DecodeJSON too. So every form is
+// held to one contract: @superschematic/schema-config declares it,
+// gen-json-schema projects it to the embedded JSON Schema, and this package
+// enforces it.
 package schemaconfig
 
 import (
@@ -46,8 +47,8 @@ type ServiceDependency struct {
 
 // SchemaConfig is the service configuration extracted from
 // schema.config.{ts,json,yaml}. The TypeScript form is read statically off
-// the defineConfig({...}) object literal -- never executed. The JSON and YAML
-// forms decode directly into this struct after JSON Schema validation.
+// the defineConfig({...}) object literal -- never executed. Every form
+// decodes into this struct through DecodeJSON.
 type SchemaConfig struct {
 	// Name is the service name (e.g., "web-db").
 	Name string `json:"name" yaml:"name"`
@@ -175,7 +176,7 @@ type KindSet interface {
 func ReadFile(servicePath string, known KindSet) (*SchemaConfig, error) {
 	jsonPath := filepath.Join(servicePath, "schema.config.json")
 	if data, err := os.ReadFile(jsonPath); err == nil {
-		return decodeJSON(data, "schema.config.json", known)
+		return DecodeJSON(data, "schema.config.json", known)
 	}
 	yamlPath := filepath.Join(servicePath, "schema.config.yaml")
 	if data, err := os.ReadFile(yamlPath); err == nil {
@@ -187,16 +188,18 @@ func ReadFile(servicePath string, known KindSet) (*SchemaConfig, error) {
 		if err != nil {
 			return nil, fmt.Errorf("schema.config.yaml: converting to JSON: %w", err)
 		}
-		return decodeJSON(jsonBytes, "schema.config.yaml", known)
+		return DecodeJSON(jsonBytes, "schema.config.yaml", known)
 	}
 	return nil, fmt.Errorf("service %s has no schema.config.{json,yaml}: %w", servicePath, os.ErrNotExist)
 }
 
-// decodeJSON validates a config payload against the generated JSON Schema,
-// then strict-decodes it. The schema checks the core output sections and
+// DecodeJSON validates a config payload against the generated JSON Schema,
+// strict-decodes it and checks its shape with ValidateShapeWith. source
+// prefixes each error. The schema checks the core output sections and
 // admits any other outputs key; registry.ParseOutputs checks those against
-// the registered generators and their OutputSchema.
-func decodeJSON(data []byte, source string, known KindSet) (*SchemaConfig, error) {
+// the registered generators and their OutputSchema. The data forms and the
+// TypeScript form, converted to JSON, all decode here.
+func DecodeJSON(data []byte, source string, known KindSet) (*SchemaConfig, error) {
 	sch, err := compiledSchema()
 	if err != nil {
 		return nil, err

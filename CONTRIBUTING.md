@@ -248,8 +248,10 @@ an example's script for a change to that example, and
 `examples/migrations/scripts/check.sh` for a change to the migration
 planner or runner.
 
-CI runs only on a pull request that targets `main` and is not a draft.
-Marking a draft ready for review starts its run. A stacked pull request runs
+CI runs on a pull request that targets `main` and is not a draft, and once
+more on `main` after a merge: the quick tier again, whose run saves the
+caches pull requests start from. Marking a draft ready for review starts
+its run. A stacked pull request runs
 nothing until it targets `main`; when GitHub retargets it after its parent
 merges, push to it, or close and reopen it, to start the run. A pull
 request merges with one approval and a green `ci-pass`; an approval from an

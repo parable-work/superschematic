@@ -75,3 +75,10 @@ export function uuidFromDb(value: unknown): string {
 export function isHyphenatedUUID(text: string): boolean {
   return HYPHENATED_UUID.test(text);
 }
+
+/** The same id in one form, whatever form a UUID came in: what a read by many ids matches its rows on. */
+export function idKey(id: unknown): string {
+  const text = String(id);
+  const n = uuidValue(text);
+  return n === undefined ? text : base62UUID(n);
+}
