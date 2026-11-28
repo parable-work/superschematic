@@ -70,7 +70,7 @@ const (
 // generated API and ORM modules require, and of the Cloud SQL Go connector
 // cloudsql.go imports, whose own pgx requirement is pgxVersion.
 const (
-	chiVersion          = "v5.3.2"
+	chiVersion          = "v5.4.0"
 	pgxVersion          = "v5.11.0"
 	zapVersion          = "v1.28.0"
 	cloudSQLConnVersion = "v1.25.3"

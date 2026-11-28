@@ -14,7 +14,7 @@ publish.workspace = true
 default = []
 # The host loop over a tokio-postgres client inside a transaction: an
 # advisory lock per lock key and a savepoint per change set.
-postgres = ["dep:tokio-postgres", "dep:bytes"]
+postgres = ["dep:tokio-postgres", "dep:bytes", "dep:superschematic-engine-pg"]
 # The host loop over a rusqlite connection: a check of each read made under
 # a lock and the change set in one savepoint.
 sqlite = ["dep:rusqlite"]
@@ -33,6 +33,9 @@ tokio-postgres = { version = "0.7.18", optional = true }
 # The buffer a parameter writes its text into, already in tokio-postgres's
 # tree.
 bytes = { version = "1.11", optional = true }
+# The class of a server's error, which says when a command is busy. Its
+# classes alone: the caller's client brings its own TLS.
+superschematic-engine-pg = { path = "../pg", optional = true }
 rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
 
 [dev-dependencies]
@@ -41,6 +44,8 @@ rusqlite = { version = "0.40.2", features = ["bundled"], optional = true }
 superschematic-rules-behaviors = { path = "../rules-behaviors" }
 superschematic-rules-testkit = { path = "../rules-testkit" }
 tokio = { version = "1.52.2", features = ["macros", "rt-multi-thread"] }
+# The Postgres tests connect with the TLS their URL's sslmode asks for.
+superschematic-engine-pg = { path = "../pg", features = ["tls"] }
 
 [lints]
 workspace = true

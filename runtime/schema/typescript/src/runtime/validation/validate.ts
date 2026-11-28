@@ -10,6 +10,7 @@ import {
 } from 'superscalar/validation';
 import { createDefaultScalarValidatorRegistry } from './registry';
 import { parseSchema, parseSchemaJson } from '../json/reader';
+import { compilePattern } from './pattern';
 import { isAnyJSONScalar, jsonShapeOf, structuredJSONType } from './types';
 import type { FieldDef, SchemaInput, ScalarDef, Schema, TypeDef, UnionDef, ValidationOptions } from './types';
 
@@ -149,7 +150,7 @@ function validateStringConstraints(
 
   if (scalar.pattern) {
     try {
-      const pattern = new RegExp(scalar.pattern, 'u');
+      const pattern = compilePattern(scalar.pattern);
       if (!pattern.test(value)) {
         errors.push({
           validator: 'pattern',
@@ -408,7 +409,7 @@ function validateFieldLevelStringConstraints(field: FieldDef, value: string): Va
   }
   if (field.validatePattern) {
     try {
-      const pattern = new RegExp(field.validatePattern, 'u');
+      const pattern = compilePattern(field.validatePattern);
       if (!pattern.test(value)) {
         fieldErrors.push({
           validator: 'pattern',

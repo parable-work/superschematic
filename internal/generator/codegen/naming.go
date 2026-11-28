@@ -32,9 +32,11 @@ var irregularPlurals = map[string]string{
 }
 
 // ToSnakeCase converts PascalCase, camelCase, or kebab-case strings to snake_case.
+// It splits only where a lower-case letter or digit meets a capital, as
+// ToKebabCase does.
 // Examples:
 //   - "UserName" -> "user_name"
-//   - "getHTTPResponse" -> "get_http_response"
+//   - "getHTTPResponse" -> "get_httpresponse"
 //   - "connector-requests" -> "connector_requests"
 func ToSnakeCase(s string) string {
 	s = strings.ReplaceAll(s, "-", "_")
@@ -42,10 +44,19 @@ func ToSnakeCase(s string) string {
 	return strings.ToLower(snake)
 }
 
-// ToKebabCase converts PascalCase or camelCase strings to kebab-case.
+// ToKebabCase converts PascalCase or camelCase strings to kebab-case. It
+// splits only where a lower-case letter or digit meets a capital, so a run
+// of capitals stays one word and an underscore stays.
 // Examples:
 //   - "UserName" -> "user-name"
-//   - "getHTTPResponse" -> "get-http-response"
+//   - "getHTTPResponse" -> "get-httpresponse"
+//   - "line_item" -> "line_item"
+//
+// It is not ir.Kebab (getHTTPResponse is get-http-response there, and
+// line_item line-item): its output is a wire name, an operation's route
+// and capability and a tool's name, which the engine derives the same way
+// (runtime/engine/testdata/tool_parameters_parity.json), so changing it
+// would move routes and tools a deployed API serves.
 func ToKebabCase(s string) string {
 	kebab := caseBoundaryRegex.ReplaceAllString(s, "${1}-${2}")
 	return strings.ToLower(kebab)

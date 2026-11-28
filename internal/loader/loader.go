@@ -223,7 +223,11 @@ func LoadServiceWithConfig(servicePath string, opts ...Option) (*ir.Schema, *sch
 	var schema *ir.Schema
 	var cfg *schemaconfig.SchemaConfig
 	var vin verify.Input
-	if runsTSFrontend(servicePath, tsFiles) {
+	ts, err := runsTSFrontend(servicePath, tsFiles)
+	if err != nil {
+		return nil, nil, err
+	}
+	if ts {
 		// The TypeScript frontend owns its program, config read, walk, and
 		// validation; cross-service imports land in schema.Imports.
 		var tsInput *verify.Input
@@ -996,17 +1000,18 @@ func HasTSFrontend(servicePath string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return runsTSFrontend(servicePath, tsFiles), nil
+	return runsTSFrontend(servicePath, tsFiles)
 }
 
 // runsTSFrontend is HasTSFrontend over the service's classified TypeScript
-// schema files.
-func runsTSFrontend(servicePath string, tsFiles []string) bool {
-	if len(tsFiles) > 0 {
-		return true
+// schema files. It refuses a service with more than one config form
+// (schemaconfig.Locate).
+func runsTSFrontend(servicePath string, tsFiles []string) (bool, error) {
+	_, form, _, err := schemaconfig.Locate(servicePath)
+	if err != nil {
+		return false, err
 	}
-	_, err := os.Stat(filepath.Join(servicePath, "schema.config.ts"))
-	return err == nil
+	return len(tsFiles) > 0 || form == schemaconfig.FormTS, nil
 }
 
 func classifySchemaFiles(servicePath string) (dataFiles, tsFiles []string, err error) {

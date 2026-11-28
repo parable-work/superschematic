@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/stackgen"
+	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
 	"github.com/parable-work/superschematic/internal/registry"
 	"github.com/parable-work/superschematic/internal/release"
 	"github.com/parable-work/superschematic/internal/stack"
@@ -169,7 +170,14 @@ func rootApps(c registry.GenerateContext, name string) ([]registry.CIApp, error)
 	var out []registry.CIApp
 	for _, entry := range entries {
 		other := entry.Name()
-		if !entry.IsDir() || strings.HasPrefix(other, "_") || other == filepath.Base(dir) || !hasConfig(filepath.Join(root, other)) {
+		if !entry.IsDir() || strings.HasPrefix(other, "_") || other == filepath.Base(dir) {
+			continue
+		}
+		_, _, ok, err := schemaconfig.Locate(filepath.Join(root, other))
+		if err != nil {
+			return nil, fmt.Errorf("stack %s: %w", name, err)
+		}
+		if !ok {
 			continue
 		}
 		cfg, err := c.Options.LoadDependencyConfig(other)
@@ -202,17 +210,6 @@ func rootApps(c registry.GenerateContext, name string) ([]registry.CIApp, error)
 		}
 	}
 	return out, nil
-}
-
-// hasConfig reports whether dir holds a schema config, as a service of the
-// services root does.
-func hasConfig(dir string) bool {
-	for _, file := range []string{"schema.config.ts", "schema.config.json", "schema.config.yaml"} {
-		if _, err := os.Stat(filepath.Join(dir, file)); err == nil {
-			return true
-		}
-	}
-	return false
 }
 
 // archives are the release's static archives by platform, with where

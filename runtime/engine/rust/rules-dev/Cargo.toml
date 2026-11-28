@@ -12,7 +12,7 @@ publish.workspace = true
 default = []
 # PgStore: the development layout in a schema of a Postgres database, and
 # with the server feature a move of one to a Postgres runtime database.
-postgres = ["dep:postgres", "superschematic-rules-runtime?/postgres"]
+postgres = ["dep:postgres", "dep:superschematic-engine-pg", "superschematic-rules-runtime?/postgres"]
 # The routes over HTTP as an axum router (rules_dev::server), with the
 # event stream and the MCP endpoint, and the superschematic-dev binary that
 # serves them. The handler's router is transport-free; this is its binding.
@@ -37,6 +37,8 @@ rusqlite = { version = "0.40.2", features = ["bundled"] }
 # The store in a Postgres schema, through the synchronous client the
 # engine's storage uses; off by default.
 postgres = { version = "0.19.14", optional = true }
+# The TLS a URL's sslmode asks for.
+superschematic-engine-pg = { path = "../pg", features = ["tls"], optional = true }
 # A request's id and a create's key when it names none.
 uuid = { version = "1.28.0", features = ["v4"] }
 # The server feature's router and listener, at the versions the engine's

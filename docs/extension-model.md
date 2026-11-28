@@ -1697,6 +1697,10 @@ against the registry with an error that lists the registered kinds. Its
 generator claims and validates each section against its generator's
 `OutputSchema` (section 3.6).
 `superschematic json-schema --config` prints the embedded schema as is.
+A service directory holds one config: `schema.config.ts`,
+`schema.config.json` or `schema.config.yaml`. One that holds more than one
+is refused, since no form is read in preference to another
+(`schemaconfig.Locate`).
 
 ## 6. The frontend
 

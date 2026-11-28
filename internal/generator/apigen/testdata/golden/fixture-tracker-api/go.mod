@@ -18,7 +18,7 @@ module example.com/schemas/api/fixture-tracker-api
 go 1.27.3
 
 require (
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.4.0
 	github.com/jackc/pgx/v5 v5.11.0
 	example.com/schemas/orm/fixture-tracker-db v0.0.0-00010101000000-000000000000
 	example.com/schemas/types/go/fixture-tracker-api v0.0.0-00010101000000-000000000000

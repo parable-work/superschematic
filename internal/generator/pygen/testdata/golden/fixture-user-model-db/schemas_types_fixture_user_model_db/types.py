@@ -126,7 +126,7 @@ class OAuthClient(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -402,7 +402,7 @@ class OAuthCode(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -477,7 +477,7 @@ class OAuthCode(BaseModel):
                 errors.add_field_error("code_hash", "maxLength", "must be at most 64 characters")
             if len(str(self.code_hash)) < 64:
                 errors.add_field_error("code_hash", "minLength", "must be at least 64 characters")
-            if re.search(r"^[0-9a-f]{64}$", str(self.code_hash), re.ASCII) is None:
+            if re.search(r"^[0-9a-f]{64}\Z", str(self.code_hash)) is None:
                 errors.add_field_error("code_hash", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -698,7 +698,7 @@ class OAuthGrant(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -957,7 +957,7 @@ class OAuthToken(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -990,7 +990,7 @@ class OAuthToken(BaseModel):
                 errors.add_field_error("token_hash", "maxLength", "must be at most 64 characters")
             if len(str(self.token_hash)) < 64:
                 errors.add_field_error("token_hash", "minLength", "must be at least 64 characters")
-            if re.search(r"^[0-9a-f]{64}$", str(self.token_hash), re.ASCII) is None:
+            if re.search(r"^[0-9a-f]{64}\Z", str(self.token_hash)) is None:
                 errors.add_field_error("token_hash", "pattern", "invalid format")
 
         # Validate createdAt
@@ -1188,7 +1188,7 @@ class Role(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1389,7 +1389,7 @@ class Session(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1418,7 +1418,7 @@ class Session(BaseModel):
                 errors.add_field_error("token_hash", "maxLength", "must be at most 64 characters")
             if len(str(self.token_hash)) < 64:
                 errors.add_field_error("token_hash", "minLength", "must be at least 64 characters")
-            if re.search(r"^[0-9a-f]{64}$", str(self.token_hash), re.ASCII) is None:
+            if re.search(r"^[0-9a-f]{64}\Z", str(self.token_hash)) is None:
                 errors.add_field_error("token_hash", "pattern", "invalid format")
 
         # Validate createdAt
@@ -1618,7 +1618,7 @@ class User(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1839,7 +1839,7 @@ class UserApiKey(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -1878,7 +1878,7 @@ class UserApiKey(BaseModel):
                 errors.add_field_error("token_hash", "maxLength", "must be at most 64 characters")
             if len(str(self.token_hash)) < 64:
                 errors.add_field_error("token_hash", "minLength", "must be at least 64 characters")
-            if re.search(r"^[0-9a-f]{64}$", str(self.token_hash), re.ASCII) is None:
+            if re.search(r"^[0-9a-f]{64}\Z", str(self.token_hash)) is None:
                 errors.add_field_error("token_hash", "pattern", "invalid format")
 
         # Validate permissions
@@ -2101,7 +2101,7 @@ class UserCredential(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only
@@ -2318,7 +2318,7 @@ class UserRoleGrant(BaseModel):
         # Validate id
         if self.id is not None:
 
-            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\Z", str(self.id)) is None:
                 errors.add_field_error("id", "pattern", "invalid format")
 
             # The scalar's type checks these rules again, so it reports only

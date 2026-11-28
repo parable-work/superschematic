@@ -2488,6 +2488,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "superschematic-engine-pg"
+version = "0.0.0"
+dependencies = [
+ "tokio-postgres",
+]
+
+[[package]]
 name = "superschematic-http-runtime"
 version = "0.0.0"
 dependencies = [
@@ -2537,6 +2544,7 @@ dependencies = [
  "bytes",
  "serde",
  "serde_json",
+ "superschematic-engine-pg",
  "superschematic-rules",
  "tokio-postgres",
  "uuid",
@@ -2550,7 +2558,7 @@ dependencies = [
  "ryu-js",
  "serde",
  "serde_json",
- "sha2 0.10.9",
+ "sha2 0.11.1",
  "superschematic-rules",
 ]
 

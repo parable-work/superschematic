@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/parable-work/superschematic/ir"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Parser interprets an IR Schema to coerce, normalize, default, and

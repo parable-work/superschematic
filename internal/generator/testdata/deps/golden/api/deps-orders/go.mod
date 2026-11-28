@@ -17,7 +17,7 @@ module example.com/schemas/api/deps-orders
 go 1.27.3
 
 require (
-	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-chi/chi/v5 v5.4.0
 	example.com/schemas/orm/deps-db v0.0.0-00010101000000-000000000000
 	example.com/schemas/sdk/go/deps-catalog v0.0.0-00010101000000-000000000000
 	github.com/joho/godotenv v1.5.1
