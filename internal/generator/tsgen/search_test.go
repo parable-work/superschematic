@@ -29,13 +29,17 @@ export async function find(orm: FixtureSearchDbOrm, q: string): Promise<SearchRe
 }
 `
 
+// searchFileProcessorCase is the case of searchCases that runs the file
+// processor's pass over a row's attachment on Postgres (D154, D159, #702).
+const searchFileProcessorCase = "a file's text the file processor extracts is indexed with its row (D154, D159, #702)"
+
 // searchCases are the cases search.test.ts runs: D155's "done when" in
 // the generated repositories.
 var searchCases = []string{
 	"two principals with different access search the same text and each gets exactly the rows their list reads would show, ranked across at least five tables",
 	"a party with a grant finds only the rows its grant reaches, through the route and the MCP tool too, and a revoked grant finds nothing",
 	"a row's conversation and files are indexed with it, and an encrypted field never is",
-	"a file's text the file processor extracts is indexed with its row (D154, D159, #702)",
+	searchFileProcessorCase,
 	"an index row follows its row: an audience change and a delete at once, a change of text once the queue drains",
 	"scope keeps a search to the app's filter",
 	"embeddings re-rank the first hits, are kept while the text holds, and can be switched off",
