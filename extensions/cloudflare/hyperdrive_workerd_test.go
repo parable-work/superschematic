@@ -23,7 +23,11 @@ const tsLedgerHyperdrive = "a76a99bc342644deb02c38d66082262a"
 
 // tsLedgerFixtureServices are the workerd fixture's services a version's
 // service binding names, by the deployable whose Worker each runs.
-var tsLedgerFixtureServices = map[string]string{"ledger": "ts-ledger"}
+var tsLedgerFixtureServices = map[string]string{
+	"ledger":      "ts-ledger",
+	"embed-relay": "ts-ledger-embed-line-items.wake-relay",
+	"sync-relay":  "ts-ledger-sync-items.wake-relay",
+}
 
 // tsLedgerStack is ts-ledger-stack on the cloudflare target: ts-ledger, a
 // TypeScript API over the user model with two workers, over ts-ledger-db on
@@ -82,7 +86,9 @@ func tsLedgerStack() (*ir.Stack, []stack.Service) {
 // of the server (D91) holds its version's bindings too: SITE_CONFIG,
 // SITE_FALLBACK and SITE_ORIGIN with their texts, ASSETS as the fixture's
 // stand-in for the static assets, and SITE_API_TS_LEDGER as a service
-// binding of the fixture's server. The server, which only the site's
+// binding of the fixture's server. Each worker's wake relay (#600) holds
+// WORKFLOW, the fixture's stand-in for its Workflow, and each worker binds
+// the other's relay as a service. The server, which only the site's
 // origin serves, is not exposed, and binds no CORS origins and no identity
 // config: no trusted origin and no cookie domain.
 func TestWorkerdLedgerFixtureHoldsTheGoldenBindings(t *testing.T) {
@@ -98,6 +104,9 @@ func TestWorkerdLedgerFixtureHoldsTheGoldenBindings(t *testing.T) {
 		"embedWorker":  "ts-ledger-embed-line-items",
 		"syncWorker":   "ts-ledger-sync-items",
 		"siteWorker":   "ts-ledger-web",
+		// Each worker's wake relay, through which the other wakes it (#600).
+		"embedRelayWorker": "ts-ledger-embed-line-items.wake-relay",
+		"syncRelayWorker":  "ts-ledger-sync-items.wake-relay",
 	} {
 		got := fixture[worker]
 		if got == nil {
@@ -133,7 +142,7 @@ func TestWorkerdLedgerFixtureHoldsTheGoldenBindings(t *testing.T) {
 				// workerd runs no Workflow: the fixture stands in for a
 				// worker's with the tester's WakeRecorder entrypoint, which
 				// records each instance a wake creates (D151).
-				if have.kind != "service" || !strings.HasPrefix(name, "WAKE_") {
+				if have.kind != "service" || (!strings.HasPrefix(name, "WAKE_") && name != cloudflare.WakeRelayWorkflowBinding) {
 					t.Errorf("%s's %s is a %s of %q, want the fixture's stand-in for the Workflow %v", worker, name, have.kind, have.value, b["workflowName"])
 				}
 			case "assets":

@@ -47,8 +47,12 @@ func (e *emitter) emitOperationSet(set *ir.OperationSet) {
 		e.emitRowFeatureOperationsSet(set, owner)
 		return
 	}
+	if set.IsTriageOperations() {
+		e.emitTriageOperationsSet(set, owner)
+		return
+	}
 	if set.Auth || len(set.Permissions) > 0 || set.Public {
-		e.failf("%s: a class-level @auth, @requirePermission or @publicRoute applies only to a @behaviorOperations, @graphOperations or @rowFeatureOperations set", owner)
+		e.failf("%s: a class-level @auth, @requirePermission or @publicRoute applies only to a @behaviorOperations, @graphOperations, @rowFeatureOperations or @triageOperations set", owner)
 	}
 
 	auth := false
@@ -299,6 +303,57 @@ func (e *emitter) emitRowFeatureOperationsSet(set *ir.OperationSet, owner string
 		fmt.Fprintf(&e.body, "@%s(%s, %s)\n", e.use("rowFeatureOperations"), e.ident(cfg.Type, "table"), literal)
 	} else {
 		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("rowFeatureOperations"), e.ident(cfg.Type, "table"))
+	}
+	if set.Auth {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("auth"))
+	}
+	if len(set.Permissions) > 0 {
+		fmt.Fprintf(&e.body, "@%s([%s])\n", e.use("requirePermission"), quotedList(set.Permissions))
+	}
+	if set.Public {
+		fmt.Fprintf(&e.body, "@%s\n", e.use("publicRoute"))
+	}
+	e.emitServiceCallersDecorator("", set.ServiceCallers)
+	e.emitMiddlewareDecorators("", set.Middleware)
+	fmt.Fprintf(&e.body, "export abstract class %s {}\n", e.ident(set.Name, "operation set"))
+}
+
+// emitTriageOperationsSet renders the inbound path's triage as routes
+// (#746): @triageOperations with the party table, which the document's
+// imports name, and refersTo, a type of the document, and the set's
+// clause, service clause and middleware, on an abstract class with no
+// members. Its operations are the loader's, which the writer leaves out
+// (withoutExpansion), so the reader expands it again.
+func (e *emitter) emitTriageOperationsSet(set *ir.OperationSet, owner string) {
+	if len(set.Operations) > 0 {
+		e.failf("%s: a @triageOperations class has no members; write the set the loader has not filled", owner)
+	}
+	if set.Encrypted {
+		e.failf("%s: a @triageOperations class is not Encrypted", owner)
+	}
+	cfg := set.TriageOperations
+	imported := false
+	for _, imp := range e.doc.Imports {
+		if slices.Contains(imp.Types, cfg.Party) {
+			e.importSymbol(imp.Package, cfg.Party)
+			imported = true
+			break
+		}
+	}
+	if !imported {
+		e.failf("%s: the party table %s is not covered by the document's imports", owner, cfg.Party)
+	}
+	var options []string
+	if cfg.RefersTo != "" {
+		options = append(options, "refersTo: "+e.ident(cfg.RefersTo, "type"))
+	}
+
+	e.body.WriteString("\n")
+	e.comment("", set.Comment)
+	if literal := optionalObjectLiteral(options); literal != "" {
+		fmt.Fprintf(&e.body, "@%s(%s, %s)\n", e.use("triageOperations"), e.ident(cfg.Party, "table"), literal)
+	} else {
+		fmt.Fprintf(&e.body, "@%s(%s)\n", e.use("triageOperations"), e.ident(cfg.Party, "table"))
 	}
 	if set.Auth {
 		fmt.Fprintf(&e.body, "@%s\n", e.use("auth"))

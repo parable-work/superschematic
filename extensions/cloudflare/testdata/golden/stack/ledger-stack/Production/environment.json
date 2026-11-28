@@ -417,13 +417,28 @@
               "type": "secrets_store_secret"
             },
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"PlaidSyncRequested\":[{\"binding\":\"WAKE_FINANCES_API_SYNC_PLAID_ITEM\"}]}",
+              "type": "plain_text"
+            },
+            {
+              "name": "WAKE_FINANCES_API_SYNC_PLAID_ITEM",
+              "service": {
+                "$output": {
+                  "resource": "finances-api-sync-plaid-item.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "4",
               "type": "plain_text"
             },
             {
               "name": "WORKER_DRAIN_SECONDS",
-              "text": "50",
+              "text": "22",
               "type": "plain_text"
             }
           ],
@@ -460,9 +475,103 @@
           }
         },
         "dependsOn": [
-          "finances-api-embed-line-items.worker"
+          "finances-api-embed-line-items.worker",
+          "finances-api-sync-plaid-item.wake-relay.worker"
         ],
         "phase": "rollout",
+        "owners": [
+          "finances-api-embed-line-items"
+        ]
+      },
+      {
+        "id": "finances-api-embed-line-items.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "finances-api-embed-line-items.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "finances-api-embed-line-items.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "finances-api-embed-line-items.wake-relay.version",
+          "finances-api-embed-line-items.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "finances-api-embed-line-items"
+        ]
+      },
+      {
+        "id": "finances-api-embed-line-items.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "ledger-stack-production-finances-api-embed-line-items"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "finances-api-embed-line-items.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "finances-api-embed-line-items.wake-relay.worker",
+          "finances-api-embed-line-items.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "finances-api-embed-line-items"
+        ]
+      },
+      {
+        "id": "finances-api-embed-line-items.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "ledger-stack-production-finances-api-embed-line-items-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "finances-api-embed-line-items"
         ]
@@ -485,6 +594,9 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "finances-api-sync-plaid-item.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "finances-api-embed-line-items"
@@ -795,13 +907,28 @@
               "type": "secrets_store_secret"
             },
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"EmbedLineItem\":[{\"binding\":\"WAKE_FINANCES_API_EMBED_LINE_ITEMS\"}]}",
+              "type": "plain_text"
+            },
+            {
+              "name": "WAKE_FINANCES_API_EMBED_LINE_ITEMS",
+              "service": {
+                "$output": {
+                  "resource": "finances-api-embed-line-items.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "1",
               "type": "plain_text"
             },
             {
               "name": "WORKER_DRAIN_SECONDS",
-              "text": "50",
+              "text": "22",
               "type": "plain_text"
             }
           ],
@@ -838,9 +965,103 @@
           }
         },
         "dependsOn": [
+          "finances-api-embed-line-items.wake-relay.worker",
           "finances-api-sync-plaid-item.worker"
         ],
         "phase": "rollout",
+        "owners": [
+          "finances-api-sync-plaid-item"
+        ]
+      },
+      {
+        "id": "finances-api-sync-plaid-item.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "finances-api-sync-plaid-item.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "finances-api-sync-plaid-item.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "finances-api-sync-plaid-item.wake-relay.version",
+          "finances-api-sync-plaid-item.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "finances-api-sync-plaid-item"
+        ]
+      },
+      {
+        "id": "finances-api-sync-plaid-item.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "ledger-stack-production-finances-api-sync-plaid-item"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "finances-api-sync-plaid-item.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "finances-api-sync-plaid-item.wake-relay.worker",
+          "finances-api-sync-plaid-item.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "finances-api-sync-plaid-item"
+        ]
+      },
+      {
+        "id": "finances-api-sync-plaid-item.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "ledger-stack-production-finances-api-sync-plaid-item-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "finances-api-sync-plaid-item"
         ]
@@ -863,6 +1084,9 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "finances-api-embed-line-items.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "finances-api-sync-plaid-item"
@@ -1039,8 +1263,10 @@
     {
       "step": "infrastructure",
       "resources": [
+        "finances-api-embed-line-items.wake-relay.worker",
         "finances-api-embed-line-items.worker",
         "finances-api-sync-all-plaid-items.worker",
+        "finances-api-sync-plaid-item.wake-relay.worker",
         "finances-api-sync-plaid-item.worker",
         "finances-api.worker"
       ]
@@ -1065,6 +1291,8 @@
         "finances-api-embed-line-items.deployment",
         "finances-api-embed-line-items.schedule",
         "finances-api-embed-line-items.version",
+        "finances-api-embed-line-items.wake-relay.deployment",
+        "finances-api-embed-line-items.wake-relay.version",
         "finances-api-embed-line-items.workflow",
         "finances-api-sync-all-plaid-items.deployment",
         "finances-api-sync-all-plaid-items.schedule",
@@ -1073,6 +1301,8 @@
         "finances-api-sync-plaid-item.deployment",
         "finances-api-sync-plaid-item.schedule",
         "finances-api-sync-plaid-item.version",
+        "finances-api-sync-plaid-item.wake-relay.deployment",
+        "finances-api-sync-plaid-item.wake-relay.version",
         "finances-api-sync-plaid-item.workflow",
         "finances-api.deployment",
         "finances-api.version"

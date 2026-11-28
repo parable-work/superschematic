@@ -639,6 +639,7 @@ export interface OperationSet {
   public?: boolean;
   rowFeatureOperations?: RowFeatureOperationsConfig;
   serviceCallers?: ServiceCallers;
+  triageOperations?: TriageOperationsConfig;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
 }
@@ -659,6 +660,7 @@ export interface OperationSetFile {
   public?: boolean;
   rowFeatureOperations?: RowFeatureOperationsConfig;
   serviceCallers?: ServiceCallers;
+  triageOperations?: TriageOperationsConfig;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
 }
@@ -999,6 +1001,11 @@ export interface TraitConfigSchema {
 export interface TraitRef {
   configArgs?: { [key: string]: unknown };
   name: string;
+}
+
+export interface TriageOperationsConfig {
+  party: string;
+  refersTo?: string;
 }
 
 export interface TypeDef {

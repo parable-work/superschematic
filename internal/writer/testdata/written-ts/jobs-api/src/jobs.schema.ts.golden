@@ -1,5 +1,5 @@
-import { NoticeWork, RunRequest } from "@schemas/jobs-db";
-import { worker } from "@superschematic/api";
+import { Contact, NoticeWork, RunRequest } from "@schemas/jobs-db";
+import { triageOperations, worker } from "@superschematic/api";
 import { Nullable, Secret } from "@superschematic/schema";
 import { envVars, providers } from "@superschematic/schema-config";
 
@@ -29,6 +29,13 @@ export abstract class JobsApiConfig {
 
   INBOUND_ADDRESS: Nullable<string>;
 }
+
+// The office's triage as routes (#746): what came from no one the
+// deployment trusts, a page at a time; one message with its photos;
+// settling one onto a contact, its number entered by hand or verified by a
+// code; and dismissing one. Each needs parties.triage, the office's.
+@triageOperations(Contact)
+export abstract class Triage {}
 
 // Runs the notifier, which sends a party's verification code and a user's
 // echo (D153).

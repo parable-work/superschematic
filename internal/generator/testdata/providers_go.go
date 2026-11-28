@@ -9,6 +9,8 @@ package fixtureprovidersgoapi_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -27,6 +29,8 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 
+	"github.com/parable-work/superschematic/runtime/http/go/bucket"
+	"github.com/parable-work/superschematic/runtime/http/go/fileprocessing"
 	"github.com/parable-work/superschematic/runtime/http/go/providers"
 	"github.com/parable-work/superschematic/runtime/http/go/session"
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
@@ -434,6 +438,152 @@ func TestProviders(t *testing.T) {
 			t.Fatalf("the files through Deps: %+v, %v", files, err)
 		}
 	})
+
+	t.Run("the file processor's pass makes an uploaded file's text and preview through the slot PREVIEWS names, and ends a file it fails on failed", func(t *testing.T) {
+		logger, logged := jsonLogger()
+		deps := depsOf(t, devCfg, db, logger)
+		system := orm.AsSystem(ctx)
+		objects := &memBucket{objects: map[string]memObject{}}
+		wiring := api.Wiring{Files: fileprocessing.Options{Bucket: objects}}
+		ticket, err := db.GetTicketRepository().CreateOne(system, &orm.TicketCreate{Title: "Plans"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		row := rowrefs.RowRef{Table: "Ticket", Key: ticket.Id.String()}
+		files := deps.DB.Attachments()
+		plan := upload(system, t, files, objects, row, "plan.txt", "text/plain", []byte("Hawthorn rows along the north wall."))
+		broken := upload(system, t, files, objects, row, "scan.pgm", "image/x-portable-graymap", []byte("not an image"))
+		// The upload asked each file's text: text-preview reads the plan's,
+		// and reads no text of a PGM image, which ends that file failed.
+		run, err := api.ProcessPendingFiles(ctx, deps, wiring)
+		if err != nil || run != (fileprocessing.Run{Extracted: 1, Failed: 1}) {
+			t.Fatalf("the first pass: %+v, %v", run, err)
+		}
+		got, err := files.Get(system, rowrefs.FileRef{Table: "Ticket", ID: plan.ID})
+		if err != nil || got.Extraction != rowrefs.ProcessingDone || got.ExtractedText == nil || *got.ExtractedText != "Hawthorn rows along the north wall." {
+			t.Fatalf("the plan's text: %+v, %v", got, err)
+		}
+		// A first view asks a preview: the plan's is an SVG beside its
+		// object, and text-preview fails on the image that is no PGM.
+		for _, file := range []rowrefs.Attachment{plan, broken} {
+			if _, err := files.Download(system, rowrefs.FileRef{Table: "Ticket", ID: file.ID}, bucket.ForAttachments(objects), 0); err != nil {
+				t.Fatal(err)
+			}
+		}
+		run, err = api.ProcessPendingFiles(ctx, deps, wiring)
+		if err != nil || run != (fileprocessing.Run{Previewed: 1, Failed: 1}) {
+			t.Fatalf("the second pass: %+v, %v", run, err)
+		}
+		got, err = files.Get(system, rowrefs.FileRef{Table: "Ticket", ID: plan.ID})
+		if err != nil || got.Preview != rowrefs.ProcessingDone || got.PreviewObject == nil || *got.PreviewObject != rowrefs.PreviewObjectOf(plan.ObjectKey) {
+			t.Fatalf("the plan's preview: %+v, %v", got, err)
+		}
+		if preview := objects.objects[*got.PreviewObject]; preview.contentType != "image/svg+xml" || !strings.Contains(string(preview.data), "Hawthorn") {
+			t.Fatalf("the preview object: %q %q", preview.contentType, preview.data)
+		}
+		got, err = files.Get(system, rowrefs.FileRef{Table: "Ticket", ID: broken.ID})
+		if err != nil || got.Extraction != rowrefs.ProcessingFailed || got.Preview != rowrefs.ProcessingFailed {
+			t.Fatalf("the image the processor failed on: %+v, %v", got, err)
+		}
+		// Nothing is pending: a third pass asks the processor nothing.
+		if run, err := api.ProcessPendingFiles(ctx, deps, wiring); err != nil || run != (fileprocessing.Run{}) {
+			t.Fatalf("the third pass: %+v, %v", run, err)
+		}
+		// Each failure is logged with its reason, and never the file's text.
+		lines := logged.String()
+		if strings.Count(lines, "a file was not processed") != 2 || !strings.Contains(lines, "no file processor extracts the text of image/x-portable-graymap") || !strings.Contains(lines, "no PGM image") {
+			t.Errorf("the failures logged:\n%s", lines)
+		}
+		if strings.Contains(lines, "Hawthorn") || strings.Contains(lines, "not an image") {
+			t.Errorf("a file's bytes reached the log:\n%s", lines)
+		}
+		// A pass with no bucket is refused, saying so.
+		if _, err := api.ProcessPendingFiles(ctx, deps, api.Wiring{}); err == nil || !strings.Contains(err.Error(), "wiring.Files") {
+			t.Errorf("a pass with no bucket: %v", err)
+		}
+	})
+}
+
+// memBucket is a bucket in memory, which a browser's PUT through a
+// signed URL writes as put does.
+type memBucket struct {
+	mu      sync.Mutex
+	objects map[string]memObject
+}
+
+type memObject struct {
+	data        []byte
+	contentType string
+}
+
+func (b *memBucket) Name() string { return "mem" }
+
+func (b *memBucket) Put(_ context.Context, name string, body io.Reader, opts bucket.PutOptions) (bucket.PutResult, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return bucket.PutResult{}, err
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.objects[name] = memObject{data: data, contentType: opts.ContentType}
+	return bucket.PutResult{Object: bucket.Object{Name: name, Size: int64(len(data)), ContentType: opts.ContentType}, Created: true}, nil
+}
+
+func (b *memBucket) Head(_ context.Context, name string) (bucket.Object, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	o, ok := b.objects[name]
+	return bucket.Object{Name: name, Size: int64(len(o.data)), ContentType: o.contentType}, ok, nil
+}
+
+func (b *memBucket) Get(_ context.Context, name string) (*bucket.Reader, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	o, ok := b.objects[name]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", bucket.ErrNotFound, name)
+	}
+	return &bucket.Reader{ReadCloser: io.NopCloser(bytes.NewReader(o.data)), Object: bucket.Object{Name: name, Size: int64(len(o.data)), ContentType: o.contentType}}, nil
+}
+
+func (b *memBucket) Delete(_ context.Context, name string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if _, ok := b.objects[name]; !ok {
+		return fmt.Errorf("%w: %s", bucket.ErrNotFound, name)
+	}
+	delete(b.objects, name)
+	return nil
+}
+
+func (b *memBucket) List(context.Context, bucket.ListOptions) (bucket.Page, error) {
+	return bucket.Page{}, nil
+}
+
+func (b *memBucket) SignedURL(_ context.Context, name string, _ bucket.SignedURLOptions) (string, error) {
+	return "https://mem.example/" + name, nil
+}
+
+// upload is a browser's upload of data as a file of row: Begin, the PUT
+// its URL takes, and Complete, which asks the file's text.
+func upload(ctx context.Context, t *testing.T, files *rowrefs.Attachments, objects *memBucket, row rowrefs.RowRef, name, mediaType string, data []byte) rowrefs.Attachment {
+	t.Helper()
+	sum := sha256.Sum256(data)
+	begun, err := files.Begin(ctx, rowrefs.BeginInput{To: row, Name: name, MediaType: mediaType, Size: int64(len(data)), SHA256: hex.EncodeToString(sum[:])}, bucket.ForAttachments(objects), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := objects.Put(ctx, begun.Attachment.ObjectKey, bytes.NewReader(data), bucket.PutOptions{ContentType: mediaType}); err != nil {
+		t.Fatal(err)
+	}
+	done, err := files.Complete(ctx, rowrefs.FileRef{Table: row.Table, ID: begun.Attachment.ID}, bucket.ForAttachments(objects))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done.Extraction != rowrefs.ProcessingPending {
+		t.Fatalf("a completed upload's extraction is %s, not pending", done.Extraction)
+	}
+	return done
 }
 
 // headerRunner is a runner that sets request headers.

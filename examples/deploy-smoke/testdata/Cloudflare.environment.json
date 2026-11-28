@@ -2806,6 +2806,11 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "bindings": [
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"BillChange\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillDeadline\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillEvent\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"CheckInChange\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInDeadline\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInEvent\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"DrainLineItem\":[{\"binding\":\"WAKE_SMOKE_API_DRAIN_LINE_ITEMS\"}],\"FileReleased\":[{\"binding\":\"WAKE_SMOKE_API_RELEASE_FILES\"}],\"FollowUpChange\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"FollowUpDeadline\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"NoticeWork\":[{\"binding\":\"WAKE_SMOKE_API_NOTIFY\"}],\"RunRequest\":[{\"binding\":\"WAKE_SMOKE_API_RUNS\"}],\"SearchIndexing\":[{\"binding\":\"WAKE_SMOKE_API_INDEX_SEARCH\"}]}",
+              "type": "plain_text"
+            },
+            {
               "id": "00000000000000000000000000000000",
               "name": "SMOKE_DB_DATABASE",
               "type": "hyperdrive"
@@ -2876,6 +2881,86 @@
               "type": "plain_text"
             },
             {
+              "name": "WAKE_SMOKE_API_BILL_REMINDERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-bill-reminders.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_CHECK_IN_WAKE_UPS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_DRAIN_LINE_ITEMS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_FOLLOW_UP_TIMERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_INDEX_SEARCH",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-index-search.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_NOTIFY",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-notify.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RELEASE_FILES",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-release-files.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RUNS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-runs.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "1",
               "type": "plain_text"
@@ -2921,9 +3006,110 @@
         "dependsOn": [
           "smoke-api-alert-reactions.r2.smoke-files.token",
           "smoke-api-alert-reactions.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker",
           "smoke-files.bucket"
         ],
         "phase": "rollout",
+        "owners": [
+          "smoke-api-alert-reactions"
+        ]
+      },
+      {
+        "id": "smoke-api-alert-reactions.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-alert-reactions.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-alert-reactions.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.version",
+          "smoke-api-alert-reactions.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-alert-reactions"
+        ]
+      },
+      {
+        "id": "smoke-api-alert-reactions.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "smoke-stack-cloudflare-smoke-api-alert-reactions"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-alert-reactions.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-alert-reactions.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-alert-reactions"
+        ]
+      },
+      {
+        "id": "smoke-api-alert-reactions.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-alert-reactions-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "smoke-api-alert-reactions"
         ]
@@ -2946,6 +3132,16 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "smoke-api-alert-reactions"
@@ -3077,6 +3273,11 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "bindings": [
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"AlertChange\":[{\"binding\":\"WAKE_SMOKE_API_ALERT_REACTIONS\"}],\"CheckInChange\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInDeadline\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInEvent\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"DrainLineItem\":[{\"binding\":\"WAKE_SMOKE_API_DRAIN_LINE_ITEMS\"}],\"FileReleased\":[{\"binding\":\"WAKE_SMOKE_API_RELEASE_FILES\"}],\"FollowUpChange\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"FollowUpDeadline\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"NoticeWork\":[{\"binding\":\"WAKE_SMOKE_API_NOTIFY\"}],\"RunRequest\":[{\"binding\":\"WAKE_SMOKE_API_RUNS\"}],\"SearchIndexing\":[{\"binding\":\"WAKE_SMOKE_API_INDEX_SEARCH\"}]}",
+              "type": "plain_text"
+            },
+            {
               "id": "00000000000000000000000000000000",
               "name": "SMOKE_DB_DATABASE",
               "type": "hyperdrive"
@@ -3147,6 +3348,86 @@
               "type": "plain_text"
             },
             {
+              "name": "WAKE_SMOKE_API_ALERT_REACTIONS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-alert-reactions.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_CHECK_IN_WAKE_UPS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_DRAIN_LINE_ITEMS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_FOLLOW_UP_TIMERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_INDEX_SEARCH",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-index-search.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_NOTIFY",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-notify.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RELEASE_FILES",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-release-files.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RUNS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-runs.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "1",
               "type": "plain_text"
@@ -3190,11 +3471,112 @@
           }
         },
         "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
           "smoke-api-bill-reminders.r2.smoke-files.token",
           "smoke-api-bill-reminders.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker",
           "smoke-files.bucket"
         ],
         "phase": "rollout",
+        "owners": [
+          "smoke-api-bill-reminders"
+        ]
+      },
+      {
+        "id": "smoke-api-bill-reminders.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-bill-reminders.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-bill-reminders.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-bill-reminders.wake-relay.version",
+          "smoke-api-bill-reminders.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-bill-reminders"
+        ]
+      },
+      {
+        "id": "smoke-api-bill-reminders.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "smoke-stack-cloudflare-smoke-api-bill-reminders"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-bill-reminders.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-bill-reminders.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-bill-reminders"
+        ]
+      },
+      {
+        "id": "smoke-api-bill-reminders.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-bill-reminders-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "smoke-api-bill-reminders"
         ]
@@ -3217,6 +3599,16 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "smoke-api-bill-reminders"
@@ -3348,6 +3740,11 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "bindings": [
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"AlertChange\":[{\"binding\":\"WAKE_SMOKE_API_ALERT_REACTIONS\"}],\"BillChange\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillDeadline\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillEvent\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"DrainLineItem\":[{\"binding\":\"WAKE_SMOKE_API_DRAIN_LINE_ITEMS\"}],\"FileReleased\":[{\"binding\":\"WAKE_SMOKE_API_RELEASE_FILES\"}],\"FollowUpChange\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"FollowUpDeadline\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"NoticeWork\":[{\"binding\":\"WAKE_SMOKE_API_NOTIFY\"}],\"RunRequest\":[{\"binding\":\"WAKE_SMOKE_API_RUNS\"}],\"SearchIndexing\":[{\"binding\":\"WAKE_SMOKE_API_INDEX_SEARCH\"}]}",
+              "type": "plain_text"
+            },
+            {
               "id": "00000000000000000000000000000000",
               "name": "SMOKE_DB_DATABASE",
               "type": "hyperdrive"
@@ -3418,6 +3815,86 @@
               "type": "plain_text"
             },
             {
+              "name": "WAKE_SMOKE_API_ALERT_REACTIONS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-alert-reactions.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_BILL_REMINDERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-bill-reminders.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_DRAIN_LINE_ITEMS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_FOLLOW_UP_TIMERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_INDEX_SEARCH",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-index-search.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_NOTIFY",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-notify.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RELEASE_FILES",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-release-files.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RUNS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-runs.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "1",
               "type": "plain_text"
@@ -3461,11 +3938,112 @@
           }
         },
         "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
           "smoke-api-check-in-wake-ups.r2.smoke-files.token",
           "smoke-api-check-in-wake-ups.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker",
           "smoke-files.bucket"
         ],
         "phase": "rollout",
+        "owners": [
+          "smoke-api-check-in-wake-ups"
+        ]
+      },
+      {
+        "id": "smoke-api-check-in-wake-ups.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-check-in-wake-ups.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-check-in-wake-ups.wake-relay.version",
+          "smoke-api-check-in-wake-ups.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-check-in-wake-ups"
+        ]
+      },
+      {
+        "id": "smoke-api-check-in-wake-ups.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "smoke-stack-cloudflare-smoke-api-check-in-wake-ups"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-check-in-wake-ups"
+        ]
+      },
+      {
+        "id": "smoke-api-check-in-wake-ups.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-check-in-wake-ups-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "smoke-api-check-in-wake-ups"
         ]
@@ -3488,6 +4066,16 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "smoke-api-check-in-wake-ups"
@@ -3619,6 +4207,11 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "bindings": [
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"AlertChange\":[{\"binding\":\"WAKE_SMOKE_API_ALERT_REACTIONS\"}],\"BillChange\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillDeadline\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillEvent\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"CheckInChange\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInDeadline\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInEvent\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"FileReleased\":[{\"binding\":\"WAKE_SMOKE_API_RELEASE_FILES\"}],\"FollowUpChange\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"FollowUpDeadline\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"NoticeWork\":[{\"binding\":\"WAKE_SMOKE_API_NOTIFY\"}],\"RunRequest\":[{\"binding\":\"WAKE_SMOKE_API_RUNS\"}],\"SearchIndexing\":[{\"binding\":\"WAKE_SMOKE_API_INDEX_SEARCH\"}]}",
+              "type": "plain_text"
+            },
+            {
               "id": "00000000000000000000000000000000",
               "name": "SMOKE_DB_DATABASE",
               "type": "hyperdrive"
@@ -3689,13 +4282,93 @@
               "type": "plain_text"
             },
             {
+              "name": "WAKE_SMOKE_API_ALERT_REACTIONS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-alert-reactions.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_BILL_REMINDERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-bill-reminders.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_CHECK_IN_WAKE_UPS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_FOLLOW_UP_TIMERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_INDEX_SEARCH",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-index-search.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_NOTIFY",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-notify.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RELEASE_FILES",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-release-files.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RUNS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-runs.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "2",
               "type": "plain_text"
             },
             {
               "name": "WORKER_DRAIN_SECONDS",
-              "text": "50",
+              "text": "22",
               "type": "plain_text"
             }
           ],
@@ -3732,11 +4405,112 @@
           }
         },
         "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
           "smoke-api-drain-line-items.r2.smoke-files.token",
           "smoke-api-drain-line-items.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker",
           "smoke-files.bucket"
         ],
         "phase": "rollout",
+        "owners": [
+          "smoke-api-drain-line-items"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.wake-relay.version",
+          "smoke-api-drain-line-items.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-drain-line-items"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "smoke-stack-cloudflare-smoke-api-drain-line-items"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-drain-line-items.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-drain-line-items.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-drain-line-items"
+        ]
+      },
+      {
+        "id": "smoke-api-drain-line-items.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-drain-line-items-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "smoke-api-drain-line-items"
         ]
@@ -3759,6 +4533,16 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "smoke-api-drain-line-items"
@@ -3890,6 +4674,11 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "bindings": [
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"AlertChange\":[{\"binding\":\"WAKE_SMOKE_API_ALERT_REACTIONS\"}],\"BillChange\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillDeadline\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillEvent\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"CheckInChange\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInDeadline\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInEvent\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"DrainLineItem\":[{\"binding\":\"WAKE_SMOKE_API_DRAIN_LINE_ITEMS\"}],\"FileReleased\":[{\"binding\":\"WAKE_SMOKE_API_RELEASE_FILES\"}],\"NoticeWork\":[{\"binding\":\"WAKE_SMOKE_API_NOTIFY\"}],\"RunRequest\":[{\"binding\":\"WAKE_SMOKE_API_RUNS\"}],\"SearchIndexing\":[{\"binding\":\"WAKE_SMOKE_API_INDEX_SEARCH\"}]}",
+              "type": "plain_text"
+            },
+            {
               "id": "00000000000000000000000000000000",
               "name": "SMOKE_DB_DATABASE",
               "type": "hyperdrive"
@@ -3960,6 +4749,86 @@
               "type": "plain_text"
             },
             {
+              "name": "WAKE_SMOKE_API_ALERT_REACTIONS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-alert-reactions.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_BILL_REMINDERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-bill-reminders.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_CHECK_IN_WAKE_UPS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_DRAIN_LINE_ITEMS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_INDEX_SEARCH",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-index-search.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_NOTIFY",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-notify.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RELEASE_FILES",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-release-files.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RUNS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-runs.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "1",
               "type": "plain_text"
@@ -4003,11 +4872,112 @@
           }
         },
         "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
           "smoke-api-follow-up-timers.r2.smoke-files.token",
           "smoke-api-follow-up-timers.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker",
           "smoke-files.bucket"
         ],
         "phase": "rollout",
+        "owners": [
+          "smoke-api-follow-up-timers"
+        ]
+      },
+      {
+        "id": "smoke-api-follow-up-timers.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-follow-up-timers.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-follow-up-timers.wake-relay.version",
+          "smoke-api-follow-up-timers.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-follow-up-timers"
+        ]
+      },
+      {
+        "id": "smoke-api-follow-up-timers.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "smoke-stack-cloudflare-smoke-api-follow-up-timers"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-follow-up-timers.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-follow-up-timers"
+        ]
+      },
+      {
+        "id": "smoke-api-follow-up-timers.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-follow-up-timers-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "smoke-api-follow-up-timers"
         ]
@@ -4030,6 +5000,16 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "smoke-api-follow-up-timers"
@@ -4161,6 +5141,11 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "bindings": [
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"AlertChange\":[{\"binding\":\"WAKE_SMOKE_API_ALERT_REACTIONS\"}],\"BillChange\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillDeadline\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillEvent\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"CheckInChange\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInDeadline\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInEvent\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"DrainLineItem\":[{\"binding\":\"WAKE_SMOKE_API_DRAIN_LINE_ITEMS\"}],\"FileReleased\":[{\"binding\":\"WAKE_SMOKE_API_RELEASE_FILES\"}],\"FollowUpChange\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"FollowUpDeadline\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"NoticeWork\":[{\"binding\":\"WAKE_SMOKE_API_NOTIFY\"}],\"RunRequest\":[{\"binding\":\"WAKE_SMOKE_API_RUNS\"}]}",
+              "type": "plain_text"
+            },
+            {
               "id": "00000000000000000000000000000000",
               "name": "SMOKE_DB_DATABASE",
               "type": "hyperdrive"
@@ -4231,13 +5216,93 @@
               "type": "plain_text"
             },
             {
+              "name": "WAKE_SMOKE_API_ALERT_REACTIONS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-alert-reactions.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_BILL_REMINDERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-bill-reminders.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_CHECK_IN_WAKE_UPS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_DRAIN_LINE_ITEMS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_FOLLOW_UP_TIMERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_NOTIFY",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-notify.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RELEASE_FILES",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-release-files.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RUNS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-runs.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "2",
               "type": "plain_text"
             },
             {
               "name": "WORKER_DRAIN_SECONDS",
-              "text": "50",
+              "text": "22",
               "type": "plain_text"
             }
           ],
@@ -4274,11 +5339,112 @@
           }
         },
         "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
           "smoke-api-index-search.r2.smoke-files.token",
           "smoke-api-index-search.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker",
           "smoke-files.bucket"
         ],
         "phase": "rollout",
+        "owners": [
+          "smoke-api-index-search"
+        ]
+      },
+      {
+        "id": "smoke-api-index-search.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-index-search.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-index-search.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-index-search.wake-relay.version",
+          "smoke-api-index-search.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-index-search"
+        ]
+      },
+      {
+        "id": "smoke-api-index-search.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "smoke-stack-cloudflare-smoke-api-index-search"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-index-search.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-index-search.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-index-search"
+        ]
+      },
+      {
+        "id": "smoke-api-index-search.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-index-search-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "smoke-api-index-search"
         ]
@@ -4301,6 +5467,16 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "smoke-api-index-search"
@@ -4432,6 +5608,11 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "bindings": [
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"AlertChange\":[{\"binding\":\"WAKE_SMOKE_API_ALERT_REACTIONS\"}],\"BillChange\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillDeadline\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillEvent\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"CheckInChange\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInDeadline\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInEvent\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"DrainLineItem\":[{\"binding\":\"WAKE_SMOKE_API_DRAIN_LINE_ITEMS\"}],\"FileReleased\":[{\"binding\":\"WAKE_SMOKE_API_RELEASE_FILES\"}],\"FollowUpChange\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"FollowUpDeadline\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"RunRequest\":[{\"binding\":\"WAKE_SMOKE_API_RUNS\"}],\"SearchIndexing\":[{\"binding\":\"WAKE_SMOKE_API_INDEX_SEARCH\"}]}",
+              "type": "plain_text"
+            },
+            {
               "id": "00000000000000000000000000000000",
               "name": "SMOKE_DB_DATABASE",
               "type": "hyperdrive"
@@ -4502,13 +5683,93 @@
               "type": "plain_text"
             },
             {
+              "name": "WAKE_SMOKE_API_ALERT_REACTIONS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-alert-reactions.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_BILL_REMINDERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-bill-reminders.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_CHECK_IN_WAKE_UPS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_DRAIN_LINE_ITEMS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_FOLLOW_UP_TIMERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_INDEX_SEARCH",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-index-search.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RELEASE_FILES",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-release-files.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RUNS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-runs.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "2",
               "type": "plain_text"
             },
             {
               "name": "WORKER_DRAIN_SECONDS",
-              "text": "50",
+              "text": "22",
               "type": "plain_text"
             }
           ],
@@ -4545,11 +5806,112 @@
           }
         },
         "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
           "smoke-api-notify.r2.smoke-files.token",
           "smoke-api-notify.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker",
           "smoke-files.bucket"
         ],
         "phase": "rollout",
+        "owners": [
+          "smoke-api-notify"
+        ]
+      },
+      {
+        "id": "smoke-api-notify.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-notify.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-notify.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-notify.wake-relay.version",
+          "smoke-api-notify.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-notify"
+        ]
+      },
+      {
+        "id": "smoke-api-notify.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "smoke-stack-cloudflare-smoke-api-notify"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-notify.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-notify.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-notify"
+        ]
+      },
+      {
+        "id": "smoke-api-notify.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-notify-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "smoke-api-notify"
         ]
@@ -4572,6 +5934,16 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "smoke-api-notify"
@@ -4703,6 +6075,11 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "bindings": [
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"AlertChange\":[{\"binding\":\"WAKE_SMOKE_API_ALERT_REACTIONS\"}],\"BillChange\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillDeadline\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillEvent\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"CheckInChange\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInDeadline\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInEvent\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"DrainLineItem\":[{\"binding\":\"WAKE_SMOKE_API_DRAIN_LINE_ITEMS\"}],\"FollowUpChange\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"FollowUpDeadline\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"NoticeWork\":[{\"binding\":\"WAKE_SMOKE_API_NOTIFY\"}],\"RunRequest\":[{\"binding\":\"WAKE_SMOKE_API_RUNS\"}],\"SearchIndexing\":[{\"binding\":\"WAKE_SMOKE_API_INDEX_SEARCH\"}]}",
+              "type": "plain_text"
+            },
+            {
               "id": "00000000000000000000000000000000",
               "name": "SMOKE_DB_DATABASE",
               "type": "hyperdrive"
@@ -4773,13 +6150,93 @@
               "type": "plain_text"
             },
             {
+              "name": "WAKE_SMOKE_API_ALERT_REACTIONS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-alert-reactions.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_BILL_REMINDERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-bill-reminders.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_CHECK_IN_WAKE_UPS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_DRAIN_LINE_ITEMS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_FOLLOW_UP_TIMERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_INDEX_SEARCH",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-index-search.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_NOTIFY",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-notify.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RUNS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-runs.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "1",
               "type": "plain_text"
             },
             {
               "name": "WORKER_DRAIN_SECONDS",
-              "text": "50",
+              "text": "22",
               "type": "plain_text"
             }
           ],
@@ -4816,11 +6273,112 @@
           }
         },
         "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
           "smoke-api-release-files.r2.smoke-files.token",
           "smoke-api-release-files.worker",
+          "smoke-api-runs.wake-relay.worker",
           "smoke-files.bucket"
         ],
         "phase": "rollout",
+        "owners": [
+          "smoke-api-release-files"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-release-files.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-release-files.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-release-files.wake-relay.version",
+          "smoke-api-release-files.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-release-files"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "smoke-stack-cloudflare-smoke-api-release-files"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-release-files.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-release-files.wake-relay.worker",
+          "smoke-api-release-files.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-release-files"
+        ]
+      },
+      {
+        "id": "smoke-api-release-files.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-release-files-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "smoke-api-release-files"
         ]
@@ -4843,6 +6401,16 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-runs.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "smoke-api-release-files"
@@ -4974,6 +6542,11 @@
           "accountId": "0123456789abcdef0123456789abcdef",
           "bindings": [
             {
+              "name": "QUEUE_WAKES",
+              "text": "{\"AlertChange\":[{\"binding\":\"WAKE_SMOKE_API_ALERT_REACTIONS\"}],\"BillChange\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillDeadline\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"BillEvent\":[{\"binding\":\"WAKE_SMOKE_API_BILL_REMINDERS\"}],\"CheckInChange\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInDeadline\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"CheckInEvent\":[{\"binding\":\"WAKE_SMOKE_API_CHECK_IN_WAKE_UPS\"}],\"DrainLineItem\":[{\"binding\":\"WAKE_SMOKE_API_DRAIN_LINE_ITEMS\"}],\"FileReleased\":[{\"binding\":\"WAKE_SMOKE_API_RELEASE_FILES\"}],\"FollowUpChange\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"FollowUpDeadline\":[{\"binding\":\"WAKE_SMOKE_API_FOLLOW_UP_TIMERS\"}],\"NoticeWork\":[{\"binding\":\"WAKE_SMOKE_API_NOTIFY\"}],\"SearchIndexing\":[{\"binding\":\"WAKE_SMOKE_API_INDEX_SEARCH\"}]}",
+              "type": "plain_text"
+            },
+            {
               "id": "00000000000000000000000000000000",
               "name": "SMOKE_DB_DATABASE",
               "type": "hyperdrive"
@@ -5044,13 +6617,93 @@
               "type": "plain_text"
             },
             {
+              "name": "WAKE_SMOKE_API_ALERT_REACTIONS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-alert-reactions.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_BILL_REMINDERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-bill-reminders.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_CHECK_IN_WAKE_UPS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-check-in-wake-ups.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_DRAIN_LINE_ITEMS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-drain-line-items.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_FOLLOW_UP_TIMERS",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-follow-up-timers.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_INDEX_SEARCH",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-index-search.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_NOTIFY",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-notify.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
+              "name": "WAKE_SMOKE_API_RELEASE_FILES",
+              "service": {
+                "$output": {
+                  "resource": "smoke-api-release-files.wake-relay.worker",
+                  "name": "name"
+                }
+              },
+              "type": "service"
+            },
+            {
               "name": "WORKER_CONCURRENCY",
               "text": "2",
               "type": "plain_text"
             },
             {
               "name": "WORKER_DRAIN_SECONDS",
-              "text": "50",
+              "text": "22",
               "type": "plain_text"
             }
           ],
@@ -5087,11 +6740,112 @@
           }
         },
         "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker",
           "smoke-api-runs.r2.smoke-files.token",
           "smoke-api-runs.worker",
           "smoke-files.bucket"
         ],
         "phase": "rollout",
+        "owners": [
+          "smoke-api-runs"
+        ]
+      },
+      {
+        "id": "smoke-api-runs.wake-relay.deployment",
+        "type": "cloudflare:index/workersDeployment:WorkersDeployment",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "scriptName": {
+            "$output": {
+              "resource": "smoke-api-runs.wake-relay.worker",
+              "name": "name"
+            }
+          },
+          "strategy": "percentage",
+          "versions": [
+            {
+              "percentage": 100,
+              "versionId": {
+                "$output": {
+                  "resource": "smoke-api-runs.wake-relay.version",
+                  "name": "id"
+                }
+              }
+            }
+          ]
+        },
+        "dependsOn": [
+          "smoke-api-runs.wake-relay.version",
+          "smoke-api-runs.wake-relay.worker"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-runs"
+        ]
+      },
+      {
+        "id": "smoke-api-runs.wake-relay.version",
+        "type": "cloudflare:index/workerVersion:WorkerVersion",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "bindings": [
+            {
+              "name": "WORKFLOW",
+              "type": "workflow",
+              "workflowName": "smoke-stack-cloudflare-smoke-api-runs"
+            }
+          ],
+          "compatibilityDate": "2026-09-15",
+          "mainModule": "wake-relay.js",
+          "modules": [
+            {
+              "contentBase64": "Ly8gQSBkcmFpbmVyJ3Mgd2FrZSByZWxheSBvbiBDbG91ZGZsYXJlICgjNjAwOyB3YWtlcy5nbyBzYXlzIHdoeSk6IHRoZQovLyBjcmVhdGUgYSBxdWV1ZSB3YWtlciBtYWtlcyBvZiBhIHdha2UncyBiaW5kaW5nLCBvdmVyIHRoZSBzZXJ2aWNlCi8vIGJpbmRpbmcncyBSUEMsIGhhbmRlZCB0byB0aGUgd29rZW4gZHJhaW5lcidzIFdvcmtmbG93IChXT1JLRkxPVykuCgppbXBvcnQgeyBXb3JrZXJFbnRyeXBvaW50IH0gZnJvbSAnY2xvdWRmbGFyZTp3b3JrZXJzJzsKCmV4cG9ydCBkZWZhdWx0IGNsYXNzIFdha2VSZWxheSBleHRlbmRzIFdvcmtlckVudHJ5cG9pbnQgewogIGFzeW5jIGNyZWF0ZShvcHRpb25zKSB7CiAgICBjb25zdCBpZCA9IG9wdGlvbnM/LmlkOwogICAgY29uc3QgZHVlQXQgPSBvcHRpb25zPy5wYXJhbXM/LmR1ZUF0OwogICAgaWYgKHR5cGVvZiBpZCAhPT0gJ3N0cmluZycgfHwgaWQgPT09ICcnIHx8IHR5cGVvZiBkdWVBdCAhPT0gJ251bWJlcicgfHwgIU51bWJlci5pc0Zpbml0ZShkdWVBdCkpIHsKICAgICAgdGhyb3cgbmV3IFR5cGVFcnJvcignYSB3YWtlIG5hbWVzIGEgcnVuIGlkIGFuZCB0aGUgdGltZSBpdCBpcyBkdWUnKTsKICAgIH0KICAgIGNvbnN0IHdvcmtmbG93ID0gdGhpcy5lbnYuV09SS0ZMT1c7CiAgICBpZiAodHlwZW9mIHdvcmtmbG93Py5jcmVhdGUgIT09ICdmdW5jdGlvbicpIHRocm93IG5ldyBFcnJvcigndGhlIHJlbGF5IGhvbGRzIG5vIFdPUktGTE9XIGJpbmRpbmcnKTsKICAgIGF3YWl0IHdvcmtmbG93LmNyZWF0ZSh7IGlkLCBwYXJhbXM6IHsgZHVlQXQgfSB9KTsKICB9CgogIGFzeW5jIGZldGNoKCkgewogICAgcmV0dXJuIG5ldyBSZXNwb25zZSgnbm90IGZvdW5kJywgeyBzdGF0dXM6IDQwNCB9KTsKICB9Cn0K",
+              "contentType": "application/javascript+module",
+              "name": "wake-relay.js"
+            }
+          ],
+          "workerId": {
+            "$output": {
+              "resource": "smoke-api-runs.wake-relay.worker",
+              "name": "id"
+            }
+          }
+        },
+        "dependsOn": [
+          "smoke-api-runs.wake-relay.worker",
+          "smoke-api-runs.workflow"
+        ],
+        "phase": "rollout",
+        "owners": [
+          "smoke-api-runs"
+        ]
+      },
+      {
+        "id": "smoke-api-runs.wake-relay.worker",
+        "type": "cloudflare:index/worker:Worker",
+        "properties": {
+          "accountId": "0123456789abcdef0123456789abcdef",
+          "name": "smoke-stack-cloudflare-smoke-api-runs-wake",
+          "observability": {
+            "enabled": true,
+            "logs": {
+              "enabled": true,
+              "invocationLogs": true
+            }
+          },
+          "subdomain": {
+            "enabled": false,
+            "previewsEnabled": false
+          }
+        },
+        "phase": "infrastructure",
         "owners": [
           "smoke-api-runs"
         ]
@@ -5114,6 +6868,16 @@
             "previewsEnabled": false
           }
         },
+        "dependsOn": [
+          "smoke-api-alert-reactions.wake-relay.worker",
+          "smoke-api-bill-reminders.wake-relay.worker",
+          "smoke-api-check-in-wake-ups.wake-relay.worker",
+          "smoke-api-drain-line-items.wake-relay.worker",
+          "smoke-api-follow-up-timers.wake-relay.worker",
+          "smoke-api-index-search.wake-relay.worker",
+          "smoke-api-notify.wake-relay.worker",
+          "smoke-api-release-files.wake-relay.worker"
+        ],
         "phase": "infrastructure",
         "owners": [
           "smoke-api-runs"
@@ -5889,22 +7653,31 @@
       "step": "infrastructure",
       "resources": [
         "smoke-api-alert-reactions.r2.smoke-files.token",
+        "smoke-api-alert-reactions.wake-relay.worker",
         "smoke-api-alert-reactions.worker",
         "smoke-api-bill-reminders.r2.smoke-files.token",
+        "smoke-api-bill-reminders.wake-relay.worker",
         "smoke-api-bill-reminders.worker",
         "smoke-api-check-in-wake-ups.r2.smoke-files.token",
+        "smoke-api-check-in-wake-ups.wake-relay.worker",
         "smoke-api-check-in-wake-ups.worker",
         "smoke-api-drain-line-items.r2.smoke-files.token",
+        "smoke-api-drain-line-items.wake-relay.worker",
         "smoke-api-drain-line-items.worker",
         "smoke-api-follow-up-timers.r2.smoke-files.token",
+        "smoke-api-follow-up-timers.wake-relay.worker",
         "smoke-api-follow-up-timers.worker",
         "smoke-api-index-search.r2.smoke-files.token",
+        "smoke-api-index-search.wake-relay.worker",
         "smoke-api-index-search.worker",
         "smoke-api-notify.r2.smoke-files.token",
+        "smoke-api-notify.wake-relay.worker",
         "smoke-api-notify.worker",
         "smoke-api-release-files.r2.smoke-files.token",
+        "smoke-api-release-files.wake-relay.worker",
         "smoke-api-release-files.worker",
         "smoke-api-runs.r2.smoke-files.token",
+        "smoke-api-runs.wake-relay.worker",
         "smoke-api-runs.worker",
         "smoke-api-sync-all-linked-accounts.r2.smoke-files.token",
         "smoke-api-sync-all-linked-accounts.worker",
@@ -5941,38 +7714,56 @@
         "smoke-api-alert-reactions.deployment",
         "smoke-api-alert-reactions.schedule",
         "smoke-api-alert-reactions.version",
+        "smoke-api-alert-reactions.wake-relay.deployment",
+        "smoke-api-alert-reactions.wake-relay.version",
         "smoke-api-alert-reactions.workflow",
         "smoke-api-bill-reminders.deployment",
         "smoke-api-bill-reminders.schedule",
         "smoke-api-bill-reminders.version",
+        "smoke-api-bill-reminders.wake-relay.deployment",
+        "smoke-api-bill-reminders.wake-relay.version",
         "smoke-api-bill-reminders.workflow",
         "smoke-api-check-in-wake-ups.deployment",
         "smoke-api-check-in-wake-ups.schedule",
         "smoke-api-check-in-wake-ups.version",
+        "smoke-api-check-in-wake-ups.wake-relay.deployment",
+        "smoke-api-check-in-wake-ups.wake-relay.version",
         "smoke-api-check-in-wake-ups.workflow",
         "smoke-api-drain-line-items.deployment",
         "smoke-api-drain-line-items.schedule",
         "smoke-api-drain-line-items.version",
+        "smoke-api-drain-line-items.wake-relay.deployment",
+        "smoke-api-drain-line-items.wake-relay.version",
         "smoke-api-drain-line-items.workflow",
         "smoke-api-follow-up-timers.deployment",
         "smoke-api-follow-up-timers.schedule",
         "smoke-api-follow-up-timers.version",
+        "smoke-api-follow-up-timers.wake-relay.deployment",
+        "smoke-api-follow-up-timers.wake-relay.version",
         "smoke-api-follow-up-timers.workflow",
         "smoke-api-index-search.deployment",
         "smoke-api-index-search.schedule",
         "smoke-api-index-search.version",
+        "smoke-api-index-search.wake-relay.deployment",
+        "smoke-api-index-search.wake-relay.version",
         "smoke-api-index-search.workflow",
         "smoke-api-notify.deployment",
         "smoke-api-notify.schedule",
         "smoke-api-notify.version",
+        "smoke-api-notify.wake-relay.deployment",
+        "smoke-api-notify.wake-relay.version",
         "smoke-api-notify.workflow",
         "smoke-api-release-files.deployment",
         "smoke-api-release-files.schedule",
         "smoke-api-release-files.version",
+        "smoke-api-release-files.wake-relay.deployment",
+        "smoke-api-release-files.wake-relay.version",
         "smoke-api-release-files.workflow",
         "smoke-api-runs.deployment",
         "smoke-api-runs.schedule",
         "smoke-api-runs.version",
+        "smoke-api-runs.wake-relay.deployment",
+        "smoke-api-runs.wake-relay.version",
         "smoke-api-runs.workflow",
         "smoke-api-sync-all-linked-accounts.deployment",
         "smoke-api-sync-all-linked-accounts.schedule",

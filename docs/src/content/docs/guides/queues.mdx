@@ -952,7 +952,8 @@ cloudflare target runs a TypeScript worker as a Worker of its own,
 with the database reached through its Hyperdrive config
 ([Databases on Hyperdrive](/superschematic/guides/stacks/#databases-on-hyperdrive)),
 and runs the same claim loop `stack dev` runs for a window,
-`WORKER_DRAIN_SECONDS`, 50 seconds unless `drainSeconds` says otherwise;
+`WORKER_DRAIN_SECONDS`, 50 seconds or what the firing's CPU time leaves
+(22 seconds with the defaults), unless `drainSeconds` says otherwise;
 then it stops as a process stops at SIGTERM: it claims no more, lets the
 running handlers finish within the worker's `grace`, and gives back the
 rest. The next firing begins a minute after this one did, so a message
@@ -967,13 +968,13 @@ key, and the backoff, the retention and the dead messages are the
 table's. A firing prunes the done messages as it starts.
 
 ```ts
-settings: [{ of: FinancesApi, worker: "EmbedLineItems", concurrency: 4, drainSeconds: 40 }],
+settings: [{ of: FinancesApi, worker: "EmbedLineItems", concurrency: 4, drainSeconds: 40, cpuMs: 60000 }],
 ```
 
 | Setting | Default | |
 | --- | --- | --- |
 | `concurrency` | the `@worker`'s | how many messages a firing handles at a time, which its version binds as `WORKER_CONCURRENCY` |
-| `drainSeconds` | `50` | how long each firing claims; the window and the `grace` must fit in a Cron Trigger's 15 minutes |
+| `drainSeconds` | `50`, or what `cpuMs` leaves | how long each firing claims; the window and the `grace` must fit in `cpuMs`, so the firing ends before Cloudflare stops it (#600) |
 | `cpuMs` | Cloudflare's, 30 seconds | the CPU time a firing may take, up to 300000: a handler's work counts, its waits on the database and on fetches do not |
 | `logs`, `telemetry` | as a job's | Workers Logs, and trace export, a span per message |
 
@@ -1003,8 +1004,10 @@ await enqueue(tx, reminderDue, { reminderId }, { delaySeconds: 30 });
 
 The wake is sent after the enqueue's statement and fails nothing; the
 request's `waitUntil` keeps it going after the response. A worker's own
-enqueues to another worker's queue send none: that worker's next firing
-takes them. A firing that ends with messages left logs `backlog left for
+enqueues to another worker's queue wake that worker too, through its wake
+relay, a Worker that holds the other's Workflow binding so the deploy's
+graph keeps no cycle (#600,
+[Queue workers on Cron Triggers](/superschematic/guides/stacks/#queue-workers-on-cron-triggers)). A firing that ends with messages left logs `backlog left for
 the next firing`, naming the queue.
 
 A deploy migrates the database from the deploying machine

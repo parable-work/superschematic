@@ -44,6 +44,7 @@ pub mod agents;
 pub mod audience_resolve;
 pub mod calendar;
 pub mod fieldcrypt;
+pub mod file_processing;
 #[cfg(feature = "postgres")]
 pub mod inbound;
 pub mod notify;

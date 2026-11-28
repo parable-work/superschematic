@@ -83,6 +83,11 @@ type DepsWiring struct {
 	// Postgres or on SQLite (#703's AuthenticateGrant).
 	Grants bool
 
+	// Files reports whether wiring.go holds ProcessPendingFiles, the file
+	// processor's pass (#603): the database declares @attachments and the
+	// API fills a files slot (WithFiles).
+	Files bool
+
 	// SQLite reports whether the database's DB service lists sqlite first
 	// (#717): Wire, Authenticator, Routes and the queues take the ORM's
 	// SQLiteDatabase, which the entrypoints open over the SQLite file, and
