@@ -14,6 +14,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/sqlgen"
 	"github.com/parable-work/superschematic/internal/generator/tsgen"
 	"github.com/parable-work/superschematic/internal/loader"
+	loaderidentity "github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/sqlmigrate"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -37,6 +38,11 @@ const (
 	// noRouteSets leaves out the route sets: the API's users sign in
 	// through another API of the same authDb.
 	noRouteSets
+	// withOAuth turns the API's OAuth authorization server on (#695):
+	// @userSessions({ oauth: { consentPath } }) and
+	// @userAdministration({ oauth: true }), with the MCP endpoint they
+	// sign clients in to.
+	withOAuth
 )
 
 // userRoutesFixture is fixture-user-routes-api in shape, with its authDb
@@ -57,6 +63,16 @@ func userRoutesFixture(t *testing.T, shape userRoutesShape) apiFixture {
 		delete(schema.Types, "Greeting")
 	case noRouteSets:
 		schema.OperationSets = slices.DeleteFunc(schema.OperationSets, (*ir.OperationSet).IsIdentityRoutes)
+	case withOAuth:
+		for _, set := range schema.OperationSets {
+			if set.UserSessions != nil {
+				set.UserSessions.OAuth = &ir.IdentityOAuthConfig{AccessTokenTTLSeconds: 900, ConsentPath: "/connect"}
+			}
+			if set.UserAdministration != nil {
+				set.UserAdministration.OAuth = true
+			}
+		}
+		loaderidentity.ExpandRoutes(schema, authDB, ir.DefaultIdentityPermissionPrefix)
 	}
 	endpoints, err := apigen.Generate(schema, apigen.Options{
 		Provider:   sessionauth.Provider{},
@@ -66,7 +82,7 @@ func userRoutesFixture(t *testing.T, shape userRoutesShape) apiFixture {
 	if err != nil {
 		t.Fatalf("apigen.Generate: %v", err)
 	}
-	return apiFixture{name: userRoutesAPI, schema: schema, authDB: authDB, endpoints: endpoints}
+	return apiFixture{name: userRoutesAPI, schema: schema, authDB: authDB, endpoints: endpoints, mcp: shape == withOAuth}
 }
 
 // TestWriteAPIGoldenUserRoutes pins the package for
@@ -201,6 +217,43 @@ func TestGenerateUserRoutes(t *testing.T) {
 	}
 }
 
+// TestGenerateUserRoutesWithOAuth: an API that is its own OAuth
+// authorization server (#695) hands the schema's oauth to the identity
+// service, mounts the consent and connected-app operations with the
+// runtime's handlers and the protocol endpoints with mountOAuthRoutes, and
+// gives the MCP endpoint's 401 the challenge. Regenerate its golden with
+// go test ./internal/generator/tsrestgen -run TestGenerateUserRoutesWithOAuth -update
+func TestGenerateUserRoutesWithOAuth(t *testing.T) {
+	output := generateFixture(t, userRoutesFixture(t, withOAuth))
+	if output.Identity == nil || !output.Identity.OAuthAdministration ||
+		output.Identity.OAuth != "{ accessTokenTtlSeconds: 900, refreshTokenTtlSeconds: 2592000, grantMaxTtlSeconds: 31536000, clients: { metadataDocuments: true, registration: true }, consentPath: '/connect', sessionsPath: 'auth' }" {
+		t.Fatalf("identity = %+v", output.Identity)
+	}
+	byName := endpointsByName(output)
+	for _, name := range []string{
+		ir.IdentityOpGetOAuthRequest, ir.IdentityOpApproveOAuthRequest, ir.IdentityOpDenyOAuthRequest,
+		ir.IdentityOpListOAuthGrants, ir.IdentityOpRevokeOAuthGrant, ir.IdentityOpListUserOAuthGrants, ir.IdentityOpRevokeUserOAuthGrant,
+	} {
+		if ep := byName[name]; ep.IdentityOperation != name || !ep.Manual() {
+			t.Errorf("%s = %+v", name, ep)
+		}
+	}
+	checkGolden(t, output, userRoutesAPI+"-oauth")
+	outDir := t.TempDir()
+	if err := WriteAPI(output, outDir); err != nil {
+		t.Fatal(err)
+	}
+	router, err := os.ReadFile(filepath.Join(outDir, "router.ts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"export const identityOAuth: OAuthOptions", "oauth: { ...identityOAuth, ...options.oauth }", "oauthAdministration: true", "mountOAuthRoutes(router, runtime.identity", "oauthChallenge(runtime.identity)"} {
+		if !strings.Contains(string(router), want) {
+			t.Errorf("router.ts has no %s", want)
+		}
+	}
+}
+
 // TestGenerateUserModelWithoutRouteSets: an API whose authDb has a User
 // table but which declares no route set still authenticates every route
 // with the identity service, which verifies the sessions another API's
@@ -254,6 +307,7 @@ func TestGeneratedUserRoutesAPICompiles(t *testing.T) {
 		"with a project operation": withProjectOperation,
 		"the route sets alone":     routeSetsAlone,
 		"no route sets":            noRouteSets,
+		"with OAuth":               withOAuth,
 	} {
 		t.Run(name, func(t *testing.T) {
 			materializeAPI(t, userRoutesFixture(t, shape)).typeCheck(t)

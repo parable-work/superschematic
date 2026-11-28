@@ -446,7 +446,7 @@ export type SchemaConfig = {
    */
   readonly maxBytes?: number;
   /**
-   * The runtime provider packages this API may use (D159): each a directory, relative to the service's directory, whose package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
+   * The runtime provider packages this API may use (D159): each its directory, relative to the service's directory and starting with "./" or "../", or its npm name ("@scope/name" or "name"), which resolves from the node_modules of the service's directory or one above it (#608). The package's package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
    */
   readonly providers?: readonly string[];
   /**
@@ -515,7 +515,7 @@ export type SchemaConfigDocument = {
    */
   readonly maxBytes?: number;
   /**
-   * The runtime provider packages this API may use (D159): each a directory, relative to the service's directory, whose package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
+   * The runtime provider packages this API may use (D159): each its directory, relative to the service's directory and starting with "./" or "../", or its npm name ("@scope/name" or "name"), which resolves from the node_modules of the service's directory or one above it (#608). The package's package.json declares the provider under "superschematic": { "provider": ... }. The build reads each and checks it against its interface's contract, and the provider slots of the API's envVars class name one of them per environment. Only an API service sets it.
    */
   readonly providers?: readonly string[];
   /**

@@ -138,11 +138,14 @@ func (ih *InputHasher) sourcesDigest(name string) string {
 		if !ok {
 			digest = TreeDigest(filepath.Join(ih.repoRoot, SchemasDir, "services", current))
 		}
-		entries = append(entries, current+"="+digest)
 		service, ok := ih.services[current]
 		if !ok || service.Config == nil {
+			entries = append(entries, current+"="+digest)
 			continue
 		}
+		// An API's runtime providers are what a stack that deploys it reads
+		// of it besides its sources (D159, #608).
+		entries = append(entries, current+"="+digest+providersDigest(service))
 		next := make([]string, 0, len(service.Config.Dependencies)+len(service.Config.Calls)+1)
 		for _, dep := range service.Config.Dependencies {
 			next = append(next, dep.Name)

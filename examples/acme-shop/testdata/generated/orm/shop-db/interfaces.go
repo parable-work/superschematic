@@ -10,6 +10,114 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// ReadOnlyOAuthClientRepositoryInterface is the reads of OAuthClientRepositoryInterface (D150).
+type ReadOnlyOAuthClientRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthClientGetOptions) (*types.OAuthClient, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthClient, error)
+	FindOne(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientFindOptions) (*types.OAuthClient, error)
+	FindMany(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientFindOptions) ([]*types.OAuthClient, int, error)
+	FindPage(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientPageOptions) (*OAuthClientPage, error)
+}
+
+// OAuthClientRepositoryInterface defines the contract for OAuthClient data access.
+type OAuthClientRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthClientGetOptions) (*types.OAuthClient, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthClient, error)
+	FindOne(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientFindOptions) (*types.OAuthClient, error)
+	FindMany(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientFindOptions) ([]*types.OAuthClient, int, error)
+	FindPage(ctx context.Context, filter *OAuthClientFilter, opts *OAuthClientPageOptions) (*OAuthClientPage, error)
+	CreateOne(ctx context.Context, input *types.OAuthClient) (*types.OAuthClient, error)
+	CreateMany(ctx context.Context, inputs []*types.OAuthClient) ([]*types.OAuthClient, error)
+	UpsertOne(ctx context.Context, input *types.OAuthClient, on OAuthClientUniqueKey, update *OAuthClientUpdate) (*types.OAuthClient, error)
+	UpsertOneResult(ctx context.Context, input *types.OAuthClient, on OAuthClientUniqueKey, update *OAuthClientUpdate, opts *UpsertOptions) (UpsertResult[*types.OAuthClient], error)
+	UpsertMany(ctx context.Context, inputs []*types.OAuthClient, on OAuthClientUniqueKey, update OAuthClientFields, opts *UpsertOptions) ([]UpsertResult[*types.OAuthClient], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OAuthClientUpdate) (*types.OAuthClient, error)
+	UpdateMany(ctx context.Context, filter *OAuthClientFilter, update *OAuthClientUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OAuthClientFilter) (int, error)
+}
+
+// ReadOnlyOAuthCodeRepositoryInterface is the reads of OAuthCodeRepositoryInterface (D150).
+type ReadOnlyOAuthCodeRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthCodeGetOptions) (*types.OAuthCode, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthCode, error)
+	FindOne(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodeFindOptions) (*types.OAuthCode, error)
+	FindMany(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodeFindOptions) ([]*types.OAuthCode, int, error)
+	FindPage(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodePageOptions) (*OAuthCodePage, error)
+}
+
+// OAuthCodeRepositoryInterface defines the contract for OAuthCode data access.
+type OAuthCodeRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthCodeGetOptions) (*types.OAuthCode, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthCode, error)
+	FindOne(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodeFindOptions) (*types.OAuthCode, error)
+	FindMany(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodeFindOptions) ([]*types.OAuthCode, int, error)
+	FindPage(ctx context.Context, filter *OAuthCodeFilter, opts *OAuthCodePageOptions) (*OAuthCodePage, error)
+	CreateOne(ctx context.Context, input *types.OAuthCode) (*types.OAuthCode, error)
+	CreateMany(ctx context.Context, inputs []*types.OAuthCode) ([]*types.OAuthCode, error)
+	UpsertOne(ctx context.Context, input *types.OAuthCode, on OAuthCodeUniqueKey, update *OAuthCodeUpdate) (*types.OAuthCode, error)
+	UpsertOneResult(ctx context.Context, input *types.OAuthCode, on OAuthCodeUniqueKey, update *OAuthCodeUpdate, opts *UpsertOptions) (UpsertResult[*types.OAuthCode], error)
+	UpsertMany(ctx context.Context, inputs []*types.OAuthCode, on OAuthCodeUniqueKey, update OAuthCodeFields, opts *UpsertOptions) ([]UpsertResult[*types.OAuthCode], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OAuthCodeUpdate) (*types.OAuthCode, error)
+	UpdateMany(ctx context.Context, filter *OAuthCodeFilter, update *OAuthCodeUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OAuthCodeFilter) (int, error)
+}
+
+// ReadOnlyOAuthGrantRepositoryInterface is the reads of OAuthGrantRepositoryInterface (D150).
+type ReadOnlyOAuthGrantRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthGrantGetOptions) (*types.OAuthGrant, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthGrant, error)
+	FindOne(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantFindOptions) (*types.OAuthGrant, error)
+	FindMany(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantFindOptions) ([]*types.OAuthGrant, int, error)
+	FindPage(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantPageOptions) (*OAuthGrantPage, error)
+}
+
+// OAuthGrantRepositoryInterface defines the contract for OAuthGrant data access.
+type OAuthGrantRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthGrantGetOptions) (*types.OAuthGrant, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthGrant, error)
+	FindOne(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantFindOptions) (*types.OAuthGrant, error)
+	FindMany(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantFindOptions) ([]*types.OAuthGrant, int, error)
+	FindPage(ctx context.Context, filter *OAuthGrantFilter, opts *OAuthGrantPageOptions) (*OAuthGrantPage, error)
+	CreateOne(ctx context.Context, input *types.OAuthGrant) (*types.OAuthGrant, error)
+	CreateMany(ctx context.Context, inputs []*types.OAuthGrant) ([]*types.OAuthGrant, error)
+	UpsertOne(ctx context.Context, input *types.OAuthGrant, on OAuthGrantUniqueKey, update *OAuthGrantUpdate) (*types.OAuthGrant, error)
+	UpsertOneResult(ctx context.Context, input *types.OAuthGrant, on OAuthGrantUniqueKey, update *OAuthGrantUpdate, opts *UpsertOptions) (UpsertResult[*types.OAuthGrant], error)
+	UpsertMany(ctx context.Context, inputs []*types.OAuthGrant, on OAuthGrantUniqueKey, update OAuthGrantFields, opts *UpsertOptions) ([]UpsertResult[*types.OAuthGrant], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OAuthGrantUpdate) (*types.OAuthGrant, error)
+	UpdateMany(ctx context.Context, filter *OAuthGrantFilter, update *OAuthGrantUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OAuthGrantFilter) (int, error)
+}
+
+// ReadOnlyOAuthTokenRepositoryInterface is the reads of OAuthTokenRepositoryInterface (D150).
+type ReadOnlyOAuthTokenRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthTokenGetOptions) (*types.OAuthToken, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthToken, error)
+	FindOne(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenFindOptions) (*types.OAuthToken, error)
+	FindMany(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenFindOptions) ([]*types.OAuthToken, int, error)
+	FindPage(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenPageOptions) (*OAuthTokenPage, error)
+}
+
+// OAuthTokenRepositoryInterface defines the contract for OAuthToken data access.
+type OAuthTokenRepositoryInterface interface {
+	GetOne(ctx context.Context, id types.IdentityUUID, opts *OAuthTokenGetOptions) (*types.OAuthToken, error)
+	GetManyByIDs(ctx context.Context, ids []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthToken, error)
+	FindOne(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenFindOptions) (*types.OAuthToken, error)
+	FindMany(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenFindOptions) ([]*types.OAuthToken, int, error)
+	FindPage(ctx context.Context, filter *OAuthTokenFilter, opts *OAuthTokenPageOptions) (*OAuthTokenPage, error)
+	CreateOne(ctx context.Context, input *types.OAuthToken) (*types.OAuthToken, error)
+	CreateMany(ctx context.Context, inputs []*types.OAuthToken) ([]*types.OAuthToken, error)
+	UpsertOne(ctx context.Context, input *types.OAuthToken, on OAuthTokenUniqueKey, update *OAuthTokenUpdate) (*types.OAuthToken, error)
+	UpsertOneResult(ctx context.Context, input *types.OAuthToken, on OAuthTokenUniqueKey, update *OAuthTokenUpdate, opts *UpsertOptions) (UpsertResult[*types.OAuthToken], error)
+	UpsertMany(ctx context.Context, inputs []*types.OAuthToken, on OAuthTokenUniqueKey, update OAuthTokenFields, opts *UpsertOptions) ([]UpsertResult[*types.OAuthToken], error)
+	UpdateOne(ctx context.Context, id types.IdentityUUID, update *OAuthTokenUpdate) (*types.OAuthToken, error)
+	UpdateMany(ctx context.Context, filter *OAuthTokenFilter, update *OAuthTokenUpdate) (int, error)
+	DeleteOne(ctx context.Context, id types.IdentityUUID) error
+	DeleteMany(ctx context.Context, filter *OAuthTokenFilter) (int, error)
+}
+
 // ReadOnlyOrderRepositoryInterface is the reads of OrderRepositoryInterface (D150).
 type ReadOnlyOrderRepositoryInterface interface {
 	GetOne(ctx context.Context, id types.IdentityUUID, opts *OrderGetOptions) (*types.Order, error)
@@ -312,6 +420,10 @@ type UserRoleGrantRepositoryInterface interface {
 // repository's reads, the raw reads and a read-only transaction. It has no
 // write, so a write through it does not compile.
 type ReadOnlyDatabaseInterface interface {
+	GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface
+	GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface
+	GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface
+	GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface
 	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
 	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
@@ -332,6 +444,10 @@ type ReadOnlyDatabaseInterface interface {
 // ReadOnlyTxInterface is the reads of a transaction (D150): each
 // repository's reads and the raw read.
 type ReadOnlyTxInterface interface {
+	GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface
+	GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface
+	GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface
+	GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface
 	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineReadOnlyRepository() ReadOnlyOrderLineRepositoryInterface
 	GetProductReadOnlyRepository() ReadOnlyProductRepositoryInterface
@@ -356,6 +472,14 @@ type DatabaseInterface interface {
 	ReadOnly() ReadOnlyDatabaseInterface
 	Ping(ctx context.Context) error
 	Close()
+	GetOAuthClientRepository() OAuthClientRepositoryInterface
+	GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface
+	GetOAuthCodeRepository() OAuthCodeRepositoryInterface
+	GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface
+	GetOAuthGrantRepository() OAuthGrantRepositoryInterface
+	GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface
+	GetOAuthTokenRepository() OAuthTokenRepositoryInterface
+	GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface
 	GetOrderRepository() OrderRepositoryInterface
 	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineRepository() OrderLineRepositoryInterface
@@ -385,6 +509,14 @@ type TxInterface interface {
 	Exec(ctx context.Context, sql string, arguments ...any) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, arguments ...any) (pgx.Rows, error)
 	Transaction(ctx context.Context, fn func(TxInterface) error) error
+	GetOAuthClientRepository() OAuthClientRepositoryInterface
+	GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface
+	GetOAuthCodeRepository() OAuthCodeRepositoryInterface
+	GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface
+	GetOAuthGrantRepository() OAuthGrantRepositoryInterface
+	GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface
+	GetOAuthTokenRepository() OAuthTokenRepositoryInterface
+	GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface
 	GetOrderRepository() OrderRepositoryInterface
 	GetOrderReadOnlyRepository() ReadOnlyOrderRepositoryInterface
 	GetOrderLineRepository() OrderLineRepositoryInterface
@@ -412,6 +544,10 @@ type TxInterface interface {
 // NoOpDatabase provides deterministic no-op behavior for tests and mocks.
 type NoOpDatabase struct {
 	tx             *NoOpTx
+	OAuthClient    *NoOpOAuthClientRepository
+	OAuthCode      *NoOpOAuthCodeRepository
+	OAuthGrant     *NoOpOAuthGrantRepository
+	OAuthToken     *NoOpOAuthTokenRepository
 	Order          *NoOpOrderRepository
 	OrderLine      *NoOpOrderLineRepository
 	Product        *NoOpProductRepository
@@ -427,6 +563,10 @@ type NoOpDatabase struct {
 
 // NoOpTx provides deterministic no-op transaction repository access.
 type NoOpTx struct {
+	OAuthClient    *NoOpOAuthClientRepository
+	OAuthCode      *NoOpOAuthCodeRepository
+	OAuthGrant     *NoOpOAuthGrantRepository
+	OAuthToken     *NoOpOAuthTokenRepository
 	Order          *NoOpOrderRepository
 	OrderLine      *NoOpOrderLineRepository
 	Product        *NoOpProductRepository
@@ -444,6 +584,14 @@ type NoOpTx struct {
 func NewNoOpDatabase() *NoOpDatabase {
 	tx := &NoOpTx{}
 	db := &NoOpDatabase{tx: tx}
+	db.OAuthClient = &NoOpOAuthClientRepository{}
+	tx.OAuthClient = db.OAuthClient
+	db.OAuthCode = &NoOpOAuthCodeRepository{}
+	tx.OAuthCode = db.OAuthCode
+	db.OAuthGrant = &NoOpOAuthGrantRepository{}
+	tx.OAuthGrant = db.OAuthGrant
+	db.OAuthToken = &NoOpOAuthTokenRepository{}
+	tx.OAuthToken = db.OAuthToken
 	db.Order = &NoOpOrderRepository{}
 	tx.Order = db.Order
 	db.OrderLine = &NoOpOrderLineRepository{}
@@ -548,6 +696,334 @@ func (noOpRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
 type noOpRow struct{}
 
 func (noOpRow) Scan(_ ...any) error { return pgx.ErrNoRows }
+
+func (db *NoOpDatabase) GetOAuthClientRepository() OAuthClientRepositoryInterface {
+	return db.OAuthClient
+}
+
+func (db *NoOpDatabase) GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface {
+	return db.OAuthClient
+}
+
+func (tx *NoOpTx) GetOAuthClientRepository() OAuthClientRepositoryInterface {
+	return tx.OAuthClient
+}
+
+func (tx *NoOpTx) GetOAuthClientReadOnlyRepository() ReadOnlyOAuthClientRepositoryInterface {
+	return tx.OAuthClient
+}
+
+// NoOpOAuthClientRepository provides deterministic no-op repository behavior.
+type NoOpOAuthClientRepository struct{}
+
+func (r *NoOpOAuthClientRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OAuthClientGetOptions) (*types.OAuthClient, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthClientRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthClient, error) {
+	return map[types.IdentityUUID]*types.OAuthClient{}, nil
+}
+
+func (r *NoOpOAuthClientRepository) FindOne(_ context.Context, _ *OAuthClientFilter, _ *OAuthClientFindOptions) (*types.OAuthClient, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthClientRepository) FindMany(_ context.Context, _ *OAuthClientFilter, _ *OAuthClientFindOptions) ([]*types.OAuthClient, int, error) {
+	return []*types.OAuthClient{}, 0, nil
+}
+
+func (r *NoOpOAuthClientRepository) FindPage(_ context.Context, _ *OAuthClientFilter, _ *OAuthClientPageOptions) (*OAuthClientPage, error) {
+	return &OAuthClientPage{Rows: []*types.OAuthClient{}}, nil
+}
+
+func (r *NoOpOAuthClientRepository) CreateOne(_ context.Context, input *types.OAuthClient) (*types.OAuthClient, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthClientRepository) CreateMany(_ context.Context, inputs []*types.OAuthClient) ([]*types.OAuthClient, error) {
+	if inputs == nil {
+		return []*types.OAuthClient{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOAuthClientRepository) UpsertOne(_ context.Context, input *types.OAuthClient, _ OAuthClientUniqueKey, _ *OAuthClientUpdate) (*types.OAuthClient, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthClientRepository) UpsertOneResult(_ context.Context, input *types.OAuthClient, _ OAuthClientUniqueKey, _ *OAuthClientUpdate, _ *UpsertOptions) (UpsertResult[*types.OAuthClient], error) {
+	return UpsertResult[*types.OAuthClient]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOAuthClientRepository) UpsertMany(_ context.Context, inputs []*types.OAuthClient, _ OAuthClientUniqueKey, _ OAuthClientFields, _ *UpsertOptions) ([]UpsertResult[*types.OAuthClient], error) {
+	results := make([]UpsertResult[*types.OAuthClient], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.OAuthClient]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpOAuthClientRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OAuthClientUpdate) (*types.OAuthClient, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthClientRepository) UpdateMany(_ context.Context, _ *OAuthClientFilter, _ *OAuthClientUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOAuthClientRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOAuthClientRepository) DeleteMany(_ context.Context, _ *OAuthClientFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetOAuthCodeRepository() OAuthCodeRepositoryInterface {
+	return db.OAuthCode
+}
+
+func (db *NoOpDatabase) GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface {
+	return db.OAuthCode
+}
+
+func (tx *NoOpTx) GetOAuthCodeRepository() OAuthCodeRepositoryInterface {
+	return tx.OAuthCode
+}
+
+func (tx *NoOpTx) GetOAuthCodeReadOnlyRepository() ReadOnlyOAuthCodeRepositoryInterface {
+	return tx.OAuthCode
+}
+
+// NoOpOAuthCodeRepository provides deterministic no-op repository behavior.
+type NoOpOAuthCodeRepository struct{}
+
+func (r *NoOpOAuthCodeRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OAuthCodeGetOptions) (*types.OAuthCode, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthCodeRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthCode, error) {
+	return map[types.IdentityUUID]*types.OAuthCode{}, nil
+}
+
+func (r *NoOpOAuthCodeRepository) FindOne(_ context.Context, _ *OAuthCodeFilter, _ *OAuthCodeFindOptions) (*types.OAuthCode, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthCodeRepository) FindMany(_ context.Context, _ *OAuthCodeFilter, _ *OAuthCodeFindOptions) ([]*types.OAuthCode, int, error) {
+	return []*types.OAuthCode{}, 0, nil
+}
+
+func (r *NoOpOAuthCodeRepository) FindPage(_ context.Context, _ *OAuthCodeFilter, _ *OAuthCodePageOptions) (*OAuthCodePage, error) {
+	return &OAuthCodePage{Rows: []*types.OAuthCode{}}, nil
+}
+
+func (r *NoOpOAuthCodeRepository) CreateOne(_ context.Context, input *types.OAuthCode) (*types.OAuthCode, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthCodeRepository) CreateMany(_ context.Context, inputs []*types.OAuthCode) ([]*types.OAuthCode, error) {
+	if inputs == nil {
+		return []*types.OAuthCode{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOAuthCodeRepository) UpsertOne(_ context.Context, input *types.OAuthCode, _ OAuthCodeUniqueKey, _ *OAuthCodeUpdate) (*types.OAuthCode, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthCodeRepository) UpsertOneResult(_ context.Context, input *types.OAuthCode, _ OAuthCodeUniqueKey, _ *OAuthCodeUpdate, _ *UpsertOptions) (UpsertResult[*types.OAuthCode], error) {
+	return UpsertResult[*types.OAuthCode]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOAuthCodeRepository) UpsertMany(_ context.Context, inputs []*types.OAuthCode, _ OAuthCodeUniqueKey, _ OAuthCodeFields, _ *UpsertOptions) ([]UpsertResult[*types.OAuthCode], error) {
+	results := make([]UpsertResult[*types.OAuthCode], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.OAuthCode]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpOAuthCodeRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OAuthCodeUpdate) (*types.OAuthCode, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthCodeRepository) UpdateMany(_ context.Context, _ *OAuthCodeFilter, _ *OAuthCodeUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOAuthCodeRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOAuthCodeRepository) DeleteMany(_ context.Context, _ *OAuthCodeFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetOAuthGrantRepository() OAuthGrantRepositoryInterface {
+	return db.OAuthGrant
+}
+
+func (db *NoOpDatabase) GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface {
+	return db.OAuthGrant
+}
+
+func (tx *NoOpTx) GetOAuthGrantRepository() OAuthGrantRepositoryInterface {
+	return tx.OAuthGrant
+}
+
+func (tx *NoOpTx) GetOAuthGrantReadOnlyRepository() ReadOnlyOAuthGrantRepositoryInterface {
+	return tx.OAuthGrant
+}
+
+// NoOpOAuthGrantRepository provides deterministic no-op repository behavior.
+type NoOpOAuthGrantRepository struct{}
+
+func (r *NoOpOAuthGrantRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OAuthGrantGetOptions) (*types.OAuthGrant, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthGrantRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthGrant, error) {
+	return map[types.IdentityUUID]*types.OAuthGrant{}, nil
+}
+
+func (r *NoOpOAuthGrantRepository) FindOne(_ context.Context, _ *OAuthGrantFilter, _ *OAuthGrantFindOptions) (*types.OAuthGrant, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthGrantRepository) FindMany(_ context.Context, _ *OAuthGrantFilter, _ *OAuthGrantFindOptions) ([]*types.OAuthGrant, int, error) {
+	return []*types.OAuthGrant{}, 0, nil
+}
+
+func (r *NoOpOAuthGrantRepository) FindPage(_ context.Context, _ *OAuthGrantFilter, _ *OAuthGrantPageOptions) (*OAuthGrantPage, error) {
+	return &OAuthGrantPage{Rows: []*types.OAuthGrant{}}, nil
+}
+
+func (r *NoOpOAuthGrantRepository) CreateOne(_ context.Context, input *types.OAuthGrant) (*types.OAuthGrant, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthGrantRepository) CreateMany(_ context.Context, inputs []*types.OAuthGrant) ([]*types.OAuthGrant, error) {
+	if inputs == nil {
+		return []*types.OAuthGrant{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOAuthGrantRepository) UpsertOne(_ context.Context, input *types.OAuthGrant, _ OAuthGrantUniqueKey, _ *OAuthGrantUpdate) (*types.OAuthGrant, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthGrantRepository) UpsertOneResult(_ context.Context, input *types.OAuthGrant, _ OAuthGrantUniqueKey, _ *OAuthGrantUpdate, _ *UpsertOptions) (UpsertResult[*types.OAuthGrant], error) {
+	return UpsertResult[*types.OAuthGrant]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOAuthGrantRepository) UpsertMany(_ context.Context, inputs []*types.OAuthGrant, _ OAuthGrantUniqueKey, _ OAuthGrantFields, _ *UpsertOptions) ([]UpsertResult[*types.OAuthGrant], error) {
+	results := make([]UpsertResult[*types.OAuthGrant], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.OAuthGrant]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpOAuthGrantRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OAuthGrantUpdate) (*types.OAuthGrant, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthGrantRepository) UpdateMany(_ context.Context, _ *OAuthGrantFilter, _ *OAuthGrantUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOAuthGrantRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOAuthGrantRepository) DeleteMany(_ context.Context, _ *OAuthGrantFilter) (int, error) {
+	return 0, nil
+}
+
+func (db *NoOpDatabase) GetOAuthTokenRepository() OAuthTokenRepositoryInterface {
+	return db.OAuthToken
+}
+
+func (db *NoOpDatabase) GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface {
+	return db.OAuthToken
+}
+
+func (tx *NoOpTx) GetOAuthTokenRepository() OAuthTokenRepositoryInterface {
+	return tx.OAuthToken
+}
+
+func (tx *NoOpTx) GetOAuthTokenReadOnlyRepository() ReadOnlyOAuthTokenRepositoryInterface {
+	return tx.OAuthToken
+}
+
+// NoOpOAuthTokenRepository provides deterministic no-op repository behavior.
+type NoOpOAuthTokenRepository struct{}
+
+func (r *NoOpOAuthTokenRepository) GetOne(_ context.Context, _ types.IdentityUUID, _ *OAuthTokenGetOptions) (*types.OAuthToken, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthTokenRepository) GetManyByIDs(_ context.Context, _ []types.IdentityUUID) (map[types.IdentityUUID]*types.OAuthToken, error) {
+	return map[types.IdentityUUID]*types.OAuthToken{}, nil
+}
+
+func (r *NoOpOAuthTokenRepository) FindOne(_ context.Context, _ *OAuthTokenFilter, _ *OAuthTokenFindOptions) (*types.OAuthToken, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthTokenRepository) FindMany(_ context.Context, _ *OAuthTokenFilter, _ *OAuthTokenFindOptions) ([]*types.OAuthToken, int, error) {
+	return []*types.OAuthToken{}, 0, nil
+}
+
+func (r *NoOpOAuthTokenRepository) FindPage(_ context.Context, _ *OAuthTokenFilter, _ *OAuthTokenPageOptions) (*OAuthTokenPage, error) {
+	return &OAuthTokenPage{Rows: []*types.OAuthToken{}}, nil
+}
+
+func (r *NoOpOAuthTokenRepository) CreateOne(_ context.Context, input *types.OAuthToken) (*types.OAuthToken, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthTokenRepository) CreateMany(_ context.Context, inputs []*types.OAuthToken) ([]*types.OAuthToken, error) {
+	if inputs == nil {
+		return []*types.OAuthToken{}, nil
+	}
+	return inputs, nil
+}
+
+func (r *NoOpOAuthTokenRepository) UpsertOne(_ context.Context, input *types.OAuthToken, _ OAuthTokenUniqueKey, _ *OAuthTokenUpdate) (*types.OAuthToken, error) {
+	return input, nil
+}
+
+func (r *NoOpOAuthTokenRepository) UpsertOneResult(_ context.Context, input *types.OAuthToken, _ OAuthTokenUniqueKey, _ *OAuthTokenUpdate, _ *UpsertOptions) (UpsertResult[*types.OAuthToken], error) {
+	return UpsertResult[*types.OAuthToken]{Row: input, Status: UpsertInserted}, nil
+}
+
+func (r *NoOpOAuthTokenRepository) UpsertMany(_ context.Context, inputs []*types.OAuthToken, _ OAuthTokenUniqueKey, _ OAuthTokenFields, _ *UpsertOptions) ([]UpsertResult[*types.OAuthToken], error) {
+	results := make([]UpsertResult[*types.OAuthToken], len(inputs))
+	for i, input := range inputs {
+		results[i] = UpsertResult[*types.OAuthToken]{Row: input, Status: UpsertInserted}
+	}
+	return results, nil
+}
+
+func (r *NoOpOAuthTokenRepository) UpdateOne(_ context.Context, _ types.IdentityUUID, _ *OAuthTokenUpdate) (*types.OAuthToken, error) {
+	return nil, ErrNotFound
+}
+
+func (r *NoOpOAuthTokenRepository) UpdateMany(_ context.Context, _ *OAuthTokenFilter, _ *OAuthTokenUpdate) (int, error) {
+	return 0, nil
+}
+
+func (r *NoOpOAuthTokenRepository) DeleteOne(_ context.Context, _ types.IdentityUUID) error {
+	return nil
+}
+
+func (r *NoOpOAuthTokenRepository) DeleteMany(_ context.Context, _ *OAuthTokenFilter) (int, error) {
+	return 0, nil
+}
 
 func (db *NoOpDatabase) GetOrderRepository() OrderRepositoryInterface {
 	return db.Order
@@ -1464,6 +1940,22 @@ var (
 	_ TxInterface                               = (*NoOpTx)(nil)
 	_ ReadOnlyTxInterface                       = (*Tx)(nil)
 	_ ReadOnlyTxInterface                       = (*NoOpTx)(nil)
+	_ OAuthClientRepositoryInterface            = (*OAuthClientRepository)(nil)
+	_ OAuthClientRepositoryInterface            = (*NoOpOAuthClientRepository)(nil)
+	_ ReadOnlyOAuthClientRepositoryInterface    = (*OAuthClientRepository)(nil)
+	_ ReadOnlyOAuthClientRepositoryInterface    = (*NoOpOAuthClientRepository)(nil)
+	_ OAuthCodeRepositoryInterface              = (*OAuthCodeRepository)(nil)
+	_ OAuthCodeRepositoryInterface              = (*NoOpOAuthCodeRepository)(nil)
+	_ ReadOnlyOAuthCodeRepositoryInterface      = (*OAuthCodeRepository)(nil)
+	_ ReadOnlyOAuthCodeRepositoryInterface      = (*NoOpOAuthCodeRepository)(nil)
+	_ OAuthGrantRepositoryInterface             = (*OAuthGrantRepository)(nil)
+	_ OAuthGrantRepositoryInterface             = (*NoOpOAuthGrantRepository)(nil)
+	_ ReadOnlyOAuthGrantRepositoryInterface     = (*OAuthGrantRepository)(nil)
+	_ ReadOnlyOAuthGrantRepositoryInterface     = (*NoOpOAuthGrantRepository)(nil)
+	_ OAuthTokenRepositoryInterface             = (*OAuthTokenRepository)(nil)
+	_ OAuthTokenRepositoryInterface             = (*NoOpOAuthTokenRepository)(nil)
+	_ ReadOnlyOAuthTokenRepositoryInterface     = (*OAuthTokenRepository)(nil)
+	_ ReadOnlyOAuthTokenRepositoryInterface     = (*NoOpOAuthTokenRepository)(nil)
 	_ OrderRepositoryInterface                  = (*OrderRepository)(nil)
 	_ OrderRepositoryInterface                  = (*NoOpOrderRepository)(nil)
 	_ ReadOnlyOrderRepositoryInterface          = (*OrderRepository)(nil)

@@ -63,6 +63,1090 @@ def _add_model_errors(errors: ValidationErrors, key: str, value: Any, by_alias: 
         nested = value.validate_all(by_alias=True) if by_alias else value.validate_all()
         errors.add_nested_errors(key, nested)
 
+class OAuthClient(BaseModel):
+    """
+    An OAuth client: a metadata document's, cached, or one that registered.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: Optional[IdentityUUID] = Field(default=None, alias="id", serialization_alias="id")
+
+    # The client_id the client is known by: its metadata document's URL, or the id registration made.
+    client_id: str = Field(..., alias="clientId", serialization_alias="clientId")
+
+    # metadataDocument or registered.
+    kind: str = Field(..., alias="kind", serialization_alias="kind")
+
+    # What the consent page calls the client.
+    name: str = Field(..., alias="name", serialization_alias="name")
+
+    # The client's home page.
+    uri: Optional[str] = Field(default=None, alias="uri", serialization_alias="uri")
+
+    # The redirects the client may use.
+    redirect_uris: List[str] = Field(..., alias="redirectUris", serialization_alias="redirectUris")
+
+    created_at: TemporalDateTime = Field(..., alias="createdAt", serialization_alias="createdAt")
+
+    # When the client's metadata document was last fetched.
+    refreshed_at: Optional[TemporalDateTime] = Field(default=None, alias="refreshedAt", serialization_alias="refreshedAt")
+
+    # Until when the metadata document's cache headers keep it.
+    fresh_until: Optional[TemporalDateTime] = Field(default=None, alias="freshUntil", serialization_alias="freshUntil")
+
+    # When an authorization last named the client.
+    last_used_at: Optional[TemporalDateTime] = Field(default=None, alias="lastUsedAt", serialization_alias="lastUsedAt")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
+
+        # Validate clientId
+        if self.client_id is None:
+            errors.add_field_error("client_id", "required", "required field")
+        else:
+
+            if len(str(self.client_id)) < 1:
+                errors.add_field_error("client_id", "minLength", "must be at least 1 characters")
+
+        # Validate kind
+        if self.kind is None:
+            errors.add_field_error("kind", "required", "required field")
+
+        # Validate name
+        if self.name is None:
+            errors.add_field_error("name", "required", "required field")
+
+        # Validate uri
+        if self.uri is not None:
+            try:
+                TypeAdapter(str).validate_python(self.uri)
+            except PydanticValidationError as e:
+                errors.add_field_error("uri", "invalid", str(e))
+
+        # Validate redirectUris
+        if self.redirect_uris is None:
+            errors.add_field_error("redirect_uris", "required", "required field")
+        else:
+
+            if isinstance(self.redirect_uris, list):
+                for index, item in enumerate(self.redirect_uris):
+                    if item is None:
+                        errors.add_field_error(f"redirect_uris[{index}]", "required", "required field")
+
+        # Validate createdAt
+        if self.created_at is None:
+            errors.add_field_error("created_at", "required", "required field")
+
+        # Validate refreshedAt
+        if self.refreshed_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.refreshed_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("refreshed_at", "invalid", str(e))
+
+        # Validate freshUntil
+        if self.fresh_until is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.fresh_until)
+            except PydanticValidationError as e:
+                errors.add_field_error("fresh_until", "invalid", str(e))
+
+        # Validate lastUsedAt
+        if self.last_used_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.last_used_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("last_used_at", "invalid", str(e))
+
+        if by_alias:
+            return errors._with_field_names({
+                "client_id": "clientId",
+                "redirect_uris": "redirectUris",
+                "created_at": "createdAt",
+                "refreshed_at": "refreshedAt",
+                "fresh_until": "freshUntil",
+                "last_used_at": "lastUsedAt",
+            })
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "OAuthClient":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "OAuthClient":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "OAuthClient":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "OAuthClient":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "OAuthClient":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "OAuthClient":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "OAuthClient":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+        })
+
+class OAuthCode(BaseModel):
+    """
+    An OAuth authorization request: pending while its user consents, then the code its client redeems once.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: Optional[IdentityUUID] = Field(default=None, alias="id", serialization_alias="id")
+
+    # The client that asked.
+    client: Optional[OAuthClient] = Field(default=None, alias="client", serialization_alias="client")
+
+    # The user who approved the request.
+    user: Optional[User] = Field(default=None, alias="user", serialization_alias="user")
+
+    # The grant approval made.
+    grant: Optional[OAuthGrant] = Field(default=None, alias="grant", serialization_alias="grant")
+
+    # The redirect the request named, which the code is bound to.
+    redirect_uri: str = Field(..., alias="redirectUri", serialization_alias="redirectUri")
+
+    # The PKCE challenge, S256, which the code's verifier must answer.
+    code_challenge: str = Field(..., alias="codeChallenge", serialization_alias="codeChallenge")
+
+    # The state the client sent, which the redirect carries back.
+    state: Optional[str] = Field(default=None, alias="state", serialization_alias="state")
+
+    # The scope the client asked for, as it sent it.
+    scope: Optional[str] = Field(default=None, alias="scope", serialization_alias="scope")
+
+    # The resource the request named, which the code is bound to.
+    resource: str = Field(..., alias="resource", serialization_alias="resource")
+
+    # The value approve and deny send back, which ties a decision to the request the page read.
+    nonce: str = Field(..., alias="nonce", serialization_alias="nonce")
+
+    # The SHA-256 of the code approval made, which only the client holds.
+    code_hash: Optional[CryptoSHA256] = Field(default=None, alias="codeHash", serialization_alias="codeHash")
+
+    created_at: TemporalDateTime = Field(..., alias="createdAt", serialization_alias="createdAt")
+
+    # When the request, or once approved its code, ends.
+    expires_at: TemporalDateTime = Field(..., alias="expiresAt", serialization_alias="expiresAt")
+
+    # When the code was redeemed; a second redemption revokes its grant.
+    used_at: Optional[TemporalDateTime] = Field(default=None, alias="usedAt", serialization_alias="usedAt")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
+
+        # Validate client
+        if self.client is not None:
+            try:
+                TypeAdapter(OAuthClient).validate_python(self.client)
+            except PydanticValidationError as e:
+                errors.add_field_error("client", "invalid", str(e))
+
+        _add_model_errors(errors, "client", self.client, by_alias)
+
+        # Validate user
+        if self.user is not None:
+            try:
+                TypeAdapter(User).validate_python(self.user)
+            except PydanticValidationError as e:
+                errors.add_field_error("user", "invalid", str(e))
+
+        _add_model_errors(errors, "user", self.user, by_alias)
+
+        # Validate grant
+        if self.grant is not None:
+            try:
+                TypeAdapter(OAuthGrant).validate_python(self.grant)
+            except PydanticValidationError as e:
+                errors.add_field_error("grant", "invalid", str(e))
+
+        _add_model_errors(errors, "grant", self.grant, by_alias)
+
+        # Validate redirectUri
+        if self.redirect_uri is None:
+            errors.add_field_error("redirect_uri", "required", "required field")
+
+        # Validate codeChallenge
+        if self.code_challenge is None:
+            errors.add_field_error("code_challenge", "required", "required field")
+
+        # Validate state
+        if self.state is not None:
+            try:
+                TypeAdapter(str).validate_python(self.state)
+            except PydanticValidationError as e:
+                errors.add_field_error("state", "invalid", str(e))
+
+        # Validate scope
+        if self.scope is not None:
+            try:
+                TypeAdapter(str).validate_python(self.scope)
+            except PydanticValidationError as e:
+                errors.add_field_error("scope", "invalid", str(e))
+
+        # Validate resource
+        if self.resource is None:
+            errors.add_field_error("resource", "required", "required field")
+
+        # Validate nonce
+        if self.nonce is None:
+            errors.add_field_error("nonce", "required", "required field")
+
+        # Validate codeHash
+        if self.code_hash is not None:
+
+            if len(str(self.code_hash)) > 64:
+                errors.add_field_error("code_hash", "maxLength", "must be at most 64 characters")
+            if len(str(self.code_hash)) < 64:
+                errors.add_field_error("code_hash", "minLength", "must be at least 64 characters")
+            if re.search(r"^[0-9a-f]{64}$", str(self.code_hash), re.ASCII) is None:
+                errors.add_field_error("code_hash", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "code_hash" or key.startswith("code_hash[") for key in errors.errors):
+                try:
+                    TypeAdapter(CryptoSHA256).validate_python(self.code_hash)
+                except PydanticValidationError as e:
+                    errors.add_field_error("code_hash", "invalid", str(e))
+
+        # Validate createdAt
+        if self.created_at is None:
+            errors.add_field_error("created_at", "required", "required field")
+
+        # Validate expiresAt
+        if self.expires_at is None:
+            errors.add_field_error("expires_at", "required", "required field")
+
+        # Validate usedAt
+        if self.used_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.used_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("used_at", "invalid", str(e))
+
+        if by_alias:
+            return errors._with_field_names({
+                "redirect_uri": "redirectUri",
+                "code_challenge": "codeChallenge",
+                "code_hash": "codeHash",
+                "created_at": "createdAt",
+                "expires_at": "expiresAt",
+                "used_at": "usedAt",
+            })
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "OAuthCode":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "OAuthCode":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "OAuthCode":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "OAuthCode":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "OAuthCode":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "OAuthCode":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "OAuthCode":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+            "client": self.client.mask_secrets() if self.client is not None else None,
+            "user": self.user.mask_secrets() if self.user is not None else None,
+            "grant": self.grant.mask_secrets() if self.grant is not None else None,
+        })
+
+class OAuthGrant(BaseModel):
+    """
+    An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: Optional[IdentityUUID] = Field(default=None, alias="id", serialization_alias="id")
+
+    # The user the grant calls as.
+    user: Optional[User] = Field(default=None, alias="user", serialization_alias="user")
+
+    # The client that holds the grant.
+    client: Optional[OAuthClient] = Field(default=None, alias="client", serialization_alias="client")
+
+    # The permissions the grant was given, each held while its user holds it; null for every permission its user holds.
+    permissions: Optional[List[str]] = Field(default=None, alias="permissions", serialization_alias="permissions")
+
+    # The URL of the resource the grant was given for.
+    resource: str = Field(..., alias="resource", serialization_alias="resource")
+
+    created_at: TemporalDateTime = Field(..., alias="createdAt", serialization_alias="createdAt")
+
+    # When the grant ends, however often its refresh token rotates.
+    expires_at: TemporalDateTime = Field(..., alias="expiresAt", serialization_alias="expiresAt")
+
+    # When the grant's token last authenticated a request, written at most once a minute.
+    last_used_at: Optional[TemporalDateTime] = Field(default=None, alias="lastUsedAt", serialization_alias="lastUsedAt")
+
+    # When the grant was revoked, by its user, by an administrator, by a replayed code or refresh token, or when its user was disabled.
+    revoked_at: Optional[TemporalDateTime] = Field(default=None, alias="revokedAt", serialization_alias="revokedAt")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
+
+        # Validate user
+        if self.user is not None:
+            try:
+                TypeAdapter(User).validate_python(self.user)
+            except PydanticValidationError as e:
+                errors.add_field_error("user", "invalid", str(e))
+
+        _add_model_errors(errors, "user", self.user, by_alias)
+
+        # Validate client
+        if self.client is not None:
+            try:
+                TypeAdapter(OAuthClient).validate_python(self.client)
+            except PydanticValidationError as e:
+                errors.add_field_error("client", "invalid", str(e))
+
+        _add_model_errors(errors, "client", self.client, by_alias)
+
+        # Validate permissions
+        if self.permissions is not None:
+            # A None entry is reported at its own index below; the whole-value
+            # check would repeat it at the field.
+            if not (isinstance(self.permissions, list) and None in self.permissions):
+                try:
+                    TypeAdapter(List[str]).validate_python(self.permissions)
+                except PydanticValidationError as e:
+                    errors.add_field_error("permissions", "invalid", str(e))
+
+            if isinstance(self.permissions, list):
+                for index, item in enumerate(self.permissions):
+                    if item is None:
+                        errors.add_field_error(f"permissions[{index}]", "required", "required field")
+
+        # Validate resource
+        if self.resource is None:
+            errors.add_field_error("resource", "required", "required field")
+
+        # Validate createdAt
+        if self.created_at is None:
+            errors.add_field_error("created_at", "required", "required field")
+
+        # Validate expiresAt
+        if self.expires_at is None:
+            errors.add_field_error("expires_at", "required", "required field")
+
+        # Validate lastUsedAt
+        if self.last_used_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.last_used_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("last_used_at", "invalid", str(e))
+
+        # Validate revokedAt
+        if self.revoked_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.revoked_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("revoked_at", "invalid", str(e))
+
+        if by_alias:
+            return errors._with_field_names({
+                "created_at": "createdAt",
+                "expires_at": "expiresAt",
+                "last_used_at": "lastUsedAt",
+                "revoked_at": "revokedAt",
+            })
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "OAuthGrant":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "OAuthGrant":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "OAuthGrant":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "OAuthGrant":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "OAuthGrant":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "OAuthGrant":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "OAuthGrant":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+            "user": self.user.mask_secrets() if self.user is not None else None,
+            "client": self.client.mask_secrets() if self.client is not None else None,
+        })
+
+class OAuthToken(BaseModel):
+    """
+    An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.
+    """
+
+    model_config = ConfigDict(
+        strict=True,
+        validate_assignment=True,
+        extra='ignore',
+        use_enum_values=True,
+        populate_by_name=True,
+    )
+
+    id: Optional[IdentityUUID] = Field(default=None, alias="id", serialization_alias="id")
+
+    # The grant that issued the token.
+    grant: Optional[OAuthGrant] = Field(default=None, alias="grant", serialization_alias="grant")
+
+    # access or refresh.
+    kind: str = Field(..., alias="kind", serialization_alias="kind")
+
+    # The SHA-256 of the token, which only its client holds.
+    token_hash: CryptoSHA256 = Field(..., alias="tokenHash", serialization_alias="tokenHash")
+
+    created_at: TemporalDateTime = Field(..., alias="createdAt", serialization_alias="createdAt")
+
+    # When the token ends.
+    expires_at: TemporalDateTime = Field(..., alias="expiresAt", serialization_alias="expiresAt")
+
+    # When a refresh token rotated; a second use revokes its grant.
+    used_at: Optional[TemporalDateTime] = Field(default=None, alias="usedAt", serialization_alias="usedAt")
+
+    # When the token was revoked.
+    revoked_at: Optional[TemporalDateTime] = Field(default=None, alias="revokedAt", serialization_alias="revokedAt")
+
+    def validate_all(self, *, by_alias: bool = False) -> ValidationErrors:
+        """
+        Perform comprehensive validation and return all errors.
+
+        Every generated model a field holds, in a list, a list of lists or
+        a map too, is validated as well, its errors under the path that
+        reaches it (lines[0].quantity, extras.gift.quantity).
+
+        Args:
+            by_alias: Key errors by the fields' wire names, as the Go and
+                TypeScript validators and the SDK do, instead of their
+                snake_case names, nested models' fields included.
+
+        Returns:
+            ValidationErrors object containing any validation errors.
+            If no errors, the errors dict will be empty.
+        """
+        errors = ValidationErrors()
+
+        # Validate id
+        if self.id is not None:
+
+            if re.search(r"^([0-9A-Za-z]{1,22}|[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$", str(self.id), re.ASCII) is None:
+                errors.add_field_error("id", "pattern", "invalid format")
+
+            # The scalar's type checks these rules again, so it reports only
+            # a failure they did not: one failing value, one error.
+            if not any(key == "id" or key.startswith("id[") for key in errors.errors):
+                try:
+                    TypeAdapter(IdentityUUID).validate_python(self.id)
+                except PydanticValidationError as e:
+                    errors.add_field_error("id", "invalid", str(e))
+
+        # Validate grant
+        if self.grant is not None:
+            try:
+                TypeAdapter(OAuthGrant).validate_python(self.grant)
+            except PydanticValidationError as e:
+                errors.add_field_error("grant", "invalid", str(e))
+
+        _add_model_errors(errors, "grant", self.grant, by_alias)
+
+        # Validate kind
+        if self.kind is None:
+            errors.add_field_error("kind", "required", "required field")
+
+        # Validate tokenHash
+        if self.token_hash is None:
+            errors.add_field_error("token_hash", "required", "required field")
+        else:
+
+            if len(str(self.token_hash)) > 64:
+                errors.add_field_error("token_hash", "maxLength", "must be at most 64 characters")
+            if len(str(self.token_hash)) < 64:
+                errors.add_field_error("token_hash", "minLength", "must be at least 64 characters")
+            if re.search(r"^[0-9a-f]{64}$", str(self.token_hash), re.ASCII) is None:
+                errors.add_field_error("token_hash", "pattern", "invalid format")
+
+        # Validate createdAt
+        if self.created_at is None:
+            errors.add_field_error("created_at", "required", "required field")
+
+        # Validate expiresAt
+        if self.expires_at is None:
+            errors.add_field_error("expires_at", "required", "required field")
+
+        # Validate usedAt
+        if self.used_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.used_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("used_at", "invalid", str(e))
+
+        # Validate revokedAt
+        if self.revoked_at is not None:
+            try:
+                TypeAdapter(TemporalDateTime).validate_python(self.revoked_at)
+            except PydanticValidationError as e:
+                errors.add_field_error("revoked_at", "invalid", str(e))
+
+        if by_alias:
+            return errors._with_field_names({
+                "token_hash": "tokenHash",
+                "created_at": "createdAt",
+                "expires_at": "expiresAt",
+                "used_at": "usedAt",
+                "revoked_at": "revokedAt",
+            })
+
+        return errors
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a dictionary.
+
+        Returns:
+            Dictionary representation of the model.
+        """
+        return self.model_dump(mode='python', exclude_none=False)
+
+    def to_json_dict(self) -> Dict[str, Any]:
+        """
+        Convert the model to a JSON-serializable dictionary.
+
+        Returns:
+            JSON-serializable dictionary representation.
+        """
+        return self.model_dump(mode='json', exclude_none=False)
+
+    def to_json(self) -> str:
+        """
+        Convert the model to a stable JSON string.
+
+        Returns:
+            JSON string representation.
+        """
+        return self.model_dump_json(exclude_none=False)
+
+    @classmethod
+    def from_dict(cls, input_data: Dict[str, Any]) -> "OAuthToken":
+        """
+        Parse a model from a dictionary using strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=True)
+
+    @classmethod
+    def from_dict_non_strict(cls, input_data: Dict[str, Any]) -> "OAuthToken":
+        """
+        Parse a model from a dictionary using non-strict validation.
+
+        Args:
+            input_data: Dictionary payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        return cls.model_validate(input_data, strict=False)
+
+    @classmethod
+    def from_json(cls, input_data: str | bytes) -> "OAuthToken":
+        """
+        Parse a model from JSON text/bytes using strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_json_non_strict(cls, input_data: str | bytes) -> "OAuthToken":
+        """
+        Parse a model from JSON text/bytes using non-strict validation.
+
+        Args:
+            input_data: JSON payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = json.loads(input_data)
+        if not isinstance(parsed_data, dict):
+            raise ValueError("JSON content must decode to an object")
+        return cls.from_dict_non_strict(parsed_data)
+
+    @classmethod
+    def from_yaml(cls, input_data: str | bytes) -> "OAuthToken":
+        """
+        Parse a model from YAML text/bytes using strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict(parsed_data)
+
+    @classmethod
+    def from_yaml_non_strict(cls, input_data: str | bytes) -> "OAuthToken":
+        """
+        Parse a model from YAML text/bytes using non-strict validation.
+
+        Args:
+            input_data: YAML payload to parse.
+
+        Returns:
+            Parsed model instance.
+        """
+        parsed_data = _safe_load_yaml(input_data)
+        return cls.from_dict_non_strict(parsed_data)
+
+    def mask_secrets(self) -> "OAuthToken":
+        """
+        Return a copy of this object with secret fields masked.
+        """
+        return self.model_copy(update={
+            "grant": self.grant.mask_secrets() if self.grant is not None else None,
+        })
+
 class Role(BaseModel):
     """
     A named set of permissions users are granted.

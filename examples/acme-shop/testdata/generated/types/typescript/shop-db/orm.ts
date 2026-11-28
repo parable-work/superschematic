@@ -33,6 +33,658 @@ import type { BoolFilter, DateTimeFilter, NullFilter, NumberFilter, Orm, OrmDefi
 import type * as T from './types';
 
 /**
+ * A row of OAuthClient, the oauth_client table: An OAuth client: a metadata document's, cached, or one that registered.
+ */
+export interface OAuthClientRow {
+  id: T.IdentityUUID;
+  clientId: string;
+  kind: string;
+  name: string;
+  uri: string | null;
+  redirectUris: string[];
+  createdAt: T.TemporalDateTime;
+  refreshedAt: T.TemporalDateTime | null;
+  freshUntil: T.TemporalDateTime | null;
+  lastUsedAt: T.TemporalDateTime | null;
+}
+
+/** What a create of a row of OAuthClient sets; a member left unset takes its column's default, or the schema's. */
+export interface OAuthClientCreate {
+  id?: T.IdentityUUID | null;
+  clientId: string;
+  kind: string;
+  name: string;
+  uri?: string | null;
+  redirectUris: string[];
+  refreshedAt?: T.TemporalDateTime | null;
+  freshUntil?: T.TemporalDateTime | null;
+  lastUsedAt?: T.TemporalDateTime | null;
+}
+
+/** What an update of a row of OAuthClient sets: each member set, null setting a column that may be null to NULL. */
+export interface OAuthClientUpdate {
+  clientId?: string;
+  kind?: string;
+  name?: string;
+  uri?: string | null;
+  redirectUris?: string[];
+  refreshedAt?: T.TemporalDateTime | null;
+  freshUntil?: T.TemporalDateTime | null;
+  lastUsedAt?: T.TemporalDateTime | null;
+}
+
+/** The rows of OAuthClient a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface OAuthClientFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  clientId?: StringFilter<string>;
+  kind?: StringFilter<string>;
+  name?: StringFilter<string>;
+  uri?: StringFilter<string> & NullFilter;
+  createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  refreshedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  freshUntil?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  lastUsedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows a OAuthCode row's client points at, or none does. */
+  referencedByOAuthCodeClient?: ReferencedByFilter;
+  /** The rows a OAuthGrant row's client points at, or none does. */
+  referencedByOAuthGrantClient?: ReferencedByFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly OAuthClientFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OAuthClientFilter[];
+}
+
+/** The members findOne and findMany order rows of OAuthClient by. */
+export type OAuthClientOrderField = "id" | "clientId" | "kind" | "name" | "uri" | "redirectUris" | "createdAt" | "refreshedAt" | "freshUntil" | "lastUsedAt";
+
+/** The members findPage orders rows of OAuthClient by (D60, amended); ties break by id. */
+export type OAuthClientSortField = "id" | "clientId" | "kind" | "name" | "uri" | "createdAt" | "refreshedAt" | "freshUntil" | "lastUsedAt";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type OAuthClientUniqueKey = readonly ["id"] | readonly ["clientId"];
+
+/** The position of a row of OAuthClient in a findPage order: its id. */
+export interface OAuthClientPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of OAuthClient includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OAuthClientRelations {
+  readonly oauthCodes: Related<OAuthCodeRow, OAuthCodeRelations, 'many'>;
+  readonly oauthGrants: Related<OAuthGrantRow, OAuthGrantRelations, 'many'>;
+}
+
+/** The repository of OAuthClient. */
+export type OAuthClientRepository = Repository<
+  OAuthClientRow,
+  OAuthClientCreate,
+  OAuthClientUpdate,
+  OAuthClientFilter,
+  OAuthClientOrderField,
+  OAuthClientSortField,
+  OAuthClientUniqueKey,
+  T.IdentityUUID,
+  OAuthClientPageKey,
+  OAuthClientRelations
+>;
+
+/** The oauth_client table, as the runtime reads and writes it. */
+export const oAuthClientTable: TableDefinition = {
+  name: "OAuthClient",
+  table: "oauth_client",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "oauth_client.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "clientId", column: "client_id", field: "clientId", qualified: "oauth_client.client_id", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "kind", column: "kind", field: "kind", qualified: "oauth_client.kind", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "name", column: "\"name\"", field: "name", qualified: "oauth_client.\"name\"", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "uri", column: "uri", field: "uri", qualified: "oauth_client.uri", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "redirectUris", column: "redirect_uris", field: "redirectUris", qualified: "oauth_client.redirect_uris", list: true, required: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "oauth_client.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "refreshedAt", column: "refreshed_at", field: "refreshedAt", qualified: "oauth_client.refreshed_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "freshUntil", column: "fresh_until", field: "freshUntil", qualified: "oauth_client.fresh_until", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "lastUsedAt", column: "last_used_at", field: "lastUsedAt", qualified: "oauth_client.last_used_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+    qualifiedColumns: "\"oauth_client\".\"id\", \"oauth_client\".\"client_id\", \"oauth_client\".\"kind\", \"oauth_client\".\"name\", \"oauth_client\".\"uri\", \"oauth_client\".\"redirect_uris\", \"oauth_client\".\"created_at\", \"oauth_client\".\"refreshed_at\", \"oauth_client\".\"fresh_until\", \"oauth_client\".\"last_used_at\"",
+    selectColumn: "\"oauth_client\".\"%s\"",
+    getOne: "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE id = $1",
+    getOneFields: "SELECT %s FROM oauth_client WHERE id = $1",
+    getMany: "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM oauth_client%s%s LIMIT 1",
+    findMany: "SELECT %s FROM oauth_client%s%s%s",
+    count: "SELECT COUNT(*) FROM oauth_client%s",
+    page: "SELECT %s FROM oauth_client%s%s LIMIT %d",
+    pageAfterKey: "oauth_client.id %s %s",
+    pageAfter: "(%s, oauth_client.id) %s ((SELECT %s FROM oauth_client AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM oauth_client AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", oauth_client.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM oauth_client WHERE oauth_client.id = $1)",
+    insert: "INSERT INTO oauth_client (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO oauth_client (%s) VALUES %s RETURNING %s",
+    update: "UPDATE oauth_client SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+    updateMany: "UPDATE oauth_client SET %s%s",
+    updatedAt: "updated_at = statement_timestamp()",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO oauth_client (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM oauth_client WHERE id = $1",
+    deleteMany: "DELETE FROM oauth_client%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = oauth_client.id", rows: "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE (id) IN (%s)" },
+    "clientId": { conflict: "(client_id)", keep: "client_id = oauth_client.client_id", rows: "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE (client_id) IN (%s)" },
+  },
+  referencedBy: [
+    { filter: "referencedByOAuthCodeClient", probe: "SELECT 1 FROM oauth_code WHERE oauth_code.client_id = oauth_client.id" },
+    { filter: "referencedByOAuthGrantClient", probe: "SELECT 1 FROM oauth_grant WHERE oauth_grant.client_id = oauth_client.id" },
+  ],
+  many: [
+    { name: "oauthCodes", target: "oAuthCode", column: "clientId" },
+    { name: "oauthGrants", target: "oAuthGrant", column: "clientId" },
+  ],
+};
+
+/**
+ * A row of OAuthCode, the oauth_code table: An OAuth authorization request: pending while its user consents, then the code its client redeems once.
+ */
+export interface OAuthCodeRow {
+  id: T.IdentityUUID;
+  clientId: T.IdentityUUID;
+  userId: T.IdentityUUID | null;
+  grantId: T.IdentityUUID | null;
+  redirectUri: string;
+  codeChallenge: string;
+  state: string | null;
+  scope: string | null;
+  resource: string;
+  nonce: string;
+  codeHash: T.CryptoSHA256 | null;
+  createdAt: T.TemporalDateTime;
+  expiresAt: T.TemporalDateTime;
+  usedAt: T.TemporalDateTime | null;
+}
+
+/** What a create of a row of OAuthCode sets; a member left unset takes its column's default, or the schema's. */
+export interface OAuthCodeCreate {
+  id?: T.IdentityUUID | null;
+  clientId: T.IdentityUUID;
+  userId?: T.IdentityUUID | null;
+  grantId?: T.IdentityUUID | null;
+  redirectUri: string;
+  codeChallenge: string;
+  state?: string | null;
+  scope?: string | null;
+  resource: string;
+  nonce: string;
+  codeHash?: T.CryptoSHA256 | null;
+  expiresAt: T.TemporalDateTime;
+  usedAt?: T.TemporalDateTime | null;
+}
+
+/** What an update of a row of OAuthCode sets: each member set, null setting a column that may be null to NULL. */
+export interface OAuthCodeUpdate {
+  clientId?: T.IdentityUUID;
+  userId?: T.IdentityUUID | null;
+  grantId?: T.IdentityUUID | null;
+  redirectUri?: string;
+  codeChallenge?: string;
+  state?: string | null;
+  scope?: string | null;
+  resource?: string;
+  nonce?: string;
+  codeHash?: T.CryptoSHA256 | null;
+  expiresAt?: T.TemporalDateTime;
+  usedAt?: T.TemporalDateTime | null;
+}
+
+/** The rows of OAuthCode a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface OAuthCodeFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  clientId?: UuidFilter<T.IdentityUUID>;
+  userId?: UuidFilter<T.IdentityUUID> & NullFilter;
+  grantId?: UuidFilter<T.IdentityUUID> & NullFilter;
+  redirectUri?: StringFilter<string>;
+  codeChallenge?: StringFilter<string>;
+  state?: StringFilter<string> & NullFilter;
+  scope?: StringFilter<string> & NullFilter;
+  resource?: StringFilter<string>;
+  nonce?: StringFilter<string>;
+  codeHash?: StringFilter<T.CryptoSHA256> & NullFilter;
+  createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  expiresAt?: DateTimeFilter<T.TemporalDateTime>;
+  usedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose client is among the OAuthClient rows the filter finds (D90). */
+  client?: OAuthClientFilter;
+  /** The rows whose user is among the User rows the filter finds; a row whose user is null is not among them (D90). */
+  user?: UserFilter;
+  /** The rows whose grant is among the OAuthGrant rows the filter finds; a row whose grant is null is not among them (D90). */
+  grant?: OAuthGrantFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly OAuthCodeFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OAuthCodeFilter[];
+}
+
+/** The members findOne and findMany order rows of OAuthCode by. */
+export type OAuthCodeOrderField = "id" | "redirectUri" | "codeChallenge" | "state" | "scope" | "resource" | "nonce" | "codeHash" | "createdAt" | "expiresAt" | "usedAt";
+
+/** The members findPage orders rows of OAuthCode by (D60, amended); ties break by id. */
+export type OAuthCodeSortField = "id" | "redirectUri" | "codeChallenge" | "state" | "scope" | "resource" | "nonce" | "codeHash" | "createdAt" | "expiresAt" | "usedAt";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type OAuthCodeUniqueKey = readonly ["id"] | readonly ["codeHash"];
+
+/** The position of a row of OAuthCode in a findPage order: its id. */
+export interface OAuthCodePageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of OAuthCode includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OAuthCodeRelations {
+  readonly client: Related<OAuthClientRow, OAuthClientRelations, 'one'>;
+  readonly user: Related<UserRow, UserRelations, 'optional'>;
+  readonly grant: Related<OAuthGrantRow, OAuthGrantRelations, 'optional'>;
+}
+
+/** The repository of OAuthCode. */
+export type OAuthCodeRepository = Repository<
+  OAuthCodeRow,
+  OAuthCodeCreate,
+  OAuthCodeUpdate,
+  OAuthCodeFilter,
+  OAuthCodeOrderField,
+  OAuthCodeSortField,
+  OAuthCodeUniqueKey,
+  T.IdentityUUID,
+  OAuthCodePageKey,
+  OAuthCodeRelations
+>;
+
+/** The oauth_code table, as the runtime reads and writes it. */
+export const oAuthCodeTable: TableDefinition = {
+  name: "OAuthCode",
+  table: "oauth_code",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "oauth_code.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "clientId", column: "client_id", field: "client", qualified: "oauth_code.client_id", uuid: true, required: true, relation: "OAuthClient", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "userId", column: "user_id", field: "user", qualified: "oauth_code.user_id", uuid: true, relation: "User", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "grantId", column: "grant_id", field: "grant", qualified: "oauth_code.grant_id", uuid: true, relation: "OAuthGrant", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "redirectUri", column: "redirect_uri", field: "redirectUri", qualified: "oauth_code.redirect_uri", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "codeChallenge", column: "code_challenge", field: "codeChallenge", qualified: "oauth_code.code_challenge", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "state", column: "state", field: "state", qualified: "oauth_code.state", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "scope", column: "scope", field: "scope", qualified: "oauth_code.scope", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "resource", column: "resource", field: "resource", qualified: "oauth_code.resource", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "nonce", column: "nonce", field: "nonce", qualified: "oauth_code.nonce", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "codeHash", column: "code_hash", field: "codeHash", qualified: "oauth_code.code_hash", filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "oauth_code.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "oauth_code.expires_at", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "usedAt", column: "used_at", field: "usedAt", qualified: "oauth_code.used_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+    qualifiedColumns: "\"oauth_code\".\"id\", \"oauth_code\".\"client_id\", \"oauth_code\".\"user_id\", \"oauth_code\".\"grant_id\", \"oauth_code\".\"redirect_uri\", \"oauth_code\".\"code_challenge\", \"oauth_code\".\"state\", \"oauth_code\".\"scope\", \"oauth_code\".\"resource\", \"oauth_code\".\"nonce\", \"oauth_code\".\"code_hash\", \"oauth_code\".\"created_at\", \"oauth_code\".\"expires_at\", \"oauth_code\".\"used_at\"",
+    selectColumn: "\"oauth_code\".\"%s\"",
+    getOne: "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE id = $1",
+    getOneFields: "SELECT %s FROM oauth_code WHERE id = $1",
+    getMany: "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM oauth_code%s%s LIMIT 1",
+    findMany: "SELECT %s FROM oauth_code%s%s%s",
+    count: "SELECT COUNT(*) FROM oauth_code%s",
+    page: "SELECT %s FROM oauth_code%s%s LIMIT %d",
+    pageAfterKey: "oauth_code.id %s %s",
+    pageAfter: "(%s, oauth_code.id) %s ((SELECT %s FROM oauth_code AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM oauth_code AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", oauth_code.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM oauth_code WHERE oauth_code.id = $1)",
+    insert: "INSERT INTO oauth_code (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO oauth_code (%s) VALUES %s RETURNING %s",
+    update: "UPDATE oauth_code SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+    updateMany: "UPDATE oauth_code SET %s%s",
+    updatedAt: "updated_at = statement_timestamp()",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO oauth_code (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM oauth_code WHERE id = $1",
+    deleteMany: "DELETE FROM oauth_code%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = oauth_code.id", rows: "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE (id) IN (%s)" },
+    "codeHash": { conflict: "(code_hash)", keep: "code_hash = oauth_code.code_hash", rows: "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE (code_hash) IN (%s)" },
+  },
+  relations: [
+    { field: "client", column: "clientId", target: "oAuthClient", probe: "oauth_code.client_id IN (SELECT oauth_client.id FROM oauth_client%s)" },
+    { field: "user", column: "userId", target: "user", probe: "oauth_code.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+    { field: "grant", column: "grantId", target: "oAuthGrant", probe: "oauth_code.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)" },
+  ],
+};
+
+/**
+ * A row of OAuthGrant, the oauth_grant table: An OAuth grant: the user who gave it, the client that holds it, the permissions it narrows them to, and when it ends.
+ */
+export interface OAuthGrantRow {
+  id: T.IdentityUUID;
+  userId: T.IdentityUUID;
+  clientId: T.IdentityUUID;
+  permissions: string[] | null;
+  resource: string;
+  createdAt: T.TemporalDateTime;
+  expiresAt: T.TemporalDateTime;
+  lastUsedAt: T.TemporalDateTime | null;
+  revokedAt: T.TemporalDateTime | null;
+}
+
+/** What a create of a row of OAuthGrant sets; a member left unset takes its column's default, or the schema's. */
+export interface OAuthGrantCreate {
+  id?: T.IdentityUUID | null;
+  userId: T.IdentityUUID;
+  clientId: T.IdentityUUID;
+  permissions?: string[] | null;
+  resource: string;
+  expiresAt: T.TemporalDateTime;
+  lastUsedAt?: T.TemporalDateTime | null;
+  revokedAt?: T.TemporalDateTime | null;
+}
+
+/** What an update of a row of OAuthGrant sets: each member set, null setting a column that may be null to NULL. */
+export interface OAuthGrantUpdate {
+  userId?: T.IdentityUUID;
+  clientId?: T.IdentityUUID;
+  permissions?: string[] | null;
+  resource?: string;
+  expiresAt?: T.TemporalDateTime;
+  lastUsedAt?: T.TemporalDateTime | null;
+  revokedAt?: T.TemporalDateTime | null;
+}
+
+/** The rows of OAuthGrant a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface OAuthGrantFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  userId?: UuidFilter<T.IdentityUUID>;
+  clientId?: UuidFilter<T.IdentityUUID>;
+  resource?: StringFilter<string>;
+  createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  expiresAt?: DateTimeFilter<T.TemporalDateTime>;
+  lastUsedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  revokedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows a OAuthCode row's grant points at, or none does. */
+  referencedByOAuthCodeGrant?: ReferencedByFilter;
+  /** The rows a OAuthToken row's grant points at, or none does. */
+  referencedByOAuthTokenGrant?: ReferencedByFilter;
+  /** The rows whose user is among the User rows the filter finds (D90). */
+  user?: UserFilter;
+  /** The rows whose client is among the OAuthClient rows the filter finds (D90). */
+  client?: OAuthClientFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly OAuthGrantFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OAuthGrantFilter[];
+}
+
+/** The members findOne and findMany order rows of OAuthGrant by. */
+export type OAuthGrantOrderField = "id" | "permissions" | "resource" | "createdAt" | "expiresAt" | "lastUsedAt" | "revokedAt";
+
+/** The members findPage orders rows of OAuthGrant by (D60, amended); ties break by id. */
+export type OAuthGrantSortField = "id" | "resource" | "createdAt" | "expiresAt" | "lastUsedAt" | "revokedAt";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type OAuthGrantUniqueKey = readonly ["id"];
+
+/** The position of a row of OAuthGrant in a findPage order: its id. */
+export interface OAuthGrantPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of OAuthGrant includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OAuthGrantRelations {
+  readonly user: Related<UserRow, UserRelations, 'one'>;
+  readonly client: Related<OAuthClientRow, OAuthClientRelations, 'one'>;
+  readonly oauthCodes: Related<OAuthCodeRow, OAuthCodeRelations, 'many'>;
+  readonly oauthTokens: Related<OAuthTokenRow, OAuthTokenRelations, 'many'>;
+}
+
+/** The repository of OAuthGrant. */
+export type OAuthGrantRepository = Repository<
+  OAuthGrantRow,
+  OAuthGrantCreate,
+  OAuthGrantUpdate,
+  OAuthGrantFilter,
+  OAuthGrantOrderField,
+  OAuthGrantSortField,
+  OAuthGrantUniqueKey,
+  T.IdentityUUID,
+  OAuthGrantPageKey,
+  OAuthGrantRelations
+>;
+
+/** The oauth_grant table, as the runtime reads and writes it. */
+export const oAuthGrantTable: TableDefinition = {
+  name: "OAuthGrant",
+  table: "oauth_grant",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "oauth_grant.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "userId", column: "user_id", field: "user", qualified: "oauth_grant.user_id", uuid: true, required: true, relation: "User", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "clientId", column: "client_id", field: "client", qualified: "oauth_grant.client_id", uuid: true, required: true, relation: "OAuthClient", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "permissions", column: "permissions", field: "permissions", qualified: "oauth_grant.permissions", list: true },
+    { name: "resource", column: "resource", field: "resource", qualified: "oauth_grant.resource", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "oauth_grant.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "oauth_grant.expires_at", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "lastUsedAt", column: "last_used_at", field: "lastUsedAt", qualified: "oauth_grant.last_used_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "oauth_grant.revoked_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+    qualifiedColumns: "\"oauth_grant\".\"id\", \"oauth_grant\".\"user_id\", \"oauth_grant\".\"client_id\", \"oauth_grant\".\"permissions\", \"oauth_grant\".\"resource\", \"oauth_grant\".\"created_at\", \"oauth_grant\".\"expires_at\", \"oauth_grant\".\"last_used_at\", \"oauth_grant\".\"revoked_at\"",
+    selectColumn: "\"oauth_grant\".\"%s\"",
+    getOne: "SELECT \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM oauth_grant WHERE id = $1",
+    getOneFields: "SELECT %s FROM oauth_grant WHERE id = $1",
+    getMany: "SELECT \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM oauth_grant WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM oauth_grant%s%s LIMIT 1",
+    findMany: "SELECT %s FROM oauth_grant%s%s%s",
+    count: "SELECT COUNT(*) FROM oauth_grant%s",
+    page: "SELECT %s FROM oauth_grant%s%s LIMIT %d",
+    pageAfterKey: "oauth_grant.id %s %s",
+    pageAfter: "(%s, oauth_grant.id) %s ((SELECT %s FROM oauth_grant AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM oauth_grant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", oauth_grant.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM oauth_grant WHERE oauth_grant.id = $1)",
+    insert: "INSERT INTO oauth_grant (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO oauth_grant (%s) VALUES %s RETURNING %s",
+    update: "UPDATE oauth_grant SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+    updateMany: "UPDATE oauth_grant SET %s%s",
+    updatedAt: "updated_at = statement_timestamp()",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO oauth_grant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM oauth_grant WHERE id = $1",
+    deleteMany: "DELETE FROM oauth_grant%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = oauth_grant.id", rows: "SELECT \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM oauth_grant WHERE (id) IN (%s)" },
+  },
+  referencedBy: [
+    { filter: "referencedByOAuthCodeGrant", probe: "SELECT 1 FROM oauth_code WHERE oauth_code.grant_id = oauth_grant.id" },
+    { filter: "referencedByOAuthTokenGrant", probe: "SELECT 1 FROM oauth_token WHERE oauth_token.grant_id = oauth_grant.id" },
+  ],
+  relations: [
+    { field: "user", column: "userId", target: "user", probe: "oauth_grant.user_id IN (SELECT \"user\".id FROM \"user\"%s)" },
+    { field: "client", column: "clientId", target: "oAuthClient", probe: "oauth_grant.client_id IN (SELECT oauth_client.id FROM oauth_client%s)" },
+  ],
+  many: [
+    { name: "oauthCodes", target: "oAuthCode", column: "grantId" },
+    { name: "oauthTokens", target: "oAuthToken", column: "grantId" },
+  ],
+};
+
+/**
+ * A row of OAuthToken, the oauth_token table: An OAuth access or refresh token: the grant that issued it, the SHA-256 of its text, and when it ends.
+ */
+export interface OAuthTokenRow {
+  id: T.IdentityUUID;
+  grantId: T.IdentityUUID;
+  kind: string;
+  tokenHash: T.CryptoSHA256;
+  createdAt: T.TemporalDateTime;
+  expiresAt: T.TemporalDateTime;
+  usedAt: T.TemporalDateTime | null;
+  revokedAt: T.TemporalDateTime | null;
+}
+
+/** What a create of a row of OAuthToken sets; a member left unset takes its column's default, or the schema's. */
+export interface OAuthTokenCreate {
+  id?: T.IdentityUUID | null;
+  grantId: T.IdentityUUID;
+  kind: string;
+  tokenHash: T.CryptoSHA256;
+  expiresAt: T.TemporalDateTime;
+  usedAt?: T.TemporalDateTime | null;
+  revokedAt?: T.TemporalDateTime | null;
+}
+
+/** What an update of a row of OAuthToken sets: each member set, null setting a column that may be null to NULL. */
+export interface OAuthTokenUpdate {
+  grantId?: T.IdentityUUID;
+  kind?: string;
+  tokenHash?: T.CryptoSHA256;
+  expiresAt?: T.TemporalDateTime;
+  usedAt?: T.TemporalDateTime | null;
+  revokedAt?: T.TemporalDateTime | null;
+}
+
+/** The rows of OAuthToken a read or a write finds: each member set is one condition, all of them ANDed. */
+export interface OAuthTokenFilter {
+  id?: UuidFilter<T.IdentityUUID>;
+  grantId?: UuidFilter<T.IdentityUUID>;
+  kind?: StringFilter<string>;
+  tokenHash?: StringFilter<T.CryptoSHA256>;
+  createdAt?: DateTimeFilter<T.TemporalDateTime>;
+  expiresAt?: DateTimeFilter<T.TemporalDateTime>;
+  usedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  revokedAt?: DateTimeFilter<T.TemporalDateTime> & NullFilter;
+  /** The rows whose grant is among the OAuthGrant rows the filter finds (D90). */
+  grant?: OAuthGrantFilter;
+  /** The rows every one of the filters finds, beside the other members (D99), so two anyOf groups, each in a filter of its own, must both hold; a filter of no member adds no condition, and neither does an empty list. */
+  allOf?: readonly OAuthTokenFilter[];
+  /** The rows any of the filters finds, beside the other members (D90); a filter of no member keeps every row, and so does an empty list. */
+  anyOf?: readonly OAuthTokenFilter[];
+}
+
+/** The members findOne and findMany order rows of OAuthToken by. */
+export type OAuthTokenOrderField = "id" | "kind" | "tokenHash" | "createdAt" | "expiresAt" | "usedAt" | "revokedAt";
+
+/** The members findPage orders rows of OAuthToken by (D60, amended); ties break by id. */
+export type OAuthTokenSortField = "id" | "kind" | "tokenHash" | "createdAt" | "expiresAt" | "usedAt" | "revokedAt";
+
+/** The unique keys upsertOne and upsertMany are keyed by, by their fields. */
+export type OAuthTokenUniqueKey = readonly ["id"] | readonly ["tokenHash"];
+
+/** The position of a row of OAuthToken in a findPage order: its id. */
+export interface OAuthTokenPageKey {
+  readonly id: T.IdentityUUID;
+}
+
+/** The relations a read of OAuthToken includes (D90): each one's rows, their own relations, and how many a row has. */
+export interface OAuthTokenRelations {
+  readonly grant: Related<OAuthGrantRow, OAuthGrantRelations, 'one'>;
+}
+
+/** The repository of OAuthToken. */
+export type OAuthTokenRepository = Repository<
+  OAuthTokenRow,
+  OAuthTokenCreate,
+  OAuthTokenUpdate,
+  OAuthTokenFilter,
+  OAuthTokenOrderField,
+  OAuthTokenSortField,
+  OAuthTokenUniqueKey,
+  T.IdentityUUID,
+  OAuthTokenPageKey,
+  OAuthTokenRelations
+>;
+
+/** The oauth_token table, as the runtime reads and writes it. */
+export const oAuthTokenTable: TableDefinition = {
+  name: "OAuthToken",
+  table: "oauth_token",
+  key: "id",
+  columns: [
+    { name: "id", column: "id", field: "id", qualified: "oauth_token.id", uuid: true, key: true, auto: true, required: true, filter: ["eq", "ne", "in", "notIn", "isNull"], sortable: true },
+    { name: "grantId", column: "grant_id", field: "grant", qualified: "oauth_token.grant_id", uuid: true, required: true, relation: "OAuthGrant", filter: ["eq", "ne", "in", "notIn", "isNull"] },
+    { name: "kind", column: "kind", field: "kind", qualified: "oauth_token.kind", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "tokenHash", column: "token_hash", field: "tokenHash", qualified: "oauth_token.token_hash", required: true, filter: ["eq", "ne", "in", "notIn", "ilike", "isNull"], sortable: true },
+    { name: "createdAt", column: "created_at", field: "createdAt", qualified: "oauth_token.created_at", timestamp: true, required: true, audit: "createdAt", filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "expiresAt", column: "expires_at", field: "expiresAt", qualified: "oauth_token.expires_at", timestamp: true, required: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "usedAt", column: "used_at", field: "usedAt", qualified: "oauth_token.used_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+    { name: "revokedAt", column: "revoked_at", field: "revokedAt", qualified: "oauth_token.revoked_at", timestamp: true, filter: ["eq", "ne", "gt", "gte", "lt", "lte", "between", "in", "notIn", "isNull"], sortable: true },
+  ],
+  statements: {
+    columns: "\"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+    qualifiedColumns: "\"oauth_token\".\"id\", \"oauth_token\".\"grant_id\", \"oauth_token\".\"kind\", \"oauth_token\".\"token_hash\", \"oauth_token\".\"created_at\", \"oauth_token\".\"expires_at\", \"oauth_token\".\"used_at\", \"oauth_token\".\"revoked_at\"",
+    selectColumn: "\"oauth_token\".\"%s\"",
+    getOne: "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE id = $1",
+    getOneFields: "SELECT %s FROM oauth_token WHERE id = $1",
+    getMany: "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE id IN (%s)",
+    live: "",
+    liveWhere: "",
+    liveCondition: "",
+    findOne: "SELECT %s FROM oauth_token%s%s LIMIT 1",
+    findMany: "SELECT %s FROM oauth_token%s%s%s",
+    count: "SELECT COUNT(*) FROM oauth_token%s",
+    page: "SELECT %s FROM oauth_token%s%s LIMIT %d",
+    pageAfterKey: "oauth_token.id %s %s",
+    pageAfter: "(%s, oauth_token.id) %s ((SELECT %s FROM oauth_token AS page_key WHERE page_key.id = %s), %s)",
+    pageAfterNulls: "CASE (SELECT %s IS NULL FROM oauth_token AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+    pageOrder: " ORDER BY %s %s",
+    pageOrderNulls: " ORDER BY %s %s NULLS LAST",
+    pageTiebreak: ", oauth_token.id %s",
+    pageKeyExists: "SELECT EXISTS (SELECT 1 FROM oauth_token WHERE oauth_token.id = $1)",
+    insert: "INSERT INTO oauth_token (%s) VALUES (%s) RETURNING %s",
+    insertMany: "INSERT INTO oauth_token (%s) VALUES %s RETURNING %s",
+    update: "UPDATE oauth_token SET %s WHERE id = $%d",
+    returning: " RETURNING \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+    updateMany: "UPDATE oauth_token SET %s%s",
+    updatedAt: "updated_at = statement_timestamp()",
+    updatedBy: "updated_by = $%d",
+    upsert: "INSERT INTO oauth_token (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\", (xmax = 0) AS _inserted",
+    softDelete: "",
+    softDeleteMany: "",
+    delete: "DELETE FROM oauth_token WHERE id = $1",
+    deleteMany: "DELETE FROM oauth_token%s",
+  },
+  uniqueKeys: {
+    "id": { conflict: "(id)", keep: "id = oauth_token.id", rows: "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE (id) IN (%s)" },
+    "tokenHash": { conflict: "(token_hash)", keep: "token_hash = oauth_token.token_hash", rows: "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE (token_hash) IN (%s)" },
+  },
+  relations: [
+    { field: "grant", column: "grantId", target: "oAuthGrant", probe: "oauth_token.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)" },
+  ],
+};
+
+/**
  * A row of Order, the "order" table: A shopper's order. Staff look orders up by customer, newest first. An
  * order put back to placed, by staff or by a script in psql, is fulfilled
  * again: the database's trigger enqueues its OrderPlaced, whatever wrote
@@ -1098,6 +1750,10 @@ export interface UserFilter {
   id?: UuidFilter<T.IdentityUUID>;
   email?: StringFilter<T.ContactEmail>;
   name?: StringFilter<T.IdentityName>;
+  /** The rows a OAuthCode row's user points at, or none does. */
+  referencedByOAuthCodeUser?: ReferencedByFilter;
+  /** The rows a OAuthGrant row's user points at, or none does. */
+  referencedByOAuthGrantUser?: ReferencedByFilter;
   /** The rows a Order row's customer points at, or none does. */
   referencedByOrderCustomer?: ReferencedByFilter;
   /** The rows a Review row's author points at, or none does. */
@@ -1132,6 +1788,8 @@ export interface UserPageKey {
 
 /** The relations a read of User includes (D90): each one's rows, their own relations, and how many a row has. */
 export interface UserRelations {
+  readonly oauthCodes: Related<OAuthCodeRow, OAuthCodeRelations, 'many'>;
+  readonly oauthGrants: Related<OAuthGrantRow, OAuthGrantRelations, 'many'>;
   readonly orders: Related<OrderRow, OrderRelations, 'many'>;
   readonly reviews: Related<ReviewRow, ReviewRelations, 'many'>;
   readonly sessions: Related<SessionRow, SessionRelations, 'many'>;
@@ -1205,6 +1863,8 @@ export const userTable: TableDefinition = {
     "email": { conflict: "(email)", keep: "email = \"user\".email", rows: "SELECT \"created_at\", \"updated_at\", \"id\", \"email\", \"name\" FROM \"user\" WHERE (email) IN (%s)" },
   },
   referencedBy: [
+    { filter: "referencedByOAuthCodeUser", probe: "SELECT 1 FROM oauth_code WHERE oauth_code.user_id = \"user\".id" },
+    { filter: "referencedByOAuthGrantUser", probe: "SELECT 1 FROM oauth_grant WHERE oauth_grant.user_id = \"user\".id" },
     { filter: "referencedByOrderCustomer", probe: "SELECT 1 FROM \"order\" WHERE \"order\".customer_id = \"user\".id" },
     { filter: "referencedByReviewAuthor", probe: "SELECT 1 FROM review WHERE review.author_id = \"user\".id", live: " AND review.deleted_at IS NULL" },
     { filter: "referencedBySessionUser", probe: "SELECT 1 FROM \"session\" WHERE \"session\".user_id = \"user\".id" },
@@ -1213,6 +1873,8 @@ export const userTable: TableDefinition = {
     { filter: "referencedByUserRoleGrantUser", probe: "SELECT 1 FROM user_role_grant WHERE user_role_grant.user_id = \"user\".id" },
   ],
   many: [
+    { name: "oauthCodes", target: "oAuthCode", column: "userId" },
+    { name: "oauthGrants", target: "oAuthGrant", column: "userId" },
     { name: "orders", target: "order", column: "customerId" },
     { name: "reviews", target: "review", column: "authorId" },
     { name: "sessions", target: "session", column: "userId" },
@@ -1638,6 +2300,10 @@ export const userRoleGrantTable: TableDefinition = {
 
 /** The repositories of shop-db, by table. */
 export interface ShopDbRepositories {
+  readonly oAuthClient: OAuthClientRepository;
+  readonly oAuthCode: OAuthCodeRepository;
+  readonly oAuthGrant: OAuthGrantRepository;
+  readonly oAuthToken: OAuthTokenRepository;
   readonly order: OrderRepository;
   readonly orderLine: OrderLineRepository;
   readonly product: ProductRepository;
@@ -1699,6 +2365,10 @@ export const shopDbOrm: OrmDefinition = {
   historyActorCTE: "WITH history_actor AS MATERIALIZED (\n\tSELECT set_config('superschematic.history_actor_id', COALESCE($1::text, ''), true) AS _history_actor\n)\n",
   clearHistoryActor: "SELECT set_config('superschematic.history_actor_id', '', true)",
   tables: {
+    oAuthClient: oAuthClientTable,
+    oAuthCode: oAuthCodeTable,
+    oAuthGrant: oAuthGrantTable,
+    oAuthToken: oAuthTokenTable,
     order: orderTable,
     orderLine: orderLineTable,
     product: productTable,

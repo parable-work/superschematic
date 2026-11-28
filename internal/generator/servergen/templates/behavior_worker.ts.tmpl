@@ -35,7 +35,9 @@
 // minutes.
 
 import { {{ join .RuntimeImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}';
+{{- if .PostgresDatabases }}
 import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}connectPostgres, queueWakesSettled } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+{{- end }}
 {{- if .SQLiteDatabases }}
 import { openSqlite, sqliteFile, type SqliteDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/sqlite';
 {{- end }}
@@ -44,7 +46,9 @@ import { {{ join .EngineImports ", " }} } from '{{ .Naming.EngineNpmPackage }}/s
 {{- end }}
 import { runWorkers, workerConcurrency, workerDrain } from '{{ .Naming.HTTPRuntimeNpmPackage }}/worker';
 import { startTelemetry{{ if .Clients }}, type Telemetry{{ end }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/telemetry';
+{{- if .PostgresDatabases }}
 import type { Pool } from 'pg';
+{{- end }}
 {{- if .Buckets }}
 import { openBucket } from '{{ .Naming.HTTPRuntimeNpmPackage }}/gcs';
 {{- end }}
@@ -117,7 +121,10 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]{{ if .
 {{ template "ts-open-memory-store" . }}
 {{- end }}
 
+{{- if .PostgresDatabases }}
+
 {{ template "ts-connect" . }}
+{{- end }}
 {{- if .SQLiteDatabases }}
 
 {{ template "ts-open-sqlite" . }}

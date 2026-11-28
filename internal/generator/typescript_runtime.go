@@ -9,7 +9,6 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/internal/generator/tsrestgen"
 	"github.com/parable-work/superschematic/internal/generator/tsutil"
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -59,15 +58,14 @@ func (r run) typeScriptProviders() (*tsrestgen.DepsProviders, error) {
 
 // typeScriptRuntime sets what deps holds of the runtime pieces db, the
 // API's database, declares, which the generated server wires over its
-// repositories on Postgres: the notifier of its @notifier("dispatch")
-// queue (D153); the inbound path of its conversations and its
-// @runRequests queue (D157); the calendar of its @calendarSource tables
-// (D152); search across its @searchable tables and their indexing queues
-// (D155); and its @accessGrants and @accessLog tables (D156). A database
-// that lists sqlite first gets none: an app builds them over the runtime's
-// ./d1 entry (D189).
+// repositories, on Postgres or, from the runtime's ./d1 entry, on SQLite
+// and D1 (D189, #702): the notifier of its @notifier("dispatch") queue
+// (D153); the inbound path of its conversations and its @runRequests
+// queue (D157); the calendar of its @calendarSource tables (D152); search
+// across its @searchable tables and their indexing queues (D155); and its
+// @accessGrants and @accessLog tables (D156).
 func typeScriptRuntime(deps *tsrestgen.DepsInfo, db *ir.Schema) {
-	if db == nil || deps.Dialect == tsrestgen.SQLiteDialect {
+	if db == nil {
 		return
 	}
 	if dispatch := db.NotifierTable(ir.NotifierDispatch); dispatch != nil {
@@ -88,6 +86,11 @@ func typeScriptRuntime(deps *tsrestgen.DepsInfo, db *ir.Schema) {
 			deps.Routes.Calendar = true
 		}
 	}
+	for _, td := range db.Types {
+		if td != nil && td.Attachments != nil {
+			deps.Routes.Files = true
+		}
+	}
 	deps.Routes.Grants = db.AccessGrantsTable() != nil
 	deps.Routes.AccessLog = db.AccessLogTable() != nil
 }
@@ -105,16 +108,9 @@ func sortedKeys[V any](m map[string]V) []string {
 // typeScriptRuntimeQueues are the queues of db, schema, whose @worker a
 // runtime piece runs in TypeScript beside the dispatcher's: the notifier's
 // dispatch queue (D153) and the @searchable declarations' queues (D155),
-// on a database whose DB service lists postgres first. typeScriptRuntime
-// sets the same for the API's own build.
+// whichever dialect the database's DB service lists first (#702).
+// typeScriptRuntime sets the same for the API's own build.
 func (r run) typeScriptRuntimeQueues(db string, schema *ir.Schema) []string {
-	if r.Options.DependencyConfig != nil {
-		if cfg, ok := r.Options.DependencyConfig(db); ok && cfg != nil {
-			if outputs, err := registry.ParseOutputs(cfg.Outputs, r.Registry); err == nil && outputs.SQLDialects()[0] == tsrestgen.SQLiteDialect {
-				return nil
-			}
-		}
-	}
 	deps := tsrestgen.DepsInfo{}
 	typeScriptRuntime(&deps, schema)
 	var out []string

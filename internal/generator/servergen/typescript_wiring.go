@@ -49,6 +49,7 @@ func (w *TypeScriptWorker) planRuntimeHandler(o *tsrestgen.APIOutput, info tsres
 		w.Transcripts = o.Deps.Agents != nil && info.Queue == o.Deps.Agents.Requests
 	case tsrestgen.WorkerNotifier:
 		w.Handler = "notifyMessage"
+		w.Upkeep = true
 	case tsrestgen.WorkerSearch:
 		w.Handler = "indexSearchMessage"
 		w.HandlerOptions = true
@@ -112,8 +113,19 @@ func (a *TypeScriptAPI) runtimeMCPOptions() []string {
 	return nil
 }
 
+// AccessEntry is the entry of the HTTP runtime an entrypoint imports its
+// APIs' grants and access log from: ./postgres beside a pool, and ./d1,
+// which imports no driver, for a server whose databases list sqlite first
+// (#702).
+func (s *TypeScriptServer) AccessEntry() string {
+	if len(s.PostgresDatabases()) > 0 {
+		return "/postgres"
+	}
+	return "/d1"
+}
+
 // AccessImports are the names an entrypoint imports from the HTTP
-// runtime's ./postgres entry for its APIs' grants and access log (D156).
+// runtime's AccessEntry for its APIs' grants and access log (D156).
 func (s *TypeScriptServer) AccessImports() []string {
 	var grants, log bool
 	for _, a := range s.APIs {

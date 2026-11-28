@@ -57,7 +57,7 @@ import { {{ if .CloudSQL }}{{ if .Engines }}cloudSqlSocket, {{ end }}{{ end }}co
 import type { Pool } from 'pg';
 {{- end }}
 {{- if .AccessImports }}
-import { {{ join .AccessImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}/postgres';
+import { {{ join .AccessImports ", " }} } from '{{ .Naming.HTTPRuntimeNpmPackage }}{{ .AccessEntry }}';
 {{- end }}
 {{- if .SQLiteDatabases }}
 import { ping as pingSqlDatabase } from '{{ .Naming.HTTPRuntimeNpmPackage }}/d1';

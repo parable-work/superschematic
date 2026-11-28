@@ -315,14 +315,8 @@ func (o *APIOutput) SetDeps(deps DepsInfo) error {
 		}
 		seen[m.Field] = m.Service
 	}
-	if deps.Agents != nil && deps.Dialect == SQLiteDialect {
-		// The dispatcher runs on SQLite and D1 (D189); the generated
-		// agents.ts builds it from the ./postgres entry, and its workers
-		// claim through the Postgres queue client.
-		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), and %s lists sqlite first: the generated server builds it from the runtime's ./postgres entry and claims its queues through the Postgres queue client. On SQLite and D1 an app builds createAgents of the runtime's ./d1 entry over the ./orm/sqlite entry's repositories and claims its queues over the SqlDatabase (D189)", o.SchemaName, deps.Database)
-	}
 	if deps.Agents != nil && !depsORM(deps) {
-		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), which runs over the repositories %s's TypeScript types export for Postgres, and holds none", o.SchemaName, deps.Database)
+		return fmt.Errorf("tsrestgen: %s's Deps holds the agent dispatcher (D183), which runs over the repositories %s's TypeScript types export, and holds none", o.SchemaName, deps.Database)
 	}
 	if err := o.checkRuntimeDeps(deps); err != nil {
 		return err
@@ -743,23 +737,19 @@ func (o *APIOutput) ORMEntry() string    { return tsgen.ORMEntry }
 
 // checkBehaviorWorkers refuses deps for an API that declares a behavior
 // worker (D103) when they hold no repositories: its handlers run each
-// deadline and each change through Deps.orm's repository of the table, on
-// Postgres, where its queues are claimed. One on a sqlite-first database
-// is refused even with the repositories there (D116): its claims are
-// Postgres's.
+// deadline and each change through Deps.orm's repository of the table,
+// with its queues claimed over the pool, or over the SqlDatabase on a
+// sqlite-first database (D186, #702).
 func (o *APIOutput) checkBehaviorWorkers(deps DepsInfo) error {
 	workers := o.BehaviorWorkers()
 	if len(workers) == 0 {
 		return nil
 	}
 	w := workers[0]
-	if deps.Database != "" && deps.Dialect == SQLiteDialect {
-		return fmt.Errorf("tsrestgen: worker %s runs %s, and %s lists sqlite first: a TypeScript behavior worker claims its queues on Postgres alone, and one on a SQLite file or D1 is not built (D103, D116); on SQLite an app's worker runs the ./orm/sqlite entry's runDeadline and runChange over sqliteQueue's claims (D186)", w.Name, w.Behavior.Runs(), deps.Database)
-	}
 	if depsORM(deps) {
 		return nil
 	}
-	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export for Postgres (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Runs(), deps.Database, deps.Database)
+	return fmt.Errorf("tsrestgen: worker %s runs %s, through the repositories %s's TypeScript types export (D103); enable outputs.types.typescript in %s's config", w.Name, w.Behavior.Runs(), deps.Database, deps.Database)
 }
 
 // HasJobs reports whether the API declares a job, for which deps.ts

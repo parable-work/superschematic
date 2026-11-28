@@ -82,6 +82,9 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
   // message as it is, and the implementation has no method for it.
   const concurrency = workerConcurrency(4);
   const queue = postgresQueue(workDbPool, noticeWorkQueue);
+  // The notifier's upkeep beside the queue's prune: every channel adapter's
+  // health on its schedule, and the deliveries past their retention.
+  const upkeep = workApiApi.notifierUpkeepOf(workApiDeps);
   logger.info('worker started', { api: 'work-api', class: 'Notify', queue: queue.name, concurrency });
   await runWorker(
     {
@@ -98,7 +101,7 @@ async function run(signal: AbortSignal, pools: { end(): Promise<void> }[]): Prom
       complete: (id, token) => queue.complete(id, token),
       fail: (id, token, cause) => queue.fail(id, token, cause),
       release: (id, token) => queue.release(id, token),
-      prune: limit => queue.prune(limit),
+      prune: async limit => (await queue.prune(limit)) + (await upkeep(limit)),
       slot: slots => queue.slot(slots),
       nextDue: () => queue.nextDue(),
     },

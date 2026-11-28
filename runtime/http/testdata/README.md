@@ -24,6 +24,7 @@ behave alike.
 | `agents_parity.json` | The agent orchestration's and the inbound path's pure parts (D157, D158, D183, D193): a class's default autonomy (`defaultAutonomy`), a message's trust (`trustOf`), the autonomy a run has over an operation (`effectiveAutonomy`), a party's paths narrowing a run's (`narrowReaches`), an agent's permissions narrowed to whom it acts for (`narrowPermissions`), the hash an approval is bound to (`paramsHash`), the policy row that wins (`bestPolicy`), what a use crosses of a budget (`budgetCrossing`), a transcript entry's redaction (`redactText`) and whether an email's authentication passes (`emailAuthenticated`): TypeScript's `agents.ts` and `inbound.ts` exports, Rust's `orm::agents` and `orm::inbound` twins, and Go's `agents` and `inbound` (D192). Its `comment` states the harness; `runtime/http/typescript` writes it with `AGENTS_PARITY_WRITE=1 bun test src/agents-parity.test.ts`. |
 | `attachments_parity.json` | The rules of a file of a row (D154): whether a text is a file's name, 1 to 255 code points (D14, amended) with no `/`, `\` or control character and not white space alone (`names`), whether a media type is one a file may have (`mediaTypes`), and whether a declaration's `mediaTypes` admit one (`allowed`): Go's `rowrefs` (`runtime/schema/go`) and TypeScript's `isFileName`, `MEDIA_TYPE` and `mediaTypeAllowed`. Its `comment` states the harness; `runtime/schema/go/rowrefs` writes it with `go test -run TestAttachmentsParityVectors -update`. |
 | `identity_parity.json` | The identity runtime's vectors (D50), described below. |
+| `oauth_parity.json` | The OAuth authorization server's pure parts (#695): the access and refresh tokens' text and hashes (`tokens`), the credential each is on a request (`credentials`), the config's `oauth` member (`config`), PKCE (`verifiers`, `pkce`), redirect matching with the port ignored on loopback (`redirects`, `redirectKinds`), the public base (`publicBases`), the two discovery documents, their paths and the MCP endpoint's challenge (`metadata`), a scope's names (`scopes`), a metadata document's URL (`metadataUrls`), the addresses its fetch refuses (`privateAddresses`) and how long a document is kept (`cacheSeconds`): TypeScript's `identity` exports. Its `comment` states the harness; `runtime/http/typescript` writes it with `OAUTH_PARITY_WRITE=1 bun test src/identity/oauth-parity.test.ts`. Rust and Go have no reader of it yet. |
 | `identity/` | The fixture the identity stores run against: `fixture-user-model-db.json` (its identity descriptor), `create.sql` (its Postgres DDL) and `sqlite/create.sql` (its SQLite DDL). `TestIdentityStoreFixtureIsCurrent` in `internal/generator` fails when they are stale and rewrites them with `-update`. |
 
 ## identity_parity.json
@@ -56,7 +57,8 @@ Otherwise `want` is the config the runtime runs with, every member present:
   "apiKeyMaxTtlSeconds": 31536000,
   "cookie": {"name": "__Host-session", "domain": "", "secure": true, "sameSite": "Lax"},
   "trustedOrigins": [],
-  "password": {"argon2": {"memoryKiB": 19456, "iterations": 2, "parallelism": 1}}
+  "password": {"argon2": {"memoryKiB": 19456, "iterations": 2, "parallelism": 1}},
+  "oauth": {"publicBaseUrl": ""}
 }
 ```
 

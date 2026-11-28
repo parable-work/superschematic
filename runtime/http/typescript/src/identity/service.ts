@@ -7,6 +7,7 @@ import { crossOriginAllowed, type CrossOriginRequest } from './crossorigin.js';
 import {
   API_KEY_NOT_HELD_MESSAGE,
   FieldErrors,
+  OAUTH_TOKEN_NOT_HELD_MESSAGE,
   SESSION_ONLY_MESSAGE,
   crossOrigin,
   identityConflict,
@@ -31,7 +32,9 @@ import {
   type StoredRole,
   type StoredUser,
 } from './store.js';
-import { extractCredential, hashToken, isApiKey, newApiKey, newToken, type Transport } from './token.js';
+import { extractCredential, hashToken, isApiKey, isOAuthAccessToken, newApiKey, newToken, type Transport } from './token.js';
+import { OAuthServer, type OAuthOptions } from './oauth.js';
+import type { AccessLog } from '../access.js';
 
 /*
 The user model's logic over a store, a config and a clock (D50), as the Go
@@ -68,6 +71,8 @@ export interface IdentityPrincipal {
   readonly sessionId: string;
   /** The API key's id (D114), and empty for a session's principal. */
   readonly apiKeyId: string;
+  /** The OAuth grant's id (#695) when an access token authenticated the request; absent or empty otherwise. */
+  readonly oauthGrantId?: string;
   readonly transport: Transport;
 }
 
@@ -262,6 +267,22 @@ export interface IdentityServiceOptions {
    * without it.
    */
   readonly apiKeyAdministration?: boolean;
+  /**
+   * Turns on the API's OAuth authorization server (#695), as its
+   * @userSessions({ oauth }) declares it: the consent and connected-app
+   * routes, the protocol endpoints (mountOAuthRoutes), and access tokens
+   * on every route. A request with an access token is refused without it.
+   */
+  readonly oauth?: OAuthOptions;
+  /**
+   * Turns on the administration set's OAuth grant operations (#695), as
+   * the API's @userAdministration({ oauth: true }) declares them:
+   * listUserOAuthGrants and revokeUserOAuthGrant, which identityRoutes
+   * leaves out without it. They need oauth too.
+   */
+  readonly oauthAdministration?: boolean;
+  /** Where the OAuth server records the grants given and revoked (D156), when the API keeps an access log (accessLogOf). */
+  readonly accessLog?: AccessLog;
 }
 
 /** Go's RFC 3339 with the fraction's trailing zeros dropped, in UTC: how the Go runtime writes a time. */
@@ -310,6 +331,7 @@ const OUTER_SPACE = new RegExp(`^${SPACE}+|${SPACE}+$`, 'gu');
  */
 function sessionOnly(p: IdentityPrincipal): void {
   if ((p.apiKeyId ?? '') !== '') throw identityForbidden(SESSION_ONLY_MESSAGE);
+  if ((p.oauthGrantId ?? '') !== '') throw identityForbidden(OAUTH_TOKEN_NOT_HELD_MESSAGE);
 }
 
 /** A login's transport: bearer when absent. */
@@ -368,6 +390,15 @@ function checkRegistration(registration: RegistrationOptions): RegistrationOptio
   };
 }
 
+/** The first value of a header of a request's headers, or null. */
+function headerOf(headers: IdentityRequest['headers'], name: string): string | null {
+  if (headers instanceof Headers) return headers.get(name);
+  for (const [key, value] of headers as Iterable<readonly [string, string]>) {
+    if (key.toLowerCase() === name) return value;
+  }
+  return null;
+}
+
 /** The identity service. */
 export class IdentityService {
   readonly config: IdentityConfig;
@@ -386,6 +417,10 @@ export class IdentityService {
   readonly apiKeys: boolean;
   /** Whether the administration set's API key operations are turned on (IdentityServiceOptions.apiKeyAdministration). */
   readonly apiKeyAdministration: boolean;
+  /** The OAuth authorization server (#695), when IdentityServiceOptions.oauth turns it on. */
+  readonly oauth: OAuthServer | undefined;
+  /** Whether the administration set's OAuth grant operations are turned on (IdentityServiceOptions.oauthAdministration). */
+  readonly oauthAdministration: boolean;
 
   /** Validates the config and starts hashing the dummy password an unknown login verifies against, at the config's cost. */
   constructor(options: IdentityServiceOptions) {
@@ -406,6 +441,21 @@ export class IdentityService {
     this.registration = checkRegistration(options.registration ?? {});
     this.apiKeys = options.apiKeys === true;
     this.apiKeyAdministration = options.apiKeyAdministration === true;
+    this.oauth = options.oauth
+      ? new OAuthServer(
+          {
+            store: this.store,
+            config: this.config,
+            now: () => this.now(),
+            random: size => this.random(size),
+            permissions: () => this.routes.flatMap(route => route.permissions),
+            requirePermission: (p, name) => this.require(p, name),
+            ...(options.accessLog ? { accessLog: options.accessLog } : {}),
+          },
+          options.oauth
+        )
+      : undefined;
+    this.oauthAdministration = options.oauthAdministration === true;
     this.params = this.config.password.argon2;
     this.dummy = dummyHash(this.params);
     // A failure surfaces on the first login that needs the hash.
@@ -560,7 +610,7 @@ export class IdentityService {
     }
     if (credential.transport === 'cookie' && !this.crossOriginAllowed(request)) throw crossOrigin();
     try {
-      return await this.authenticateToken(credential.token, credential.transport);
+      return await this.authenticateToken(credential.token, credential.transport, request);
     } catch (error) {
       if (clear && error instanceof HttpProblem && error.status === 401) {
         throw unauthenticated(error, clear);
@@ -573,10 +623,20 @@ export class IdentityService {
    * Resolves a session token to its principal, as authenticate does once it
    * has read the token from a request. A token that is an API key is
    * resolved as one with the bearer transport, the only one that carries it
-   * (D114).
+   * (D114), and an OAuth access token as one (#695), held to this API's
+   * resource when request says which host it reached.
    */
-  async authenticateToken(token: string, transport: Transport): Promise<IdentityPrincipal> {
+  async authenticateToken(token: string, transport: Transport, request?: IdentityRequest): Promise<IdentityPrincipal> {
     if (transport === 'bearer' && isApiKey(token)) return this.authenticateApiKey(token);
+    if (transport === 'bearer' && isOAuthAccessToken(token)) {
+      if (!this.oauth) throw unauthenticated(new Error('the API serves no OAuth'));
+      // A token is held to this API's resource when the request says
+      // which host it reached (#695).
+      const audience = request
+        ? { configured: this.config.oauth.publicBaseUrl, host: request.host, forwardedPrefix: headerOf(request.headers, 'x-forwarded-prefix') }
+        : undefined;
+      return this.oauth.authenticate(token, audience);
+    }
     let rec;
     try {
       rec = await this.store.findSession(hashToken(token));
