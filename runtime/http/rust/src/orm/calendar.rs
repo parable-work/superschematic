@@ -829,7 +829,7 @@ mod pg {
                 Repositories::new(&client, definition).map_err(|err| failed(&err))?;
             match call_calendar_tool(&repositories, Some(principal), arguments, &self.options).await
             {
-                Ok(calendar) => Ok(crate::mcp::CallOutcome::Result(json!(calendar))),
+                Ok(calendar) => Ok(crate::mcp::CallOutcome::Result(serde_json::json!(calendar))),
                 Err(Error::Invalid(message)) => Ok(crate::mcp::CallOutcome::Problem(
                     crate::response::problem_body(&ApiError::bad_request(message), None),
                 )),
