@@ -38,11 +38,34 @@ func TestWriteORMGoldenNotifications(t *testing.T) {
 	if events := defs.Tables["Ticket"].Events; len(events) != 4 || events[1].Kind != "ticket.overdue" || events[1].Urgency != "urgent" {
 		t.Errorf("Ticket's events: %+v", events)
 	}
-	got, err := os.ReadFile(filepath.Join(dir, "notifications.go"))
+	// The database lists sqlite (#618): each column says how a SQLite
+	// column holds it.
+	inbox := defs.Parts["inbox"].Columns
+	if inbox["createdAt"].SQLite != "time" || inbox["payload"].SQLite != "json" || inbox["recipient"].SQLite != "" {
+		t.Errorf("the inbox's columns on SQLite: %+v", inbox)
+	}
+	for _, name := range []string{"notifications.go", "notifications_sqlite.go"} {
+		checkGoldenFile(t, dir, svc, name)
+	}
+
+	output, dir = crossTablesOutput(t, "fixture-db")
+	if output.Notifications != nil {
+		t.Errorf("fixture-db's Notifications: %+v", output.Notifications)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "notifications.go")); !os.IsNotExist(err) {
+		t.Errorf("fixture-db wrote notifications.go: %v", err)
+	}
+}
+
+// checkGoldenFile compares the file name dir holds, the ORM of svc, with
+// its golden copy, or rewrites the copy with -update.
+func checkGoldenFile(t *testing.T, dir, svc, name string) {
+	t.Helper()
+	got, err := os.ReadFile(filepath.Join(dir, name))
 	if err != nil {
 		t.Fatal(err)
 	}
-	golden := filepath.Join("testdata", "golden", svc, "notifications.go")
+	golden := filepath.Join("testdata", "golden", svc, name)
 	if *update {
 		if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
 			t.Fatal(err)
@@ -54,14 +77,6 @@ func TestWriteORMGoldenNotifications(t *testing.T) {
 	}
 	want, err := os.ReadFile(golden)
 	if err != nil || string(got) != string(want) {
-		t.Errorf("notifications.go of %s differs from its golden (run with -update to accept): %v", svc, err)
-	}
-
-	output, dir = crossTablesOutput(t, "fixture-db")
-	if output.Notifications != nil {
-		t.Errorf("fixture-db's Notifications: %+v", output.Notifications)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "notifications.go")); !os.IsNotExist(err) {
-		t.Errorf("fixture-db wrote notifications.go: %v", err)
+		t.Errorf("%s of %s differs from its golden (run with -update to accept): %v", name, svc, err)
 	}
 }

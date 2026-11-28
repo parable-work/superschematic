@@ -13,7 +13,8 @@ const poolFixture = "../../loader/tsreader/testdata/services/fixture-pool-db"
 // The layout document of a table that implements Pool beside Budget
 // (D104): Account's first use is Pool's, its four owned fields, the two
 // instants converted as epoch milliseconds, markOut and reportRoom on a row
-// and pick, an operation of the table as a whole that writes nothing, and
+// and pick, an operation of the table as a whole that writes nothing and
+// answers a row at member (registry.TableOperationRow), and
 // no sub-table; then Budget's, with its three sub-tables. Pool's recheck is
 // a message of Account's deadline queue and its event of the event queue,
 // and nothing hears Account's writes. A read across the table takes its
@@ -38,7 +39,7 @@ func TestLayoutOfPool(t *testing.T) {
 		`{"name":"outUntil","field":"poolOutUntil","column":"pool_out_until","type":"Temporal.DateTime","convert":"epochMillis"},` +
 		`{"name":"outReason","field":"poolOutReason","column":"pool_out_reason","type":"string"},` +
 		`{"name":"checkedAt","field":"poolCheckedAt","column":"pool_checked_at","type":"Temporal.DateTime","convert":"epochMillis"}],` +
-		`"operations":[{"name":"markOut","writes":true},{"name":"reportRoom","writes":true},{"name":"pick","writes":false,"table":true}]}`
+		`"operations":[{"name":"markOut","writes":true},{"name":"reportRoom","writes":true},{"name":"pick","writes":false,"table":true,"answersRow":"member"}]}`
 	if string(pool) != want {
 		t.Errorf("Account's Pool =\n%s\nwant\n%s", pool, want)
 	}

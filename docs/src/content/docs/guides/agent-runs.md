@@ -14,7 +14,7 @@ stop switch ends every run in flight.
 
 | Built | Not built yet |
 | --- | --- |
-| `@agents("<part>")` on the orchestration's tables, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
+| `@agents("<part>")` on the orchestration's tables, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
 | run requests on a queue from routes, assignments, schedules, principals and inbound messages | a real container platform's sandbox provider and a model API's provider |
 | the run's token as a grant per target row, acting for its principal, its paths narrowed to a party's grant | a live run on Workers (`smoke.sh Cloudflare` is the maintainer's) |
 | autonomy per agent and operation or class, approvals bound to their parameters' hash, `@autonomy` in the generated MCP tools | |
@@ -22,8 +22,9 @@ stop switch ends every run in flight.
 | budgets per agent and in total, warnings, pauses; stop switches | |
 | asking in a row's thread, with a follow-up row at the deadline | |
 | redacted transcripts in a bucket; credentials that stay in the sandbox | |
-| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; a generated Go server that builds the dispatcher into its `Deps`, and a Rust server that does the same; `@autonomy` in a Go server, which serves no MCP endpoint |
-| the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres | |
+| a generated TypeScript server that builds the dispatcher into its `Deps`, mounts its routes and runs its queues | the same over a database that lists `sqlite` first, whose generated dispatcher is built from the `./postgres` entry; a Rust server that builds the dispatcher into its `Deps`; `@autonomy` in a Go server, which serves no MCP endpoint |
+| the Go runtime's `agents` package and `providers.RunAgentInstance`, on Postgres and SQLite | |
+| a generated Go server that builds the dispatcher, the notifier and the inbound path into its `Deps`, mounts their routes and runs their queues ([the generated Go server](#the-generated-go-server)) | the same over a database that lists `sqlite` first (#717) |
 | the Rust runtime's `orm::agents` and `run_agent_instance`, on Postgres | |
 
 [D158](https://github.com/parable-work/superschematic/issues/607) and [D183](https://github.com/parable-work/superschematic/issues/612)
@@ -142,6 +143,12 @@ buildRouter(implementations, {
 });
 ```
 
+The generated server puts `grantAuthenticator({ orm, inner, runTokens:
+'inner' })` in front of the implementation's authenticator for a database
+with grants: a party's token runs as the party, and a run's token goes on
+to the implementation's, which resolves it where it is
+`deps.agents.authenticator(...)` and refuses it otherwise.
+
 ## Autonomy
 
 Each tool call passes the run's policy. The most specific row wins: the
@@ -181,15 +188,15 @@ message, and approving it releases the message; denying it refuses it.
 
 A TypeScript API whose database declares the orchestration holds the
 dispatcher in its `Deps`. The generated entrypoint builds `deps.agents`
-with `createAgents` over `deps.orm` and the requests queue, and the rest of
-its options from the implementation's `createAgentOptions`:
+with `createAgents` over `deps.orm` and the requests queue, with the
+providers its config names (`deps.providers`, D159), the notifier
+(`deps.notifier`, D153) and the inbound path (`deps.inbound`, D157) it
+builds too, and the rest of its options from the implementation's
+`createAgentOptions`, which override them:
 
 ```ts
 export const createAgentOptions: AgentOptionsConstructor = deps => ({
   endpoint: deps.config.AGENT_ENDPOINT ?? 'http://localhost:8080/api/agents',
-  providers, // providersFrom over the config's slots (D159)
-  notifier, // createNotifier, whose approval replies run agents' reply actions
-  inbound, // createInbound, whose approve hook is agents.sendApproval
   tools,
   search: true,
 });
@@ -197,8 +204,9 @@ export const createAgentOptions: AgentOptionsConstructor = deps => ({
 
 | What the generated server does | Where |
 | --- | --- |
-| builds `deps.agents` with `withAgents` | every entrypoint that builds `Deps` |
-| mounts `deps.agents.routes()` at the endpoint's path | the server |
+| builds `deps.agents` with `withRuntime`, the API package's `runtime.ts`, after the notifier and the inbound path | every entrypoint that builds `Deps`: `main.ts`, `fetch.ts`, and each worker's `main.ts` and `drain.ts` |
+| routes a route's `{ agent }` recipient to the dispatcher, decides "approve 12" and "deny 12" with its reply actions, and gives the inbound path its `sendApproval` hook | the notifier and the inbound path it builds |
+| mounts `deps.agents.routes({ authenticate })` at the endpoint's path, with the approvals' approve and deny as the caller the API's authenticator establishes | the server |
 | passes `agents.mcpGate` as the MCP endpoint's call gate | a server that serves the API's MCP endpoint |
 | hands each message to `agents.handle` | a `@worker` of the requests queue, and of the `@runRequests` queue (D157) |
 | prunes the transcripts past their retention with the queue | the requests queue's worker |
@@ -332,6 +340,54 @@ sandbox's side is `providers.RunAgentInstance`. A Go server is refused an
 operation's `@autonomy`, which holds an agent run's calls of the API's MCP
 tools, since it serves no MCP endpoint; `MCPGate` is that gate for the day
 one does.
+
+On SQLite the Go runtime runs the same dispatcher (#618), as the
+TypeScript one does (D189). `(*SQLiteDatabase).Orchestration()` is its
+host over the SQLite file, and the runtime writes its statements over the
+orchestration's tables in SQLite's words
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). A
+run's Lease, Retries and status run through the behaviors' core in the
+SQLite repository's transaction, the definitions keep their rows and
+version there, which a run records, and `WorkerQueue()` claims the requests
+on SQLite. The Go repository reads no definition's history on SQLite, as
+the TypeScript one reads none.
+
+### The generated Go server
+
+A stack's Go server wires all of the above itself (D190, D192, D187). The
+API package of an API whose database hosts the notifier, has a calendar
+source or a `@searchable` table, or keeps grants, holds `wiring.go`:
+
+| What | What it does |
+| --- | --- |
+| `Wiring` | The options of the notifier, the inbound path, the dispatcher, its routes and authenticator, the calendar's and search's routes, and the indexing. The implementation's `NewWiring(deps Deps) (Wiring, error)` answers them, and a member left zero takes the wiring's default. |
+| `Wire(deps, db, wiring)` | Builds `Deps.Agents`, `Deps.Notifier` and `Deps.Inbound` in the order above, giving each `Deps.Providers` and `Deps.Logger`, the notifier the dispatcher's requests and its `approve` and `deny`, and the inbound path the dispatcher's send approval. A member `Deps` already holds is kept. |
+| `Authenticator(deps, db, wiring, inner)` | The API's auth step, its identity's middleware or its `AuthMiddleware`, behind the dispatcher's `Authenticator` and so `session.GrantAuthenticator`. |
+| `Routes(deps, db, wiring, auth)` | The inbox (`GET /api/inbox`, `POST /api/inbox/{id}/read` and `/ack`) and the calendar and search behind `auth`; the relays' callbacks (`POST /webhooks/{slot}/inbound` and `/status`), a calendar feed's fetch and the agent routes outside it; the approvals' routes behind it. |
+| `<Worker>Queue(deps, db, wiring)` | The queue of a `@worker` of the dispatch queue, the requests queue, the `@runRequests` queue or a `@searchable` declaration's queue: the notifier's, the dispatcher's, the inbound path's run requests, or `crosstable.IndexSearch` over each message. The `Workers` interface has no method for it. |
+
+The server's `main.go` asks `NewWiring`, calls `Wire`, establishes every
+route's caller with `Authenticator` and serves `Routes` beside the API's
+router. A job and a worker build the same `Deps`, and a worker of one of
+those queues runs its `<Worker>Queue` and calls no `NewWorkers`. The
+scaffolded implementation's `NewWiring` names the endpoint, which an app
+reads from its config:
+
+```go
+func NewWiring(deps api.Deps) (api.Wiring, error) {
+	return api.Wiring{
+		Agents:   agents.Options{Endpoint: deps.Config.AgentEndpoint, Tools: tools},
+		Notifier: notify.Options{Replies: replies},
+	}, nil
+}
+```
+
+An app that builds a part itself puts it in `Deps` before `Wire` runs, or
+mounts routes of its own beside the generated ones. Over a database that
+lists `sqlite` first the generated server wires none of it yet and its
+workers are refused (#717): the implementation builds the parts over
+`Deps.DB` itself, which run on SQLite as above. `@autonomy` waits for a Go
+MCP endpoint.
 
 ## In Rust
 

@@ -29,7 +29,7 @@ themselves, held to its audience and their grants (D156, D180).
 
 // notifierDefinitions are the notifier's tables by part and the database's
 // tables, which the notifier runs on.
-var notifierDefinitions = notifications.MustParse(`{"parts":{"channelIdentities":{"type":"ChannelIdentity","table":"channel_identity","columns":{"address":{"name":"address"},"codeAttempts":{"name":"code_attempts"},"codeExpiresAt":{"name":"code_expires_at"},"codeHash":{"name":"code_hash"},"codePurpose":{"name":"code_purpose"},"createdAt":{"name":"created_at"},"id":{"name":"id","uuid":true},"kind":{"name":"kind"},"optedOutAt":{"name":"opted_out_at"},"principal":{"name":"principal","uuid":true},"principalKind":{"name":"principal_kind"},"principalTable":{"name":"principal_table"},"revokedAt":{"name":"revoked_at"},"trust":{"name":"trust"},"verifiedAt":{"name":"verified_at"}}},"channelTrust":{"type":"ChannelTrust","table":"channel_trust","columns":{"channelKind":{"name":"channel_kind"},"id":{"name":"id","uuid":true},"level":{"name":"level"},"permissions":{"name":"permissions"}}},"deliveries":{"type":"Delivery","table":"delivery","columns":{"acknowledgedAt":{"name":"acknowledged_at"},"address":{"name":"address"},"attempt":{"name":"attempt"},"channelKind":{"name":"channel_kind"},"deliveredAt":{"name":"delivered_at"},"detail":{"name":"detail"},"dueAt":{"name":"due_at"},"endedAt":{"name":"ended_at"},"failedAt":{"name":"failed_at"},"id":{"name":"id","uuid":true},"notice":{"name":"notice","uuid":true},"providerMessageId":{"name":"provider_message_id"},"purpose":{"name":"purpose"},"queuedAt":{"name":"queued_at"},"readAt":{"name":"read_at"},"recipient":{"name":"recipient","uuid":true},"sentAt":{"name":"sent_at"},"slot":{"name":"slot"},"state":{"name":"state"}}},"inbox":{"type":"Notice","table":"notice","columns":{"acknowledgedAt":{"name":"acknowledged_at"},"acknowledgedVia":{"name":"acknowledged_via"},"body":{"name":"body"},"createdAt":{"name":"created_at"},"digestedAt":{"name":"digested_at"},"escalation":{"name":"escalation"},"eventId":{"name":"event_id","uuid":true},"eventKind":{"name":"event_kind"},"id":{"name":"id","uuid":true},"payload":{"name":"payload"},"readAt":{"name":"read_at"},"recipient":{"name":"recipient","uuid":true},"recipientKind":{"name":"recipient_kind"},"reference":{"name":"reference"},"route":{"name":"route","uuid":true},"state":{"name":"state"},"subjectKey":{"name":"subject_key"},"subjectTable":{"name":"subject_table"},"title":{"name":"title"},"urgency":{"name":"urgency"}}},"preferences":{"type":"NoticePreference","table":"notice_preference","columns":{"channels":{"name":"channels"},"digest":{"name":"digest"},"eventKind":{"name":"event_kind"},"id":{"name":"id","uuid":true},"principal":{"name":"principal","uuid":true},"quietEnd":{"name":"quiet_end"},"quietStart":{"name":"quiet_start"},"timeZone":{"name":"time_zone"},"urgency":{"name":"urgency"}}},"replies":{"type":"Reply","table":"reply","columns":{"address":{"name":"address"},"body":{"name":"body"},"channelKind":{"name":"channel_kind"},"detail":{"name":"detail"},"id":{"name":"id","uuid":true},"identity":{"name":"identity","uuid":true},"interpreter":{"name":"interpreter"},"notice":{"name":"notice","uuid":true},"outcome":{"name":"outcome"},"principal":{"name":"principal","uuid":true},"providerMessageId":{"name":"provider_message_id"},"receivedAt":{"name":"received_at"},"reference":{"name":"reference"},"slot":{"name":"slot"},"undo":{"name":"undo"},"undoneAt":{"name":"undone_at"},"verb":{"name":"verb"}}},"routes":{"type":"NoticeRoute","table":"notice_route","columns":{"createdAt":{"name":"created_at"},"createdBy":{"name":"created_by","uuid":true},"enabled":{"name":"enabled"},"escalation":{"name":"escalation"},"eventKind":{"name":"event_kind"},"filter":{"name":"filter"},"id":{"name":"id","uuid":true},"name":{"name":"\"name\""},"recipients":{"name":"recipients"},"subjectTable":{"name":"subject_table"},"urgency":{"name":"urgency"}}},"subscriptions":{"type":"Subscription","table":"subscription","columns":{"channels":{"name":"channels"},"createdAt":{"name":"created_at"},"enabled":{"name":"enabled"},"filter":{"name":"filter"},"id":{"name":"id","uuid":true},"lastSentAt":{"name":"last_sent_at"},"name":{"name":"\"name\""},"nextAt":{"name":"next_at"},"principal":{"name":"principal","uuid":true},"rule":{"name":"rule"},"start":{"name":"\"start\""},"subjectTable":{"name":"subject_table"},"timeZone":{"name":"time_zone"},"titleField":{"name":"title_field"}}}},"tables":{"Account":{"key":"id"},"Approval":{"key":"id","events":[{"kind":"approval.requested","title":"summary","urgency":"urgent"}]},"ChannelIdentity":{"key":"id","part":"channelIdentities"},"ChannelTrust":{"key":"id","part":"channelTrust"},"Delivery":{"key":"id","part":"deliveries"},"Notice":{"key":"id","part":"inbox"},"NoticePreference":{"key":"id","part":"preferences"},"NoticeRoute":{"key":"id","part":"routes"},"Reply":{"key":"id","part":"replies"},"Role":{"key":"id"},"Session":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"Subscription":{"key":"id","part":"subscriptions"},"Ticket":{"key":"id","events":[{"kind":"ticket.assigned","payload":["title","status"],"title":"title"},{"kind":"ticket.overdue","payload":["title"],"title":"title","urgency":"urgent"},{"kind":"ticket.summary","title":"title","urgency":"digest"},{"kind":"reference.cleared","title":"title","urgency":"record"}]},"UserApiKey":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"UserCredential":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"UserRoleGrant":{"key":"id","relations":{"role":{"target":"Role","member":"role"},"user":{"target":"Account","member":"user"}}}}}`)
+var notifierDefinitions = notifications.MustParse(`{"parts":{"channelIdentities":{"type":"ChannelIdentity","table":"channel_identity","columns":{"address":{"name":"address"},"codeAttempts":{"name":"code_attempts"},"codeExpiresAt":{"name":"code_expires_at","sqlite":"time"},"codeHash":{"name":"code_hash"},"codePurpose":{"name":"code_purpose"},"createdAt":{"name":"created_at","sqlite":"time"},"id":{"name":"id","uuid":true},"kind":{"name":"kind"},"optedOutAt":{"name":"opted_out_at","sqlite":"time"},"principal":{"name":"principal","uuid":true},"principalKind":{"name":"principal_kind"},"principalTable":{"name":"principal_table"},"revokedAt":{"name":"revoked_at","sqlite":"time"},"trust":{"name":"trust"},"verifiedAt":{"name":"verified_at","sqlite":"time"}}},"channelTrust":{"type":"ChannelTrust","table":"channel_trust","columns":{"channelKind":{"name":"channel_kind"},"id":{"name":"id","uuid":true},"level":{"name":"level"},"permissions":{"name":"permissions","sqlite":"json"}}},"deliveries":{"type":"Delivery","table":"delivery","columns":{"acknowledgedAt":{"name":"acknowledged_at","sqlite":"time"},"address":{"name":"address"},"attempt":{"name":"attempt"},"channelKind":{"name":"channel_kind"},"deliveredAt":{"name":"delivered_at","sqlite":"time"},"detail":{"name":"detail"},"dueAt":{"name":"due_at","sqlite":"time"},"endedAt":{"name":"ended_at","sqlite":"time"},"failedAt":{"name":"failed_at","sqlite":"time"},"id":{"name":"id","uuid":true},"notice":{"name":"notice","uuid":true},"providerMessageId":{"name":"provider_message_id"},"purpose":{"name":"purpose"},"queuedAt":{"name":"queued_at","sqlite":"time"},"readAt":{"name":"read_at","sqlite":"time"},"recipient":{"name":"recipient","uuid":true},"sentAt":{"name":"sent_at","sqlite":"time"},"slot":{"name":"slot"},"state":{"name":"state"}}},"inbox":{"type":"Notice","table":"notice","columns":{"acknowledgedAt":{"name":"acknowledged_at","sqlite":"time"},"acknowledgedVia":{"name":"acknowledged_via"},"body":{"name":"body"},"createdAt":{"name":"created_at","sqlite":"time"},"digestedAt":{"name":"digested_at","sqlite":"time"},"escalation":{"name":"escalation"},"eventId":{"name":"event_id","uuid":true},"eventKind":{"name":"event_kind"},"id":{"name":"id","uuid":true},"payload":{"name":"payload","sqlite":"json"},"readAt":{"name":"read_at","sqlite":"time"},"recipient":{"name":"recipient","uuid":true},"recipientKind":{"name":"recipient_kind"},"reference":{"name":"reference"},"route":{"name":"route","uuid":true},"state":{"name":"state"},"subjectKey":{"name":"subject_key"},"subjectTable":{"name":"subject_table"},"title":{"name":"title"},"urgency":{"name":"urgency"}}},"preferences":{"type":"NoticePreference","table":"notice_preference","columns":{"channels":{"name":"channels","sqlite":"json"},"digest":{"name":"digest"},"eventKind":{"name":"event_kind"},"id":{"name":"id","uuid":true},"principal":{"name":"principal","uuid":true},"quietEnd":{"name":"quiet_end"},"quietStart":{"name":"quiet_start"},"timeZone":{"name":"time_zone"},"urgency":{"name":"urgency"}}},"replies":{"type":"Reply","table":"reply","columns":{"address":{"name":"address"},"body":{"name":"body"},"channelKind":{"name":"channel_kind"},"detail":{"name":"detail"},"id":{"name":"id","uuid":true},"identity":{"name":"identity","uuid":true},"interpreter":{"name":"interpreter"},"notice":{"name":"notice","uuid":true},"outcome":{"name":"outcome"},"principal":{"name":"principal","uuid":true},"providerMessageId":{"name":"provider_message_id"},"receivedAt":{"name":"received_at","sqlite":"time"},"reference":{"name":"reference"},"slot":{"name":"slot"},"undo":{"name":"undo","sqlite":"json"},"undoneAt":{"name":"undone_at","sqlite":"time"},"verb":{"name":"verb"}}},"routes":{"type":"NoticeRoute","table":"notice_route","columns":{"createdAt":{"name":"created_at","sqlite":"time"},"createdBy":{"name":"created_by","uuid":true},"enabled":{"name":"enabled","sqlite":"bool"},"escalation":{"name":"escalation","sqlite":"json"},"eventKind":{"name":"event_kind"},"filter":{"name":"filter","sqlite":"json"},"id":{"name":"id","uuid":true},"name":{"name":"\"name\""},"recipients":{"name":"recipients","sqlite":"json"},"subjectTable":{"name":"subject_table"},"urgency":{"name":"urgency"}}},"subscriptions":{"type":"Subscription","table":"subscription","columns":{"channels":{"name":"channels","sqlite":"json"},"createdAt":{"name":"created_at","sqlite":"time"},"enabled":{"name":"enabled","sqlite":"bool"},"filter":{"name":"filter","sqlite":"json"},"id":{"name":"id","uuid":true},"lastSentAt":{"name":"last_sent_at","sqlite":"time"},"name":{"name":"\"name\""},"nextAt":{"name":"next_at","sqlite":"time"},"principal":{"name":"principal","uuid":true},"rule":{"name":"rule"},"start":{"name":"\"start\""},"subjectTable":{"name":"subject_table"},"timeZone":{"name":"time_zone"},"titleField":{"name":"title_field"}}}},"tables":{"Account":{"key":"id"},"Approval":{"key":"id","events":[{"kind":"approval.requested","title":"summary","urgency":"urgent"}]},"ChannelIdentity":{"key":"id","part":"channelIdentities"},"ChannelTrust":{"key":"id","part":"channelTrust"},"Delivery":{"key":"id","part":"deliveries"},"Notice":{"key":"id","part":"inbox"},"NoticePreference":{"key":"id","part":"preferences"},"NoticeRoute":{"key":"id","part":"routes"},"Reply":{"key":"id","part":"replies"},"Role":{"key":"id"},"Session":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"Subscription":{"key":"id","part":"subscriptions"},"Ticket":{"key":"id","events":[{"kind":"ticket.assigned","payload":["title","status"],"title":"title"},{"kind":"ticket.overdue","payload":["title"],"title":"title","urgency":"urgent"},{"kind":"ticket.summary","title":"title","urgency":"digest"},{"kind":"reference.cleared","title":"title","urgency":"record"}]},"UserApiKey":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"UserCredential":{"key":"id","relations":{"user":{"target":"Account","member":"user"}}},"UserRoleGrant":{"key":"id","relations":{"role":{"target":"Role","member":"role"},"user":{"target":"Account","member":"user"}}}}}`)
 
 // Notifications is the database as the notifier runs through it (D190).
 func (db *Database) Notifications() notifications.Host {
@@ -41,6 +41,9 @@ func (db *Database) Notifications() notifications.Host {
 type notifierHost struct {
 	db *Database
 	tx TxInterface
+	// lite is the SQLite database the host runs on (notifications_sqlite.go),
+	// tx then a *SQLiteTx of it; nil on Postgres.
+	lite *SQLiteDatabase
 }
 
 // notifierRepositories are the repositories the notifier reads a record
@@ -68,10 +71,16 @@ func (h notifierHost) repositories() notifierRepositories {
 	if h.tx != nil {
 		return h.tx
 	}
+	if h.lite != nil {
+		return h.lite
+	}
 	return h.db
 }
 
 func (h notifierHost) Query(ctx context.Context, sql string, args ...any) ([]notifications.Row, error) {
+	if h.lite != nil {
+		return h.sqliteQuery(ctx, sql, args...)
+	}
 	var rows pgx.Rows
 	var err error
 	if h.tx != nil {
@@ -100,6 +109,9 @@ func (h notifierHost) Query(ctx context.Context, sql string, args ...any) ([]not
 }
 
 func (h notifierHost) Exec(ctx context.Context, sql string, args ...any) (int64, error) {
+	if h.lite != nil {
+		return h.sqliteExec(ctx, sql, args...)
+	}
 	if h.tx != nil {
 		tag, err := h.tx.Exec(ctx, sql, args...)
 		return tag.RowsAffected(), err
@@ -109,14 +121,23 @@ func (h notifierHost) Exec(ctx context.Context, sql string, args ...any) (int64,
 }
 
 func (h notifierHost) Transaction(ctx context.Context, fn func(notifications.Host) error) error {
-	run := func(tx TxInterface) error { return fn(notifierHost{db: h.db, tx: tx}) }
+	run := func(tx TxInterface) error { return fn(notifierHost{db: h.db, tx: tx, lite: h.lite}) }
 	if h.tx != nil {
 		return h.tx.Transaction(ctx, run)
+	}
+	if h.lite != nil {
+		return h.lite.Transaction(ctx, run)
 	}
 	return h.db.Transaction(ctx, run)
 }
 
 func (h notifierHost) In(tx any) (notifications.Host, error) {
+	if h.lite != nil {
+		return h.sqliteIn(tx)
+	}
+	if _, lite := tx.(*SQLiteTx); lite {
+		return nil, fmt.Errorf("orm: the notifier on Postgres writes in a transaction of its database, not a *SQLiteTx")
+	}
 	in, ok := tx.(TxInterface)
 	if !ok || in == nil {
 		return nil, fmt.Errorf("orm: the notifier writes in a transaction of this database (a TxInterface), not %T", tx)
@@ -153,6 +174,9 @@ func (h notifierHost) Enqueue(ctx context.Context, work notifications.Work, dela
 	msg, err := notifierMessage(work)
 	if err != nil {
 		return err
+	}
+	if h.lite != nil {
+		return h.sqliteEnqueue(ctx, msg, delay)
 	}
 	if h.tx != nil {
 		return EnqueueNoticeWorkIn(ctx, h.tx, msg, delay)
@@ -205,11 +229,30 @@ func notifierWork(msg types.NoticeWork) notifications.Work {
 }
 
 func (h notifierHost) Dispatch() notifications.Queue {
+	if h.lite != nil {
+		return notifierQueue{queue: sqliteClaims[NoticeWorkClaim]{queue: NewNoticeWorkSQLiteQueue(h.lite.SQL())}}
+	}
 	return notifierQueue{queue: h.db.NoticeWorkQueue()}
 }
 
+// notifierClaims is a generated queue whose claims are C, as the
+// notifier's and the orchestration's workers claim it: its Postgres
+// queue, or on SQLite its claims there.
+type notifierClaims[C any] interface {
+	Claim(ctx context.Context, n int, lease time.Duration) ([]C, error)
+	Complete(ctx context.Context, id, token string) error
+	Fail(ctx context.Context, id, token, cause string) (bool, error)
+	Extend(ctx context.Context, id, token string, lease time.Duration) error
+	Release(ctx context.Context, id, token string) error
+	Prune(ctx context.Context, limit int) (int, error)
+	Slot(ctx context.Context, slots int) (release func(), ok bool, err error)
+	NextDue(ctx context.Context) (time.Duration, bool, error)
+}
+
 // notifierQueue is NoticeWork as the notifier's worker claims it.
-type notifierQueue struct{ queue *NoticeWorkQueue }
+type notifierQueue struct {
+	queue notifierClaims[NoticeWorkClaim]
+}
 
 func (q notifierQueue) Name() string { return "NoticeWork" }
 
@@ -739,18 +782,35 @@ func (h notifierHost) Permissions(ctx context.Context, user string) ([]string, e
 	if err != nil {
 		return nil, err
 	}
+	// The grants' roles, in one read.
+	var roleIDs []types.IdentityUUID
+	for _, grant := range grants {
+		if grant.Role.Id != nil {
+			roleIDs = append(roleIDs, *grant.Role.Id)
+		}
+	}
+	if len(roleIDs) == 0 {
+		return []string{}, nil
+	}
+	roles, _, err := repositories.GetRoleRepository().FindMany(ctx, &RoleFilter{Id: &UUIDFilter{In: roleIDs}}, &RoleFindOptions{Fields: RoleFields{}.All(), Limit: len(roleIDs), SkipCount: true})
+	if err != nil {
+		return nil, err
+	}
+	byID := make(map[types.IdentityUUID]*types.Role, len(roles))
+	for _, role := range roles {
+		if role.Id != nil {
+			byID[*role.Id] = role
+		}
+	}
 	seen := map[string]bool{}
 	out := []string{}
 	for _, grant := range grants {
 		if grant.Role.Id == nil {
 			continue
 		}
-		role, err := repositories.GetRoleRepository().GetOne(ctx, *grant.Role.Id, nil)
-		if errors.Is(err, ErrNotFound) {
+		role, found := byID[*grant.Role.Id]
+		if !found {
 			continue
-		}
-		if err != nil {
-			return nil, err
 		}
 		for _, permission := range role.Permissions {
 			if !seen[permission] {

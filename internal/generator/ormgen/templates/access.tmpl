@@ -461,64 +461,117 @@ func GrantEnded(ctx context.Context, db grantRepositories, grant access.Grant, n
 	if grant.EndsWhenField == "" {
 		return "", nil
 	}
-	value, found, err := grantTargetField(AsSystem(ctx), db, grant.TargetType, grant.TargetID, grant.EndsWhenField)
-	switch {
-	case err != nil:
+	targets, err := grantTargets(AsSystem(ctx), db, grant.TargetType, []string{grant.TargetID})
+	if err != nil {
 		return "", err
-	case !found:
-		return access.GrantTargetGone, nil
-	case value == grant.EndsWhenState:
-		return access.GrantEndedState, nil
 	}
-	return "", nil
+	return grantEndedByTarget(grant, targets), nil
 }
 
-// grantTargetField is the text of field of the row of targetType whose key
-// is targetID, and false when there is none.
-func grantTargetField(ctx context.Context, db grantRepositories, targetType, targetID, field string) (string, bool, error) {
-	var row any
+// grantEndedByTarget is why grant, which ends on its target's state, is
+// not active, given its target type's rows by id: its target is gone, or
+// its field holds the state that ends it; "" when neither.
+func grantEndedByTarget(grant access.Grant, targets map[string]map[string]any) string {
+	members, found := targets[grant.TargetID]
+	switch {
+	case !found:
+		return access.GrantTargetGone
+	case grantMemberText(members[grant.EndsWhenField]) == grant.EndsWhenState:
+		return access.GrantEndedState
+	}
+	return ""
+}
+
+// grantMemberText is a target row's member as a grant's end state
+// compares it: "" for none.
+func grantMemberText(value any) string {
+	switch value := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return value
+	}
+	return fmt.Sprint(value)
+}
+
+// grantTargets reads the rows of targetType whose keys ids name, in one
+// read, each as its members under every id that names it; an id with no
+// row, or that is no key, is left out.
+func grantTargets(ctx context.Context, db grantRepositories, targetType string, ids []string) (map[string]map[string]any, error) {
 	switch targetType {
 	{{- range .Access.Tables }}
 	{{- if .KeyGo }}
 	case {{ printf "%q" .Type }}:
-		key, err := ParseUserID(targetID)
+		keys, named := grantTargetKeys(ids)
+		if len(keys) == 0 {
+			return nil, nil
+		}
+		rows, _, err := db.Get{{ .Type }}Repository().FindMany(ctx, &{{ .Type }}Filter{ {{- .KeyGo }}: &UUIDFilter{In: keys}}, &{{ .Type }}FindOptions{Fields: {{ .Type }}Fields{}.All(), Limit: len(keys), SkipCount: true})
 		if err != nil {
-			return "", false, nil
+			return nil, err
 		}
-		found, err := db.Get{{ .Type }}Repository().FindOne(ctx, &{{ .Type }}Filter{ {{- .KeyGo }}: &UUIDFilter{Eq: &key}}, nil)
-		if errors.Is(err, ErrNotFound) {
-			return "", false, nil
+		wires := make([]string, len(rows))
+		for i, row := range rows {
+			wire, err := json.Marshal(row.{{ .KeyGo }})
+			if err != nil {
+				return nil, err
+			}
+			wires[i] = string(wire)
 		}
-		if err != nil {
-			return "", false, err
-		}
-		row = found
+		return grantTargetMembers(rows, wires, named)
 	{{- end }}
 	{{- end }}
-	default:
-		return "", false, nil
 	}
-	data, err := json.Marshal(row)
+	return nil, nil
+}
+
+// grantTargetKeys is ids as keys, each once, and the ids by each key's
+// wire form; an id that is no key is left out.
+func grantTargetKeys(ids []string) ([]{{ .UserIDGoType }}, map[string][]string) {
+	var keys []{{ .UserIDGoType }}
+	named := map[string][]string{}
+	for _, id := range ids {
+		key, err := ParseUserID(id)
+		if err != nil {
+			continue
+		}
+		wire, err := json.Marshal(key)
+		if err != nil {
+			continue
+		}
+		if _, seen := named[string(wire)]; !seen {
+			keys = append(keys, key)
+		}
+		named[string(wire)] = append(named[string(wire)], id)
+	}
+	return keys, named
+}
+
+// grantTargetMembers is rows, whose keys' wire forms are wires, as their
+// members under each id named holds for the key.
+func grantTargetMembers(rows any, wires []string, named map[string][]string) (map[string]map[string]any, error) {
+	data, err := json.Marshal(rows)
 	if err != nil {
-		return "", false, err
+		return nil, err
 	}
-	var members map[string]any
+	var members []map[string]any
 	if err := json.Unmarshal(data, &members); err != nil {
-		return "", false, err
+		return nil, err
 	}
-	value, ok := members[field]
-	if !ok || value == nil {
-		return "", true, nil
+	out := make(map[string]map[string]any, len(members))
+	for i, row := range members {
+		for _, id := range named[wires[i]] {
+			out[id] = row
+		}
 	}
-	if text, ok := value.(string); ok {
-		return text, true, nil
-	}
-	return fmt.Sprint(value), true, nil
+	return out, nil
 }
 
 // ActiveGrants reads the active grants (D156): each grant that has
 // started, has not ended by its date or its target's state, and was not
 // revoked, of a holder, of a target, or every one, as the system actor.
+// The targets of the grants that end on a target's state are read in one
+// read per target type.
 func ActiveGrants(ctx context.Context, db grantRepositories, filter access.ActiveGrantsFilter) ([]access.Grant, error) {
 	ctx = AsSystem(ctx)
 	now := filter.Now
@@ -551,19 +604,35 @@ func ActiveGrants(ctx context.Context, db grantRepositories, filter access.Activ
 	if err != nil {
 		return nil, err
 	}
-	var active []access.Grant
+	var current []access.Grant
+	ending := map[string][]string{}
 	for _, row := range rows {
 		grant, err := grantOf(row)
 		if err != nil {
 			return nil, err
 		}
-		ended, err := GrantEnded(ctx, db, grant, now)
+		if grant.EndedByDate(now) != "" {
+			continue
+		}
+		current = append(current, grant)
+		if grant.EndsWhenField != "" {
+			ending[grant.TargetType] = append(ending[grant.TargetType], grant.TargetID)
+		}
+	}
+	targets := make(map[string]map[string]map[string]any, len(ending))
+	for targetType, ids := range ending {
+		read, err := grantTargets(ctx, db, targetType, ids)
 		if err != nil {
 			return nil, err
 		}
-		if ended == "" {
-			active = append(active, grant)
+		targets[targetType] = read
+	}
+	var active []access.Grant
+	for _, grant := range current {
+		if grant.EndsWhenField != "" && grantEndedByTarget(grant, targets[grant.TargetType]) != "" {
+			continue
 		}
+		active = append(active, grant)
 	}
 	return active, nil
 }
@@ -576,6 +645,12 @@ func ActiveGrants(ctx context.Context, db grantRepositories, filter access.Activ
 // an unknown token is, with an error that wraps access.ErrGrantRefused. A
 // calendar feed's token reads its feed alone (D152).
 func (db *Database) AuthenticateGrant(ctx context.Context, token string, now time.Time) (access.GrantAuthentication, error) {
+	return authenticateGrant(ctx, db, token, now)
+}
+
+// authenticateGrant is AuthenticateGrant through db, the repositories of
+// either dialect (D182, #611).
+func authenticateGrant(ctx context.Context, db grantRepositories, token string, now time.Time) (access.GrantAuthentication, error) {
 	ctx = AsSystem(ctx)
 	hash := types.CryptoSHA256(access.GrantTokenHash(token))
 	found, err := db.Get{{ .Access.Grants }}Repository().FindOne(ctx, &{{ .Access.Grants }}Filter{TokenHash: &StringFilter{Eq: (*string)(&hash)}}, nil)

@@ -100,7 +100,8 @@ type CompanyNameResolveParams struct {
 
 // CompanyNameResolveResult is what name's resolve returns.
 type CompanyNameResolveResult struct {
-	// Row is the row that holds the name; null when none does.
+	// Row is the row that holds the name; null when none does, and to a caller
+	// held to per-record access who may not read the row that does (D156).
 	Row *CompanyNameResolveResultRow `json:"row"`
 }
 
@@ -134,7 +135,8 @@ type CompanyNameOperations interface {
 	// first. An alias the row does not hold is answered unchanged.
 	RemoveAlias(ctx context.Context, id types.IdentityUUID, params CompanyNameRemoveAliasParams) (*CompanyNameRemoveAliasResult, error)
 	// Resolve finds the row whose name or alias a name names, in its normalized
-	// form: a read of the table as a whole that writes nothing.
+	// form: a read of the table as a whole that writes nothing. A row the caller
+	// may not read is none (D156).
 	Resolve(ctx context.Context, params CompanyNameResolveParams) (*CompanyNameResolveResult, error)
 }
 

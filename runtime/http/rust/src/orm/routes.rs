@@ -32,7 +32,7 @@ use super::plan::Plan;
 use super::run::{Client, Runner};
 use super::{
     Column, Constraint, ConstraintKind, Definition, Error, PageOptions, Refusal, Table, Values,
-    WriteOptions, ACCESS_LOG,
+    WriteOptions, ACCESS_LOG, MERGE_OUT_OF_REACH,
 };
 use crate::auth::{covers, Principal};
 use crate::error::ApiError;
@@ -346,6 +346,12 @@ impl From<Error> for ApiError {
             Error::Invalid(message) => ApiError::bad_request(message),
             Error::Constraint(constraint) => ApiError::conflict(constraint.message),
             Error::Busy(_) => ApiError::service_unavailable("The database is busy; try again"),
+            // A merge that would write a row of another table the caller
+            // may not write (D156) is the caller's to be refused.
+            Error::Merge {
+                code: MERGE_OUT_OF_REACH,
+                message,
+            } => ApiError::forbidden(message),
             // A merge of a row into itself, or into a row that references
             // it (D147), conflicts with the rows as they are.
             Error::Merge { message, .. } => ApiError::conflict(message),
@@ -1055,5 +1061,19 @@ mod tests {
         );
         assert_eq!(acting(Some(&principal("service:billing"))), None);
         assert_eq!(acting(None), None);
+    }
+
+    #[test]
+    fn a_merge_past_a_row_the_caller_may_not_write_is_forbidden() {
+        let refused = |code: &'static str| {
+            ApiError::from(Error::Merge {
+                code,
+                message: "Label a cannot be merged".to_owned(),
+            })
+            .status
+        };
+        assert_eq!(refused(MERGE_OUT_OF_REACH), http::StatusCode::FORBIDDEN);
+        assert_eq!(refused("self"), http::StatusCode::CONFLICT);
+        assert_eq!(refused("self_reference"), http::StatusCode::CONFLICT);
     }
 }

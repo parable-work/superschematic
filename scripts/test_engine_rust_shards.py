@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for engine_rust_shards.py, and of ci.yml: its shards are the scripts', and its shared caches have one writer.
+"""Tests for engine_rust_shards.py, and of ci.yml: its shards are the scripts', its shared caches have one writer, and its full tier is the release's call.
 
   python3 -m unittest discover -s scripts -p 'test_*.py'
 
@@ -133,6 +133,28 @@ class TestCISuperscalarCache(unittest.TestCase):
             name = job.split(":", 1)[0].strip()
             # The script with no argument, on a line of its own.
             self.assertRegex(job, r"\n +(run: )?scripts/superscalar-dep\.sh\n", f"{name} saves the checkout and does not build all of it")
+
+
+class TestCITiers(unittest.TestCase):
+    """The full tier is the release's call, never an event: a release's event is push, as a merge to main's is."""
+
+    def test_no_step_or_job_runs_on_the_event_not_being_a_pull_request(self):
+        # The cache saves do (a merge's run saves them too), as save-if or
+        # beside !cancelled(), never as an if of their own.
+        self.assertNotRegex(CI.read_text(), r"\n +if: github\.event_name != 'pull_request'")
+
+    def test_the_go_tests_are_short_unless_the_tier_is_full(self):
+        self.assertIn("GO_TEST_SHORT: ${{ inputs.tier != 'full' }}", CI.read_text())
+
+    def test_the_input_is_full_unless_said(self):
+        self.assertRegex(CI.read_text(), r"\n  workflow_call:\n    inputs:\n      tier:\n(?: {8}[^\n]*\n)*? {8}default: full\n")
+
+    def test_the_release_asks_for_the_full_tier(self):
+        release = (ROOT / ".github" / "workflows" / "release.yml").read_text()
+        self.assertRegex(release, r"uses: \./\.github/workflows/ci\.yml\n(?: +#[^\n]*\n)* +with:\n +tier: full\n")
+
+    def test_a_merge_to_main_runs_the_workflow(self):
+        self.assertRegex(CI.read_text(), r"\n  push:\n    branches: \[main\]\n")
 
 
 if __name__ == "__main__":

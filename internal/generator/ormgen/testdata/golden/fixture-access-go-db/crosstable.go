@@ -109,8 +109,10 @@ func (h crossTablesHost) Grants() crosstable.Grants {
 	return crossTablesGrants{db: h.db}
 }
 
-// crossTablesGrants are the grants of Grant a calendar feed is (D152).
-type crossTablesGrants struct{ db *Database }
+// crossTablesGrants are the grants of Grant a calendar feed is (D152),
+// through the repositories of the database it is over, on Postgres or
+// SQLite.
+type crossTablesGrants struct{ db grantRepositories }
 
 func (g crossTablesGrants) Issue(ctx context.Context, input access.IssueGrantInput) (string, string, error) {
 	row, token, err := IssueGrant(ctx, g.db, input)

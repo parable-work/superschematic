@@ -31,10 +31,14 @@
 //! none, so two writers that take one name at once never both hold it: the
 //! second's insert finds the row inserted and the host runs it again from
 //! fresh state, when it finds the name taken, on Postgres, SQLite and D1
-//! alike, with no lock. A name another row holds is refused with that row's
-//! key, the veto `name_taken`; one whose holder is no live row (a row
-//! deleted past the core) is taken over, held to the version it was read
-//! at. A removed alias deletes its row, and a delete through the core
+//! alike, with no lock. A name another row holds is refused, the veto
+//! `name_taken`, which says the name is taken and names neither that row's
+//! key nor any of its fields: under per-record access (D156) the caller may
+//! be one that row is hidden from, and since the names are unique across
+//! the table whoever reads them, that the name is taken is all the refusal
+//! tells. One whose holder is no live row (a row deleted past the core) is
+//! taken over, held to the version it was read at. A removed alias deletes
+//! its row, and a delete through the core
 //! deletes the row's (D147's second primitive, [`Cx::delete_shared`]), each
 //! held to the version it was read at.
 //!
@@ -51,7 +55,11 @@
 //! answered before any other use's guard is asked (D104's settle), so no
 //! gate refuses a call that changes nothing, and a name taken is refused
 //! there too. `resolve`, an operation of the table that only reads, answers
-//! the row whose name or alias a name names, or none.
+//! the row whose name or alias a name names, or none. The core reads every
+//! row, so it is the adapters that keep the answer to the caller (D156):
+//! the layout marks the operation's `row` as a row of the table
+//! (`answersRow`), and each ORM answers it null to a caller who may not
+//! read that row, as for a name no row holds.
 //!
 //! A merge of a table with an Aliased field (D147's `mergeInto`) moves the
 //! row merged away's aliases to the row that stays, adds its name as one of
@@ -490,7 +498,7 @@ fn claim(cx: &Cx<'_, AliasedConfig>, key: &str, given: &str, normalized: &str) -
         Some(row) => match holder_of(&row) {
             Some(holder) if holder == key => Ok(()),
             Some(holder) if cx.read_row(cx.type_name(), &holder)?.is_some() => {
-                Err(taken(cx, given, normalized, &holder))
+                Err(taken(cx, given, normalized))
             }
             _ => cx.update_shared(NAMES, normalized, row.version, values),
         },
@@ -508,24 +516,23 @@ fn refuse_taken(view: &View<'_, AliasedConfig>, given: &str, normalized: &str) -
     if Some(holder.as_str()) == view.key() || view.read_row(view.type_name(), &holder)?.is_none() {
         return Ok(());
     }
-    Err(taken(view, given, normalized, &holder))
+    Err(taken(view, given, normalized))
 }
 
-// taken is the veto name_taken of a name another row holds, its key in its
-// details.
+// taken is the veto name_taken of a name another row holds: the name and
+// its normalized form, and nothing of the row that holds it, neither its
+// key nor its fields, which the caller may not be allowed to see (D156).
 fn taken(
     view: &View<'_, AliasedConfig>,
     given: &str,
     normalized: &str,
-    holder: &str,
 ) -> superschematic_rules::Stop {
     let mut details = Map::new();
     details.insert("name".into(), Value::from(given));
     details.insert("normalized".into(), Value::from(normalized));
-    details.insert(HOLDER.into(), Value::from(holder));
     view.veto(
         Veto::new(format!(
-            "\"{given}\" is held by {} {holder}, as its name or an alias: a name is one row's",
+            "\"{given}\" is held by another {}, as its name or an alias: a name is one row's",
             view.type_name()
         ))
         .with_code(NAME_TAKEN)

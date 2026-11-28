@@ -41,7 +41,7 @@ docs/
                           the capability map, examples
     first-project/        the tutorial over examples/acme-shop
     guides/               one guide per area: types, tables, routes, auth, users and sessions, SDKs,
-                          stacks, queues, buckets, memory stores, static sites, traces, runtime
+                          stacks, queues, buckets, memory stores, static sites, traces, tasks, runtime
                           providers, events and notifications, outside parties, agent runs, the
                           engine and its behaviors, work queues, commerce, development and runtime
                           modes, and Topcoat

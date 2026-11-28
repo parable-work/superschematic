@@ -12,7 +12,10 @@
  * service is a Redis or Valkey server the replicas of a stack share, which
  * holds no fact (D75): its schema declares each channel and key it carries
  * (`@superschematic/memory-store`), and APIs list it in their
- * `memoryStores`.
+ * `memoryStores`. A Tasks service declares the work a commit of its
+ * repository needs, a class per task (`@superschematic/tasks`, D203): its
+ * build writes the task file a forge reads, and nothing names it, so it
+ * has no sentinel.
  */
 export enum SchemaKind {
   DB = "DB",
@@ -21,7 +24,8 @@ export enum SchemaKind {
   Stack = "Stack",
   Site = "Site",
   Bucket = "Bucket",
-  MemoryStore = "MemoryStore"
+  MemoryStore = "MemoryStore",
+  Tasks = "Tasks"
 }
 
 /**
@@ -318,6 +322,38 @@ export type CiOutputConfig = {
   readonly [renderer: string]: CiRendererConfig | undefined;
 };
 
+/**
+ * The task file a Tasks service's build writes, and the workflow of each CI its tasks run on. Only a Tasks service sets it. The build writes the files under <out>/tasks/<service>/.
+ */
+export type TasksOutputConfig = {
+  /**
+   * The path the task file is committed at, from the repository root, as ci/tasks.json. Its directory must exist. Every build-all installs the file there, and tasks --check fails when the committed file is not what the schema gives. Unset, the file is written under the output root alone.
+   */
+  readonly install?: string;
+  /**
+   * The CI the tasks run on, keyed by the renderer that writes its workflow: github for GitHub Actions, which reads the github section of the task file, or a renderer an extension registers. Each task is a job. Every build-all installs the workflow, and tasks --check holds it current as it holds the task file.
+   */
+  readonly ci?: TasksCiOutputConfig;
+};
+
+/**
+ * The CI renderers of a Tasks service, by name.
+ */
+export type TasksCiOutputConfig = {
+  readonly github?: TasksCiRendererConfig;
+  readonly [renderer: string]: TasksCiRendererConfig | undefined;
+};
+
+/**
+ * One CI renderer of a Tasks service.
+ */
+export type TasksCiRendererConfig = {
+  /**
+   * The directory the workflow is committed in, from the repository root. Its default is the renderer's own, .github/workflows for github. It must exist.
+   */
+  readonly install?: string;
+};
+
 export type SchemaOutputs = {
   readonly types?: TypesOutputConfig;
   readonly api?: ApiOutputConfig;
@@ -325,6 +361,7 @@ export type SchemaOutputs = {
   readonly sql?: SqlOutputConfig;
   readonly ci?: CiOutputConfig;
   readonly engine?: EngineOutputConfig;
+  readonly tasks?: TasksOutputConfig;
 };
 
 /**

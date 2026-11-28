@@ -1,0 +1,258 @@
+{
+  "image": "sha256:6a1f0c5d2b7e4f8093a1c6d5e4b3a29187f6e5d4c3b2a1908f7e6d5c4b3a2918",
+  "platform": "linux/amd64",
+  "sections": {
+    "acme": {
+      "tiers": [
+        {
+          "budgetSeconds": 180,
+          "name": "pr"
+        },
+        {
+          "budgetSeconds": 3600,
+          "name": "nightly"
+        }
+      ]
+    },
+    "github": {
+      "imageRepository": "ghcr.io/acme/ci",
+      "on": {
+        "pull_request": {
+          "branches": [
+            "main"
+          ]
+        },
+        "schedule": [
+          {
+            "cron": "0 5 * * *"
+          }
+        ]
+      }
+    }
+  },
+  "tasks": {
+    "api-build": {
+      "after": [
+        "vet"
+      ],
+      "hermetic": true,
+      "inputs": [
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/go.mod"
+            ]
+          }
+        },
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/go.sum"
+            ]
+          }
+        }
+      ],
+      "run": [
+        "go",
+        "build",
+        "./..."
+      ],
+      "sections": {
+        "acme": {
+          "tier": "pr",
+          "timeoutSeconds": 120
+        }
+      },
+      "uses": [
+        {
+          "output": "generated",
+          "task": "schema-build"
+        }
+      ]
+    },
+    "schema-build": {
+      "hermetic": true,
+      "inputs": [
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/cmd"
+            ]
+          }
+        },
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/ext"
+            ]
+          }
+        },
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/go.mod"
+            ]
+          }
+        },
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/go.sum"
+            ]
+          }
+        },
+        {
+          "kind": "schema",
+          "spec": {
+            "root": "examples/acme-schematic/schemas",
+            "service": "shop-api"
+          }
+        },
+        {
+          "kind": "schema",
+          "spec": {
+            "root": "examples/acme-schematic/schemas",
+            "service": "shop-catalog"
+          }
+        },
+        {
+          "kind": "schema",
+          "spec": {
+            "root": "examples/acme-schematic/schemas",
+            "service": "shop-config"
+          }
+        },
+        {
+          "kind": "schema",
+          "spec": {
+            "root": "examples/acme-schematic/schemas",
+            "service": "shop-storefront"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "kind": "paths",
+          "name": "generated",
+          "paths": [
+            "examples/acme-schematic/schemas/dist"
+          ]
+        }
+      ],
+      "run": [
+        "acme-schematic",
+        "build-all",
+        "examples/acme-schematic/schemas/services"
+      ],
+      "sections": {
+        "acme": {
+          "tier": "pr"
+        }
+      }
+    },
+    "smoke": {
+      "after": [
+        "api-build",
+        "task-file"
+      ],
+      "hermetic": false,
+      "run": [
+        "examples/acme-schematic/scripts/smoke.sh"
+      ],
+      "sections": {
+        "acme": {
+          "tier": "nightly"
+        },
+        "github": {
+          "if": "github.event_name == 'schedule'",
+          "timeoutMinutes": 60
+        }
+      }
+    },
+    "task-file": {
+      "hermetic": true,
+      "inputs": [
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/ci"
+            ]
+          }
+        },
+        {
+          "kind": "schema",
+          "spec": {
+            "root": "examples/acme-schematic/schemas",
+            "service": "shop-tasks"
+          }
+        }
+      ],
+      "run": [
+        "acme-schematic",
+        "tasks",
+        "examples/acme-schematic/schemas/services/shop-tasks",
+        "--check"
+      ],
+      "sections": {
+        "acme": {
+          "tier": "pr"
+        }
+      }
+    },
+    "vet": {
+      "hermetic": true,
+      "inputs": [
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/cmd"
+            ]
+          }
+        },
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/ext"
+            ]
+          }
+        },
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/go.mod"
+            ]
+          }
+        },
+        {
+          "kind": "path",
+          "spec": {
+            "paths": [
+              "examples/acme-schematic/go.sum"
+            ]
+          }
+        }
+      ],
+      "run": [
+        "go",
+        "vet",
+        "./..."
+      ],
+      "sections": {
+        "acme": {
+          "tier": "pr"
+        }
+      }
+    }
+  },
+  "version": 1
+}

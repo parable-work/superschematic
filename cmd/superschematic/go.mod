@@ -8,6 +8,7 @@ require (
 	github.com/parable-work/superschematic/extensions/embedded v0.0.0
 	github.com/parable-work/superschematic/extensions/gcp v0.0.0
 	github.com/parable-work/superschematic/extensions/pulumi v0.0.0
+	github.com/parable-work/superschematic/extensions/resolvers v0.0.0
 )
 
 require (
@@ -191,6 +192,8 @@ replace github.com/parable-work/superschematic/extensions/embedded => ../../exte
 replace github.com/parable-work/superschematic/extensions/gcp => ../../extensions/gcp
 
 replace github.com/parable-work/superschematic/extensions/pulumi => ../../extensions/pulumi
+
+replace github.com/parable-work/superschematic/extensions/resolvers => ../../extensions/resolvers
 
 // replace directives do not propagate across modules, so the core's pins
 // are repeated here. Keep them equal to the root go.mod.

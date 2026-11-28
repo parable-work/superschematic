@@ -27,7 +27,7 @@ const (
 // GitHub is the core's CI renderer: one GitHub Actions workflow per stack,
 // `<stack>.yml` (docs/stack-model.md, section 11.3, D47).
 func GitHub() registry.CIRendererSpec {
-	return registry.CIRendererSpec{Name: GitHubRenderer, Dir: GitHubDir, Render: renderGitHub}
+	return registry.CIRendererSpec{Name: GitHubRenderer, Dir: GitHubDir, Render: renderGitHub, RenderTasks: renderGitHubTasks}
 }
 
 // action is a GitHub action pinned by commit, with the release the commit
@@ -208,10 +208,13 @@ type signedIn struct {
 // step is one step of a job.
 type step struct {
 	name string
-	cond string
-	uses *action
-	dir  string
-	with [][2]string
+	// id names the step for a job's outputs, and shell is the shell its
+	// run starts in when it is not the job's.
+	id, shell string
+	cond      string
+	uses      *action
+	dir       string
+	with      [][2]string
 	// env is the step's environment variables, in order: what a stack
 	// command signs in with when the identity is a secret (D64).
 	env [][2]string
@@ -1242,6 +1245,9 @@ func (j job) write(w *yamlWriter) {
 
 func (s step) write(w *yamlWriter) {
 	w.line(3, "- name: "+scalar(s.name))
+	if s.id != "" {
+		w.line(4, "id: "+s.id)
+	}
 	if s.cond != "" {
 		w.line(4, "if: "+scalar(s.cond))
 	}
@@ -1262,6 +1268,9 @@ func (s step) write(w *yamlWriter) {
 		for _, kv := range s.env {
 			w.line(5, kv[0]+": "+scalar(kv[1]))
 		}
+	}
+	if s.shell != "" {
+		w.line(4, "shell: "+s.shell)
 	}
 	switch {
 	case strings.Contains(s.run, "\n"):

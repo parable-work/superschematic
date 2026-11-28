@@ -1,8 +1,9 @@
 package tsreader
 
 import (
+	"encoding/json"
 	"fmt"
-	"math"
+	"maps"
 	"path"
 
 	"github.com/parable-work/superschematic/internal/loader/schemaconfig"
@@ -57,7 +58,7 @@ func readConfigTS(w *walker, file *astSourceFile) (*SchemaConfig, error) {
 	if !ok {
 		return nil, errorAtNode(obj, "defineConfig argument must be an object literal")
 	}
-	return configFromMap(fields, stmt, w.reg)
+	return decodeConfig(fields, stmt, w.reg)
 }
 
 // readConfigIdentityTS reads only name and kind from a schema.config.ts. It
@@ -260,168 +261,77 @@ func (w *walker) isSentinel(sym *astSymbol) bool {
 	return ok && id.is(configPackage, "service")
 }
 
-// configFromMap converts the evaluated defineConfig object into a
-// SchemaConfig; kinds are checked against the registry.
-func configFromMap(obj map[string]any, at *astNode, reg *registry.Registry) (*SchemaConfig, error) {
-	cfg := &SchemaConfig{}
-
-	name, _ := obj["name"].(string)
-	cfg.Name = name
-
-	kind, _ := obj["kind"].(string)
-	cfg.Kind = ir.SchemaKind(kind)
-
-	if public, ok := obj["public"].(bool); ok {
-		cfg.Public = public
-	}
-	if clientVersions, ok := obj["clientVersions"].(bool); ok {
-		cfg.ClientVersions = clientVersions
-	}
-	if contentAddressed, ok := obj["contentAddressed"].(bool); ok {
-		cfg.ContentAddressed = contentAddressed
-	}
-	if raw, set := obj["maxBytes"]; set {
-		bytes, ok := raw.(float64)
-		if !ok || bytes != math.Trunc(bytes) || bytes < 1 || bytes > 1<<53 {
-			return nil, errorAtNode(at, "maxBytes must be a whole number of bytes above 0")
-		}
-		cfg.MaxBytes = int64(bytes)
-	}
-	if authDB, ok := obj["authDb"].(serviceHandle); ok {
-		cfg.AuthDB = authDB.name
-		cfg.AuthDBKind = ir.SchemaKind(authDB.kind)
-	}
-	var err *SchemaError
-	if cfg.Dependencies, err = handleList(obj, "dependencies", at); err != nil {
-		return nil, err
-	}
-	if cfg.Calls, err = handleList(obj, "calls", at); err != nil {
-		return nil, err
-	}
-	if cfg.Buckets, err = handleList(obj, "buckets", at); err != nil {
-		return nil, err
-	}
-	if cfg.MemoryStores, err = handleList(obj, "memoryStores", at); err != nil {
-		return nil, err
-	}
-	if raw, set := obj["rateLimitStore"]; set {
-		handle, ok := raw.(serviceHandle)
-		if !ok {
-			return nil, errorAtNode(at, "rateLimitStore must be a service({...}) sentinel")
-		}
-		cfg.RateLimitStore = &ServiceDependency{Name: handle.name, Kind: ir.SchemaKind(handle.kind)}
-	}
-	if raw, set := obj["providers"]; set {
-		items, ok := raw.([]any)
-		if !ok {
-			return nil, errorAtNode(at, "providers must be a list of package directories")
-		}
-		for _, item := range items {
-			dir, ok := item.(string)
-			if !ok {
-				return nil, errorAtNode(at, "providers entries must be strings, each a provider package's directory")
-			}
-			cfg.Providers = append(cfg.Providers, dir)
-		}
-	}
-	if outputs, ok := obj["outputs"].(map[string]any); ok {
-		cfg.Outputs = outputs
-	}
-	if raw, set := obj["site"]; set {
-		site, serr := siteConfig(raw, at)
-		if serr != nil {
-			return nil, serr
-		}
-		cfg.Site = site
-	}
-
-	return schemaconfig.ValidateShapeWith(cfg, reg)
+// handleKeys are the defineConfig keys that hold service handles, and
+// whether each holds a list of them. The TypeScript types take a handle
+// there, which the JSON below cannot tell from a plain {name, kind} object,
+// so the handles are checked before the conversion.
+var handleKeys = []struct {
+	key  string
+	list bool
+}{
+	{"authDb", false},
+	{"dependencies", true},
+	{"calls", true},
+	{"buckets", true},
+	{"memoryStores", true},
+	{"rateLimitStore", false},
 }
 
-// siteConfig reads a Site config's `site` object: `build`, `output` and
-// `fallback`, each a string (D55), and `dev`, the dev server stack dev
-// runs, an object of a `command` string and a `port` number (D82).
-func siteConfig(raw any, at *astNode) (*ir.SiteConfig, *SchemaError) {
-	obj, ok := raw.(map[string]any)
-	if !ok {
-		return nil, errorAtNode(at, "defineConfig site must be an object of build, output, fallback and dev")
-	}
-	site := &ir.SiteConfig{}
-	for _, key := range []string{"build", "output", "fallback"} {
-		value, set := obj[key]
+// decodeConfig decodes the evaluated defineConfig object through the decoder
+// the data forms use, so every form is held to the same JSON Schema and
+// checks. Each handle becomes the {name, kind} object the data forms write,
+// and authDb the name alone, as they write it. The authDb handle's kind,
+// which that JSON cannot carry, is set on the decoded config and checked
+// after.
+func decodeConfig(obj map[string]any, at *astNode, reg *registry.Registry) (*SchemaConfig, error) {
+	for _, h := range handleKeys {
+		value, set := obj[h.key]
 		if !set {
 			continue
 		}
-		text, ok := value.(string)
+		if !h.list {
+			if _, ok := value.(serviceHandle); !ok {
+				return nil, errorAtNode(at, "defineConfig %s must be a service({...}) sentinel, not %s", h.key, handleMiss(value))
+			}
+			continue
+		}
+		items, ok := value.([]any)
 		if !ok {
-			return nil, errorAtNode(at, "defineConfig site.%s must be a string", key)
+			return nil, errorAtNode(at, "defineConfig %s must be a list of service({...}) sentinels, not %s", h.key, handleMiss(value))
 		}
-		switch key {
-		case "build":
-			site.Build = text
-		case "output":
-			site.Output = text
-		case "fallback":
-			site.Fallback = text
+		for _, item := range items {
+			if _, ok := item.(serviceHandle); !ok {
+				return nil, errorAtNode(at, "defineConfig %s entries must be service({...}) sentinels, not %s", h.key, handleMiss(item))
+			}
 		}
 	}
-	if raw, set := obj["dev"]; set {
-		dev, err := siteDevConfig(raw, at)
-		if err != nil {
-			return nil, err
-		}
-		site.Dev = dev
+	doc := maps.Clone(obj)
+	authDB, hasAuthDB := obj["authDb"].(serviceHandle)
+	if hasAuthDB {
+		doc["authDb"] = authDB.name
 	}
-	for key := range obj {
-		if key != "build" && key != "output" && key != "fallback" && key != "dev" {
-			return nil, errorAtNode(at, "defineConfig site has no key %s; it takes build, output, fallback and dev", key)
-		}
+	data, err := json.Marshal(doc)
+	if err != nil {
+		return nil, errorAtNode(at, "defineConfig: %v", err)
 	}
-	return site, nil
+	cfg, err := schemaconfig.DecodeJSON(data, "defineConfig", reg)
+	if err != nil {
+		return nil, errorAtNode(at, "%v", err)
+	}
+	if !hasAuthDB {
+		return cfg, nil
+	}
+	cfg.AuthDBKind = ir.SchemaKind(authDB.kind)
+	if _, err := schemaconfig.ValidateShapeWith(cfg, reg); err != nil {
+		return nil, errorAtNode(at, "%v", err)
+	}
+	return cfg, nil
 }
 
-// siteDevConfig reads a Site config's `site.dev` object: its `command`, a
-// string, and its `port`, a whole number (D82).
-func siteDevConfig(raw any, at *astNode) (*ir.SiteDevConfig, *SchemaError) {
-	obj, ok := raw.(map[string]any)
-	if !ok {
-		return nil, errorAtNode(at, "defineConfig site.dev must be an object of command and port")
+// handleMiss names what a handle key holds in place of a handle.
+func handleMiss(v any) string {
+	if _, ok := v.(string); ok {
+		return "a string"
 	}
-	dev := &ir.SiteDevConfig{}
-	for key, value := range obj {
-		switch key {
-		case "command":
-			text, ok := value.(string)
-			if !ok {
-				return nil, errorAtNode(at, "defineConfig site.dev.command must be a string")
-			}
-			dev.Command = text
-		case "port":
-			port, ok := value.(float64)
-			if !ok || port != float64(int(port)) {
-				return nil, errorAtNode(at, "defineConfig site.dev.port must be a whole number")
-			}
-			dev.Port = int(port)
-		default:
-			return nil, errorAtNode(at, "defineConfig site.dev has no key %s; it takes command and port", key)
-		}
-	}
-	return dev, nil
-}
-
-// handleList reads a config key that holds a list of service handles.
-func handleList(obj map[string]any, key string, at *astNode) ([]ServiceDependency, *SchemaError) {
-	items, ok := obj[key].([]any)
-	if !ok {
-		return nil, nil
-	}
-	var deps []ServiceDependency
-	for _, item := range items {
-		handle, ok := item.(serviceHandle)
-		if !ok {
-			return nil, errorAtNode(at, "%s entries must be service({...}) sentinels", key)
-		}
-		deps = append(deps, ServiceDependency{Name: handle.name, Kind: ir.SchemaKind(handle.kind)})
-	}
-	return deps, nil
+	return describeValue(v)
 }

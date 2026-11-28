@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "superschematic://tasks/task-plan.schema.json",
+  "title": "Task plan",
+  "description": "What `tasks plan` prints for a commit (D203): each task with its work hash, its input key and its edges. A reader refuses a field this schema does not name and a version newer than it reads. sections.<name> and a task's sections.<name> are open.",
+  "type": "object",
+  "required": ["version", "keyVersion", "commit", "order", "tasks"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "description": "The plan's version.",
+      "type": "integer",
+      "const": 1
+    },
+    "keyVersion": {
+      "description": "The key definition's version and the repository's object format, as 1:sha1. Keys of two key versions never compare equal.",
+      "type": "string",
+      "pattern": "^[0-9]+:(sha1|sha256)$"
+    },
+    "commit": {
+      "description": "The commit the plan is for.",
+      "$ref": "#/$defs/objectId"
+    },
+    "base": {
+      "description": "The commit the plan's commit lands on, when the plan was asked for one.",
+      "$ref": "#/$defs/objectId"
+    },
+    "order": {
+      "description": "The tasks' names, each after the tasks it uses and the tasks it follows.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/name" }
+    },
+    "tasks": {
+      "description": "The planned tasks by name.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/task" }
+    },
+    "sections": {
+      "description": "The file's sections, as the file holds them. Open.",
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+    },
+    "objectId": {
+      "type": "string",
+      "pattern": "^([0-9a-f]{40}|[0-9a-f]{64})$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "task": {
+      "type": "object",
+      "required": ["workHash", "key"],
+      "additionalProperties": false,
+      "properties": {
+        "workHash": {
+          "description": "The hash of the task's work fields at the commit.",
+          "$ref": "#/$defs/digest"
+        },
+        "baseWorkHash": {
+          "description": "The hash of the task's work fields at the base, when the plan has a base and the two differ. The key then covers both hashes and the inputs of both.",
+          "$ref": "#/$defs/digest"
+        },
+        "key": {
+          "description": "The input key, or null for a task that is not hermetic.",
+          "oneOf": [{ "$ref": "#/$defs/digest" }, { "type": "null" }]
+        },
+        "inputs": {
+          "description": "The digest of each input, in the task's order.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["kind", "digest", "files"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": { "$ref": "#/$defs/name" },
+              "digest": { "$ref": "#/$defs/digest" },
+              "files": { "type": "integer", "minimum": 0 }
+            }
+          }
+        },
+        "uses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["task", "output"],
+            "additionalProperties": false,
+            "properties": {
+              "task": { "$ref": "#/$defs/name" },
+              "output": { "$ref": "#/$defs/name" }
+            }
+          }
+        },
+        "after": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/name" }
+        },
+        "sections": {
+          "description": "The task's part of each section. Open.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/name" },
+          "additionalProperties": true
+        }
+      }
+    }
+  }
+}

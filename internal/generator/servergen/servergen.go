@@ -433,6 +433,13 @@ type Worker struct {
 	// Workers, which it builds from the API's Deps (D104). Method is empty
 	// then. Nil for an ordinary worker.
 	Behavior *apigen.BehaviorWorkerInfo
+
+	// Runtime is set for a @worker of a queue the runtime handles (D190,
+	// D192, D187; apigen.WorkerInfo.Runtime): its main builds the API's
+	// Deps, with the runtime wired, and runs the queue the API package's
+	// QueueFunc builds, calling no NewWorkers.
+	Runtime   string
+	QueueFunc string
 }
 
 // Background reports whether the entrypoint is a job's, a worker's, an
@@ -581,6 +588,10 @@ type API struct {
 	// (D159, D184), which the entrypoint reads from its config with the
 	// API package's ProvidersOf.
 	Providers bool
+
+	// Wiring is the runtime the entrypoint wires over the API's database
+	// (D190, D192, D187, D180), nil for none (go_wiring.go).
+	Wiring *apigen.DepsWiring
 }
 
 // Call is a client in an API's Deps.
@@ -884,6 +895,9 @@ func Plan(in Input) (*Server, error) {
 		}
 		s.Kind, s.Binary = "worker", "worker"
 		s.Worker = &Worker{Name: o.Workers[i].Name, Method: o.Workers[i].Method, Queue: o.Workers[i].Queue, Concurrency: o.Workers[i].Concurrency, GraceSeconds: grace, Behavior: o.Workers[i].Behavior}
+		if o.Workers[i].Runtime != "" {
+			s.Worker.Runtime, s.Worker.QueueFunc = o.Workers[i].Runtime, o.Workers[i].QueueFunc()
+		}
 	case in.Deriver != nil:
 		if len(in.APIs) != 1 {
 			return nil, fmt.Errorf("stack %s: deriver %s runs a deriver of %d APIs; a deriver belongs to one", in.Stack, in.Server, len(in.APIs))
@@ -1113,6 +1127,7 @@ func Plan(in Input) (*Server, error) {
 		}
 	}
 	s.APIs = apis
+	s.planWiring(in)
 	if s.Worker != nil {
 		s.Worker.Database = apis[0].Database
 	}

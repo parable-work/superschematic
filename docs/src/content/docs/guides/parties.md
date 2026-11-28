@@ -15,15 +15,15 @@ takes one path, which decides who sent it and what it may reach.
 
 | Built | Not built yet |
 | --- | --- |
-| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
-| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage | a generated server that mounts the path and its workers |
+| `@party` on a table; the conversations' tables and the run requests queue, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
+| one inbound path: a user's reply, a granted party's run request, a party's timeline, triage; a generated TypeScript server that builds it into its `Deps` and mounts each relay's inbound route ([below](#take-what-comes-in)) | the same in a generated Go or Rust server |
 | email held to its SPF, DKIM and DMARC results; one inbound address per deployment | Comments' `via`, the channel a message came on |
 | threads by `Message-ID`, `In-Reply-To` and `References`, and parties that share an address | giving a held message to a party, its address added from triage; a triage page in Topcoat |
 | messages as rows, with their files and the rows they are about | |
 | a lapsed identity, verified again by a code | |
 | sending as a permission, with a rate limit, an approval policy and opt-outs | |
 | a message's trust narrowing the agent run that takes its request: a sender entered by hand asks before every write ([agent runs](/superschematic/guides/agent-runs/)) | |
-| the Go runtime's `inbound` package, on Postgres | |
+| the Go runtime's `inbound` package, on Postgres, which a generated Go server builds into its `Deps` with its relay callbacks and its run requests' worker | |
 | the Rust runtime's `orm::parties` and `orm::inbound`, on Postgres | |
 
 [D157](https://github.com/parable-work/superschematic/issues/606)
@@ -71,6 +71,18 @@ const inbound = createInbound({ orm, notifier, runs: runRequestQueue, providers,
 app.post("/webhooks/sms/inbound", async c =>
   c.json(await inbound.inbound("SMS", { headers: Object.fromEntries(c.req.raw.headers), body: await c.req.text() })));
 ```
+
+A generated TypeScript server of an API over a Postgres database with the
+conversations and a run requests queue does this itself: `deps.inbound` is
+`createInbound` over `deps.orm`, `deps.notifier` and the queue, with the
+channel slots of `deps.providers`, and `POST /webhooks/<slot>/inbound`
+hands each relay's request to it. The bucket, the inbound address and the
+approval policy of a send are the implementation's `createRuntimeOptions`'
+(`inbound: { bucket: deps.files, inboundAddress, approve }`); with the
+agent orchestration the approval policy is the dispatcher's
+`sendApproval`, which the server wires. A `@worker` of the run requests
+is the dispatcher's where the database uses the orchestration, and the
+implementation's otherwise ([act on a run request](#act-on-a-run-request)).
 
 The adapter reads the request, fetches a text's photos and reports an
 email's authentication. The core decides who sent it:
@@ -198,9 +210,26 @@ message is filed onto are read through their repository as the caller.
 The approval policy is a `SendApproval`: the app's (`ApprovalFunc`), or
 the agent dispatcher, which is built before the path and given it
 (`SetInbound`). A run request's message and grant are in base62, as the
-repositories write a key. A Go server over a database that lists `sqlite`
-first is refused the parties' tables, which run on SQLite and D1 in
-TypeScript alone ([On SQLite and D1](#on-sqlite-and-d1)).
+repositories write a key.
+
+On SQLite the Go runtime runs the same inbound path (#618), as the TypeScript one
+does (D189). `(*SQLiteDatabase).Orchestration()` is its host over the SQLite file,
+and the runtime writes its statements over its own tables in SQLite's
+words: a parameter `?n`, a list read through `json_each`, a time as RFC
+3339 text, each cell read back as the Postgres driver reads its column
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). A message's
+files go through the SQLite database's attachments, and `RunQueue` claims
+the run requests on SQLite.
+
+A stack's Go server builds the path into `Deps.Inbound` itself, after the
+notifier and with the dispatcher as its send approval when the database
+has agents, and the bucket, the inbound address and the rest its
+implementation's `NewWiring` answers in `Wiring.Inbound`. A relay's
+callback at `POST /webhooks/<slot>/inbound` takes the path, which hands a
+user's reply to the notifier, and a `@worker` of the `@runRequests` queue
+hands each request to the dispatcher, with no method of the
+implementation's. [The generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)
+lists the whole wiring.
 
 ## In Rust
 

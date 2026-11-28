@@ -14,6 +14,9 @@
 // anyone else, never an internal error and never a success. A behavior
 // route (behaviorOperation) answers a row kept from its caller word for
 // word as it answers a key no row holds, so the answer never says which.
+// On each, a create that names neither audience nor agentAccess takes its
+// table's defaults: a task is everyone's, and a note its author's alone.
+// And Pool's pick answers no member for a runner its caller does not see.
 import { Database } from 'bun:sqlite';
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -110,6 +113,30 @@ async function namedRow(orm: FixtureAudienceBehaviorsDbOrm, as: (user: string) =
   expect(await orm.task.findOne({ id: { eq: key } } as never)).toBeNull();
 }
 
+/**
+ * A create through the core that names neither audience nor agentAccess
+ * takes the table's defaults: a task is everyone's, and a note its
+ * author's alone, which agent runs only read.
+ */
+async function defaultAudience(orm: FixtureAudienceBehaviorsDbOrm, as: (user: string) => FixtureAudienceBehaviorsDbOrm): Promise<void> {
+  const task = (await orm.task.createOne({ title: 'Water the plants', owner: alice } as never)) as any;
+  expect([task.audience, task.agentAccess, task.effectiveAudience ?? null]).toEqual(['everyone', 'followRole', null]);
+  const note = (await orm.note.createOne({ author: alice, body: 'Buy more soil.' } as never)) as any;
+  expect([note.audience, note.agentAccess, note.effectiveAgents, note.effectiveAudience]).toEqual(['private', 'readOnly', 'readOnly', [alice]]);
+  await expect(as(carol).note.getOne(note.id as never)).rejects.toBeInstanceOf(NotFoundError);
+}
+
+/**
+ * Pool's pick, a read of the table as a whole that the core runs over
+ * every row, answers no member for a runner the caller does not see.
+ */
+async function pickedRunner(orm: FixtureAudienceBehaviorsDbOrm, as: (user: string) => FixtureAudienceBehaviorsDbOrm): Promise<void> {
+  const runner = (await orm.runner.createOne({ owner: alice, rank: 1 } as never)) as any;
+  const pick = async (by: FixtureAudienceBehaviorsDbOrm) => ((await by.runner.pool.pick({} as never)) as { member: { key: string } | null }).member;
+  expect(await pick(as(carol))).toBeNull();
+  expect((await pick(orm))?.key).toBe(runner.id);
+}
+
 describe('bun:sqlite', () => {
   let dir: string;
   let db: SqliteDatabase;
@@ -152,6 +179,14 @@ describe('bun:sqlite', () => {
   test("a named row's behaviors answer the principals it names, and are not found for anyone else, on bun:sqlite", async () => {
     await namedRow(createSqliteOrm(db, alice), user => createSqliteOrm(db, user));
   });
+
+  test("a create that names no audience takes the table's defaults, on bun:sqlite", async () => {
+    await defaultAudience(createSqliteOrm(db, alice), user => createSqliteOrm(db, user));
+  });
+
+  test("pick answers no runner its caller does not see, on bun:sqlite", async () => {
+    await pickedRunner(createSqliteOrm(db, alice), user => createSqliteOrm(db, user));
+  });
 });
 
 describe.skipIf(dsn === '')('Postgres', () => {
@@ -173,5 +208,13 @@ describe.skipIf(dsn === '')('Postgres', () => {
 
   test("a named row's behaviors answer the principals it names, and are not found for anyone else, on Postgres", async () => {
     await namedRow(orm, user => createOrm(db.pool, user));
+  });
+
+  test("a create that names no audience takes the table's defaults, on Postgres", async () => {
+    await defaultAudience(orm, user => createOrm(db.pool, user));
+  });
+
+  test("pick answers no runner its caller does not see, on Postgres", async () => {
+    await pickedRunner(orm, user => createOrm(db.pool, user));
   });
 });

@@ -223,6 +223,17 @@ type, which names the enum and the value (`json: cannot unmarshal string
 route still answers with the value's path, which it finds itself. null
 leaves the value as it was.
 
+A required enum field that was never set holds "", which no reader takes
+for a member, so the encoder leaves its key out (`omitzero`) instead of
+writing "". Go therefore decodes what it encodes, including an object
+nested in another one with only its key set, such as a related row read
+by id alone. The absent key decodes as any absent key does: a field with
+a `@default` takes the default, and a field without one stays unset,
+which `Validate` reports as required. So a related row read by id alone
+comes back with its defaulted enums at their defaults. Read only its key,
+as its other fields were never read. A "" that arrives in a payload is
+still refused.
+
 A `Temporal.Duration` field holds a `time.Duration`, but is read from its
 text as every validator reads it: the scalar's pattern and length, then
 the scalar core, check the text, and a text they accept is the core's
@@ -480,8 +491,11 @@ Written against the interfaces, one implementation runs on either
 dialect: a transaction's `ExecContext` and `QueryContext` run raw SQL on
 SQLite, where `Exec` and `Query`, which answer pgx's types, are
 Postgres's ([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)).
-Resolution refuses a Go worker on a SQLite file, which claims its queue
-on Postgres alone, and the build refuses an engine database there.
+Resolution refuses a generated Go worker on a SQLite file, which claims its
+queue on Postgres alone, and the build refuses an engine database there.
+The runtime's own queues claim on SQLite: the notifier's, the run
+requests' and the dispatcher's (#618), so an implementation runs their
+workers over `Deps.DB` itself.
 
 ## Consume a generated SDK
 

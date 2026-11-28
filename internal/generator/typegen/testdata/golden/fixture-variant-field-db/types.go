@@ -596,7 +596,7 @@ func CheckFromYAMLNonStrict(data []byte) (*Check, error) {
 
 // ReviewResult - A review step's result: its verdict, and the reviewer's notes.
 type ReviewResult struct {
-	Verdict Verdict `json:"verdict"`
+	Verdict Verdict `json:"verdict,omitzero"`
 
 	Notes string `json:"notes,omitempty"`
 }
@@ -845,7 +845,7 @@ type Step struct {
 
 	Title string `json:"title"`
 
-	Kind StepKind `json:"kind"`
+	Kind StepKind `json:"kind,omitzero"`
 
 	Result StepResult `json:"result,omitempty"`
 }

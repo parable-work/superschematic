@@ -7,12 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	superscalar "github.com/parable-work/superscalar/go"
+
+	"github.com/parable-work/superschematic/runtime/http/go/internal/sqldialect"
 )
 
 // Dialect is the SQL a SQLStore writes.
@@ -112,6 +113,7 @@ func NewSQLStore(db *sql.DB, dialect Dialect, descriptor []byte, opts ...SQLStor
 	for _, opt := range opts {
 		opt(s)
 	}
+	quote := sqldialect.QuoteIdent
 	u, se, c := d.User, d.Session, d.Credential
 	s.t = names{
 		user: quote(u.Table), userKey: quote(u.Columns.Key), userLogin: quote(u.Columns.Login), userName: quote(u.Columns.Name),
@@ -201,26 +203,7 @@ func (s *SQLStore) bind(query string) string {
 	if s.dialect != Postgres {
 		return query
 	}
-	var b strings.Builder
-	n := 0
-	var quoteChar byte
-	for i := 0; i < len(query); i++ {
-		c := query[i]
-		switch {
-		case quoteChar != 0:
-			if c == quoteChar {
-				quoteChar = 0
-			}
-		case c == '"' || c == '\'':
-			quoteChar = c
-		case c == '?':
-			n++
-			b.WriteString("$" + strconv.Itoa(n))
-			continue
-		}
-		b.WriteByte(c)
-	}
-	return b.String()
+	return sqldialect.NumberPlaceholders(query)
 }
 
 // timeArg is a timestamp as the dialect stores it.

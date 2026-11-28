@@ -22,6 +22,8 @@ replace github.com/parable-work/superschematic/extensions/gcp => ../gcp
 
 replace github.com/parable-work/superschematic/extensions/pulumi => ../pulumi
 
+replace github.com/parable-work/superschematic/extensions/resolvers => ../resolvers
+
 // replace directives do not propagate across modules, so the core's pins
 // are repeated here. Keep them equal to the root go.mod.
 replace github.com/microsoft/typescript-go => github.com/microsoft/TypeScript/tsc v0.0.0-20260708042240-1e4744d68260
@@ -137,6 +139,7 @@ require (
 	github.com/parable-work/superschematic/extensions/embedded v0.0.0 // indirect
 	github.com/parable-work/superschematic/extensions/gcp v0.0.0 // indirect
 	github.com/parable-work/superschematic/extensions/pulumi v0.0.0 // indirect
+	github.com/parable-work/superschematic/extensions/resolvers v0.0.0 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
 	github.com/pgavlin/fx v0.1.6 // indirect
 	github.com/pgavlin/fx/v2 v2.0.12 // indirect

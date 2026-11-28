@@ -2,6 +2,7 @@ import type { Authenticator, GrantReach, Principal, PrincipalKind } from './auth
 import type { RequestContext } from './operation.js';
 import { unauthorized } from './problem.js';
 import { sha256 } from './sha256.js';
+import { idKey } from './uuid.js';
 
 /*
 Per-record access (D156): the grants that let a caller who is no user reach
@@ -172,18 +173,65 @@ export async function revokeGrant(orm: object, id: string, at = new Date()): Pro
  * field holds the state that ends it, or its target is gone.
  */
 export async function grantEnded(orm: object, grant: GrantRow, now: Date): Promise<string | undefined> {
+  const dated = grantEndedByDate(grant, now);
+  if (dated !== undefined || !grant.endsWhenField) return dated;
+  return grantEndedByTarget(grant, await grantTargets(system(orm), grant.targetType, [grant.targetId]));
+}
+
+/** Why grant is not active at now by its dates and its revocation alone, or undefined. */
+function grantEndedByDate(grant: GrantRow, now: Date): string | undefined {
   if (grant.revokedAt !== null && grant.revokedAt !== undefined) return 'revoked';
   if (new Date(grant.startsAt).getTime() > now.getTime()) return 'not started';
   if (grant.endsAt !== null && grant.endsAt !== undefined && new Date(grant.endsAt).getTime() <= now.getTime()) return 'expired';
-  if (grant.endsWhenField) {
-    const target = repositoryOfType(system(orm), grant.targetType);
-    const key = target?.def?.key;
-    if (!target || !key) return 'target gone';
-    const row = await target.findOne({ [key]: { eq: grant.targetId } });
-    if (row === null) return 'target gone';
-    if (String(row[grant.endsWhenField]) === grant.endsWhenState) return 'target ended';
-  }
   return undefined;
+}
+
+/** Why grant, which ends on its target's state, is not active, given its target type's rows by idKey: its target is gone or holds the ending state. */
+function grantEndedByTarget(grant: GrantRow, targets: ReadonlyMap<string, Values> | undefined): string | undefined {
+  const row = targets?.get(idKey(grant.targetId));
+  if (row === undefined) return 'target gone';
+  if (String(row[grant.endsWhenField!]) === grant.endsWhenState) return 'target ended';
+  return undefined;
+}
+
+/** The rows of type whose keys ids name, in one read, by idKey; undefined when orm has no keyed table of type. */
+async function grantTargets(db: object, type: string, ids: readonly unknown[]): Promise<Map<string, Values> | undefined> {
+  const target = repositoryOfType(db, type);
+  const key = target?.def?.key;
+  if (!target || !key) return undefined;
+  const unique = [...new Map(ids.map(id => [idKey(id), id] as const)).values()];
+  const { rows } = await target.findMany({ [key]: { in: unique } }, { count: false, limit: unique.length });
+  return new Map(rows.map(row => [idKey(row[key]), row]));
+}
+
+/** A repository a read of roles goes through: the UserRole table's. */
+interface RoleRepository {
+  findMany(filter: Values, options?: Values): Promise<{ rows: Values[] }>;
+}
+
+/** The roles of names, each name read once, in one read through roles, by name; a name no role has is left out. */
+export async function rolesByName(roles: RoleRepository | null | undefined, names: Iterable<unknown>): Promise<Map<string, Values>> {
+  const unique = [...new Set([...names].map(String))];
+  if (!roles || unique.length === 0) return new Map();
+  const { rows } = await roles.findMany({ name: { in: unique } }, { count: false, limit: unique.length });
+  const out = new Map<string, Values>();
+  for (const row of rows) if (!out.has(String(row.name))) out.set(String(row.name), row);
+  return out;
+}
+
+/** The roles of ids, each read once, in one read through roles, by idKey; an id no role has is left out. */
+export async function rolesById(roles: RoleRepository | null | undefined, ids: Iterable<unknown>): Promise<Map<string, Values>> {
+  const unique = [...new Map([...ids].filter(id => id !== null && id !== undefined).map(id => [idKey(id), id] as const)).values()];
+  if (!roles || unique.length === 0) return new Map();
+  const { rows } = await roles.findMany({ id: { in: unique } }, { count: false, limit: unique.length });
+  return new Map(rows.map(row => [idKey(row.id), row]));
+}
+
+/** The permissions of roles, each once, in the order the roles and their permissions come. */
+export function permissionsOf(roles: Iterable<Values | undefined>): string[] {
+  const out = new Set<string>();
+  for (const role of roles) for (const permission of (role?.permissions as readonly string[] | null | undefined) ?? []) out.add(permission);
+  return [...out];
 }
 
 /** A role's reaches, "Type:path" each, by type: the paths a grant of the role reaches rows of the type by. */
@@ -225,11 +273,19 @@ export async function activeGrants(orm: object, filter: ActiveGrantsFilter = {})
     anyOf: [{ endsAt: { isNull: true } }, { endsAt: { gt: now } }],
   };
   const { rows } = await grants.findMany(where, { count: false, limit: 10000 });
-  const active: Values[] = [];
-  for (const row of rows) {
-    if ((await grantEnded(db, row as unknown as GrantRow, now)) === undefined) active.push(row);
+  const current = rows.filter(row => grantEndedByDate(row as unknown as GrantRow, now) === undefined);
+  // The targets of the grants that end on a target's state: one read per target type.
+  const ending = new Map<string, unknown[]>();
+  for (const row of current) {
+    const grant = row as unknown as GrantRow;
+    if (grant.endsWhenField) ending.set(grant.targetType, [...(ending.get(grant.targetType) ?? []), grant.targetId]);
   }
-  return active;
+  const targets = new Map<string, Map<string, Values> | undefined>();
+  for (const [type, ids] of ending) targets.set(type, await grantTargets(db, type, ids));
+  return current.filter(row => {
+    const grant = row as unknown as GrantRow;
+    return !grant.endsWhenField || grantEndedByTarget(grant, targets.get(grant.targetType)) === undefined;
+  });
 }
 
 /** What grantAuthenticator takes. */
@@ -240,6 +296,15 @@ export interface GrantAuthenticatorOptions {
   readonly inner?: Authenticator;
   /** The time a grant is held to; the clock's unless set. */
   readonly now?: () => Date;
+  /**
+   * What an agent run's token meets: refused 401 (refuse, the default), or
+   * handed to inner as any other request is (inner), which accepts it only
+   * where it is the dispatcher's authenticator, agents.authenticator. The
+   * generated server wraps an implementation's authenticator with inner,
+   * so a run's token reaches the API's routes where the implementation
+   * says (D194).
+   */
+  readonly runTokens?: 'refuse' | 'inner';
 }
 
 /**
@@ -288,7 +353,10 @@ function grantAuthenticatorOf(options: GrantAuthenticatorOptions, admitsRuns: bo
     // is no credential of any route.
     if (grant.targetType === 'CalendarFeed' || grant.targetType.startsWith('CalendarFeed;')) throw unauthorized("A calendar feed's token reads its feed alone");
     // An agent run's token is the dispatcher's to resolve (D194).
-    if (!admitsRuns && grant.holderKind === 'agent') throw unauthorized("An agent run's token is resolved by the agent dispatcher's authenticator alone");
+    if (!admitsRuns && grant.holderKind === 'agent') {
+      if (options.runTokens === 'inner') return options.inner ? options.inner(ctx) : null;
+      throw unauthorized("An agent run's token is resolved by the agent dispatcher's authenticator alone");
+    }
     const ended = await grantEnded(db, grant, options.now?.() ?? new Date());
     if (ended !== undefined) throw unauthorized(`The grant has ${ended === 'not started' ? 'not started' : 'ended'}`);
     const role = await roles.findOne({ name: { eq: grant.role } });

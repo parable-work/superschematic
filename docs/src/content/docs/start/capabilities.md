@@ -52,7 +52,7 @@ breaks your code, the type checker of each language points at the line.
 | You need | Declare | The build generates | You write | Guide |
 | --- | --- | --- | --- | --- |
 | A project | nothing: `superschematic init` writes the schemas root, its naming file, base tsconfig and ignore rules | nothing yet | nothing | [CLI](/superschematic/reference/cli/#init-schemas-root) |
-| A service of any kind | nothing: `superschematic new service <name> --kind DB\|API\|General\|Bucket\|Site\|MemoryStore` writes its config, package files and a starter schema | its first build, and the handle other configs import | the schema, from the starter | [CLI](/superschematic/reference/cli/#new-service-name---kind-dbapigeneralbucketsitememorystore) |
+| A service of any kind | nothing: `superschematic new service <name> --kind DB\|API\|General\|Bucket\|Site\|MemoryStore\|Tasks` writes its config, package files and a starter schema | its first build, and the handle other configs import | the schema, from the starter | [CLI](/superschematic/reference/cli/#new-service-name---kind-dbapigeneralbucketsitememorystoretasks) |
 
 ## Data
 
@@ -177,6 +177,7 @@ The core's runtime for these is TypeScript, over Postgres.
 | One binary a person installs | an environment with the `embedded` target, its servers Rust and its databases `sqlite` first | `stack build <environment>`: every server and worker in one process, each database a SQLite file the binary migrates as it starts from the plans its releases recorded, and the site's files inside it | nothing | [Stacks](/superschematic/guides/stacks/#build-one-binary) |
 | CI that deploys | `outputs.ci` on the Stack service | the workflow | nothing | [Stacks](/superschematic/guides/stacks/#generated-ci) |
 | Traces | nothing in a schema: OpenTelemetry's own `OTEL_` variables | spans from every server, job and worker | nothing | [Traces](/superschematic/guides/traces/) |
+| The checks of a commit, each run once | a Tasks service: a class per task with `@task`, its command, the tracked files it reads, the outputs of other tasks it uses and the tasks it follows | the task file a forge reads at a commit, held current by `tasks --check`, and with `tasks plan` an input key per task over git's object ids, so a pass a forge trusts is not run twice | the forge that runs the plan, and its own section of the file | [Tasks](/superschematic/guides/tasks/) |
 
 ## A backend with no generated code
 

@@ -54,7 +54,7 @@ export const table: string = fixtureAliasedDbRules.types.Company.uses[0]!.shared
 // Postgres alone, where the generated repositories merge.
 var (
 	aliasedCases = []string{
-		"a name another row holds, as its name or an alias, is refused with its key",
+		"a name another row holds, as its name or an alias, is refused naming nothing of that row",
 		"rename keeps the old name as an alias, and resolve finds the row a name or an alias names",
 		"a removed alias, and a deleted row's names, are freed for another row",
 		"a tag reads its label as a slug",

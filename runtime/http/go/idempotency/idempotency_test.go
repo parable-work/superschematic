@@ -476,3 +476,19 @@ func TestCallerPrincipal(t *testing.T) {
 		t.Errorf("a request a service forwards a user on is %q's", got)
 	}
 }
+
+// TestBindLeavesQuotedTextAlone: a ? in a configured table or column name,
+// which the store quotes, or in a literal, is no placeholder.
+func TestBindLeavesQuotedTextAlone(t *testing.T) {
+	cols := Columns{Lookup: "look?up", State: `st"?"ate`, Status: "status", Body: "body", StartedAt: "started_at"}
+	s := NewSQLStore(nil, Postgres, Table{Table: "idem?keys", Columns: cols})
+	c := s.c
+	query := "UPDATE " + s.table + " SET " + c.State + " = 'done?', " + c.Status + " = ?, " + c.Body + " = ? WHERE " + c.Lookup + " = ? AND " + c.StartedAt + " = ?"
+	want := `UPDATE "idem?keys" SET "st""?""ate" = 'done?', "status" = $1, "body" = $2 WHERE "look?up" = $3 AND "started_at" = $4`
+	if got := s.bind(query); got != want {
+		t.Errorf("Postgres bind = %s, want %s", got, want)
+	}
+	if got := NewSQLStore(nil, SQLite, Table{Table: "idem?keys", Columns: cols}).bind(query); got != query {
+		t.Errorf("SQLite bind = %s, want the query as written", got)
+	}
+}

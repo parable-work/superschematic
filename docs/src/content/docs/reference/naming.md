@@ -1315,6 +1315,37 @@ fields `FileUploadData` has (`Filename`, `ContentType`, `Size`, `Data`,
 `ResetReader`). Empty, the API defines `FileUploadData` itself. A value
 that is not an exported Go identifier fails the load.
 
+## `[tasks.sections.<name>]`
+
+Registers a task section as data (D203). A section is a part of a Tasks
+service's task file that one forge owns and reads: its tiers and
+triggers, and each task's tier and timeout. The core checks each part
+against the section's schema and copies it into the file under
+`sections.<name>`. A forge with no extension registers its section
+here. [Sections](/superschematic/guides/tasks/#sections-what-a-forge-owns)
+is the guide.
+
+```toml
+[tasks.sections.forge]
+file = "forge/file.schema.json"
+task = "forge/task.schema.json"
+```
+
+| Key | Meaning |
+| --- | --- |
+| `file` | the JSON Schema of the section's part that belongs to the file, which `@tasks` holds |
+| `task` | the JSON Schema of the section's part of one task, which `@task` holds |
+
+Each is a JSON Schema file's path, relative to the schemas root and
+slash-separated. A section gives one or both. A name is lowercase words
+joined by hyphens, and not `github`, which the core registers for its
+[github renderer](/superschematic/guides/tasks/#run-the-tasks-on-github-actions). The schemas' bytes are part of the build cache's key,
+so a change to one rebuilds a Tasks service.
+
+A rule a JSON Schema cannot say is the forge's to check when it reads
+the file. An extension that registers the section in Go adds a `Verify`
+for such rules; a name both register is refused.
+
 ## `[extension.<name>]`
 
 Undecoded tables handed to the extension whose `Name()` matches

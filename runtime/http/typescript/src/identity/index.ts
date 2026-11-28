@@ -70,7 +70,8 @@ export {
   validPermission,
 } from './permissions.js';
 export type { IdentityRoute } from './permissions.js';
-export { DESCRIPTOR_VERSION, IdentityDescriptorError, parseIdentityDescriptor, quoteIdentifier } from './descriptor.js';
+export { DESCRIPTOR_VERSION, IdentityDescriptorError, parseIdentityDescriptor } from './descriptor.js';
+export { quoteIdentifier } from '../sql-text.js';
 export type { IdentityDescriptor } from './descriptor.js';
 export { IdentityStoreError, isStoreError } from './store.js';
 export type {

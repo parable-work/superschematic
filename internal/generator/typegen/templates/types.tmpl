@@ -1131,7 +1131,7 @@ func validate{{.Symbol}}Value(value {{.Symbol}}, required bool) (bool, []Validat
 {{formatComment .Name .Doc}}
 type {{.Name}} struct {
 	{{range .Fields}}
-	{{.GoName}} {{.GoType}} `json:"{{.Name}}{{if not .Required}}{{if or .UsesWrapper (and .IsArray (not .IsMap))}},omitzero{{else if not .KeepsZeroValue}},omitempty{{end}}{{end}}"`
+	{{.GoName}} {{.GoType}} `json:"{{.Name}}{{if not .Required}}{{if or .UsesWrapper (and .IsArray (not .IsMap))}},omitzero{{else if not .KeepsZeroValue}},omitempty{{end}}{{else if .OmitsUnsetEnum}},omitzero{{end}}"`
 	{{end}}
 {{- if .JSONObjectFields}}
 

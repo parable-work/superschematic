@@ -2,6 +2,7 @@ import type { SqlDatabase, SqlValue } from './d1.js';
 import type { OrmOptions, OrmQueryable } from './orm.js';
 import { HttpProblem } from './problem.js';
 import { wakeAfterEnqueue } from './queue-wake.js';
+import { quoteIdentifier as quote } from './sql-text.js';
 import { uuidFromDb, uuidToDb, uuidValue } from './uuid.js';
 
 /*
@@ -499,6 +500,14 @@ export interface RulesOperation {
   readonly writes: boolean;
   /** True for an operation of the table as a whole (D104), a declaration's scope schema: a repository method that takes no key, which the adapter runs as a command without a row (runTableOperation). */
   readonly table?: boolean;
+  /**
+   * Of an operation of the table as a whole, the member of its answer that
+   * names one of the table's rows, an object whose key is the row's key in
+   * its wire form, or null (Aliased's resolve: row). The core reads every
+   * row, so the repository keeps the answer to its caller (D156): null for a
+   * row the caller does not see. Absent for any other operation.
+   */
+  readonly answersRow?: string;
 }
 
 /**
@@ -2367,11 +2376,6 @@ function ownedColumns(table: RulesTable, dialect: RulesDialect, owned: Readonly<
  */
 function stampNow(dialect: RulesDialect): string {
   return dialect === 'postgres' ? 'statement_timestamp()' : "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
-}
-
-/** An identifier quoted as Postgres and SQLite both read one. */
-function quote(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
 }
 
 /** The nth placeholder in the store's dialect: $n on Postgres, ?n on SQLite and D1. */

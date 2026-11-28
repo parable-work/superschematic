@@ -24,6 +24,11 @@ type Manifest struct {
 	Enums   []string `json:"enums,omitempty"`
 }
 
+// manifestKinds are the kinds the manifest generator runs on: the three
+// core kinds that generate packages, and acme's own. A service of another
+// kind, such as the Tasks service shop-tasks, gets no manifest.
+var manifestKinds = []string{"DB", "API", "General", Kind}
+
 // registerManifest adds a generator to kinds the extension did not define.
 // A generator that lists kinds is appended to those kinds' pipelines after
 // the generators they name, so every DB, API, General and Catalog build
@@ -35,7 +40,7 @@ func registerManifest(r *registry.Registry, cfg Config) error {
 	return r.RegisterGenerator(registry.GeneratorSpec{
 		Name:             "acmeManifest",
 		Extension:        Name,
-		Kinds:            []string{"DB", "API", "General", Kind},
+		Kinds:            manifestKinds,
 		RendersBehaviors: true,
 		Dirs: func(c registry.GenerateContext) []string {
 			return []string{ManifestDir(c.Options.OutputRoot, c.Config.Name)}

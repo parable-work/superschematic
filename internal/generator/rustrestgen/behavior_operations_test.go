@@ -325,7 +325,10 @@ func (f behaviorFixture) buildWith(t *testing.T, sdk bool, adjust func(root, api
 	}
 	deps := behaviorDeps(behaviorLayout(t, db, reg))
 	deps.Database = behaviorDB
-	if len(output.BehaviorWorkers) > 0 {
+	// A behavior worker's queues are the database's Rust types', and so
+	// are the repositories a held database's operations check the
+	// caller's reach through (D156, D181).
+	if len(output.BehaviorWorkers) > 0 || output.BehaviorsHeld() {
 		deps.DatabaseTypesCrate = names.RustTypesCrate(behaviorDB)
 		if deps.DatabaseTypesPath, err = naming.RelPath(apiDir, filepath.Join(typesRoot, behaviorDB)); err != nil {
 			t.Fatal(err)
@@ -388,12 +391,19 @@ func (f behaviorFixture) buildWith(t *testing.T, sdk bool, adjust func(root, api
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The database's Rust types, whose repositories a held database's
+	// operations check the caller's reach through (D181), name the HTTP
+	// runtime by its version, which the checkout's stands in for.
+	patch := testpaths.RustPatch(paths, names)
+	if output.BehaviorsHeld() {
+		patch += names.HTTPRuntimeRustCrate + ` = { path = "` + filepath.ToSlash(paths.HTTPRuntimeRust) + "\" }\n"
+	}
 	// The generated manifest ends in its [dependencies] table.
 	manifest = append(manifest, []byte(sdkDependency+`
 [dev-dependencies]
 tokio = { version = "1.52.2", features = ["test-util"] }
 
-`+testpaths.RustPatch(paths, names))...)
+`+patch)...)
 	if err := os.WriteFile(filepath.Join(apiDir, "Cargo.toml"), manifest, 0o644); err != nil {
 		t.Fatal(err)
 	}
