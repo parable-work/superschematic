@@ -1,0 +1,28 @@
+import { AudienceResolving, Page } from "@schemas/fixture-audience-queue-db";
+import { Authenticated, HttpMethod, docs as apiDocs, mcp, rest, tableOperation, worker } from "@superschematic/api";
+import { source } from "@superschematic/schema";
+import { Identity } from "superscalar";
+
+// A page as the API answers it.
+@source(Page)
+export abstract class PageView {
+  id: Identity.UUID;
+
+  title: string;
+}
+
+export class Pages extends Authenticated {
+  // One page, read as its caller: a page keeps to its folder's audience.
+  @apiDocs({ title: "Get page", description: "One page, read as its caller: a page keeps to its folder's audience.", capability: "pages.get-page", lifecycle: "active", visibility: "public", replayMode: "read_only" })
+  @mcp({ handle: "get_page", invocationPolicy: "auto" })
+  @rest(HttpMethod.GET, "pages/{id}")
+  @tableOperation()
+  getPage(id: Identity.UUID): PageView {
+    throw new Error("schema declaration only");
+  }
+}
+
+// The pages' queue (D156, #734): the generated worker resolves each
+// message's pages again, and the implementation has no method for it.
+@worker({ queue: AudienceResolving })
+export abstract class ResolveAudience {}
