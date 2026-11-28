@@ -2759,7 +2759,11 @@ fn held_write(
     let at_version = if table.version.is_empty() {
         String::new()
     } else {
-        format!(" AND {} = {}", quote(&table.version), binder.bind(Bind::Int(expected)))
+        format!(
+            " AND {} = {}",
+            quote(&table.version),
+            binder.bind(Bind::Int(expected))
+        )
     };
     let text = format!(
         "{head} WHERE {} = {at_key}{at_version}{}",

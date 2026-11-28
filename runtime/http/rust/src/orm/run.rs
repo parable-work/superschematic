@@ -15,9 +15,8 @@ use serde_json::Value;
 use super::plan::{row_key_text, DeletePlan, Plan, Statement};
 use super::{
     Column, CoreCreate, CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, CreateOptions,
-    Dialect, Error,
-    FindOptions, Found, MergeResult, PageOptions, RowPage, Table, UpsertManyOptions, UpsertOptions,
-    UpsertStatus, Upserted, Values, WriteOptions,
+    Dialect, Error, FindOptions, Found, MergeResult, PageOptions, RowPage, Table,
+    UpsertManyOptions, UpsertOptions, UpsertStatus, Upserted, Values, WriteOptions,
 };
 
 /// The alias a Postgres upsert returns whether it inserted a row as,

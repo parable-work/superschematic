@@ -948,7 +948,9 @@ fn holidays_of(view: &View<'_, RecurrenceConfig>, config: &RecurrenceConfig) -> 
                         .and_then(|field| row.row.own.get(field))
                         .and_then(Value::as_str)
                         .map(str::to_ascii_lowercase);
-                    if let Some(day) = weekday.filter(|day| weekdays(std::slice::from_ref(day)).is_ok()) {
+                    if let Some(day) =
+                        weekday.filter(|day| weekdays(std::slice::from_ref(day)).is_ok())
+                    {
                         dates.push(day);
                     }
                 }
@@ -1018,7 +1020,11 @@ impl Behavior for Recurrence {
         };
         let at = format!("/{}/{RECURRENCE}", cx.use_id());
         spec_checked(cx, given, &|path: &str, message: String| {
-            Refusal::create_params(cx.type_name(), vec![SchemaIssue::new(format!("{at}{path}"), message)]).into()
+            Refusal::create_params(
+                cx.type_name(),
+                vec![SchemaIssue::new(format!("{at}{path}"), message)],
+            )
+            .into()
         })?;
         if let Some(permission) = manage(cx.config()) {
             if !cx.can(permission)? {
@@ -1199,13 +1205,21 @@ impl Behavior for Recurrence {
         // recurrence is as it was.
         if before == after {
             let mut plan = Plan::load(cx)?;
-            if !plan.spec.as_ref().is_some_and(|spec| spec.anchor == "relative") {
+            if !plan
+                .spec
+                .as_ref()
+                .is_some_and(|spec| spec.anchor == "relative")
+            {
                 return Ok(());
             }
             plan.catch_up(cx.now());
             let mut again = plan.clone();
             settle_plan(cx, &mut again)?;
-            return if again.pending() == plan.pending() { Ok(()) } else { replan(cx) };
+            return if again.pending() == plan.pending() {
+                Ok(())
+            } else {
+                replan(cx)
+            };
         }
         if watched(cx.config())
             .iter()

@@ -30,8 +30,8 @@ use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{Client, Runner};
 use super::{
     row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
-    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, CreateOptions, Definition, Dialect, Error,
-    FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertManyOptions,
+    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, CreateOptions, Definition, Dialect,
+    Error, FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertManyOptions,
     UpsertOptions, Upserted, Values, WriteOptions,
 };
 use crate::auth::Principal;
@@ -850,7 +850,11 @@ where
 
     /// Inserts a row as `create_one` does, with each use's create
     /// parameters, by its member (#729).
-    pub async fn create_one_with(&self, input: &Create, options: &CreateOptions) -> Result<Row, Error> {
+    pub async fn create_one_with(
+        &self,
+        input: &Create,
+        options: &CreateOptions,
+    ) -> Result<Row, Error> {
         row(self
             .repository
             .create_one_with(&values(input)?, options)

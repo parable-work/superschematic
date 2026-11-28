@@ -330,8 +330,9 @@ pub fn expand(input: &ExpandInput) -> Result<Expansion, String> {
             holidays.insert(date);
             continue;
         }
-        let day = weekdays(std::slice::from_ref(text))
-            .map_err(|_| format!("holiday \"{text}\" is no date (2026-12-25) and no weekday (friday)"))?;
+        let day = weekdays(std::slice::from_ref(text)).map_err(|_| {
+            format!("holiday \"{text}\" is no date (2026-12-25) and no weekday (friday)")
+        })?;
         for day in day {
             if !closed.contains(&day) {
                 closed.push(day);
@@ -766,7 +767,10 @@ mod tests {
         let mut sunday = calendar;
         sunday["date"] = json!("2026-11-01");
         assert!(run(sunday)["occurrences"][0].get("shifted").is_none());
-        let error = expand_json(&json!({"anchor": "relative", "date": "2026-10-31", "holidays": ["someday"]})).unwrap_err();
+        let error = expand_json(
+            &json!({"anchor": "relative", "date": "2026-10-31", "holidays": ["someday"]}),
+        )
+        .unwrap_err();
         assert!(error.contains("no weekday"), "{error}");
     }
 

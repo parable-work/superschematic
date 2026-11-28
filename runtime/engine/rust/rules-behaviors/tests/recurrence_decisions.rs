@@ -8,7 +8,9 @@
 mod support;
 
 use serde_json::{json, Value};
-use superschematic_rules::{Action, Caller, Outcome, Row, RowChange, RowImage, TypeSpec, UseSpec, WriteKind};
+use superschematic_rules::{
+    Action, Caller, Outcome, Row, RowChange, RowImage, TypeSpec, UseSpec, WriteKind,
+};
 use superschematic_rules_behaviors::core;
 use support::{caller, changed, refused, Host};
 
@@ -32,7 +34,10 @@ fn config() -> Value {
 }
 
 fn host() -> Host {
-    Host::new(core(), TypeSpec::new("Filing").with(UseSpec::on_type("Recurrence", config())))
+    Host::new(
+        core(),
+        TypeSpec::new("Filing").with(UseSpec::on_type("Recurrence", config())),
+    )
 }
 
 fn manager() -> Caller {
@@ -101,26 +106,74 @@ fn monthly_on_the_fourteenth() -> Value {
 #[test]
 fn a_calendars_weekday_rows_are_its_weekend() {
     let mut host = host();
-    other(&mut host, "Holiday", "h1", json!({"calendar": "east", "date": null, "weekday": "friday"}));
-    other(&mut host, "Holiday", "h2", json!({"calendar": "east", "weekday": "saturday"}));
-    other(&mut host, "Holiday", "h3", json!({"calendar": "west", "date": "2026-04-14", "weekday": null}));
-    changed(create(&mut host, &manager(), json!({"holidayCalendar": "east"}), json!({})));
-    changed(host.invoke_at(&manager(), T0, "f1", "Recurrence", "setRecurrence", monthly_on_the_fourteenth()));
+    other(
+        &mut host,
+        "Holiday",
+        "h1",
+        json!({"calendar": "east", "date": null, "weekday": "friday"}),
+    );
+    other(
+        &mut host,
+        "Holiday",
+        "h2",
+        json!({"calendar": "east", "weekday": "saturday"}),
+    );
+    other(
+        &mut host,
+        "Holiday",
+        "h3",
+        json!({"calendar": "west", "date": "2026-04-14", "weekday": null}),
+    );
+    changed(create(
+        &mut host,
+        &manager(),
+        json!({"holidayCalendar": "east"}),
+        json!({}),
+    ));
+    changed(host.invoke_at(
+        &manager(),
+        T0,
+        "f1",
+        "Recurrence",
+        "setRecurrence",
+        monthly_on_the_fourteenth(),
+    ));
     assert_eq!(
         dues(&host),
         vec![
-            ("2026-03-14T09:00".to_owned(), json!("2026-03-12T09:00"), json!("weekend")),
-            ("2026-04-14T09:00".to_owned(), json!("2026-04-14T09:00"), Value::Null),
+            (
+                "2026-03-14T09:00".to_owned(),
+                json!("2026-03-12T09:00"),
+                json!("weekend")
+            ),
+            (
+                "2026-04-14T09:00".to_owned(),
+                json!("2026-04-14T09:00"),
+                Value::Null
+            ),
         ]
     );
     // The row moves to the west calendar: Saturday and Sunday close, and
     // its April holiday moves April's to the Monday before.
-    changed(host.update_at(&manager(), T0 + HOUR, "f1", json!({"holidayCalendar": "west"})));
+    changed(host.update_at(
+        &manager(),
+        T0 + HOUR,
+        "f1",
+        json!({"holidayCalendar": "west"}),
+    ));
     assert_eq!(
         dues(&host),
         vec![
-            ("2026-03-14T09:00".to_owned(), json!("2026-03-13T09:00"), json!("weekend")),
-            ("2026-04-14T09:00".to_owned(), json!("2026-04-13T09:00"), json!("holiday")),
+            (
+                "2026-03-14T09:00".to_owned(),
+                json!("2026-03-13T09:00"),
+                json!("weekend")
+            ),
+            (
+                "2026-04-14T09:00".to_owned(),
+                json!("2026-04-13T09:00"),
+                json!("holiday")
+            ),
         ]
     );
 }
@@ -139,7 +192,10 @@ fn a_create_gives_the_row_its_recurrence() {
     ));
     let row = host.row("f1");
     assert_eq!(row.version, 1);
-    assert_eq!(row.owned["Recurrence"]["recurrence"]["anchor"], json!("calendar"));
+    assert_eq!(
+        row.owned["Recurrence"]["recurrence"]["anchor"],
+        json!("calendar")
+    );
     assert_eq!(row.owned["Recurrence"]["recurrence"]["revision"], json!(1));
     assert_eq!(row.owned["Recurrence"]["recurrence"]["setAt"], json!(T0));
     // With no calendar, March's moves off Saturday to Friday the 13th.
@@ -149,8 +205,17 @@ fn a_create_gives_the_row_its_recurrence() {
     assert_eq!(armed(&host, "overdue"), None);
     // A create with no recurrence, and one whose entry is empty, sets none.
     let mut bare = self::host();
-    changed(create(&mut bare, &manager(), json!({}), json!({"Recurrence": {}})));
-    assert!(bare.row("f1").owned.get("Recurrence").is_none_or(|owned| owned.get("recurrence").is_none()));
+    changed(create(
+        &mut bare,
+        &manager(),
+        json!({}),
+        json!({"Recurrence": {}}),
+    ));
+    assert!(bare
+        .row("f1")
+        .owned
+        .get("Recurrence")
+        .is_none_or(|owned| owned.get("recurrence").is_none()));
     assert!(bare.sub_rows("f1", "Recurrence", "occurrences").is_empty());
 }
 
@@ -160,17 +225,44 @@ fn a_create_gives_the_row_its_recurrence() {
 #[test]
 fn a_creates_recurrence_is_held_to_set_recurrences_checks_and_permission() {
     for (params, path) in [
-        (json!({"anchor": "calendar", "start": "2026-01-01"}), "/Recurrence/recurrence/rule"),
-        (json!({"anchor": "calendar", "rule": "FREQ=SOMETIMES", "start": "2026-01-01"}), "/Recurrence/recurrence/rule"),
-        (json!({"anchor": "afterDone", "every": "P1D", "start": "2026-01-01"}), "/Recurrence/recurrence/anchor"),
-        (json!({"anchor": "calendar", "rule": "FREQ=DAILY", "start": "2026-01-01", "colour": "red"}), "/Recurrence/recurrence"),
+        (
+            json!({"anchor": "calendar", "start": "2026-01-01"}),
+            "/Recurrence/recurrence/rule",
+        ),
+        (
+            json!({"anchor": "calendar", "rule": "FREQ=SOMETIMES", "start": "2026-01-01"}),
+            "/Recurrence/recurrence/rule",
+        ),
+        (
+            json!({"anchor": "afterDone", "every": "P1D", "start": "2026-01-01"}),
+            "/Recurrence/recurrence/anchor",
+        ),
+        (
+            json!({"anchor": "calendar", "rule": "FREQ=DAILY", "start": "2026-01-01", "colour": "red"}),
+            "/Recurrence/recurrence",
+        ),
     ] {
         let mut host = host();
-        let refusal = refused(create(&mut host, &manager(), json!({}), json!({"Recurrence": {"recurrence": params.clone()}})));
-        assert_eq!(refusal["code"], json!("invalid_argument"), "{params}: {refusal}");
+        let refusal = refused(create(
+            &mut host,
+            &manager(),
+            json!({}),
+            json!({"Recurrence": {"recurrence": params.clone()}}),
+        ));
+        assert_eq!(
+            refusal["code"],
+            json!("invalid_argument"),
+            "{params}: {refusal}"
+        );
         let text = refusal.to_string();
-        assert!(text.contains(&format!("\"{path}")), "{params}: {text} names no {path}");
-        assert!(host.memory.rows.is_empty(), "{params}: a refused create kept its row");
+        assert!(
+            text.contains(&format!("\"{path}")),
+            "{params}: {text} names no {path}"
+        );
+        assert!(
+            host.memory.rows.is_empty(),
+            "{params}: a refused create kept its row"
+        );
     }
     let mut host = host();
     let refusal = refused(create(
@@ -225,10 +317,24 @@ fn a_change_that_moves_nothing_plans_a_relative_recurrence_again() {
     ));
     let set = host.row("f1").owned["Recurrence"]["recurrence"].clone();
     // 2026-03-15 is a Sunday, moved before to Friday the 13th.
-    assert_eq!(dues(&host), vec![("2026-03-15T00:00".to_owned(), json!("2026-03-13T00:00"), json!("weekend"))]);
+    assert_eq!(
+        dues(&host),
+        vec![(
+            "2026-03-15T00:00".to_owned(),
+            json!("2026-03-13T00:00"),
+            json!("weekend")
+        )]
+    );
     other(&mut host, "Contract", "c1", json!({"endsOn": "2026-04-21"}));
     changed(untouched(&mut host, T0 + HOUR));
-    assert_eq!(dues(&host), vec![("2026-04-01T00:00".to_owned(), json!("2026-04-01T00:00"), Value::Null)]);
+    assert_eq!(
+        dues(&host),
+        vec![(
+            "2026-04-01T00:00".to_owned(),
+            json!("2026-04-01T00:00"),
+            Value::Null
+        )]
+    );
     assert_eq!(host.row("f1").owned["Recurrence"]["recurrence"], set);
     // Heard again with the date where the plan read it, it writes nothing.
     let version = host.row("f1").version;
