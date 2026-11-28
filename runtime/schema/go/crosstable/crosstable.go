@@ -121,16 +121,29 @@ type CalendarOccurrences struct {
 // and its owner are of; Timestamp when its field is a date-time, and
 // OwnerUUID when its owner holds a UUID.
 type CalendarSource struct {
-	Name        string               `json:"name"`
-	Kind        string               `json:"kind"`
-	Color       string               `json:"color,omitempty"`
-	Title       string               `json:"title"`
-	Field       string               `json:"field,omitempty"`
-	End         string               `json:"end,omitempty"`
-	Timestamp   bool                 `json:"timestamp,omitempty"`
-	Owner       string               `json:"owner,omitempty"`
-	OwnerUUID   bool                 `json:"ownerUuid,omitempty"`
+	Name      string `json:"name"`
+	Kind      string `json:"kind"`
+	Color     string `json:"color,omitempty"`
+	Title     string `json:"title"`
+	Field     string `json:"field,omitempty"`
+	End       string `json:"end,omitempty"`
+	Timestamp bool   `json:"timestamp,omitempty"`
+	Owner     string `json:"owner,omitempty"`
+	OwnerUUID bool   `json:"ownerUuid,omitempty"`
+	// Permission is the permission the schema's source needs (#601);
+	// CalendarOptions.Permissions may name another, which wins.
+	Permission  string               `json:"permission,omitempty"`
 	Occurrences *CalendarOccurrences `json:"occurrences,omitempty"`
+}
+
+// permissionUnder is the permission a caller needs to read the source
+// under options, and whether it needs one: the one options name for it,
+// else the schema's.
+func (s CalendarSource) permissionUnder(options CalendarOptions) (string, bool) {
+	if permission, ok := options.Permissions[s.Name]; ok {
+		return permission, true
+	}
+	return s.Permission, s.Permission != ""
 }
 
 // CalendarTable is a table with calendar sources: the table and its key

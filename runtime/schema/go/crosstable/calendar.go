@@ -23,7 +23,9 @@ caller by the predicate the table's repository applies for it
 (Host.Conditions: its audience and its grants, D156, D180), so a row's
 audience and the caller's grants hold as they hold on any read; an
 occurrence is shown only when its row is read. A source a caller lacks the
-permission of (CalendarOptions.Permissions) is left out.
+permission of is left out: the schema's (@calendarSource's permission,
+#601, CalendarSource.Permission), or the one CalendarOptions.Permissions
+names for it, which wins.
 */
 
 // CalendarOccurrence is an occurrence's key, its wall due and its state,
@@ -73,7 +75,8 @@ type CalendarRead struct {
 type CalendarOptions struct {
 	// Permissions is the permission each source needs, by its name: a
 	// caller without it reads none of its entries. A source not named
-	// needs none beyond its table's audience and grants.
+	// needs the schema's (CalendarSource.Permission), or none beyond its
+	// table's audience and grants.
 	Permissions map[string]string
 }
 
@@ -129,7 +132,7 @@ func ReadCalendar(ctx context.Context, h Host, caller Caller, read CalendarRead,
 			if read.Sources != nil && !slices.Contains(read.Sources, source.Name) {
 				continue
 			}
-			if permission, ok := options.Permissions[source.Name]; ok && !caller.holds(permission) {
+			if permission, ok := source.permissionUnder(options); ok && !caller.holds(permission) {
 				continue
 			}
 			if read.Mine && (source.Owner == "" || caller.Principal.Anonymous()) {

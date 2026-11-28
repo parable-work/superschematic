@@ -29,9 +29,9 @@ func calendarDecorators() []DecoratorSpec {
 }
 
 // calendarSourceOf reads @calendarSource<T>({ name?, field?, end?,
-// occurrences?, title, kind, color?, owner? }) on typeName.
+// occurrences?, title, kind, color?, owner?, permission? }) on typeName.
 func calendarSourceOf(typeName string, args []any) (ir.CalendarSourceDef, error) {
-	const shape = "@calendarSource<T>({ name?, field?, end?, occurrences?, title, kind, color?, owner? })"
+	const shape = "@calendarSource<T>({ name?, field?, end?, occurrences?, title, kind, color?, owner?, permission? })"
 	var source ir.CalendarSourceDef
 	if len(args) != 1 {
 		return source, fmt.Errorf("@calendarSource on %s takes one options object: %s", typeName, shape)
@@ -68,8 +68,10 @@ func calendarSourceOf(typeName string, args []any) (ir.CalendarSourceDef, error)
 			source.Color = value
 		case "owner":
 			source.Owner = value
+		case "permission":
+			source.Permission = value
 		default:
-			return source, ArgErrorf(0, "@calendarSource on %s has no option %q; it takes name, field, end, occurrences, title, kind, color and owner", typeName, key)
+			return source, ArgErrorf(0, "@calendarSource on %s has no option %q; it takes name, field, end, occurrences, title, kind, color, owner and permission", typeName, key)
 		}
 	}
 	switch {

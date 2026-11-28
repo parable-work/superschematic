@@ -6,8 +6,9 @@
 //! overdue), a missed one not blocking the next; complete with what and
 //! who completed it, an afterDone recurrence dated from it; a rule change
 //! that leaves an open occurrence as it was and replans the rest; skip,
-//! moveOne and listOccurrences; holidays from the row's calendar; and the
-//! permissions and vetoes.
+//! moveOne and listOccurrences; holidays from the row's calendar; an
+//! occurrence falling due at its due (#601); and the permissions and
+//! vetoes.
 
 mod support;
 
@@ -180,6 +181,9 @@ fn set_recurrence_plans_the_horizon_and_arms_its_deadlines() {
     // March's reminder fell before now and was recorded; April's is next.
     assert!(occurrences(&host)[0].1.contains_key("remindedAt"));
     assert_eq!(armed(&host, "remind"), Some(april - 2 * DAY));
+    // March falls due at its due, which has not come (#601).
+    assert_eq!(armed(&host, "due"), Some(march));
+    assert!(!occurrences(&host)[0].1.contains_key("fellDueAt"));
     assert_eq!(
         host.row("f1").owned["Recurrence"]["nextDueAt"],
         json!(march)
@@ -716,5 +720,137 @@ fn a_run_emits_each_occurrence_it_opens_reminds_and_misses_once() {
             .count(),
         1,
         "{missed:?}"
+    );
+}
+
+// fired runs every deadline due by now and answers the events the fires
+// wrote, by kind and occurrence, in order.
+fn fired(host: &mut Host, now: i64) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for (name, outcome) in host.fall_due(now, &runner()) {
+        match outcome {
+            Outcome::Changed(changes) => {
+                for event in &changes.events {
+                    let key = event.payload["key"].as_str().unwrap_or_default().to_owned();
+                    out.push((event.kind.clone(), key));
+                }
+            }
+            Outcome::Refused(refusal) => panic!("the fire of {name} was refused: {refusal:?}"),
+        }
+    }
+    out
+}
+
+// An occurrence falls due at its due (#601): the due deadline fires there,
+// records fellDueAt and emits due once; one done before its due never
+// falls due, and the deadline goes on to the next.
+#[test]
+fn an_occurrence_falls_due_at_its_due_once_unless_it_is_done() {
+    let mut host = hosting(monthly(), json!({}));
+    changed(call(
+        &mut host,
+        &manager(),
+        T0,
+        "setRecurrence",
+        first_of_month(),
+    ));
+    let march = 1_772_373_600_000;
+    let april = 1_775_048_400_000;
+    let march_key = "2026-03-01T09:00".to_owned();
+    assert_eq!(fired(&mut host, march - 1), vec![]);
+    assert_eq!(
+        fired(&mut host, march),
+        vec![("due".to_owned(), march_key.clone())]
+    );
+    assert_eq!(occurrences(&host)[0].1["fellDueAt"], json!(march));
+    assert_eq!(states(&host)[0].1, "open");
+    // Nothing falls due again; the deadline is April's.
+    assert_eq!(armed(&host, "due"), Some(april));
+    assert_eq!(fired(&mut host, march + HOUR), vec![]);
+    // April, done before its due, never falls due: May's is next.
+    fired(&mut host, april - 7 * DAY);
+    changed(call(
+        &mut host,
+        &worker(),
+        april - DAY,
+        "complete",
+        json!({"key": "2026-04-01T09:00"}),
+    ));
+    let may = 1_777_640_400_000;
+    assert_eq!(armed(&host, "due"), Some(may));
+    let events = fired(&mut host, april + 2 * DAY);
+    assert!(!events.iter().any(|(kind, _)| kind == "due"), "{events:?}");
+    assert!(!occurrences(&host)[1].1.contains_key("fellDueAt"));
+}
+
+// With no overdueAfter an occurrence is missed at its due: one fire raises
+// due, then missed, and opens the next. A worker that was down raises each due it passed, once,
+// at its next fire.
+#[test]
+fn an_occurrence_missed_at_its_due_falls_due_first_and_a_late_fire_catches_up() {
+    let mut host = hosting(
+        json!({"anchors": ["calendar"], "timeZone": "UTC", "horizonDays": 40}),
+        json!({}),
+    );
+    changed(call(
+        &mut host,
+        &manager(),
+        T0,
+        "setRecurrence",
+        json!({"anchor": "calendar", "rule": "FREQ=WEEKLY", "start": "2026-03-02T09:00"}),
+    ));
+    let first = T0 + DAY + 9 * HOUR;
+    assert_eq!(
+        fired(&mut host, first),
+        vec![
+            ("due".to_owned(), "2026-03-02T09:00".to_owned()),
+            ("missed".to_owned(), "2026-03-02T09:00".to_owned()),
+            // The next opens as this one falls due: no opensBefore.
+            ("opened".to_owned(), "2026-03-09T09:00".to_owned())
+        ]
+    );
+    // Down for two weeks: the next fire raises the two dues it passed, and
+    // each is missed.
+    let events = fired(&mut host, first + 15 * DAY);
+    let dues: Vec<&str> = events
+        .iter()
+        .filter(|(kind, _)| kind == "due")
+        .map(|(_, key)| key.as_str())
+        .collect();
+    assert_eq!(
+        dues,
+        vec!["2026-03-09T09:00", "2026-03-16T09:00"],
+        "{events:?}"
+    );
+    assert_eq!(fired(&mut host, first + 15 * DAY + HOUR), vec![]);
+}
+
+// moveOne of an occurrence that fell due to a later due lets it fall due
+// again there.
+#[test]
+fn an_occurrence_moved_past_its_due_falls_due_again_at_the_new_one() {
+    let mut host = hosting(monthly(), json!({}));
+    changed(call(
+        &mut host,
+        &manager(),
+        T0,
+        "setRecurrence",
+        first_of_month(),
+    ));
+    let march = 1_772_373_600_000;
+    fired(&mut host, march);
+    let moved = result(call(
+        &mut host,
+        &manager(),
+        march + HOUR,
+        "moveOne",
+        json!({"key": "2026-03-01T09:00", "due": "2026-03-03T09:00"}),
+    ));
+    assert!(moved.get("fellDueAt").is_none(), "{moved}");
+    let again = march + 2 * DAY;
+    assert_eq!(armed(&host, "due"), Some(again));
+    assert_eq!(
+        fired(&mut host, again),
+        vec![("due".to_owned(), "2026-03-01T09:00".to_owned())]
     );
 }

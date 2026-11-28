@@ -123,7 +123,7 @@ func TestNativeDeclarationsAreTheFiles(t *testing.T) {
 		t.Fatalf("Reconcile's declaration = %+v, want its value field observed, optional", reconcile)
 	}
 	// Recurrence (D153) raises an occurrence's opened, reminded and missed.
-	emitters := map[string][]string{"Schedules": {"run"}, "Pool": {"recheck"}, "Recurrence": {"opened", "reminded", "missed"}}
+	emitters := map[string][]string{"Schedules": {"run"}, "Pool": {"recheck"}, "Recurrence": {"opened", "reminded", "due", "missed"}}
 	for name, kinds := range emitters {
 		var got []string
 		for _, event := range byName[name].Events {

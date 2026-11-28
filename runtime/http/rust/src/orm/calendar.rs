@@ -11,8 +11,9 @@
 //! in a window, each row through its table's repository opened for the
 //! caller (`with_access`), so a row's audience and the caller's grants
 //! hold as they hold on any read (D156); an occurrence is shown only when
-//! its row is. A source the caller lacks the permission of
-//! ([`CalendarOptions::permissions`]) is left out.
+//! its row is. A source the caller lacks the permission of is left out:
+//! the schema's (`@calendarSource`'s permission, #601), or the one
+//! [`CalendarOptions::permissions`] names for it, which wins.
 //!
 //! The feed is for a calendar client, which sends no Authorization header:
 //! its URL holds a token. The token is a grant (D156) of the database's
@@ -70,8 +71,23 @@ pub struct CalendarSource {
     pub end: Option<String>,
     #[serde(default)]
     pub owner: Option<String>,
+    /// The permission the schema's source needs (#601);
+    /// [`CalendarOptions::permissions`] may name another, which wins.
+    #[serde(default)]
+    pub permission: Option<String>,
     #[serde(default)]
     pub occurrences: Option<CalendarOccurrences>,
+}
+
+impl CalendarSource {
+    /// The permission a caller needs to read the source under `options`:
+    /// the one they name for it, else the schema's (#601); `None` for none.
+    pub fn permission_under<'a>(&'a self, options: &'a CalendarOptions) -> Option<&'a String> {
+        options
+            .permissions
+            .get(&self.name)
+            .or(self.permission.as_ref())
+    }
 }
 
 /// An occurrence's key, its wall due and its state, on its entry.
@@ -147,8 +163,9 @@ pub struct CalendarRead {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct CalendarOptions {
     /// The permission each source needs, by its name: a caller without it
-    /// reads none of its entries. A source not named needs none beyond its
-    /// table's audience and grants.
+    /// reads none of its entries. A source not named needs the schema's
+    /// ([`CalendarSource::permission`]), or none beyond its table's
+    /// audience and grants.
     pub permissions: BTreeMap<String, String>,
 }
 
@@ -582,7 +599,7 @@ mod pg {
                 {
                     continue;
                 }
-                if let Some(permission) = options.permissions.get(&source.name) {
+                if let Some(permission) = source.permission_under(options) {
                     if !principal.is_some_and(|p| p.permissions.contains(permission)) {
                         continue;
                     }
@@ -1413,6 +1430,22 @@ mod tests {
             all_day: false,
             occurrence: None,
         }
+    }
+
+    #[test]
+    fn a_sources_permission_is_the_schemas_unless_the_options_name_one() {
+        let source: CalendarSource = serde_json::from_value(serde_json::json!({
+            "name": "contract", "kind": "renewal", "title": "title", "field": "endsOn", "permission": "contracts.read"
+        }))
+        .unwrap();
+        let none = CalendarOptions::default();
+        assert_eq!(source.permission_under(&none).map(String::as_str), Some("contracts.read"));
+        let named = CalendarOptions {
+            permissions: [("contract".to_owned(), "calendar.all".to_owned())].into(),
+        };
+        assert_eq!(source.permission_under(&named).map(String::as_str), Some("calendar.all"));
+        let open = CalendarSource { permission: None, ..source };
+        assert_eq!(open.permission_under(&none), None);
     }
 
     #[test]

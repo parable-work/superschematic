@@ -12,7 +12,7 @@
 import type { Pool } from 'pg';
 import type { Authenticator, Logger } from '@superschematic/http-runtime';
 import type { FixtureRecurrenceDbOrm, FixtureRecurrenceDbTx } from '@schemas/fixture-recurrence-db-types/orm';
-import type { FilingRecurrenceMissedEvent, FilingRecurrenceOpenedEvent, FilingRecurrenceRemindedEvent } from '@schemas/fixture-recurrence-api-types/types';
+import type { FilingRecurrenceDueEvent, FilingRecurrenceMissedEvent, FilingRecurrenceOpenedEvent, FilingRecurrenceRemindedEvent } from '@schemas/fixture-recurrence-api-types/types';
 import type { Implementations } from './interfaces';
 
 /** What the implementation of fixture-recurrence-api is built from. */
@@ -61,6 +61,8 @@ export interface Workers {
   filingDeadlinesRecurrenceOpened(event: FilingRecurrenceOpenedEvent, tx: FixtureRecurrenceDbTx, signal: AbortSignal): Promise<void>;
   /** Handles an event reminded of Filing's Recurrence, which the behavior worker FilingDeadlines claims from FilingEvent: tx is fixture-recurrence-db's repositories in the transaction the event's completion commits in, as the worker's caller (fixture-recurrence-api/FilingDeadlines). The event is done when it resolves; a rejection fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it, so a method is idempotent. */
   filingDeadlinesRecurrenceReminded(event: FilingRecurrenceRemindedEvent, tx: FixtureRecurrenceDbTx, signal: AbortSignal): Promise<void>;
+  /** Handles an event due of Filing's Recurrence, which the behavior worker FilingDeadlines claims from FilingEvent: tx is fixture-recurrence-db's repositories in the transaction the event's completion commits in, as the worker's caller (fixture-recurrence-api/FilingDeadlines). The event is done when it resolves; a rejection fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it, so a method is idempotent. */
+  filingDeadlinesRecurrenceDue(event: FilingRecurrenceDueEvent, tx: FixtureRecurrenceDbTx, signal: AbortSignal): Promise<void>;
   /** Handles an event missed of Filing's Recurrence, which the behavior worker FilingDeadlines claims from FilingEvent: tx is fixture-recurrence-db's repositories in the transaction the event's completion commits in, as the worker's caller (fixture-recurrence-api/FilingDeadlines). The event is done when it resolves; a rejection fails it, and the queue retries it after its backoff until its retries are spent. An event may come again after a worker dies holding it, so a method is idempotent. */
   filingDeadlinesRecurrenceMissed(event: FilingRecurrenceMissedEvent, tx: FixtureRecurrenceDbTx, signal: AbortSignal): Promise<void>;
 }

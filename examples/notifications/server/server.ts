@@ -94,6 +94,8 @@ export function ticketsWorkers(deps: Deps) {
       notifier.fromBehaviorEvent(tx, 'Duty', 'recurrence', { kind: 'opened', key: event.key, payload: event.payload }),
     dutyDeadlinesRecurrenceReminded: (event: { key: string; payload: unknown }, tx: unknown) =>
       notifier.fromBehaviorEvent(tx, 'Duty', 'recurrence', { kind: 'reminded', key: event.key, payload: event.payload }),
+    dutyDeadlinesRecurrenceDue: (event: { key: string; payload: unknown }, tx: unknown) =>
+      notifier.fromBehaviorEvent(tx, 'Duty', 'recurrence', { kind: 'due', key: event.key, payload: event.payload }),
     dutyDeadlinesRecurrenceMissed: (event: { key: string; payload: unknown }, tx: unknown) =>
       notifier.fromBehaviorEvent(tx, 'Duty', 'recurrence', { kind: 'missed', key: event.key, payload: event.payload }),
   };

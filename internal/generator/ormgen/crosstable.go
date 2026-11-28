@@ -77,7 +77,7 @@ func crossTablesOf(schema *ir.Schema, tables []sqlutil.TableModel, sqlite bool) 
 			def := calendarTableDef{Table: t.Quoted, Live: sourceLive(t)}
 			def.Key, def.KeyType, def.UUID = keyOf(t)
 			for i, source := range td.CalendarSources {
-				entry := calendarSourceDef{Name: ir.CalendarSourceName(td, i), Kind: source.Kind, Color: source.Color}
+				entry := calendarSourceDef{Name: ir.CalendarSourceName(td, i), Kind: source.Kind, Color: source.Color, Permission: source.Permission}
 				title, err := column(name, source.Title)
 				if err != nil {
 					return nil, err
@@ -188,6 +188,7 @@ type calendarSourceDef struct {
 	Timestamp   bool                    `json:"timestamp,omitempty"`
 	Owner       string                  `json:"owner,omitempty"`
 	OwnerUUID   bool                    `json:"ownerUuid,omitempty"`
+	Permission  string                  `json:"permission,omitempty"`
 	Occurrences *calendarOccurrencesDef `json:"occurrences,omitempty"`
 }
 

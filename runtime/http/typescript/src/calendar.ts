@@ -17,7 +17,8 @@ of the row. readCalendar reads every source in a window, each row through
 its table's repository as the caller (orm.as(principal)), so a row's
 audience and the caller's grants hold as they hold on any read (D156); an
 occurrence is shown only when its row is. A source a caller lacks the
-permission of (CalendarOptions.permissions) is left out.
+permission of is left out: the schema's (@calendarSource's permission,
+#601), or the one CalendarOptions.permissions names for it, which wins.
 
 The feed is for a calendar client, which sends no Authorization header: its
 URL holds a token. The token is a grant (D156) of the database's
@@ -55,6 +56,8 @@ export interface CalendarSourceDefinition {
   readonly field?: string;
   readonly end?: string;
   readonly owner?: string;
+  /** The permission the schema's source needs (#601); CalendarOptions.permissions may name another, which wins. */
+  readonly permission?: string;
   readonly occurrences?: CalendarOccurrencesDefinition;
 }
 
@@ -90,7 +93,7 @@ export interface CalendarRead {
 
 /** What the calendar takes beside the ORM. */
 export interface CalendarOptions {
-  /** The permission each source needs, by its name: a caller without it reads none of its entries. A source not named needs none beyond its table's audience and grants. */
+  /** The permission each source needs, by its name: a caller without it reads none of its entries. A source not named needs the schema's (its definition's permission), or none beyond its table's audience and grants. */
   readonly permissions?: Readonly<Record<string, string>>;
 }
 
@@ -155,7 +158,7 @@ export async function readCalendar(orm: object, principal: Principal | null, rea
     const def = repository.def!;
     for (const source of def.calendar ?? []) {
       if (read.sources && !read.sources.includes(source.name)) continue;
-      const permission = options.permissions?.[source.name];
+      const permission = options.permissions?.[source.name] ?? source.permission;
       if (permission !== undefined && !(principal?.permissions ?? []).includes(permission)) continue;
       if (read.scope === 'mine' && (source.owner === undefined || principal === null)) continue;
       const owned: Values = read.scope === 'mine' && source.owner !== undefined && principal !== null ? { [source.owner]: { eq: principal.subject } } : {};

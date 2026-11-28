@@ -146,6 +146,7 @@ export interface CalendarSourceDef {
   name: string;
   occurrences?: boolean;
   owner?: string;
+  permission?: string;
   title: string;
 }
 

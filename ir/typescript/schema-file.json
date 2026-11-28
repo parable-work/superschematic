@@ -4591,6 +4591,10 @@
           "default": "",
           "type": "string"
         },
+        "permission": {
+          "default": "",
+          "type": "string"
+        },
         "title": {
           "type": "string"
         }
