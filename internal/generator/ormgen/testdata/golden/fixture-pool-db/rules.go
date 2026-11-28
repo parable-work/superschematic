@@ -115,7 +115,8 @@ const rulesLayoutJSON = `{
             {
               "name": "pick",
               "writes": false,
-              "table": true
+              "table": true,
+              "answersRow": "member"
             }
           ]
         },

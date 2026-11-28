@@ -673,9 +673,12 @@ type Field struct {
 	DerefValue bool
 
 	// EnumDefault is the declared @default of a required, non-array enum
-	// field. CreateOne and CreateMany insert it when the caller leaves the
-	// field at its Go zero value, the empty string, which is never an enum
-	// member; without it a struct literal that omits the field inserts ''.
+	// field, and of an @audience table's audience and agentAccess, whose
+	// trigger refuses any value but its few too (accessChoice, D156).
+	// CreateOne and CreateMany insert it when the caller leaves the field
+	// at its Go zero value, the empty string, which is never one of them,
+	// and a create through the behaviors' core hands the core it, as it
+	// binds it; without it a struct literal that omits the field inserts ''.
 	EnumDefault string
 
 	// FilterKind is the kind of the field's filter (sqlutil.FilterKind),
@@ -1681,7 +1684,7 @@ func extractRepository(typeDef *ir.TypeDef, schema *ir.Schema, scalars map[strin
 			repo.HasSearch = true
 			repo.QuotedSearchColumn = sqlutil.QuoteIdentifier(sqlgen.SearchTextColumn)
 		}
-		if enumNames[field.IRType] && field.IsRequired && !field.IsArray && fieldDef.Default != nil {
+		if (enumNames[field.IRType] || accessChoice(fieldDef)) && field.IsRequired && !field.IsArray && fieldDef.Default != nil {
 			field.EnumDefault = *fieldDef.Default
 		}
 		if field.IsJSONField && field.IsUnion {

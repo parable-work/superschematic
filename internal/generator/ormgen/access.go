@@ -20,6 +20,18 @@ import (
 // table's, for a party or an agent run that calls through grants, to the
 // rows one of its grants reaches.
 
+// accessChoice reports whether field is one of the string fields @audience
+// adds a table with a default (D156): audience, agentAccess and
+// effectiveAgents, each one of a few values the table's trigger checks or
+// sets, "" never among them. A create that leaves one at its Go zero value
+// takes its default, as it takes an enum's (Field.EnumDefault), so a
+// struct literal that names neither audience nor agentAccess inserts the
+// table's, as a create through the API, whose body takes the schema's
+// defaults, does.
+func accessChoice(field *ir.FieldDef) bool {
+	return field.Origin == ir.OriginAccess && field.TypeRef.Name == "string" && !field.TypeRef.IsArray && !field.TypeRef.IsMap
+}
+
 // AccessModel is what access.go is generated from.
 type AccessModel struct {
 	// Tables are the database's tables, by type, sorted: each one's

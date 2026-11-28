@@ -106,6 +106,35 @@ export type Authenticator = ((ctx: RequestContext) => Promise<Principal | null>)
   readonly readsAuthorization?: boolean;
 };
 
+/**
+ * The authenticator of a route the router does not mount (D152, D153,
+ * D155): authenticate, called for a request alone, with the request's
+ * headers, its method and path, and its Bearer token as the Hono adapter
+ * reads it. A route that is no operation has no operation spec, path
+ * captures or request id of the router's, and an authenticator that reads
+ * them reads them empty.
+ */
+export function requestAuthenticator(authenticate: Authenticator): (request: Request) => Promise<Principal | null> {
+  return request => {
+    const url = new URL(request.url);
+    const header = request.headers.get('authorization') ?? '';
+    const bearer = header.startsWith('Bearer ') ? header.slice('Bearer '.length).trim() : '';
+    const ctx = {
+      requestId: request.headers.get('x-request-id') ?? '',
+      method: request.method,
+      path: url.pathname,
+      headers: request.headers,
+      raw: request,
+      pathParams: {},
+      query: url.searchParams,
+      principal: null,
+      signal: request.signal,
+      ...(bearer !== '' && !authenticate.readsAuthorization ? { bearerToken: bearer } : {}),
+    };
+    return authenticate(ctx as unknown as RequestContext);
+  };
+}
+
 /** Reports whether `held` satisfies `required`; an empty `required` must be satisfied. */
 export type PermissionMatcher = (held: readonly string[], required: readonly string[]) => boolean;
 

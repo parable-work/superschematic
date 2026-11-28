@@ -1,0 +1,22 @@
+name: held-go-api
+kind: API
+types:
+  Summary:
+    name: Summary
+    role: APIView
+    fields:
+      - name: notes
+        typeRef: { name: number }
+        required: true
+operationSets:
+  - name: NoteQueries
+    operations:
+      - name: summary
+        typeRef: { name: Summary }
+        required: true
+        httpMethod: GET
+        restPath: summary
+derivers:
+  - name: FillNotes
+    comment: Sums up each note.
+    schemas: ["Note"]

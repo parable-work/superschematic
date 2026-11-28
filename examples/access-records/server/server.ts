@@ -1,38 +1,21 @@
 /*
-The wiring of records-api's TypeScript server (D156): the generated router
-over records-db's repositories, with grants and the access log turned on.
-A request with a grant's token runs as the grant's holder; any other is the
-identity service's, or the project's own authenticator's. The repositories
-keep every read of an operation to its caller's audience and grants, so the
-router needs nothing more.
+What records-api's implementation adds to its generated TypeScript server
+(D156). The generated server wires the rest itself: it runs a request with
+a grant's token as the grant's holder, through grantAuthenticator in front
+of the implementation's authenticator, which establishes every other
+caller, and gives the router the access log (accessLogOf), which records
+each call an API key or a grant makes and each read an agent run makes.
+The repositories keep every read of an operation to its caller's audience
+and grants, so the router needs nothing more.
 
-The imports name the packages `superschematic build-all` writes for the
-example's two services.
+Left to the app: giving a party its grant.
+
+The imports name the package `superschematic build-all` writes for
+records-db.
 */
 import pg from 'pg';
-import { Hono } from 'hono';
-import type { Authenticator } from '@superschematic/http-runtime';
-import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
-import { accessLogOf, grantAuthenticator, issueGrant } from '@superschematic/http-runtime/postgres';
+import { issueGrant } from '@superschematic/http-runtime/postgres';
 import { createOrm } from '@schemas/records-db-types/orm';
-import { buildRouter } from '@schemas/records-api-api/router';
-
-/** The server: users through authenticate, parties and agent runs through their grants. */
-export function recordsServer(pool: pg.Pool, authenticate: Authenticator, fieldKeys: string): Hono {
-  const orm = createOrm(pool, { fieldKeys });
-  const app = new Hono();
-  app.route(
-    '/',
-    buildRouter({}, {
-      orm,
-      authenticate: grantAuthenticator({ orm, inner: authenticate }),
-      accessLog: accessLogOf(orm),
-    })
-  );
-  app.notFound(notFoundHandler());
-  app.onError(errorHandler());
-  return app;
-}
 
 /**
  * Lets a party reach one agreement until a date: its sites and their

@@ -13,6 +13,21 @@
           "name": "nightly"
         }
       ]
+    },
+    "github": {
+      "imageRepository": "ghcr.io/acme/ci",
+      "on": {
+        "pull_request": {
+          "branches": [
+            "main"
+          ]
+        },
+        "schedule": [
+          {
+            "cron": "0 5 * * *"
+          }
+        ]
+      }
     }
   },
   "tasks": {
@@ -153,6 +168,10 @@
       "sections": {
         "acme": {
           "tier": "nightly"
+        },
+        "github": {
+          "if": "github.event_name == 'schedule'",
+          "timeoutMinutes": 60
         }
       }
     },
@@ -163,7 +182,7 @@
           "kind": "path",
           "spec": {
             "paths": [
-              "examples/acme-schematic/ci/tasks.json"
+              "examples/acme-schematic/ci"
             ]
           }
         },

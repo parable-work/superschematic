@@ -53,6 +53,9 @@ func goRuntimeModule(t *testing.T, db, name, source, run string, modules map[str
 		cfg.Outputs["types"] = types
 	}
 	types["go"] = map[string]any{"enabled": true}
+	// The fixtures list postgres and sqlite, which the Go ORM serves the
+	// notifier, the parties and the agents on both of (#618): the build
+	// keeps both, and a Postgres script runs over its Database.
 	if _, err := Run(schema, cfg, Options{
 		OutputRoot:       outputRoot,
 		Paths:            paths,

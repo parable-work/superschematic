@@ -3,8 +3,11 @@ package ormgen
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/parable-work/superschematic/internal/testpaths"
 )
 
 // batchedAccessORMCases are the cases batchedAccessORMTest runs over
@@ -26,8 +29,10 @@ var batchedAccessORMCases = []string{
 // the parameters of in statements of a batch each, in one transaction. It
 // loads fixture-merge-access-db, generates its Go types, ORM and DDL into a
 // temporary tree, and runs batchedAccessORMTest on the Postgres at
-// SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL; every case must pass. It skips
-// without the database and in -short mode.
+// SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL; every case must pass. Its Brand
+// is Aliased, so the module links the behaviors' core's static archive,
+// which scripts/rules-archive.sh stages. It skips without the database or
+// the archive, and in -short mode.
 func TestBatchedReadsAndWritesOnPostgres(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping the generated ORM's batched reads and writes in -short mode")
@@ -35,7 +40,12 @@ func TestBatchedReadsAndWritesOnPostgres(t *testing.T) {
 	if os.Getenv("SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL") == "" {
 		t.Skip("set SUPERSCHEMATIC_ORMGEN_TEST_DATABASE_URL to run the generated ORM's batched reads and writes against Postgres")
 	}
-	ormDir := generateORMModule(t, "fixture-merge-access-db")
+	paths := testpaths.Local(t)
+	archive := filepath.Join(paths.RulesGo, "lib", runtime.GOOS+"_"+runtime.GOARCH, "libsuperschematic_rules.a")
+	if _, err := os.Stat(archive); err != nil {
+		t.Skipf("the behaviors' core's archive is not staged at %s: run scripts/rules-archive.sh (make rules-archive)", archive)
+	}
+	ormDir := generateBehaviorORMModule(t, paths, "fixture-merge-access-db")
 	if err := os.WriteFile(filepath.Join(ormDir, "batched_access_test.go"), []byte(batchedAccessORMTest), 0o644); err != nil {
 		t.Fatalf("write the test: %v", err)
 	}

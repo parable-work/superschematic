@@ -192,6 +192,9 @@ func rootOf(tree registry.TaskTree, spec SchemaSpec) (SchemaRoot, error) {
 //   - every tracked file of the schemas root that belongs to no service:
 //     the naming file, the workspace's manifests and lockfile, and the
 //     shared files the services import;
+//   - but no file in a directory a build writes, by the names the build
+//     cache leaves out (SkippedDirs), and not the copy of the dependency
+//     graph the naming file's [deps] copy names, which a build writes;
 //   - each file the naming file's [cache] inputs lists.
 //
 // The set is found from tracked text alone, with no schema loaded and
@@ -221,8 +224,35 @@ type SchemaSet struct {
 	Services []string
 	// Paths are the tracked files of the set.
 	Paths []string
+	// Shared are the files of Paths that belong to no service: the
+	// schemas root's own, which are in every service's set.
+	Shared []string
 	// Generated are the [cache] inputs the commit does not hold.
 	Generated []registry.TaskGeneratedPath
+}
+
+// SkippedDirs are the directory names a schema input leaves out wherever
+// they sit under its schemas root: what a build writes and a tool keeps.
+// They are the names the build cache leaves out of a service's digest
+// (internal/buildcache), so a file in one cannot change what a service
+// generates. A lockfile committed under the output root is one: a build
+// of the generated workspace reads it, and a build of the schemas does
+// not.
+var SkippedDirs = []string{".git", "node_modules", "dist", "bin", "target", "__pycache__", ".venv", ".pytest_cache", ".ruff_cache"}
+
+// skipped reports whether a path of a schemas root sits in a directory a
+// schema input leaves out.
+func skipped(rootDir, p string) bool {
+	rel := strings.TrimPrefix(strings.TrimPrefix(p, rootDir), "/")
+	segments := strings.Split(rel, "/")
+	for _, segment := range segments[:len(segments)-1] {
+		for _, name := range SkippedDirs {
+			if segment == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // SchemaInputSet computes the static input set of the root's service
@@ -243,7 +273,30 @@ func SchemaInputSet(tree registry.TaskTree, root SchemaRoot, name string) (Schem
 	for _, service := range root.Services {
 		known[service] = true
 	}
+	// The naming file says what else is no input: the copy of the
+	// dependency graph build-all writes ([deps] copy), which a build
+	// produces and none reads.
+	namingFile := path.Join(root.Dir, naming.FileName)
+	var names *naming.Naming
+	if _, ok := tree.Entry(namingFile); ok {
+		data, err := tree.Read(namingFile)
+		if err != nil {
+			return SchemaSet{}, err
+		}
+		parsed, err := naming.Parse(data, namingFile)
+		if err != nil {
+			return SchemaSet{}, err
+		}
+		names = &parsed
+	}
+	depsCopy := ""
+	if names != nil && names.Deps.Copy != "" {
+		depsCopy = path.Join(path.Dir(root.Dir), names.Deps.Copy)
+	}
 	for _, entry := range rootFiles {
+		if skipped(root.Dir, entry.Path) || entry.Path == depsCopy {
+			continue
+		}
 		rest, inServices := strings.CutPrefix(entry.Path, servicesDir)
 		if service, _, ok := strings.Cut(rest, "/"); inServices && ok && known[service] {
 			byService[service] = append(byService[service], entry)
@@ -281,21 +334,13 @@ func SchemaInputSet(tree registry.TaskTree, root SchemaRoot, name string) (Schem
 	sort.Strings(set.Services)
 	for _, entry := range shared {
 		set.Paths = append(set.Paths, entry.Path)
+		set.Shared = append(set.Shared, entry.Path)
 	}
 
 	// The naming file's [cache] inputs: files generation reads from
 	// outside the schemas root. One the commit does not hold is a file a
 	// task writes.
-	namingFile := path.Join(root.Dir, naming.FileName)
-	if _, ok := tree.Entry(namingFile); ok {
-		data, err := tree.Read(namingFile)
-		if err != nil {
-			return SchemaSet{}, err
-		}
-		names, err := naming.Parse(data, namingFile)
-		if err != nil {
-			return SchemaSet{}, err
-		}
+	if names != nil {
 		// An entry is relative to the parent of the schemas root, as the
 		// build cache reads it.
 		for _, rel := range names.Cache.Inputs {

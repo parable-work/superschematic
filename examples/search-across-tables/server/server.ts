@@ -1,8 +1,10 @@
 /*
 Search across a workspace's tables (D155), wired by hand over
 workspace-db's repositories: the search route, the search MCP tool, and
-the handler the SearchIndexing queue's worker runs. The generated router
-does not mount them yet.
+the handler the SearchIndexing queue's worker runs. The example has no API;
+the generated TypeScript server of an API over the database wires all
+three itself (its runtime.ts), and an implementation gives it only
+searchOptions' answer, as createRuntimeOptions' search.
 
 Every read keeps to what its caller may read, inside the query: a page a
 person keeps to themselves is in no one else's results or counts, and a

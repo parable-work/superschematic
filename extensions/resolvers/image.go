@@ -3,6 +3,8 @@ package resolvers
 import (
 	"encoding/json"
 	"fmt"
+	"path"
+	"regexp"
 	"strings"
 
 	"github.com/parable-work/superschematic/registry"
@@ -29,10 +31,19 @@ type imageInput struct {
 
 // resolveImage is the `image` resolver. An image resolves to:
 //
-//   - its Dockerfile, and the .dockerignore of its context;
+//   - its Dockerfile, and the ignore file of its context;
 //   - each file of the context a `COPY` or an `ADD` names, a directory
 //     with all under it, and a pattern with all it matches;
-//   - each file of the context a `RUN --mount=type=bind` mounts.
+//   - each file of the context a `RUN --mount=type=bind` mounts;
+//   - less what the ignore file leaves out of the context, which no
+//     instruction can then read.
+//
+// The ignore file is `<Dockerfile>.dockerignore` when the commit holds
+// one, and the context's `.dockerignore` otherwise, as BuildKit chooses.
+// Its lines are read as Docker reads them: a pattern from the context's
+// root, `*` and `?` within one segment and `**` across them, a pattern
+// that matches a directory leaving out all under it, and a line that
+// starts with `!` taking files back in, the last matching line deciding.
 //
 // A source that holds a variable (`COPY ${DIR} /app`) cannot be read
 // from the Dockerfile, so the whole context is taken. A source the
@@ -41,9 +52,7 @@ type imageInput struct {
 //
 // Not read: a `COPY --from` of another stage or image, whose files are
 // not the context's; an `ADD` of a URL; and the base images, which a
-// Dockerfile holds to their bytes by naming a digest. The .dockerignore
-// is taken as a file and not applied: what it leaves out stays in the
-// set, which is then wider and never narrower.
+// Dockerfile holds to their bytes by naming a digest.
 func resolveImage(req registry.TaskResolveRequest) (registry.TaskResolution, error) {
 	var spec imageInput
 	if err := json.Unmarshal(req.Spec, &spec); err != nil {
@@ -67,12 +76,43 @@ func resolveImage(req registry.TaskResolveRequest) (registry.TaskResolution, err
 		return registry.TaskResolution{}, err
 	}
 	r := newResolution(req.Tree)
-	r.add(dockerfile)
-	r.add(dockerfile + ".dockerignore")
-	r.add(file(context, ".dockerignore"))
+	// The ignore file in effect, whose lines leave files out of the
+	// context. Both names are the image's when the commit holds them: a
+	// change to either may change which is read.
+	var rules []ignoreRule
+	for _, name := range []string{dockerfile + ".dockerignore", file(context, ".dockerignore")} {
+		if !has(req.Tree, name) {
+			continue
+		}
+		if rules == nil {
+			ignore, err := req.Tree.Read(name)
+			if err != nil {
+				return registry.TaskResolution{}, err
+			}
+			if rules, err = parseDockerignore(string(ignore)); err != nil {
+				return registry.TaskResolution{}, fmt.Errorf("%s: %w", name, err)
+			}
+			if rules == nil {
+				rules = []ignoreRule{}
+			}
+		}
+	}
+	// take adds a file of the context unless the ignore file leaves it
+	// out.
+	take := func(p string) {
+		rel := strings.TrimPrefix(strings.TrimPrefix(p, context), "/")
+		if !ignored(rules, rel) {
+			r.paths[p] = true
+		}
+	}
+	takeContext := func() {
+		for _, entry := range registry.TaskEntriesUnder(req.Tree.Entries(), context) {
+			take(entry.Path)
+		}
+	}
 	for _, source := range dockerSources(string(data)) {
 		if source == wholeContext {
-			r.addUnder(context, nil)
+			takeContext()
 			continue
 		}
 		rel := strings.TrimPrefix(strings.TrimPrefix(source, "/"), "./")
@@ -81,7 +121,7 @@ func resolveImage(req registry.TaskResolveRequest) (registry.TaskResolution, err
 			return registry.TaskResolution{}, err
 		}
 		if target == context {
-			r.addUnder(context, nil)
+			takeContext()
 			continue
 		}
 		matched := matchSources(req.Tree, target)
@@ -92,10 +132,112 @@ func resolveImage(req registry.TaskResolveRequest) (registry.TaskResolution, err
 			continue
 		}
 		for _, p := range matched {
-			r.paths[p] = true
+			take(p)
 		}
 	}
+	// The Dockerfile and the ignore files are the image's whatever the
+	// ignore file says of them.
+	r.add(dockerfile)
+	r.add(dockerfile + ".dockerignore")
+	r.add(file(context, ".dockerignore"))
 	return r.result(), nil
+}
+
+// ignoreRule is one line of an ignore file: a pattern, compiled as
+// Docker compiles it, and whether the line takes files back in.
+type ignoreRule struct {
+	match  *regexp.Regexp
+	negate bool
+}
+
+// parseDockerignore reads an ignore file's lines as Docker does: a blank
+// line and a line that starts with `#` say nothing; `!` first takes
+// files back in; a pattern is cleaned as a path, and a leading or a
+// trailing slash does not matter.
+func parseDockerignore(text string) ([]ignoreRule, error) {
+	var rules []ignoreRule
+	for _, line := range strings.Split(strings.ReplaceAll(text, "\r\n", "\n"), "\n") {
+		pattern := strings.TrimSpace(line)
+		if pattern == "" || strings.HasPrefix(pattern, "#") {
+			continue
+		}
+		rule := ignoreRule{}
+		if strings.HasPrefix(pattern, "!") {
+			rule.negate = true
+			pattern = strings.TrimSpace(pattern[1:])
+		}
+		pattern = strings.TrimPrefix(path.Clean("/"+pattern), "/")
+		if pattern == "" {
+			// The context's root: every file.
+			pattern = "**"
+		}
+		compiled, err := compileDockerignore(pattern)
+		if err != nil {
+			return nil, fmt.Errorf("pattern %q: %w", line, err)
+		}
+		rule.match = compiled
+		rules = append(rules, rule)
+	}
+	return rules, nil
+}
+
+// compileDockerignore turns one pattern into the regular expression
+// Docker matches paths with: `**/` is any number of directories, `**` at
+// the end is anything, `*` is any run of characters within a segment,
+// `?` is one of them, and a bracket is a class.
+func compileDockerignore(pattern string) (*regexp.Regexp, error) {
+	var b strings.Builder
+	b.WriteString("^")
+	runes := []rune(pattern)
+	for i := 0; i < len(runes); i++ {
+		switch ch := runes[i]; ch {
+		case '*':
+			if i+1 < len(runes) && runes[i+1] == '*' {
+				i++
+				if i+1 < len(runes) && runes[i+1] == '/' {
+					i++
+				}
+				if i+1 == len(runes) {
+					b.WriteString(".*")
+				} else {
+					b.WriteString("(.*/)?")
+				}
+				continue
+			}
+			b.WriteString("[^/]*")
+		case '?':
+			b.WriteString("[^/]")
+		case '.', '$', '+', '(', ')', '|', '{', '}', '^':
+			b.WriteString(`\` + string(ch))
+		case '\\':
+			if i+1 < len(runes) {
+				i++
+				b.WriteString(regexp.QuoteMeta(string(runes[i])))
+			}
+		default:
+			b.WriteRune(ch)
+		}
+	}
+	b.WriteString("$")
+	return regexp.Compile(b.String())
+}
+
+// ignored reports whether the ignore file leaves a path of the context
+// out. Each line is tried in order against the path and against each
+// directory above it, and the last line that matches decides.
+func ignored(rules []ignoreRule, rel string) bool {
+	out := false
+	segments := strings.Split(rel, "/")
+	for _, rule := range rules {
+		matched := false
+		for n := len(segments); n >= 1 && !matched; n-- {
+			matched = rule.match.MatchString(strings.Join(segments[:n], "/"))
+		}
+		if matched {
+			out = !rule.negate
+		}
+	}
+	return out
 }
 
 // matchSources returns the tracked files a source names: the files a

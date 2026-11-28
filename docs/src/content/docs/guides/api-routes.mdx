@@ -1360,16 +1360,19 @@ Identity.UUID, into: Identity.UUID): LabelView`) reads both live rows, 404
 for either that holds none, and runs [the
 merge](/superschematic/guides/database-tables/#merging-rows) in the route's
 transaction. A merge of a row into itself, or into a row that references
-it through a relation of the table to itself, is 409. It takes no row rule
+it through a relation of the table to itself, is 409, and one that would
+repoint or delete a row of another table its caller may not write is 403
+(`out_of_reach`), naming the table and nothing of the row. It takes no row rule
 and no parent in its path, since it reaches both rows by their keys. The
 TypeScript server serves it; the Go and Rust servers write no handler of
 it yet, so the operation stays in the implementation's interface, to write
 over `MergeInto` and `merge_into`. A TypeScript server whose database
 lists sqlite first opens it on SQLite, where its repositories merge no
 rows yet, so the build refuses the merge there (D182). The route reads
-both rows as its caller, and the Go and Rust repositories' merges find
-only the rows their caller may write
-([Who may read a row](/superschematic/guides/database-tables/#who-may-read-a-row)).
+both rows as its caller, and the TypeScript, Go and Rust repositories'
+merges find only the two rows their caller may write, and write no row of
+another table their caller may not
+([A merge and who may write the rows](/superschematic/guides/database-tables/#a-merge-and-who-may-write-the-rows)).
 
 A success is the envelope a hand-written route answers, with the status it
 answers, 200. A shape that fits no kind fails the load, and the message
@@ -1948,6 +1951,34 @@ or the id of whom it acts for is in the audience of, and writes it only
 when its agent access is `followRole`. A route with no caller sees the
 rows everyone may.
 
+A table that composes behaviors ([A table's behavior
+operations](#a-tables-behavior-operations)) holds their operations to the
+same rows. That covers a Workflow transition, a Comments post, edit or
+delete, an Approvals sign-off, an Aliased rename and every other
+operation on a row. One that writes runs only for a caller who may write
+the row. One that writes nothing, such as Comments' `listMessages`, runs
+for a caller who sees it. For any other caller the row is the 404 of one
+that is not there: the call is refused before the behaviors' core reads
+the row, and nothing is written. The TypeScript, Go and Rust repositories
+hold every operation on a row to this, and so do the Go and Rust servers'
+behavior routes.
+
+A merge reaches rows past the two it names, and keeps to the caller too.
+It repoints and deletes the rows of every table that references the row
+merged away, and refuses (`out_of_reach`, which a route answers 403) when
+one of them is a row its caller may not write
+([A merge and who may write the rows](/superschematic/guides/database-tables/#a-merge-and-who-may-write-the-rows)).
+And the behaviors' core reads every row, so a behavior's answer that names
+a row is held to the caller where the repositories, and a Rust server's
+behavior routes, hand it back. Aliased's `resolve` answers `{ row: null }`
+for a name a row the caller does not see holds, and the `name_taken` that
+refuses a name another row holds names nothing of that row
+([A row's names](/superschematic/guides/database-tables/#a-rows-names)).
+Pool's `pick` answers `{ member: null }` when the member it picks is one
+the caller does not see
+([A pool of members](/superschematic/guides/database-tables/#a-pool-of-members)).
+Each holds in TypeScript, Go and Rust.
+
 Outside an operation, a job, a worker and `orm.asSystem()` read every row,
 and so does the database's own role. `orm.as(principal)` and
 `orm.withUser(id)` read as that principal. An upsert of an `@audience`
@@ -2120,6 +2151,13 @@ buildRouter(implementations, {
 });
 ```
 
+A generated TypeScript server does this itself for a database with an
+`@accessGrants` or an `@accessLog` table: the implementation's
+`authenticate` is `inner`, and an agent run's token goes on to it
+(`runTokens: 'inner'`), which resolves it where it is the dispatcher's
+([agent runs](/superschematic/guides/agent-runs/)). An API whose identity service establishes
+its callers keeps the identity's alone on its routes.
+
 ### In Go
 
 The Go server and ORM serve the same access. The auth provider's
@@ -2129,6 +2167,11 @@ puts one on the request with `session.ContextWithCaller`; a step that puts
 only an id, as the identity runtime does, names a user. Each route binds
 the caller to the ORM with `orm.WithPrincipal`, so the repositories hold
 every read and write of the operation to it, as the TypeScript ones do.
+A behavior's operation on a row, such as `db.Task.Status().Transition`
+or `db.Task.Comments().Post`, checks the row before the core runs, as
+`UpdateOne` does. A row out of reach is `orm.ErrNotFound`, which wraps the
+core's `not_found` of a row that is not there, so the behavior route
+answers 404 for both.
 `orm.AsSystem(ctx)`, and a context outside any operation, read every row.
 
 ```go
@@ -2138,7 +2181,13 @@ api.RegisterRoutes(router, api.Config{DB: db, Logger: logger})
 
 `session.GrantAuthenticator` runs a request with a `grant_` token as the
 grant's holder; the ORM of a database with an `@accessGrants` table is the
-authority it reads the grant from on every call. The grants are the ORM's:
+authority it reads the grant from on every call. A stack's Go server wires
+it itself: its API package's `Authenticator` puts it before the API's own
+auth step, the identity runtime's middleware or the implementation's
+`AuthMiddleware`, which the router's `Config` then takes, or, for an API
+with neither, on the router, so a grant's holder is the caller of every
+route; with the agent dispatcher it is the dispatcher's `Authenticator`,
+which establishes a running run's token too. The grants are the ORM's:
 
 | Function | Does |
 | --- | --- |
@@ -2156,6 +2205,16 @@ operation's transaction. A route of an API whose database has an
 `@accessLog` table records its call itself, before the permission check:
 there is no option to pass. A revealed field holds text, and the database
 needs an `@accessLog` table, or the build is refused.
+
+A Go create that leaves `Audience` or `AgentAccess` at `""` takes the
+table's default, `@audience`'s `default` and `agents`, as a create
+through a route does, whose body takes the schema's defaults. A table
+that composes behaviors creates, reads and writes its rows through the
+behaviors' core, which reads `audienceNamed` and `effectiveAudience` as
+lists of ids, so its operations, and a Go deriver of its Derived fields,
+run on a private or a named row. A deriver reads and settles every row,
+as a job does, and the rows keep to their audience for every other
+caller.
 
 A Go server refuses at build time the platform features it does not
 serve yet, on its database's tables and its own: `@party`,
@@ -2204,6 +2263,22 @@ Repositories opened without `with_access`, and `as_system()`, read every
 row, as a job does. `audience_conditions(definition, audience, caller,
 args, write)` in `orm` is the predicate a read across tables applies.
 
+A behavior's operation through the repositories (`operation`, and each
+use's typed methods) checks the row as `update_one` does, and answers a
+row out of reach with `Error::NotFound`. `Repository::reach(key, write)`
+is the same check, for code that runs the core itself, and
+`Repository::keep_answer(member, operation, answer)` holds an operation
+of the table as a whole's answer to the caller as `table_operation` does.
+The server's behavior routes run the core through the rules adapter. Over
+a database whose rows keep to a caller (an `@audience` table or grants),
+each route opens the database's Rust repositories for the request's
+caller and checks the row before the core runs. A row out of reach gets
+the core's 404 for a row that is not there. A route of an operation of
+the table as a whole, such as `resolve` or `pick`, answers null for the
+row its answer names when the caller does not see it. So the crate
+depends on the database's Rust types and their Postgres repositories, and
+the build refuses one whose `Deps` names none.
+
 The grants and the access log are in the runtime's `access` module:
 
 | TypeScript | Rust |
@@ -2236,7 +2311,6 @@ too (D191), through the runtime's `orm::notify`.
 | a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists only the active grants, and a declared query of them | `activeGrants` in the TypeScript runtime, or a `@tableOperation` over a view of every grant |
-| a generated TypeScript server that passes the access log itself | pass `accessLog: accessLogOf(orm)` in the router's options; the Go server records its calls itself |
 | a GIN index on `effective_audience` | add one with `@rawSql` for a large table |
 
 ## A table's behavior operations
