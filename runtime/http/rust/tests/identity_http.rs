@@ -1417,7 +1417,17 @@ async fn an_in_process_caller_is_admitted_by_the_routes_rule() {
     assert_eq!(principal.claims["name"], "Admin");
     assert_eq!(principal.claims["transport"], "bearer");
     assert!(principal.claims["sessionId"].is_string());
+    // The assurance a session's principal carries (D200): when the session
+    // signed in, which an Approvals requirement's recent-sign-in reads; no
+    // passkey verified the call.
+    let assurance = principal.assurance.clone().expect("a session's assurance");
+    assert!(
+        assurance.signed_in_at.is_some_and(|at| at > 0),
+        "{assurance:?}"
+    );
+    assert!(!assurance.user_verified);
     let caller = IdentityPrincipal::from_principal(&principal).unwrap();
+    assert_eq!(caller.signed_in_at, assurance.signed_in_at);
     assert_eq!(caller.login, "admin@example.com");
     assert_eq!(caller.roles[0].name, "admin");
 
@@ -2303,6 +2313,7 @@ async fn nothing_was_done(h: &Harness, member: &str, key: &str, token: &str) {
         session_id: String::new(),
         api_key_id: String::new(),
         transport: Transport::Bearer,
+        signed_in_at: None,
     };
     let input = CreateApiKeyInput {
         name: "x".to_owned(),
@@ -2575,6 +2586,7 @@ async fn a_keys_principal_reaches_a_handler_behind_the_routers_controls() {
         (&json!(created.id), &json!("")),
         "a key's claims"
     );
+    assert_eq!(principal.assurance, None, "an API key proves no sign-in");
     let caller = IdentityPrincipal::from_principal(&principal).unwrap();
     assert_eq!(
         (caller.api_key_id.as_str(), caller.session_id.as_str()),

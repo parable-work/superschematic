@@ -58,7 +58,9 @@ func generateApprovalsAPI(t *testing.T, api, db *ir.Schema, writes bool) *apigen
 // their golden copies: the routes, whose handlers call the ORM's
 // Approvals().SignOff, WithdrawSignOff and ListSignOffs and
 // Status().Transition; the interfaces, whose one method is reassignTask's;
-// behaviors.go; deps.go; the OpenAPI document; and the permission catalog.
+// behaviors.go; behavior_caller.go, which hands the core the principal
+// whole, its kind, whom it acts for, its Agent and its assurance (D200);
+// deps.go; the OpenAPI document; and the permission catalog.
 // Constants and StateRules add no route. Regenerate with:
 // go test ./internal/generator/apigen -run TestWriteAPIGoldenApprovals -update
 func TestWriteAPIGoldenApprovals(t *testing.T) {
@@ -102,7 +104,7 @@ func TestWriteAPIGoldenApprovals(t *testing.T) {
 		t.Fatalf("write api: %v", err)
 	}
 	goldenDir := filepath.Join("testdata", "golden", approvalsFixtures.api)
-	for _, name := range []string{"go.mod", "routes.go", "interfaces.go", "behaviors.go", "deps.go", "openapi.json", "permissions.json"} {
+	for _, name := range []string{"go.mod", "routes.go", "interfaces.go", "behaviors.go", "behavior_caller.go", "deps.go", "openapi.json", "permissions.json"} {
 		got, err := os.ReadFile(filepath.Join(outDir, name))
 		if err != nil {
 			t.Fatalf("read generated %s: %v", name, err)
