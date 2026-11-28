@@ -1709,6 +1709,7 @@ pub const SQLITE: &str = r#"{
           "kind": "deadline",
           "title": "title",
           "color": "filing",
+          "permission": "filings.work",
           "occurrences": {
             "table": "filing_recurrence_occurrences",
             "row": "filing_id",
