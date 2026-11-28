@@ -70,6 +70,11 @@ stack's build (or `build --scaffold`) writes once when it is missing. Its
 | `GET` | `/api/teams/{id}/summary` | `teams.summarizeTeam` | authenticated |
 | `GET` | `/api/teams/{teamId}/issues` | `issues.listIssues` (table: Issue, list) (filtered) (paged) | issues.read |
 | `POST` | `/api/teams/{teamId}/issues` | `issues.createIssue` (table: Issue, create) | issues.write |
+| `POST` | `/api/teams/{teamId}/watching/issues` | `watching.createWatchedIssue` (table: Issue, create) | authenticated |
+| `GET` | `/api/watching/comments` | `watching.listWatchedComments` (table: Comment, list) (paged) | authenticated |
+| `GET` | `/api/watching/issues` | `watching.listWatchedIssues` (table: Issue, list) (paged) | authenticated |
+| `GET` | `/api/watching/issues/{id}` | `watching.getWatchedIssue` (table: Issue, read) | authenticated |
+| `PATCH` | `/api/watching/issues/{id}` | `watching.updateWatchedIssue` (table: Issue, update) | authenticated |
 
 ## Usage
 

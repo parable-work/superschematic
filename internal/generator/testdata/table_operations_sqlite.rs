@@ -271,6 +271,68 @@ async fn the_router_serves_its_tables_from_a_sqlite_file() {
     let mine = get("/notes".into()).await.data().clone();
     assert_eq!(mine["items"].as_array().map(Vec::len), Some(1));
 
+    // A row rule on a list of ids (#735): a create makes the caller its one
+    // watcher, the issues a caller reaches are those whose watchers hold
+    // it, and a comment's rule follows its issue to the list. The list is
+    // a JSON array of the ids' text, which json_each reads.
+    let watching = format!("/teams/{team}/watching/issues");
+    let adas = post(watching.clone(), json!({"title": "Watched by Ada"})).await.data().clone();
+    let bens = call(&router, &ben, Method::POST, &watching, Some(json!({"title": "Watched by Ben"})))
+        .await
+        .data()
+        .clone();
+    let file = rusqlite::Connection::open(dir.join("tracker.sqlite")).expect("open the file");
+    let watchers = |title: &str| -> Value {
+        let text: String = file
+            .query_row("SELECT watchers FROM issue WHERE title = ?1", [title], |row| row.get(0))
+            .expect("an issue's watchers");
+        serde_json::from_str(&text).expect("a JSON array")
+    };
+    assert_eq!(watchers("Watched by Ada"), json!([ADA]));
+    assert_eq!(watchers("Watched by Ben"), json!([BEN]));
+    file.execute(
+        "UPDATE issue SET watchers = ?1 WHERE title = 'Watched by Ada'",
+        [json!([ADA, BEN]).to_string()],
+    )
+    .expect("add a watcher");
+    for (issue, body) in [(&adas, "On a shared issue"), (&bens, "On Ben's issue")] {
+        let id = issue["id"].as_str().expect("an issue's id");
+        post(format!("/issues/{id}/comments"), json!({"body": body})).await.data();
+    }
+    let sorted = |page: &Value, member: &str| -> Vec<String> {
+        let mut out: Vec<String> = page["items"]
+            .as_array()
+            .expect("a page's items")
+            .iter()
+            .map(|item| item[member].as_str().expect("a member").to_owned())
+            .collect();
+        out.sort();
+        out
+    };
+    let carol = "33333333-3333-4333-8333-333333333333";
+    assert_eq!(sorted(get("/watching/issues".into()).await.data(), "title"), vec!["Watched by Ada"]);
+    assert_eq!(
+        sorted(call(&router, &ben, Method::GET, "/watching/issues", None).await.data(), "title"),
+        vec!["Watched by Ada", "Watched by Ben"]
+    );
+    assert_eq!(sorted(call(&router, carol, Method::GET, "/watching/issues", None).await.data(), "title"), Vec::<String>::new());
+    assert_eq!(sorted(get("/watching/comments".into()).await.data(), "body"), vec!["On a shared issue"]);
+    assert_eq!(
+        sorted(call(&router, &ben, Method::GET, "/watching/comments", None).await.data(), "body"),
+        vec!["On Ben's issue", "On a shared issue"]
+    );
+    let bens_path = format!("/watching/issues/{}", bens["id"].as_str().expect("an issue's id"));
+    get(bens_path.clone()).await.refused(404, "Issue not found");
+    patch(bens_path.clone(), json!({"title": "Ada was here"}))
+        .await
+        .refused(404, "Issue not found");
+    assert_eq!(watchers("Watched by Ben"), json!([BEN]));
+    let adas_path = format!("/watching/issues/{}", adas["id"].as_str().expect("an issue's id"));
+    assert_eq!(call(&router, &ben, Method::GET, &adas_path, None).await.data()["title"], "Watched by Ada");
+    call(&router, carol, Method::GET, &adas_path, None)
+        .await
+        .refused(404, "Issue not found");
+
     let _ = std::fs::remove_dir_all(dir);
 }
 

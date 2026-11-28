@@ -209,6 +209,14 @@
           }
         },
         {
+          "name": "watchers",
+          "comment": "Who watches the issue, by id: the API's row rule reaches the issues\nwhose list holds the caller (#735).",
+          "typeRef": {
+            "name": "Identity.UUID",
+            "isArray": true
+          }
+        },
+        {
           "name": "comments",
           "typeRef": {
             "name": "Comment",

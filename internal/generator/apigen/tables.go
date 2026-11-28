@@ -634,7 +634,9 @@ func (b *tableBuilder) handler(endpoint EndpointInfo) (*TableHandler, error) {
 // caller holds the rule's override permission. none are the statements
 // that answer a caller no row can name, one with no id. No statements for
 // an operation without a rule. A member that holds text is not served
-// yet: the Go handlers compare the caller with a UUID alone.
+// yet: the Go handlers compare the caller with a UUID alone. A list of ids
+// holds the caller where it holds its id (#735), through the filter's
+// condition <Type>Holding<Field>, which no request's filter names.
 func (b *tableBuilder) reach(owner string, result *tableView, to *ir.TableOperation, none []string) ([]string, error) {
 	if len(to.By) == 0 {
 		if to.OverridePermission != "" {
@@ -656,6 +658,10 @@ func (b *tableBuilder) reach(owner string, result *tableView, to *ir.TableOperat
 		column := result.column(name)
 		if column == nil {
 			return nil, fmt.Errorf("apigen: operation %s: its row rule names %s, which is no member of %s; the loader holds a @tableOperation's rule to its table (D108)", owner, name, to.Type)
+		}
+		if column.IsIDList() {
+			named = append(named, "*orm."+to.Type+"Holding"+codegen.ToPascalCase(column.Field)+"(caller)")
+			continue
 		}
 		if column.Filter != sqlutil.FilterUUID {
 			return nil, unserved("its row rule names %s, which holds text, and the Go server compares the caller with a member that holds a UUID alone so far (D108)", name)
@@ -725,6 +731,12 @@ func (b *tableBuilder) rulePath(owner, table, path string) (string, error) {
 	}
 	if column == nil {
 		return "", fmt.Errorf("apigen: operation %s: its row rule's path %s ends at %s, which is no member of %s; the loader checks every step (D108)", owner, path, last, at.Type)
+	}
+	if column.IsIDList() && len(opens) > 0 {
+		// The last step's filter is the list's condition (#735).
+		holding := "orm." + at.Type + "Holding" + codegen.ToPascalCase(column.Field) + "(caller)"
+		step := strings.TrimSuffix(opens[len(opens)-1], "&orm."+at.Type+"Filter{")
+		return "{" + strings.Join(opens[:len(opens)-1], "") + step + holding + strings.Repeat("}", len(opens)-1) + "}", nil
 	}
 	if column.Filter != sqlutil.FilterUUID {
 		return "", unserved("its row rule's path %s ends at %s, which holds text, and the Go server compares the caller with a member that holds a UUID alone so far (D108)", path, last)
@@ -1528,6 +1540,14 @@ func (b *tableBuilder) create(owner string, h *TableHandler, body *tableView, pa
 		}
 		if _, set := byMember[name]; set {
 			return fmt.Errorf("apigen: operation %s: its body %s sets %s, the member its row rule sets to the caller; the loader refuses it on a @tableOperation (D108)", owner, body.def.Name, name)
+		}
+		if column.IsIDList() {
+			// A list of ids holds the caller alone (#735).
+			if held := rowScalar(b.tables, column); held != uuidScalar {
+				return unserved("its row rule names %s, a list of %s, and a create of the Go server sets the caller as %s alone so far (D108)", name, held, uuidScalar)
+			}
+			callers = append(callers, "row."+codegen.ToPascalCase(column.Field)+" = []"+b.alias+".IdentityUUID{caller}")
+			continue
 		}
 		if column.Filter != sqlutil.FilterUUID {
 			return unserved("its row rule names %s, which holds text, and the Go server names the caller by a UUID alone so far (D108)", name)

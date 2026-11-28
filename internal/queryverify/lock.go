@@ -175,6 +175,8 @@ func CheckLock(serviceDir string, schema *ir.Schema) error {
 		declared[q.Name] = true
 		entry, ok := locked[q.Name]
 		switch {
+		case AudienceProblem(q) != "":
+			stale = append(stale, AudienceProblem(q))
 		case !ok:
 			stale = append(stale, fmt.Sprintf("query %s has not been verified: %s holds no entry for it", q.Name, LockFile))
 		case entry.Hash != Hash(q):

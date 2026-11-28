@@ -62,6 +62,7 @@ var rowsOfIssue = tableRows{
 		"estimate":    "estimate",
 		"due_on":      "dueOn",
 		"assignee_id": "assigneeId",
+		"watchers":    "watchers",
 	},
 	Related: map[string]string{
 		"team_id":     "Team",
@@ -511,6 +512,20 @@ func asTeamView(row *fixturetrackerdb.Team) types.TeamView {
 	}
 	view.Key = row.Key
 	view.Name = row.Name
+	return view
+}
+
+// asWatchedIssueView is row, a row of Issue, as WatchedIssueView shows it: each field the
+// row's member of its name, a relation's key the row it points at.
+func asWatchedIssueView(row *fixturetrackerdb.Issue) types.WatchedIssueView {
+	var view types.WatchedIssueView
+	if row.Id != nil {
+		view.Id = *row.Id
+	}
+	if row.Team.Id != nil {
+		view.TeamId = *row.Team.Id
+	}
+	view.Title = row.Title
 	return view
 }
 
@@ -1230,6 +1245,216 @@ func tableIssuesCreateIssue(ctx context.Context, db orm.DatabaseInterface, TeamI
 	})
 	if err != nil {
 		return nil, tableWriteError(err, rowsOfIssue, "team_id")
+	}
+	return result, nil
+}
+
+// tableWatchingCreateWatchedIssue serves POST /api/teams/{teamId}/watching/issues from Issue (D106):
+// a new row of the members the body sets under the path's parents, each
+// member left out or null left to its column's default, as its view.
+func tableWatchingCreateWatchedIssue(ctx context.Context, db orm.DatabaseInterface, TeamId types.IdentityUUID, input *types.CreateWatchedIssueInput, raw json.RawMessage) (*types.WatchedIssueView, error) {
+	var result *types.WatchedIssueView
+	err := runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		repo := tx.GetIssueRepository()
+		row := &fixturetrackerdb.Issue{}
+		row.Status = fixturetrackerdb.IssueStatus("open")
+		row.Priority = 0
+		{
+			value := TeamId
+			row.Team.Id = &value
+		}
+		row.Title = input.Title
+		caller, named := tableCallerID(ctx)
+		if !named {
+			return tableUnnamedCaller(ctx, "Issue")
+		}
+		row.Watchers = []fixturetrackerdb.IdentityUUID{caller}
+		created, err := repo.CreateOne(ctx, row)
+		if err != nil {
+			return err
+		}
+		view := asWatchedIssueView(created)
+		result = &view
+		return nil
+	})
+	if err != nil {
+		return nil, tableWriteError(err, rowsOfIssue, "team_id")
+	}
+	return result, nil
+}
+
+// tableWatchingListWatchedComments serves GET /api/watching/comments from Comment (D106):
+// a page of its live rows, as the request filters,
+// searches and sorts them, each as its view.
+func tableWatchingListWatchedComments(ctx context.Context, db orm.DatabaseInterface, page paging.Request) (paging.Page[types.CommentView], error) {
+	var result paging.Page[types.CommentView]
+	err := runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		where := &orm.CommentFilter{}
+		{
+			caller, named := tableCallerID(ctx)
+			if !named {
+				result.Items = []types.CommentView{}
+				return nil
+			}
+			where.AllOf = append(where.AllOf, orm.CommentFilter{AnyOf: []orm.CommentFilter{{Issue: orm.IssueHoldingWatchers(caller)}}})
+		}
+		options := &orm.CommentPageOptions{Fields: orm.CommentFields{}.All(), Limit: page.Limit}
+		if page.Cursor != "" {
+			options.After = &orm.CommentPageKey{}
+			if err := paging.DecodeCursor(page.Cursor, options.After); err != nil {
+				return err
+			}
+		}
+		rows, err := tx.GetCommentRepository().FindPage(ctx, where, options)
+		if err != nil {
+			return err
+		}
+		result.Items = make([]types.CommentView, len(rows.Rows))
+		for i, row := range rows.Rows {
+			result.Items[i] = asCommentView(row)
+		}
+		if rows.Next != nil {
+			next, err := paging.EncodeCursor(rows.Next)
+			if err != nil {
+				return err
+			}
+			result.Next = &next
+		}
+		return nil
+	})
+	if err != nil {
+		return paging.Page[types.CommentView]{}, tableReadError(err, rowsOfComment)
+	}
+	return result, nil
+}
+
+// tableWatchingListWatchedIssues serves GET /api/watching/issues from Issue (D106):
+// a page of its live rows, as the request filters,
+// searches and sorts them, each as its view.
+func tableWatchingListWatchedIssues(ctx context.Context, db orm.DatabaseInterface, page paging.Request) (paging.Page[types.WatchedIssueView], error) {
+	var result paging.Page[types.WatchedIssueView]
+	err := runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		where := &orm.IssueFilter{}
+		{
+			caller, named := tableCallerID(ctx)
+			if !named {
+				result.Items = []types.WatchedIssueView{}
+				return nil
+			}
+			where.AllOf = append(where.AllOf, orm.IssueFilter{AnyOf: []orm.IssueFilter{*orm.IssueHoldingWatchers(caller)}})
+		}
+		options := &orm.IssuePageOptions{Fields: orm.IssueFields{}.All(), Limit: page.Limit}
+		if page.Cursor != "" {
+			options.After = &orm.IssuePageKey{}
+			if err := paging.DecodeCursor(page.Cursor, options.After); err != nil {
+				return err
+			}
+		}
+		rows, err := tx.GetIssueRepository().FindPage(ctx, where, options)
+		if err != nil {
+			return err
+		}
+		result.Items = make([]types.WatchedIssueView, len(rows.Rows))
+		for i, row := range rows.Rows {
+			result.Items[i] = asWatchedIssueView(row)
+		}
+		if rows.Next != nil {
+			next, err := paging.EncodeCursor(rows.Next)
+			if err != nil {
+				return err
+			}
+			result.Next = &next
+		}
+		return nil
+	})
+	if err != nil {
+		return paging.Page[types.WatchedIssueView]{}, tableReadError(err, rowsOfIssue)
+	}
+	return result, nil
+}
+
+// tableWatchingGetWatchedIssue serves GET /api/watching/issues/{id} from Issue (D106):
+// the live row whose key is the path's, as its view.
+func tableWatchingGetWatchedIssue(ctx context.Context, db orm.DatabaseInterface, Id types.IdentityUUID) (*types.WatchedIssueView, error) {
+	var result *types.WatchedIssueView
+	err := runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		repo := tx.GetIssueRepository()
+		where := &orm.IssueFilter{Id: &orm.UUIDFilter{Eq: &Id}}
+		{
+			caller, named := tableCallerID(ctx)
+			if !named {
+				return orm.ErrNotFound
+			}
+			where.AllOf = append(where.AllOf, orm.IssueFilter{AnyOf: []orm.IssueFilter{*orm.IssueHoldingWatchers(caller)}})
+		}
+		row, err := repo.FindOne(ctx, where, nil)
+		if err != nil {
+			return err
+		}
+		view := asWatchedIssueView(row)
+		result = &view
+		return nil
+	})
+	if err != nil {
+		return nil, tableReadError(err, rowsOfIssue)
+	}
+	return result, nil
+}
+
+// tableWatchingUpdateWatchedIssue serves PATCH /api/watching/issues/{id} from Issue (D106):
+// the members the body's own JSON holds set on the live row whose key is
+// the path's, a null clearing a column that may be null and a body of no
+// member writing nothing, as the row's view.
+func tableWatchingUpdateWatchedIssue(ctx context.Context, db orm.DatabaseInterface, Id types.IdentityUUID, input *types.UpdateWatchedIssueInput, raw json.RawMessage) (*types.WatchedIssueView, error) {
+	members, err := tableMembersOf(raw)
+	if err != nil {
+		return nil, err
+	}
+	var result *types.WatchedIssueView
+	err = runTableOperation(ctx, db, func(ctx context.Context, tx orm.TxInterface) error {
+		repo := tx.GetIssueRepository()
+		where := &orm.IssueFilter{Id: &orm.UUIDFilter{Eq: &Id}}
+		{
+			caller, named := tableCallerID(ctx)
+			if !named {
+				return orm.ErrNotFound
+			}
+			where.AllOf = append(where.AllOf, orm.IssueFilter{AnyOf: []orm.IssueFilter{*orm.IssueHoldingWatchers(caller)}})
+		}
+		row, err := repo.FindOne(ctx, where, nil)
+		if err != nil {
+			return err
+		}
+		refusal := types.NewValidationErrors()
+		for _, name := range []string{"title"} {
+			if members.null(name) {
+				refusal.AddFieldError(name, "required", "required field")
+			}
+		}
+		if members.set("title") && input.Title == "" {
+			refusal.AddFieldError("title", "minLength", "must be at least 1 characters")
+		}
+		if refusal.HasErrors() {
+			return &tableRefusal{errors: refusal}
+		}
+		update := &orm.IssueUpdate{}
+		changed := false
+		if members.set("title") {
+			value := input.Title
+			update.Title = &value
+			changed = true
+		}
+		if changed {
+			if row, err = repo.UpdateOne(ctx, *row.Id, update); err != nil {
+				return err
+			}
+		}
+		view := asWatchedIssueView(row)
+		result = &view
+		return nil
+	})
+	if err != nil {
+		return nil, tableWriteError(err, rowsOfIssue)
 	}
 	return result, nil
 }

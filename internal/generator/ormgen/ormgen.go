@@ -425,6 +425,11 @@ type Repository struct {
 	// relation points at a live row its target's filter finds.
 	PathRelations []PathRelation
 
+	// IDLists are the table's lists of ids a row rule may name (#735): the
+	// filter's unexported condition of the rows whose list holds an id,
+	// which <Type>Holding<Field> sets and no request's filter names.
+	IDLists []IDList
+
 	// ManyRelations are the one-to-many relations a filter reaches through
 	// (D108, D180): the filter's <Name> keeps the rows some row of the
 	// relation's source points at, among those its source's filter finds.
@@ -2084,6 +2089,11 @@ func attachTable(repo *Repository, table *sqlutil.TableModel) error {
 	repo.SearchCondition = sqlutil.SearchConditionOf(table)
 	for _, rel := range table.ToOne {
 		repo.PathRelations = append(repo.PathRelations, PathRelation{ToOne: rel, GoField: codegen.ToPascalCase(rel.Field)})
+	}
+	for _, c := range table.Columns {
+		if c.IsIDList() {
+			repo.IDLists = append(repo.IDLists, IDList{Field: c.Field, GoField: codegen.ToPascalCase(c.Field), Qualified: c.Qualified})
+		}
 	}
 	for _, field := range repo.Fields {
 		if field.IsEncrypted {

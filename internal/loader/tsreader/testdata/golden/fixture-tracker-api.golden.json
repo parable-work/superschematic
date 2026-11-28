@@ -144,6 +144,7 @@
           "updatedBy",
           "deletedAt",
           "deletedBy",
+          "watchers",
           "comments"
         ]
       },
@@ -271,6 +272,44 @@
         }
       ]
     },
+    "CreateWatchedIssueInput": {
+      "name": "CreateWatchedIssueInput",
+      "owner": "src/tracker.schema.ts",
+      "comment": "What a caller sets to start an issue it watches: the row rule makes the\ncaller its one watcher.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Issue",
+        "omittedFromSource": [
+          "id",
+          "team",
+          "body",
+          "status",
+          "priority",
+          "estimate",
+          "dueOn",
+          "assignee",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy",
+          "deletedAt",
+          "deletedBy",
+          "watchers",
+          "comments"
+        ]
+      },
+      "fields": [
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true,
+          "validateMinLength": 1,
+          "validateMaxLength": 200
+        }
+      ]
+    },
     "IssueGuestView": {
       "name": "IssueGuestView",
       "owner": "src/tracker.schema.ts",
@@ -291,6 +330,7 @@
           "updatedBy",
           "deletedAt",
           "deletedBy",
+          "watchers",
           "comments"
         ]
       },
@@ -331,6 +371,7 @@
           "updatedBy",
           "deletedAt",
           "deletedBy",
+          "watchers",
           "comments"
         ]
       },
@@ -577,6 +618,7 @@
           "updatedBy",
           "deletedAt",
           "deletedBy",
+          "watchers",
           "comments"
         ]
       },
@@ -655,6 +697,92 @@
           "typeRef": {
             "name": "Identity.UUID"
           }
+        }
+      ]
+    },
+    "UpdateWatchedIssueInput": {
+      "name": "UpdateWatchedIssueInput",
+      "owner": "src/tracker.schema.ts",
+      "comment": "What a watcher may change of an issue.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Issue",
+        "omittedFromSource": [
+          "id",
+          "team",
+          "body",
+          "status",
+          "priority",
+          "estimate",
+          "dueOn",
+          "assignee",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy",
+          "deletedAt",
+          "deletedBy",
+          "watchers",
+          "comments"
+        ]
+      },
+      "fields": [
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "validateMinLength": 1,
+          "validateMaxLength": 200
+        }
+      ]
+    },
+    "WatchedIssueView": {
+      "name": "WatchedIssueView",
+      "owner": "src/tracker.schema.ts",
+      "comment": "An issue as its watchers see it. The row rule reads who watches it.",
+      "role": "APIView",
+      "source": {
+        "target": "fixture-tracker-db.Issue",
+        "omittedFromSource": [
+          "team",
+          "body",
+          "status",
+          "priority",
+          "estimate",
+          "dueOn",
+          "assignee",
+          "createdAt",
+          "createdBy",
+          "updatedAt",
+          "updatedBy",
+          "deletedAt",
+          "deletedBy",
+          "watchers",
+          "comments"
+        ]
+      },
+      "fields": [
+        {
+          "name": "id",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "teamId",
+          "typeRef": {
+            "name": "Identity.UUID"
+          },
+          "required": true
+        },
+        {
+          "name": "title",
+          "typeRef": {
+            "name": "string"
+          },
+          "required": true
         }
       ]
     }
@@ -1104,6 +1232,143 @@
           "tableOperation": {},
           "httpMethod": "DELETE",
           "restPath": "issues/{issueId}/comments/{id}"
+        }
+      ]
+    },
+    {
+      "name": "Watching",
+      "comment": "Issues are their watchers' (#735): each operation's row rule names\nwatchers, a list of ids, which reaches the issues whose list holds the\ncaller, and a comment's follows its issue to the list.",
+      "operations": [
+        {
+          "name": "listWatchedIssues",
+          "comment": "The issues the caller watches.",
+          "typeRef": {
+            "name": "WatchedIssueView",
+            "isArray": true
+          },
+          "required": true,
+          "auth": true,
+          "page": {
+            "defaultLimit": 20,
+            "maxLimit": 100
+          },
+          "tableOperation": {
+            "by": [
+              "watchers"
+            ]
+          },
+          "httpMethod": "GET",
+          "restPath": "watching/issues"
+        },
+        {
+          "name": "getWatchedIssue",
+          "comment": "An issue the caller watches.",
+          "typeRef": {
+            "name": "WatchedIssueView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "tableOperation": {
+            "by": [
+              "watchers"
+            ]
+          },
+          "httpMethod": "GET",
+          "restPath": "watching/issues/{id}"
+        },
+        {
+          "name": "createWatchedIssue",
+          "comment": "A new issue of the team the path names, the caller its one watcher.",
+          "typeRef": {
+            "name": "WatchedIssueView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "teamId",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "CreateWatchedIssueInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "tableOperation": {
+            "by": [
+              "watchers"
+            ]
+          },
+          "httpMethod": "POST",
+          "restPath": "teams/{teamId}/watching/issues"
+        },
+        {
+          "name": "updateWatchedIssue",
+          "comment": "Changes an issue the caller watches.",
+          "typeRef": {
+            "name": "WatchedIssueView"
+          },
+          "required": true,
+          "arguments": [
+            {
+              "name": "id",
+              "typeRef": {
+                "name": "Identity.UUID"
+              },
+              "required": true
+            },
+            {
+              "name": "input",
+              "typeRef": {
+                "name": "UpdateWatchedIssueInput"
+              },
+              "required": true
+            }
+          ],
+          "auth": true,
+          "tableOperation": {
+            "by": [
+              "watchers"
+            ]
+          },
+          "httpMethod": "PATCH",
+          "restPath": "watching/issues/{id}"
+        },
+        {
+          "name": "listWatchedComments",
+          "comment": "The comments on the issues the caller watches.",
+          "typeRef": {
+            "name": "CommentView",
+            "isArray": true
+          },
+          "required": true,
+          "auth": true,
+          "page": {
+            "defaultLimit": 20,
+            "maxLimit": 100
+          },
+          "tableOperation": {
+            "by": [
+              "issue.watchers"
+            ]
+          },
+          "httpMethod": "GET",
+          "restPath": "watching/comments"
         }
       ]
     },

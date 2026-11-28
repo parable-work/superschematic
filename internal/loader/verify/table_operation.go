@@ -475,11 +475,12 @@ func checkResultView(owner string, result *tableView, r *Result) {
 
 // subjectMember reports whether a row rule may name the column (D108): it
 // holds one subject the repositories filter by, a UUID, a to-one
-// relation's key or text, and is the row's own to say: createdBy alone
+// relation's key or text, or a list of UUIDs, which holds the caller where
+// it holds its id (#735), and is the row's own to say: createdBy alone
 // among the audit fields, no field a behavior owns, no secret.
 func subjectMember(source *ir.TypeDef, c *sqlutil.ColumnModel) bool {
 	_, anchors := source.FieldBehavior(c.Field)
-	return (c.Filter == sqlutil.FilterUUID || c.Filter == sqlutil.FilterString) &&
+	return (c.Filter == sqlutil.FilterUUID || c.Filter == sqlutil.FilterString || c.IsIDList()) &&
 		(c.Audit == "" || c.Audit == sqlutil.AuditCreatedBy) &&
 		!c.Secret && !c.Encrypted && !c.Internal && !anchors && (c.Def == nil || !c.Def.Owned())
 }
@@ -542,7 +543,7 @@ func checkRowRule(owner, kind string, op *ir.FieldDef, db *tableDatabase, result
 		case c.Audit != "" && c.Audit != sqlutil.AuditCreatedBy:
 			r.errorf("", "%s: by names %s, which the repository stamps at a write and says nothing of who the row is for; name createdBy, or a member of the row (%s)", owner, name, listed)
 		case !subjectMember(result.source, c):
-			r.errorf("", "%s: by names %s, which holds no subject a row rule compares the caller with: text, a UUID, a to-one relation's key or createdBy, none of them secret or a behavior's (%s)", owner, name, listed)
+			r.errorf("", "%s: by names %s, which holds no subject a row rule compares the caller with: text, a UUID, a list of UUIDs, a to-one relation's key or createdBy, none of them secret or a behavior's (%s)", owner, name, listed)
 		case kind != ir.TableOperationCreate || c.Audit == sqlutil.AuditCreatedBy:
 		case name == key:
 			r.errorf("", "%s: by names %s, the key of %s, and a create's row rule sets each member it names to the caller: a create names no key", owner, name, result.source.Name)
@@ -615,7 +616,7 @@ func checkRowRulePath(owner, kind string, db *tableDatabase, result *tableView, 
 	case c.Audit != "" && c.Audit != sqlutil.AuditCreatedBy:
 		r.errorf("", "%s: by names the path %s, which ends at %s, a stamp of a write that says nothing of who the row is for", owner, path, last)
 	case source == nil || !subjectMember(source, c):
-		r.errorf("", "%s: by names the path %s, which ends at %s, which holds no subject a row rule compares the caller with: text, a UUID, a to-one relation's key or createdBy", owner, path, last)
+		r.errorf("", "%s: by names the path %s, which ends at %s, which holds no subject a row rule compares the caller with: text, a UUID, a list of UUIDs, a to-one relation's key or createdBy", owner, path, last)
 	}
 }
 

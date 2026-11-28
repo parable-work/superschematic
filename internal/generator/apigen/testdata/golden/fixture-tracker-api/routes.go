@@ -300,6 +300,36 @@ func protectedAPIRoutes(cfg Config) []runtimerouting.Route {
 				runtimesession.RequirePermissions("issues.write"),
 			},
 		},
+		// A new issue of the team the path names, the caller its one watcher.
+		{
+			Method:  "POST",
+			Path:    "/teams/{teamId}/watching/issues",
+			Handler: requireTableCaller(createWatchingCreateWatchedIssueHandler(cfg.DB)),
+		},
+		// The comments on the issues the caller watches.
+		{
+			Method:  "GET",
+			Path:    "/watching/comments",
+			Handler: requireTableCaller(createWatchingListWatchedCommentsHandler(cfg.DB)),
+		},
+		// The issues the caller watches.
+		{
+			Method:  "GET",
+			Path:    "/watching/issues",
+			Handler: requireTableCaller(createWatchingListWatchedIssuesHandler(cfg.DB)),
+		},
+		// An issue the caller watches.
+		{
+			Method:  "GET",
+			Path:    "/watching/issues/{id}",
+			Handler: requireTableCaller(createWatchingGetWatchedIssueHandler(cfg.DB)),
+		},
+		// Changes an issue the caller watches.
+		{
+			Method:  "PATCH",
+			Path:    "/watching/issues/{id}",
+			Handler: requireTableCaller(createWatchingUpdateWatchedIssueHandler(cfg.DB)),
+		},
 	}
 }
 
@@ -1409,6 +1439,258 @@ func createIssuesCreateIssueHandler(db orm.DatabaseInterface) gohttp.HandlerFunc
 
 		// Serve the operation from its table, as the request's caller (D106)
 		result, err := tableIssuesCreateIssue(r.Context(), db, TeamId, &input, rawInput)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createWatchingCreateWatchedIssueHandler creates a handler for POST /api/teams/{teamId}/watching/issues
+//
+// A new issue of the team the path names, the caller its one watcher.
+//
+// It serves the create of Issue, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createWatchingCreateWatchedIssueHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		TeamIdStr, err := runtimerouting.PathParam(r, "teamId")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "teamId must be percent-encoded UTF-8")
+			return
+		}
+		if TeamIdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "teamId is required")
+			return
+		}
+		TeamId, err := types.ParseIdentityUUID(TeamIdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "teamId must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.CreateWatchedIssueInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableWatchingCreateWatchedIssue(r.Context(), db, TeamId, &input, rawInput)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createWatchingListWatchedCommentsHandler creates a handler for GET /api/watching/comments
+//
+// The comments on the issues the caller watches.
+//
+// It serves the list of Comment, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createWatchingListWatchedCommentsHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+
+		// Read the page's cursor and limit (@paginated): its own reader, whose
+		// refusal is the 400 every server answers at cursor or limit.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 100})
+		if !ok {
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableWatchingListWatchedComments(r.Context(), db, page)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+
+		// Respond with result
+		// The page is the envelope's data, {items, next}: nil items are [] and
+		// no next is null.
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createWatchingListWatchedIssuesHandler creates a handler for GET /api/watching/issues
+//
+// The issues the caller watches.
+//
+// It serves the list of Issue, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createWatchingListWatchedIssuesHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+
+		// Read the page's cursor and limit (@paginated): its own reader, whose
+		// refusal is the 400 every server answers at cursor or limit.
+		page, ok := paging.Read(w, r, paging.Spec{DefaultLimit: 20, MaxLimit: 100})
+		if !ok {
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableWatchingListWatchedIssues(r.Context(), db, page)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+
+		// Respond with result
+		// The page is the envelope's data, {items, next}: nil items are [] and
+		// no next is null.
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createWatchingGetWatchedIssueHandler creates a handler for GET /api/watching/issues/{id}
+//
+// An issue the caller watches.
+//
+// It serves the read of Issue, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createWatchingGetWatchedIssueHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableWatchingGetWatchedIssue(r.Context(), db, Id)
+		if err != nil {
+			respondTableError(w, r, err)
+			return
+		}
+
+		// Respond with result
+		RespondJSONEnvelope(w, gohttp.StatusOK, result, r)
+	}
+}
+
+// createWatchingUpdateWatchedIssueHandler creates a handler for PATCH /api/watching/issues/{id}
+//
+// Changes an issue the caller watches.
+//
+// It serves the update of Issue, a table of fixture-tracker-db, from its
+// repository in one transaction (D106): no implementation method serves
+// it.
+func createWatchingUpdateWatchedIssueHandler(db orm.DatabaseInterface) gohttp.HandlerFunc {
+	return func(w gohttp.ResponseWriter, r *gohttp.Request) {
+		// Extract path parameters, each percent-decoded once
+		IdStr, err := runtimerouting.PathParam(r, "id")
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be percent-encoded UTF-8")
+			return
+		}
+		if IdStr == "" {
+			RespondError(w, r, gohttp.StatusBadRequest, "id is required")
+			return
+		}
+		Id, err := types.ParseIdentityUUID(IdStr)
+		if err != nil {
+			RespondError(w, r, gohttp.StatusBadRequest, "id must be a valid UUID")
+			return
+		}
+		// Parse and validate input: a body, JSON, an object with only the
+		// keys the input type declares, then the type's decoding and rules,
+		// each refused with the 400 every generated server sends.
+		var input types.UpdateWatchedIssueInput
+		rawInput, refusal := bodyargs.ReadInput(r.Body, input.JSONFieldNames())
+		if refusal != nil {
+			RespondInputRefusal(w, r, refusal)
+			return
+		}
+		if err := json.Unmarshal(rawInput, &input); err != nil {
+			// A string an enum lacks, which its decoder refuses, is "enum"
+			// at its path beside the type's other rules, as every server
+			// answers it.
+			RespondInputRefusal(w, r, bodyargs.DecodeRefusal(rawInput, &input, err))
+			return
+		}
+
+		// Validate input
+		if validationErrors := input.Validate(); validationErrors.HasErrors() {
+			RespondInputRefusal(w, r, bodyargs.Mismatch("validation failed", validationErrors))
+			return
+		}
+
+		// Ensure request context is still valid before entering implementation logic.
+		if err := CheckContext(r.Context()); err != nil {
+			logger := LoggerFromContext(r.Context())
+			RespondAppError(w, logger, err)
+			return
+		}
+
+		// Serve the operation from its table, as the request's caller (D106)
+		result, err := tableWatchingUpdateWatchedIssue(r.Context(), db, Id, &input, rawInput)
 		if err != nil {
 			respondTableError(w, r, err)
 			return

@@ -56,6 +56,12 @@ func (f *{{ .TypeName }}Filter) sqliteConditions(args *[]any) []string {
 	{{- end }}
 	}
 	{{- end }}
+	{{- range .IDLists }}
+	if f.holds{{ .GoField }} != nil {
+		*args = append(*args, sqliteUUIDText(*f.holds{{ .GoField }}))
+		conditions = append(conditions, fmt.Sprintf({{ goRawString .SQLiteHolds }}, len(*args)))
+	}
+	{{- end }}
 	{{- range .PathRelations }}
 	if f.{{ .GoField }} != nil {
 		{{- if $.HeldByAccess }}

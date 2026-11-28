@@ -57,6 +57,11 @@ func TestTableOperationEndpoints(t *testing.T) {
 		"GET /api/teams/{id} read Team tableTeamsGetTeam",
 		"GET /api/teams/{teamId}/issues list Issue tableIssuesListIssues",
 		"POST /api/teams/{teamId}/issues create Issue tableIssuesCreateIssue",
+		"POST /api/teams/{teamId}/watching/issues create Issue tableWatchingCreateWatchedIssue",
+		"GET /api/watching/comments list Comment tableWatchingListWatchedComments",
+		"GET /api/watching/issues list Issue tableWatchingListWatchedIssues",
+		"GET /api/watching/issues/{id} read Issue tableWatchingGetWatchedIssue",
+		"PATCH /api/watching/issues/{id} update Issue tableWatchingUpdateWatchedIssue",
 	}
 	if !slices.Equal(kinds, want) {
 		t.Fatalf("table endpoints =\n%s\nwant\n%s", strings.Join(kinds, "\n"), strings.Join(want, "\n"))
@@ -123,7 +128,7 @@ func TestTableOperationEndpoints(t *testing.T) {
 	for _, r := range tables.Rows {
 		rows = append(rows, r.Var)
 	}
-	if !slices.Equal(views, []string{"asCommentView fixturetrackerdb.Comment", "asIssueGuestView fixturetrackerdb.Issue", "asIssueView fixturetrackerdb.Issue", "asMemberView fixturetrackerdb.Member", "asNoteView fixturetrackerdb.Note", "asTeamView fixturetrackerdb.Team"}) ||
+	if !slices.Equal(views, []string{"asCommentView fixturetrackerdb.Comment", "asIssueGuestView fixturetrackerdb.Issue", "asIssueView fixturetrackerdb.Issue", "asMemberView fixturetrackerdb.Member", "asNoteView fixturetrackerdb.Note", "asTeamView fixturetrackerdb.Team", "asWatchedIssueView fixturetrackerdb.Issue"}) ||
 		!slices.Equal(rows, []string{"rowsOfComment", "rowsOfIssue", "rowsOfMember", "rowsOfNote", "rowsOfTeam"}) {
 		t.Errorf("views %v, rows %v", views, rows)
 	}
@@ -446,7 +451,7 @@ func TestATableOperationTheGoServerDoesNotServeYetStaysImplemented(t *testing.T)
 		"a projection": {
 			func(api, _ *ir.Schema) { tableOperation(t, api, "getIssue").TableOperation.Projection = true },
 			[]apigen.UnservedTableOperation{{Operation: "Issues.getIssue", Reason: projection}},
-			[]string{"GetIssue", "SummarizeTeam"}, 18,
+			[]string{"GetIssue", "SummarizeTeam"}, 23,
 		},
 		"a view with a list": {
 			withLabels,
@@ -454,15 +459,15 @@ func TestATableOperationTheGoServerDoesNotServeYetStaysImplemented(t *testing.T)
 				{Operation: "Issues.deleteIssue", Reason: list}, {Operation: "Issues.getIssue", Reason: list}, {Operation: "Issues.updateIssue", Reason: list},
 				{Operation: "Issues.listIssues", Reason: list}, {Operation: "Issues.createIssue", Reason: list},
 			},
-			[]string{"DeleteIssue", "GetIssue", "UpdateIssue", "ListIssues", "CreateIssue", "SummarizeTeam"}, 14,
+			[]string{"DeleteIssue", "GetIssue", "UpdateIssue", "ListIssues", "CreateIssue", "SummarizeTeam"}, 19,
 		},
 		"a default no literal writes": {
 			func(_, db *ir.Schema) {
 				zero := "00000000-0000-4000-8000-000000000000"
 				db.Types["Issue"].Fields = append(db.Types["Issue"].Fields, &ir.FieldDef{Name: "ownerId", TypeRef: ir.TypeRef{Name: "Identity.UUID"}, Required: true, Default: &zero})
 			},
-			[]apigen.UnservedTableOperation{{Operation: "Issues.createIssue", Reason: owner}},
-			[]string{"CreateIssue", "SummarizeTeam"}, 18,
+			[]apigen.UnservedTableOperation{{Operation: "Issues.createIssue", Reason: owner}, {Operation: "Watching.createWatchedIssue", Reason: owner}},
+			[]string{"CreateIssue", "CreateWatchedIssue", "SummarizeTeam"}, 22,
 		},
 		// A create that names the state its row starts in (D109) makes
 		// a Workflow's transition, which the Go handlers do not yet.
@@ -471,7 +476,7 @@ func TestATableOperationTheGoServerDoesNotServeYetStaysImplemented(t *testing.T)
 				tableOperation(t, api, "createIssue").TableOperation.Starts = []string{"status"}
 			},
 			[]apigen.UnservedTableOperation{{Operation: "Issues.createIssue", Reason: "its body names the state the row starts in, status, and the Go server writes no create that makes a Workflow's transition so far (D109)"}},
-			[]string{"CreateIssue", "SummarizeTeam"}, 18,
+			[]string{"CreateIssue", "SummarizeTeam"}, 23,
 		},
 		"every operation": {
 			func(api, _ *ir.Schema) {
@@ -497,8 +502,8 @@ func TestATableOperationTheGoServerDoesNotServeYetStaysImplemented(t *testing.T)
 			if tc.want != nil && !slices.Equal(unserved, tc.want) {
 				t.Errorf("UnservedTableOperations =\n%+v\nwant\n%+v", unserved, tc.want)
 			}
-			if tc.want == nil && len(unserved) != 19 {
-				t.Errorf("UnservedTableOperations lists %d operations, want all 19", len(unserved))
+			if tc.want == nil && len(unserved) != 24 {
+				t.Errorf("UnservedTableOperations lists %d operations, want all 24", len(unserved))
 			}
 			if got := len(output.ServedTableEndpoints()); got != tc.served || output.HasTableEndpoints() != (tc.served > 0) || output.TakesDatabase() != (tc.served > 0) {
 				t.Errorf("the output serves %d table operations (HasTableEndpoints %t), want %d", got, output.HasTableEndpoints(), tc.served)
@@ -508,8 +513,8 @@ func TestATableOperationTheGoServerDoesNotServeYetStaysImplemented(t *testing.T)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(view.TableEndpoints) != tc.served || len(view.Endpoints) != 20-tc.served || (view.Tables != nil) != (tc.served > 0) {
-				t.Fatalf("the implemented view has %d table endpoints and %d endpoints, want %d and %d", len(view.TableEndpoints), len(view.Endpoints), tc.served, 20-tc.served)
+			if len(view.TableEndpoints) != tc.served || len(view.Endpoints) != 25-tc.served || (view.Tables != nil) != (tc.served > 0) {
+				t.Fatalf("the implemented view has %d table endpoints and %d endpoints, want %d and %d", len(view.TableEndpoints), len(view.Endpoints), tc.served, 25-tc.served)
 			}
 			for _, ep := range view.Endpoints {
 				if (ep.TableOperation() != nil) != ep.TableByHand || ep.ServedTable() != nil {
@@ -520,7 +525,7 @@ func TestATableOperationTheGoServerDoesNotServeYetStaysImplemented(t *testing.T)
 				t.Errorf("the view's HasTableEndpoints = %t", view.HasTableEndpoints())
 			}
 			// The output every other writer reads is as it was.
-			if len(output.Endpoints) != 20 || output.Tables != nil || slices.ContainsFunc(output.Endpoints, func(ep apigen.EndpointInfo) bool { return ep.TableByHand }) {
+			if len(output.Endpoints) != 25 || output.Tables != nil || slices.ContainsFunc(output.Endpoints, func(ep apigen.EndpointInfo) bool { return ep.TableByHand }) {
 				t.Error("ImplementedOutput changed the output it was given")
 			}
 

@@ -17,9 +17,17 @@ import (
 	ir "github.com/parable-work/superschematic/ir"
 )
 
-var update = flag.Bool("update", false, "write fixture-queries-db's queries.lock")
+var update = flag.Bool("update", false, "write the fixtures' queries.lock")
 
 const fixtureDir = "../loader/tsreader/testdata/services/fixture-queries-db"
+
+// audienceFixtureDir is a service whose queries read @audience tables
+// through :audience marks (#735).
+const audienceFixtureDir = "../loader/tsreader/testdata/services/fixture-audience-queries-db"
+
+// lockedFixtures are the services whose committed queries.lock
+// TestVerifyFixtureOnPostgres writes.
+var lockedFixtures = []string{fixtureDir, audienceFixtureDir}
 
 // describeTestdata holds the describe document and result the migration
 // runner's tests read and write too (runtime/migrate/go's describe_test.go).
@@ -263,13 +271,53 @@ func TestJudgeAViewsColumns(t *testing.T) {
 	}
 }
 
-// TestFixtureLockIsCurrent: fixture-queries-db's committed queries.lock
-// verified each of its queries as the schema declares it now. Write it
+// TestFixtureLockIsCurrent: each locked fixture's committed queries.lock
+// verified each of its queries as the schema declares it now. Write them
 // again with TestVerifyFixtureOnPostgres -update.
 func TestFixtureLockIsCurrent(t *testing.T) {
-	schema, _ := fixture(t)
-	if err := CheckLock(fixtureDir, schema); err != nil {
+	for _, dir := range lockedFixtures {
+		schema, err := loader.LoadService(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := CheckLock(dir, schema); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// TestAQueryOfAnAudienceTableNeedsAMark: a query that reads an @audience
+// table, or its projection's view, through a reference no :audience mark
+// holds is refused by verification, before any statement is judged, and
+// by a build's check of the lock, naming each such reference (#735).
+func TestAQueryOfAnAudienceTableNeedsAMark(t *testing.T) {
+	schema, err := loader.LoadService(audienceFixtureDir)
+	if err != nil {
 		t.Fatal(err)
+	}
+	def := *schema.Types["VisibleDocuments"].Query
+	def.SQL = "SELECT d.id, d.title FROM document d JOIN document_list l ON l.id = d.id WHERE :audience(l) AND :search::text IS NULL"
+	schema.Types["VisibleDocuments"].Query = &def
+	queries, err := sqlutil.QueriesOf(schema, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, problems := Judge(queries, &Result{Version: DescribeVersion})
+	want := "query visibleDocuments reads the @audience rows of document (as d) with no :audience mark"
+	found := false
+	for _, p := range problems {
+		if strings.HasPrefix(p, want) {
+			found = true
+		}
+		if strings.HasPrefix(p, "query visibleDocuments:") {
+			t.Errorf("a statement of the refused query was judged: %s", p)
+		}
+	}
+	if !found {
+		t.Fatalf("problems = %v", problems)
+	}
+	if err := CheckLock(audienceFixtureDir, schema); err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("the build's check: %v", err)
 	}
 }
 
@@ -305,7 +353,7 @@ func TestCheckLock(t *testing.T) {
 	}
 }
 
-// TestVerifyFixtureOnPostgres verifies fixture-queries-db's queries on the
+// TestVerifyFixtureOnPostgres verifies each locked fixture's queries on the
 // Postgres at SUPERSCHEMATIC_MIGRATE_TEST_DATABASE_URL through the
 // migration runner, built from runtime/migrate/go, and requires the lock
 // the fixture commits; with -update it writes it.
@@ -324,7 +372,18 @@ func TestVerifyFixtureOnPostgres(t *testing.T) {
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build the migration runner: %v\n%s", err, out)
 	}
-	schema, _ := fixture(t)
+	for _, dir := range lockedFixtures {
+		t.Run(filepath.Base(dir), func(t *testing.T) { verifyFixture(t, dir, url, runner) })
+	}
+}
+
+// verifyFixture verifies the queries of the service at dir and requires
+// the lock it commits; with -update it writes it.
+func verifyFixture(t *testing.T, fixtureDir, url, runner string) {
+	schema, err := loader.LoadService(fixtureDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ddl, err := sqlgen.Generate(schema, sqlgen.Options{SchemaName: schema.Name})
 	if err != nil {
 		t.Fatal(err)

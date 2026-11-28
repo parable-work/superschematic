@@ -262,6 +262,30 @@ grouped query that never returns more than one says so with `LIMIT 1`.
 What a query returns is in its lock hash, so changing it is a query to
 verify again.
 
+## A query of an @audience table
+
+A query that reads an `@audience` table marks where the table's audience
+goes: `:audience(d)` for the alias `d` it reads the table through, or the
+table's own name where it has none (#735). It stands where a condition
+does, in a `WHERE` or a join's `ON`:
+
+```sql
+SELECT d.id, d.title FROM document d
+WHERE :audience(d) AND (:search::text IS NULL OR d.title ILIKE '%' || :search || '%')
+```
+
+Each ORM replaces the mark with the audience's conditions for the call's
+caller (`audienceConditions` in TypeScript, the repositories' own in Go),
+its parameters numbered after every other, the page key's among them;
+outside an operation and as the system actor it is `TRUE`. A mark on a
+projection's view of an `@audience` table, keyed by the table's key,
+keeps the view to its source's rows the caller sees. Verification refuses
+a query that reads an `@audience` table, or a view of one, in a `FROM`, a
+`JOIN` or an `UPDATE` through a reference no mark holds, and a mark whose
+alias names no such reference fails the build. A query's statement holds
+each mark as `%A{n}` beside the `%s` of an order and the `%d` of a page,
+and verification prepares it as the condition of a caller with no id.
+
 ## Verification
 
 ```sh
@@ -334,4 +358,6 @@ kinds above that no codec reads; a `@rawSql` function or view a query
 reads, whose change the lock does not see (a projection's view it sees);
 a nullability rule finer than the outer join's table, such as a `LEFT
 JOIN` of a table also joined inside; named fragments with parameters of
-their own, which a string constant and the query's params type cover.
+their own, which a string constant and the query's params type cover;
+a party's or an agent run's grants, which an `:audience` mark does not
+hold: its conditions are the audience's alone (#735).

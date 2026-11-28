@@ -1,0 +1,86 @@
+{
+  "version": 1,
+  "queries": [
+    {
+      "name": "documentPage",
+      "hash": "sha256:3be66e9d6bba7ac85300f18d834a813b040f8ea9dcf13adc478cfc9c32ccec1d",
+      "params": [
+        "text"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "notNull": true
+        }
+      ]
+    },
+    {
+      "name": "folderDocuments",
+      "hash": "sha256:b929a4b01192b0c7f5de86b3719a3c04ac24045d9496c790d03d4f44ed0501ba",
+      "params": [
+        "uuid"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "notNull": true
+        },
+        {
+          "name": "folder_name",
+          "type": "text",
+          "notNull": true
+        }
+      ]
+    },
+    {
+      "name": "listedDocuments",
+      "hash": "sha256:f2a385ca54369d43a3861d690b9b2070b3d2d45f4e380057b1967ee914c453ae",
+      "params": [
+        "text"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "notNull": true
+        }
+      ]
+    },
+    {
+      "name": "visibleDocuments",
+      "hash": "sha256:a1028950055622ebbf85d1ab881f28a3db857c53df9c6b4ab0038bd93e7c34a3",
+      "params": [
+        "text"
+      ],
+      "columns": [
+        {
+          "name": "id",
+          "type": "uuid",
+          "notNull": true
+        },
+        {
+          "name": "title",
+          "type": "text",
+          "notNull": true
+        }
+      ]
+    }
+  ]
+}

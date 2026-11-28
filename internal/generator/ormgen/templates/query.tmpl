@@ -535,7 +535,7 @@ type {{ $typeName }}HistoryOptions struct {
 
 {{- range .Repositories }}
 {{ $quotedTableName := .QuotedTableName }}
-{{ $quotedPrimaryKey := .QuotedPrimaryKey }}
+{{ $quotedPrimaryKey := .QuotedPrimaryKey }}{{ $filterType := .TypeName }}
 
 // {{ .TypeName }}Filter provides filtering for {{ .TypeName }} queries
 type {{ .TypeName }}Filter struct {
@@ -612,12 +612,26 @@ type {{ .TypeName }}Filter struct {
 	// conditions (D90). A filter of no condition keeps every row, and so
 	// does an empty AnyOf.
 	AnyOf []{{ .TypeName }}Filter
+	{{- range .IDLists }}
+	// holds{{ .GoField }} keeps the rows whose {{ .Field }}, a list of ids, holds it:
+	// a row rule's condition (#735), which {{ $filterType }}Holding{{ .GoField }} sets.
+	holds{{ .GoField }} *{{ $.UUIDGoType }}
+	{{- end }}
 	{{- if $.HeldByAccess }}
 	// scope holds each table a condition through a relation reads to the
 	// caller of the operation that reads it (D156, D180); nil outside one.
 	scope accessScope
 	{{- end }}
 }
+{{- range .IDLists }}
+
+// {{ $filterType }}Holding{{ .GoField }} is the filter of the {{ $filterType }} rows whose
+// {{ .Field }}, a list of ids, holds id: the condition a row rule names the
+// list by (#735), which no request's filter can.
+func {{ $filterType }}Holding{{ .GoField }}(id {{ $.UUIDGoType }}) *{{ $filterType }}Filter {
+	return &{{ $filterType }}Filter{holds{{ .GoField }}: &id}
+}
+{{- end }}
 {{- if not .Released }}
 
 // {{ .TypeName }}Update provides fields that can be updated
@@ -817,6 +831,14 @@ func (f *{{ .TypeName }}Filter) conditions(args *[]interface{}, paramOffset int)
 	{{- end }}
 	}
 	{{- end }}
+	{{- end }}
+
+	{{- range .IDLists }}
+	if f.holds{{ .GoField }} != nil {
+		paramNum++
+		conditions = append(conditions, fmt.Sprintf({{ goRawString .PostgresHolds }}, paramNum))
+		*args = append(*args, f.holds{{ .GoField }}.ToUUID())
+	}
 	{{- end }}
 
 	{{- range .PathRelations }}

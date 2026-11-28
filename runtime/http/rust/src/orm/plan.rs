@@ -17,6 +17,12 @@ use crate::search::{like_pattern, terms};
 use crate::uuid62::{parse_uuid, uuid_to_base62};
 use serde_json::Map;
 
+/// The operation of a list member's filter that keeps the rows whose list
+/// holds the id it names (#735): the row rule's, never a request's. No
+/// column's filter knows it, so a request's filter that named it would be
+/// refused.
+pub const ROW_RULE_HOLDS: &str = "$holds";
+
 /// Fills a format string's `%s` and `%d`, in order, with `args`, and `%%`
 /// with `%`, as Go's `fmt.Sprintf` fills the statements `sqlutil` writes.
 /// A format that takes more arguments than it was given, or holds another
@@ -607,6 +613,44 @@ impl<'a> Plan<'a> {
         Ok(conditions)
     }
 
+    /// The condition of the rows whose `column`, a list of ids, holds the id
+    /// `value` (#735): a row rule's, under [`ROW_RULE_HOLDS`]. `$n =
+    /// ANY(column)` on Postgres, an EXISTS over `json_each` on SQLite,
+    /// whose list is a JSON array of the ids' text.
+    fn holds_condition(
+        &self,
+        table: &Table,
+        column: &Column,
+        value: &Value,
+        args: &mut Vec<Bound>,
+    ) -> Result<String, Error> {
+        let id = value
+            .as_str()
+            .and_then(parse_uuid)
+            .filter(|_| column.list && column.uuid)
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{}.{}: a row rule's list holds a UUID, of a list of UUIDs",
+                    table.name, column.name
+                ))
+            })?;
+        args.push(Bound {
+            value: Value::String(id.hyphenated().to_string()),
+            marks: Marks {
+                uuid: true,
+                ..Marks::TEXT
+            },
+        });
+        let n = self.placeholder(args.len())?;
+        let q = &column.qualified;
+        Ok(match self.definition.dialect {
+            Dialect::Postgres => format!("{n} = ANY({q})"),
+            Dialect::Sqlite => {
+                format!("EXISTS (SELECT 1 FROM json_each({q}) WHERE json_each.value = {n})")
+            }
+        })
+    }
+
     /// The filter's conditions alone. A filter through a relation holds
     /// the target's rows to what the caller sees too, unless `access` is
     /// false, as a grant's path is: its steps are the role's to name.
@@ -638,7 +682,15 @@ impl<'a> Plan<'a> {
                 continue;
             };
             let q = &column.qualified;
+            // A row rule's list of ids (#735): no column's filter knows the
+            // operation, so no request's filter can name it.
+            if let Some(value) = member.get(ROW_RULE_HOLDS) {
+                conditions.push(self.holds_condition(table, column, value, args)?);
+            }
             for (op, _) in member {
+                if op == ROW_RULE_HOLDS {
+                    continue;
+                }
                 if !column.filter.iter().any(|known| known == op) {
                     return Err(invalid(format!(
                         "{}.{} filters by {}, not {op}",
@@ -826,6 +878,14 @@ impl<'a> Plan<'a> {
                 || table
                     .column(member)
                     .is_some_and(|column| !column.filter.is_empty())
+                // A row rule's list of ids (#735), under its operation alone.
+                || table.column(member).is_some_and(|column| {
+                    column.list
+                        && column.uuid
+                        && value
+                            .as_object()
+                            .is_some_and(|ops| ops.keys().all(|op| op == ROW_RULE_HOLDS))
+                })
                 || table.relations.iter().any(|r| &r.field == member)
                 || table.many.iter().any(|m| &m.name == member)
                 || table.referenced_by.iter().any(|r| &r.filter == member);

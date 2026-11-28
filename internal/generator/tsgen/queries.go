@@ -37,6 +37,10 @@ type ORMQuery struct {
 
 	// Returns is what a call answers: "many", "one" or "optional" (D95).
 	Returns string
+
+	// Audience are the statement's :audience marks (#735), which the
+	// runtime fills for the caller.
+	Audience []sqlutil.QueryAudienceMark
 }
 
 // ResultType is the TypeScript type a call of the query resolves to: its
@@ -102,6 +106,7 @@ func typeScriptQueries(schema *ir.Schema, opts Options, types map[string]*TypeIn
 			RowType:    qualifyTypes(q.Row, known),
 			Text:       q.Text,
 			Returns:    q.Returns,
+			Audience:   q.Audience,
 		}
 		if td := schema.Types[q.Type]; td != nil {
 			query.Doc = codegen.DocText(td.Description, td.Comment)

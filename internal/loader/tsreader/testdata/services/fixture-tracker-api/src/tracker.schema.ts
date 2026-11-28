@@ -95,6 +95,27 @@ export abstract class UpdateIssueInput {
   assigneeId: Nullable<Identity.UUID>;
 }
 
+// An issue as its watchers see it. The row rule reads who watches it.
+@source(Issue)
+export abstract class WatchedIssueView {
+  id: Identity.UUID;
+  teamId: Identity.UUID;
+  title: string;
+}
+
+// What a caller sets to start an issue it watches: the row rule makes the
+// caller its one watcher.
+@source(Issue)
+export abstract class CreateWatchedIssueInput {
+  title: Validate<string, { minLength: 1; maxLength: 200 }>;
+}
+
+// What a watcher may change of an issue.
+@source(Issue)
+export abstract class UpdateWatchedIssueInput {
+  title: Nullable<Validate<string, { minLength: 1; maxLength: 200 }>>;
+}
+
 // A comment on an issue.
 @source(Comment)
 export abstract class CommentView {
@@ -277,6 +298,48 @@ export class Comments extends Authenticated {
   @requirePermission(["issues.write"])
   @tableOperation()
   deleteComment(issueId: Identity.UUID, id: Identity.UUID): CommentView {
+    throw new Error("schema declaration only");
+  }
+}
+
+// Issues are their watchers' (#735): each operation's row rule names
+// watchers, a list of ids, which reaches the issues whose list holds the
+// caller, and a comment's follows its issue to the list.
+export class Watching extends Authenticated {
+  // The issues the caller watches.
+  @rest(HttpMethod.GET, "watching/issues")
+  @paginated()
+  @tableOperation({ by: ["watchers"] })
+  listWatchedIssues(): WatchedIssueView[] {
+    throw new Error("schema declaration only");
+  }
+
+  // An issue the caller watches.
+  @rest(HttpMethod.GET, "watching/issues/{id}")
+  @tableOperation({ by: ["watchers"] })
+  getWatchedIssue(id: Identity.UUID): WatchedIssueView {
+    throw new Error("schema declaration only");
+  }
+
+  // A new issue of the team the path names, the caller its one watcher.
+  @rest(HttpMethod.POST, "teams/{teamId}/watching/issues")
+  @tableOperation({ by: ["watchers"] })
+  createWatchedIssue(teamId: Identity.UUID, input: CreateWatchedIssueInput): WatchedIssueView {
+    throw new Error("schema declaration only");
+  }
+
+  // Changes an issue the caller watches.
+  @rest(HttpMethod.PATCH, "watching/issues/{id}")
+  @tableOperation({ by: ["watchers"] })
+  updateWatchedIssue(id: Identity.UUID, input: UpdateWatchedIssueInput): WatchedIssueView {
+    throw new Error("schema declaration only");
+  }
+
+  // The comments on the issues the caller watches.
+  @rest(HttpMethod.GET, "watching/comments")
+  @paginated()
+  @tableOperation({ by: ["issue.watchers"] })
+  listWatchedComments(): CommentView[] {
     throw new Error("schema declaration only");
   }
 }

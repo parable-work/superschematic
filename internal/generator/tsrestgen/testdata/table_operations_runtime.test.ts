@@ -742,6 +742,48 @@ describe('the table operations of fixture-tracker-api', () => {
     expect(await refused('GET', '/api/notes', {})).toMatchObject({ status: 401 });
   });
 
+  test('a row rule on a list of ids keeps out who is not in it, and a create puts the caller in it alone', async () => {
+    // A create names the caller as the one watcher.
+    const kims = await ok('POST', `/api/teams/${other.id}/watching/issues`, { title: 'Watched by Kim' }, KIM);
+    expect(kims).toEqual({ id: expect.any(String), teamId: other.id, title: 'Watched by Kim' });
+    expect((await orm.issue.getOne(kims.id)).watchers).toEqual([KIM_ID]);
+    const lees = await ok('POST', `/api/teams/${other.id}/watching/issues`, { title: 'Watched by Lee' }, LEE);
+    // Kim adds Lee to her issue's watchers, as the repositories may.
+    await orm.issue.updateOne(kims.id, { watchers: [KIM_ID, LEE_ID] });
+    await orm.comment.createOne({ issueId: kims.id, body: 'On a shared issue' });
+    await orm.comment.createOne({ issueId: lees.id, body: "On Lee's issue" });
+
+    // A list holds the issues whose watchers hold the caller.
+    const watched = async (as: string) => titles((await walk('/api/watching/issues', as)).items).sort();
+    expect(await watched(KIM)).toEqual(['Watched by Kim']);
+    expect(await watched(LEE)).toEqual(['Watched by Kim', 'Watched by Lee']);
+    expect(await watched(SAM)).toEqual([]);
+
+    // A read and an update of an issue the caller does not watch are the 404 of one that is not there.
+    const notFound = { status: 404, code: 'not_found', title: 'Not Found', detail: 'Issue not found' };
+    expect(await ok('GET', `/api/watching/issues/${kims.id}`, undefined, LEE)).toMatchObject({ title: 'Watched by Kim' });
+    expect(await refused('GET', `/api/watching/issues/${lees.id}`, { as: KIM })).toMatchObject(notFound);
+    expect(await refused('GET', `/api/watching/issues/${kims.id}`, { as: SAM })).toMatchObject(notFound);
+    expect(await refused('PATCH', `/api/watching/issues/${lees.id}`, { as: SAM, body: { title: 'Sam was here' } })).toMatchObject(notFound);
+    expect((await orm.issue.getOne(lees.id)).title).toBe('Watched by Lee');
+    expect(await ok('PATCH', `/api/watching/issues/${lees.id}`, { title: 'Still watched by Lee' }, LEE)).toMatchObject({ title: 'Still watched by Lee' });
+    expect((await orm.issue.getOne(lees.id)).watchers).toEqual([LEE_ID]);
+
+    // A path that ends at the list follows a comment to its issue's watchers.
+    const comments = async (as: string) => (await walk('/api/watching/comments', as)).items.map(comment => comment.body).sort();
+    expect(await comments(KIM)).toEqual(['On a shared issue']);
+    expect(await comments(LEE)).toEqual(["On Lee's issue", 'On a shared issue']);
+    expect(await comments(SAM)).toEqual([]);
+
+    // Once the list no longer holds Lee, Lee is out.
+    await orm.issue.updateOne(kims.id, { watchers: [KIM_ID] });
+    expect(await watched(LEE)).toEqual(['Still watched by Lee']);
+    expect(await refused('GET', `/api/watching/issues/${kims.id}`, { as: LEE })).toMatchObject(notFound);
+    // A caller whose subject is no id watches nothing, and cannot watch a new issue.
+    expect(await watched('billing-worker')).toEqual([]);
+    expect(await refused('POST', `/api/teams/${other.id}/watching/issues`, { as: 'billing-worker', body: { title: 'x' } })).toMatchObject({ status: 403 });
+  });
+
   test('an operation written by hand reaches the implementation', async () => {
     const before = summarized.length;
     expect(await ok('GET', `/api/teams/${core.id}/summary`, undefined, LEE)).toEqual({
@@ -757,6 +799,7 @@ describe('the table operations of fixture-tracker-api', () => {
         'createMember',
         'createNote',
         'createTeam',
+        'createWatchedIssue',
         'deleteComment',
         'deleteIssue',
         'deleteNote',
@@ -764,13 +807,17 @@ describe('the table operations of fixture-tracker-api', () => {
         'getIssueForGuest',
         'getNote',
         'getTeam',
+        'getWatchedIssue',
         'listComments',
         'listIssues',
         'listMembers',
         'listNotes',
         'listTeams',
+        'listWatchedComments',
+        'listWatchedIssues',
         'updateIssue',
         'updateNote',
+        'updateWatchedIssue',
       ].sort()
     );
   });

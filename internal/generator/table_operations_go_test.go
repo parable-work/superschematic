@@ -42,6 +42,7 @@ var tableOperationCases = []string{
 	"a route requires its caller and its permission",
 	"a write that records its caller and has none is unauthorized",
 	"a row rule keeps each caller to the rows that name them",
+	"a row rule on a list of ids keeps out who is not in it",
 	"the operation the project writes reaches its implementation",
 }
 
@@ -245,6 +246,7 @@ import (
 	api "example.com/schemas/api/fixture-tracker-api"
 	orm "example.com/schemas/orm/fixture-tracker-db"
 	types "example.com/schemas/types/go/fixture-tracker-api"
+	dbtypes "example.com/schemas/types/go/fixture-tracker-db"
 )
 
 // authenticate is the test's authenticator, in place of the auth an API
@@ -1208,6 +1210,88 @@ func TestTableOperations(t *testing.T) {
 		refused(t, "a note created by a caller that is no user", as("billing-worker").post(notes, map[string]any{"text": "x"}), 403, "forbidden", "Access denied")
 		refused(t, "the notes with no caller", nobody.get("/notes"), 401, "", "Authentication required")
 		refused(t, "a note created with no caller", nobody.post(notes, map[string]any{"text": "x"}), 401, "", "Authentication required")
+	})
+
+	t.Run("a row rule on a list of ids keeps out who is not in it", func(t *testing.T) {
+		// Issues are their watchers' (#735): the rule names watchers, a list
+		// of ids, and a comment's follows its issue to the list.
+		kim, lee, sam := as(alice), as(bob), as(carol)
+		watching := "/teams/" + fmt.Sprint(ops["id"]) + "/watching/issues"
+		kims := kim.post(watching, map[string]any{"title": "Watched by Kim"}).data(t)
+		lees := lee.post(watching, map[string]any{"title": "Watched by Lee"}).data(t)
+		id := func(v any) dbtypes.IdentityUUID {
+			parsed, err := dbtypes.ParseIdentityUUID(uuid(t, v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return parsed
+		}
+		writer := orm.WithUserID(ctx, id(alice))
+		// A create names the caller as the one watcher.
+		for issue, want := range map[string]string{fmt.Sprint(kims["id"]): alice, fmt.Sprint(lees["id"]): bob} {
+			row, err := db.GetIssueRepository().GetOne(writer, id(issue), nil)
+			if err != nil || len(row.Watchers) != 1 || uuid(t, row.Watchers[0].String()) != want {
+				t.Fatalf("the watchers of a watched issue = %v (%v), want the caller alone", row, err)
+			}
+		}
+		setWatchers := func(issue map[string]any, watchers ...string) {
+			ids := make([]dbtypes.IdentityUUID, len(watchers))
+			for i, w := range watchers {
+				ids[i] = id(w)
+			}
+			if _, err := db.GetIssueRepository().UpdateOne(writer, id(issue["id"]), &orm.IssueUpdate{Watchers: &ids}); err != nil {
+				t.Fatalf("set the watchers: %v", err)
+			}
+		}
+		setWatchers(kims, alice, bob)
+		for _, c := range []struct {
+			issue map[string]any
+			body  string
+		}{{kims, "On a shared issue"}, {lees, "On Lee's issue"}} {
+			issue := id(c.issue["id"])
+			if _, err := db.GetCommentRepository().CreateOne(writer, &dbtypes.Comment{Issue: dbtypes.Issue{Id: &issue}, Body: c.body}); err != nil {
+				t.Fatalf("comment: %v", err)
+			}
+		}
+		sorted := func(values []string) []string { slices.Sort(values); return values }
+		watched := func(c client) []string { return sorted(all(t, c, "/watching/issues", "", "title")) }
+		comments := func(c client) []string { return sorted(all(t, c, "/watching/comments", "", "body")) }
+		for _, tc := range []struct {
+			what      string
+			got, want []string
+		}{
+			{"kim's issues", watched(kim), []string{"Watched by Kim"}},
+			{"lee's issues", watched(lee), []string{"Watched by Kim", "Watched by Lee"}},
+			{"a caller no list holds", watched(sam), []string{}},
+			{"kim's comments", comments(kim), []string{"On a shared issue"}},
+			{"lee's comments", comments(lee), []string{"On Lee's issue", "On a shared issue"}},
+			{"the comments of a caller no list holds", comments(sam), []string{}},
+			{"a caller that is no user", watched(as("billing-worker")), []string{}},
+		} {
+			if !slices.Equal(tc.got, tc.want) {
+				t.Errorf("%s: %v, want %v", tc.what, tc.got, tc.want)
+			}
+		}
+		path := func(issue map[string]any) string { return "/watching/issues/" + fmt.Sprint(issue["id"]) }
+		if got := lee.get(path(kims)).data(t); got["title"] != "Watched by Kim" {
+			t.Errorf("an issue the caller watches: %v", got)
+		}
+		refused(t, "an issue the caller does not watch", kim.get(path(lees)), 404, "not_found", "Issue not found")
+		refused(t, "an issue read by a caller no list holds", sam.get(path(kims)), 404, "not_found", "Issue not found")
+		refused(t, "an issue updated by a caller no list holds", sam.patch(path(lees), map[string]any{"title": "Sam was here"}), 404, "not_found", "Issue not found")
+		if got := column(t, "issue", "title", lees["id"]); got != "Watched by Lee" {
+			t.Errorf("the issue reads %q after the refused update", got)
+		}
+		if got := lee.patch(path(lees), map[string]any{"title": "Still watched by Lee"}).data(t); got["title"] != "Still watched by Lee" {
+			t.Errorf("an issue updated by its watcher: %v", got)
+		}
+		// Once the list no longer holds Lee, Lee is out.
+		setWatchers(kims, alice)
+		if got := watched(lee); !slices.Equal(got, []string{"Still watched by Lee"}) {
+			t.Errorf("lee's issues once removed: %v", got)
+		}
+		refused(t, "an issue whose list no longer holds the caller", lee.get(path(kims)), 404, "not_found", "Issue not found")
+		refused(t, "a watched issue created by a caller that is no user", as("billing-worker").post(watching, map[string]any{"title": "x"}), 403, "forbidden", "Access denied")
 	})
 
 	t.Run("the operation the project writes reaches its implementation", func(t *testing.T) {

@@ -48,6 +48,11 @@ type QueryScan struct {
 	// ManyRows says why the statement may return more than one row, as
 	// far as its text tells (queryManyRows, D95), or is empty.
 	ManyRows string
+	// Audience are the :audience(alias) marks, in order, and TableRefs
+	// the tables and views the statement reads, each by the alias it is
+	// read through (#735).
+	Audience  []QueryAudienceUse
+	TableRefs []QueryTableRef
 }
 
 // notNullHint matches a comment's `@notNull a, b` hint.
@@ -92,6 +97,21 @@ func ScanQuery(sql string) (QueryScan, error) {
 			j := i + 1
 			for j < len(sql) && isSQLIdentByte(sql[j]) {
 				j++
+			}
+			if sql[i+1:j] == "audience" {
+				alias, end, ok, err := scanAudienceMark(sql, j)
+				if err != nil {
+					return scan, err
+				}
+				if ok {
+					if err := statement(); err != nil {
+						return scan, err
+					}
+					scan.Audience = append(scan.Audience, QueryAudienceUse{Alias: alias, Start: i, End: end})
+					words = append(words, queryWord{upper: ":", depth: depth})
+					i = end
+					continue
+				}
 			}
 			scan.Params = append(scan.Params, QueryParamUse{Name: sql[i+1 : j], Start: i, End: j})
 			words = append(words, queryWord{upper: ":", depth: depth})
@@ -172,6 +192,7 @@ func ScanQuery(sql string) (QueryScan, error) {
 	}
 	scan.OuterTables, scan.AllOuter = outerJoins(words)
 	scan.ManyRows = queryManyRows(words)
+	scan.TableRefs = tableRefs(words)
 	for _, w := range words {
 		if w.raw != "" && w.upper != "LITERAL" {
 			scan.Identifiers = append(scan.Identifiers, w.raw)
@@ -302,6 +323,13 @@ type QueryModel struct {
 	// or ir.QueryReturnsOptional (D95).
 	Returns string
 
+	// Audience are the query's :audience marks (#735), in the order of
+	// their directives in Text, %A{0} the first; Unmarked the references
+	// to an @audience table or a view of one that no mark holds, which
+	// verification refuses.
+	Audience []QueryAudienceMark
+	Unmarked []string
+
 	OrderBy *QueryOrderModel
 	Page    *QueryPageModel
 }
@@ -346,21 +374,28 @@ type QueryStatement struct {
 // Statements are the statements of the query as Postgres runs them, each
 // order option's and each page's, its format strings filled with a page
 // of DefaultLimit rows.
+// Each audience mark holds its PrepareCondition (#735).
 func (q *QueryModel) Statements() []QueryStatement {
+	marks := func(text string) string {
+		if len(q.Audience) == 0 {
+			return text
+		}
+		return FillAudienceMarks(text, func(i int) string { return q.Audience[i].PrepareCondition() })
+	}
 	switch {
 	case q.OrderBy != nil:
 		out := make([]QueryStatement, 0, len(q.OrderBy.Options))
 		for _, option := range q.OrderBy.Options {
-			out = append(out, QueryStatement{Label: "order " + option.Value, SQL: fmt.Sprintf(q.Text, option.SQL)})
+			out = append(out, QueryStatement{Label: "order " + option.Value, SQL: fmt.Sprintf(marks(q.Text), option.SQL)})
 		}
 		return out
 	case q.Page != nil:
 		return []QueryStatement{
-			{Label: "first page", SQL: fmt.Sprintf(q.Page.First, DefaultLimit+1)},
-			{Label: "page after a key", SQL: fmt.Sprintf(q.Page.After, DefaultLimit+1)},
+			{Label: "first page", SQL: fmt.Sprintf(marks(q.Page.First), DefaultLimit+1)},
+			{Label: "page after a key", SQL: fmt.Sprintf(marks(q.Page.After), DefaultLimit+1)},
 		}
 	}
-	return []QueryStatement{{SQL: strings.ReplaceAll(q.Text, "%%", "%")}}
+	return []QueryStatement{{SQL: strings.ReplaceAll(marks(q.Text), "%%", "%")}}
 }
 
 // QueriesOf models every query of schema (ir.Schema.Queries), in query
@@ -425,6 +460,10 @@ func QueriesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]QueryMo
 			}
 		}
 	}
+	audience, err := audienceReadsOf(schema, dependencies, tables)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]QueryModel, 0, len(defs))
 	for _, td := range defs {
 		q, err := queryOf(schema, td, scalars, sqlTypes, enums, unions)
@@ -433,6 +472,9 @@ func QueriesOf(schema *ir.Schema, dependencies map[string]*ir.Schema) ([]QueryMo
 		}
 		scan, err := ScanQuery(td.Query.SQL)
 		if err != nil {
+			return nil, fmt.Errorf("query %s: %w", td.Query.Name, err)
+		}
+		if q.Audience, q.Unmarked, err = audienceMarksOf(scan, audience); err != nil {
 			return nil, fmt.Errorf("query %s: %w", td.Query.Name, err)
 		}
 		named := map[string]bool{}
@@ -497,10 +539,23 @@ func queryOf(schema *ir.Schema, td *ir.TypeDef, scalars map[string]ScalarClass, 
 	positions := map[string]int{}
 	var b strings.Builder
 	at := 0
+	marks := 0
+	// writeMarks writes the text up to before and the directive of each
+	// :audience mark that comes before it (#735).
+	writeMarks := func(before int) {
+		for marks < len(scan.Audience) && scan.Audience[marks].Start < before {
+			use := scan.Audience[marks]
+			b.WriteString(strings.ReplaceAll(def.SQL[at:use.Start], "%", "%%"))
+			b.WriteString(QueryAudienceMark{}.directive(marks))
+			at = use.End
+			marks++
+		}
+	}
 	for _, use := range scan.Params {
 		if use.Start >= scan.End {
 			break
 		}
+		writeMarks(use.Start)
 		b.WriteString(strings.ReplaceAll(def.SQL[at:use.Start], "%", "%%"))
 		at = use.End
 		pf := FieldNamed(params, use.Name)
@@ -521,6 +576,7 @@ func queryOf(schema *ir.Schema, td *ir.TypeDef, scalars map[string]ScalarClass, 
 		}
 		fmt.Fprintf(&b, "$%d", n)
 	}
+	writeMarks(scan.End)
 	b.WriteString(strings.ReplaceAll(def.SQL[at:scan.End], "%", "%%"))
 	q.Text = strings.TrimSpace(b.String())
 

@@ -1678,8 +1678,9 @@ export class Notes extends Authenticated {
 | create | each member the rule names is set to the caller, and the body's view may not hold one; `createdBy` is the repository's stamp as on any create |
 
 A member of `by` is named as a view names it: a field of the table that
-holds an id (`Identity.UUID`, `Identity.UserID`), a to-one relation's
-key (`assigneeId`), text, or `createdBy`. The caller is the request's
+holds an id (`Identity.UUID`, `Identity.UserID`), a list of ids
+(`watchers: Identity.UUID[]`), a to-one relation's key (`assigneeId`),
+text, or `createdBy`. The caller is the request's
 principal, by its subject: a user's id. A row is reached when any one
 member holds it, so `["owner", "sharedWith"]` is "mine or shared with
 me". An operation carries its own rule, so a table's read may reach the
@@ -1717,7 +1718,38 @@ holds a subject, as a plain member does:
 
 The handler turns the path into one condition of the row's `WHERE`, a
 subquery per step (`unit_id IN (SELECT id FROM unit WHERE contract_id IN
-(...))`), so a page, a sort and a filter hold as they do without it. The
+(...))`), so a page, a sort and a filter hold as they do without it.
+
+The last member, on the row or at the end of a path, may be a list of
+ids (#735). The rule then reaches the rows whose list holds the caller's
+id, and a create whose rule names the list sets it to the caller alone:
+
+```ts
+  // The issues the caller watches, and the comments on them.
+  @rest(HttpMethod.GET, "watching/issues")
+  @paginated()
+  @tableOperation({ by: ["watchers"] })
+  listWatchedIssues(): WatchedIssueView[] {
+    throw new Error("schema declaration only");
+  }
+
+  @rest(HttpMethod.GET, "watching/comments")
+  @paginated()
+  @tableOperation({ by: ["issue.watchers"] })
+  listWatchedComments(): CommentView[] {
+    throw new Error("schema declaration only");
+  }
+```
+
+On Postgres the condition is `$n = ANY(issue.watchers)`; on SQLite, whose
+list is a JSON array of the ids' text, `EXISTS (SELECT 1 FROM
+json_each(issue.watchers) WHERE json_each.value = ?n)`. It is the
+repositories' condition for the rule alone: a list has no filter a
+request, an SDK, the OpenAPI document or an MCP tool can name. A list of
+anything but ids is refused, as text and numbers are in a list. The
+TypeScript, Go and Rust servers serve it on Postgres and SQLite; a Go
+server's view still holds single values, so leave the list out of the
+operation's view. The
 loader checks that every step is a relation the table it is on declares,
 and that the last holds a subject. A create's rule names no path: a create
 sets its rule's members to the caller, and a path names rows of other
@@ -1730,11 +1762,10 @@ What a rule does not say yet:
 - A caller that is a service, or any principal whose subject is no id.
   It is named by no member that holds an id, so it lists nothing, reads
   a 404 and cannot create; give it the override permission.
-- On a Go server, a member that holds text, and a path; on a Rust
-  server, a path. The Go handlers compare the caller with a member of the
-  row that holds an id, and the Rust handlers with a member of the row
-  itself; the operation stays one you implement, with a warning. The
-  TypeScript server serves both.
+- On a Go server, a member that holds text. The Go handlers compare the
+  caller with a member that holds an id, or a list of ids; the operation
+  stays one you implement, with a warning. The TypeScript and Rust
+  servers serve it.
 
 A row rule is the generated handler's. An operation you write by hand,
 an ORM call in a worker and SQL of your own reach every row, as before.
@@ -2027,6 +2058,47 @@ Go's and Rust's repositories on SQLite keep to an audience and grants by
 the same condition, and record the access log
 ([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite),
 [In the Rust server](#in-the-rust-server)).
+
+### An audience in a declared query
+
+A declared query ([Declared queries](/superschematic/guides/database-tables/#declared-queries))
+is SQL as written, which no repository's filter reaches. A query that
+reads an `@audience` table marks where the table's audience goes:
+`:audience(d)` for the alias `d` it reads the table through, or the
+table's own name where it has none (#735).
+
+```ts
+@query<FolderParams, FolderDocumentRow>({
+  sql: `SELECT d.id, d.title, f."name" AS folder_name
+    FROM document AS d
+    JOIN folder f ON f.id = d.folder_id AND :audience(f)
+    WHERE :audience(d) AND f.id = :folder
+    ORDER BY d.title, d.id`,
+})
+export abstract class FolderDocuments {}
+```
+
+The ORM replaces each mark with the audience's conditions for the call's
+caller, as a repository's read keeps to them: the rows whose effective
+audience is everyone or holds the caller's id, for an agent run its own
+or whom it acts for, and whose agent access lets it read. An anonymous
+caller sees the rows everyone may. Outside an operation, and as the
+system actor, a mark is `TRUE`: every row. The mark's parameters are
+numbered after every other of the statement, a paged query's key's
+among them. A mark on the alias of a projection's view of an `@audience`
+table, keyed by the table's key, holds the view to the rows of its
+source the caller sees.
+
+`superschematic queries verify` lists the tables and views each query
+reads in a `FROM`, a `JOIN` or an `UPDATE`, and refuses a query that
+reads an `@audience` table, or a view of one, through a reference no mark
+holds, naming it; `check` and `build` refuse it too. A mark whose alias is
+no reference to an `@audience` table fails the build. Verification
+prepares each mark as the condition of a caller with no id, so Postgres
+checks the alias and its columns. The author still places the mark: on
+the table of an outer join, the `ON` of the join is where it keeps the
+row and the `WHERE` where it drops it. The TypeScript and Go ORMs run
+declared queries, on Postgres; the Rust repositories have none.
 
 ### A parent with very many children
 
@@ -2427,9 +2499,9 @@ too (D191), through the runtime's `orm::notify`.
 | a generated Rust server over a database that lists `sqlite` first that wires the grants' authenticator and the access log | build `access::sqlite::GrantAuthenticator` and `Logged` over the file's tables in the implementation |
 | a generated Rust server over a database that lists `sqlite` first that mounts the calendar's and the search's routes and runs the search queue's worker | merge `orm::calendar::sqlite::calendar_routes` and `orm::search_tables::sqlite::search_routes` into the router, and call `index_search` in a worker of the queue |
 | a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
-| an audience in a declared query (`@query`) and in raw SQL (options in #735) | a declared query reads every row; filter it by `effective_audience` yourself |
+| an audience in raw SQL, and a party's grants in a declared query (#735) | apply `audienceConditions` or `orm.AccessConditions` yourself; a declared query's mark holds the audience alone |
 | a generated route that lists only the active grants, and a declared query of them (options in #735) | `activeGrants` in the TypeScript, Go and Rust runtimes, or a `@tableOperation` over a view of every grant |
-| a row rule whose path ends at a list of ids, and a team as a principal in an audience (options in #735) | a row rule on a member that holds one id; name each member in `audienceNamed` |
+| a team as a principal in an audience (options in #735) | name each member in `audienceNamed` |
 | an `@audience` queue on SQLite, and the generated Rust server's worker of one (#734) | resolve in the writer's transaction on SQLite; call `orm::resolve_audience` from a Rust worker |
 
 ## A table's behavior operations
