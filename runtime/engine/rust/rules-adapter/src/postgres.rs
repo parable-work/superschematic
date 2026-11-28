@@ -19,13 +19,14 @@
 
 use std::error::Error as StdError;
 
-use bytes::BytesMut;
 use serde_json::{Map, Value};
-use tokio_postgres::types::{to_sql_checked, Format, FromSql, IsNull, ToSql, Type};
+use superschematic_engine_pg::{classify, Class};
+use tokio_postgres::types::{FromSql, ToSql, Type};
 use tokio_postgres::GenericClient;
 
 use crate::convert::{internal, Bind, Cell};
 use crate::run::{self, Dialect, Statement, Store};
+use crate::sql::Text;
 use crate::{
     Caller, ChangeRun, Claim, Command, CreateOptions, Deadline, DeadlineRun, Error, EventRun,
     ExecuteOptions, Executed, Host, Owned, QueuedEvent, Row, SubRow, TableChange,
@@ -390,6 +391,24 @@ impl<C: GenericClient + Sync> Store for PgStore<'_, C> {
             .await?;
         Ok(())
     }
+
+    fn busy(&self, error: &Error) -> bool {
+        busy(error)
+    }
+}
+
+/// Whether an error is another transaction's keeping this one from the
+/// database ([`Class::Busy`]: a serialization failure, a deadlock, a lock
+/// or statement timeout): the command is refused as `busy`, for the caller
+/// to roll back and try again.
+fn busy(error: &Error) -> bool {
+    match error {
+        Error::Database(error) => error
+            .downcast_ref::<tokio_postgres::Error>()
+            .and_then(tokio_postgres::Error::as_db_error)
+            .is_some_and(|db| classify(db) == Class::Busy),
+        Error::Refused(_) => false,
+    }
 }
 
 /// A row's column as a cell, by the column's type: the JSON `to_jsonb`
@@ -444,37 +463,6 @@ fn params(values: &[Text]) -> Vec<&(dyn ToSql + Sync)> {
         .collect()
 }
 
-/// A parameter sent as text, which Postgres reads into whatever type it
-/// meets, or NULL.
-#[derive(Debug)]
-struct Text(Option<String>);
-
-impl ToSql for Text {
-    fn to_sql(
-        &self,
-        _ty: &Type,
-        out: &mut BytesMut,
-    ) -> Result<IsNull, Box<dyn StdError + Sync + Send>> {
-        match &self.0 {
-            Some(text) => {
-                out.extend_from_slice(text.as_bytes());
-                Ok(IsNull::No)
-            }
-            None => Ok(IsNull::Yes),
-        }
-    }
-
-    fn accepts(_ty: &Type) -> bool {
-        true
-    }
-
-    fn encode_format(&self, _ty: &Type) -> Format {
-        Format::Text
-    }
-
-    to_sql_checked!();
-}
-
 /// A `json` or `jsonb` column's text, as the binary format carries it.
 struct RawJson<'a>(&'a str);
 
@@ -509,7 +497,8 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use serde_json::json;
-    use tokio_postgres::{Client, NoTls, Transaction};
+    use superschematic_engine_pg::tls_for;
+    use tokio_postgres::{Client, Transaction};
 
     use super::*;
     use crate::tests::{
@@ -576,7 +565,8 @@ mod tests {
     }
 
     async fn connect(url: &str, schema: Option<&str>) -> Client {
-        let (client, connection) = tokio_postgres::connect(url, NoTls)
+        let (url, tls) = tls_for(url).expect("the TLS");
+        let (client, connection) = tokio_postgres::connect(&url, tls)
             .await
             .expect("Postgres connects");
         tokio::spawn(async move {
@@ -924,6 +914,110 @@ mod tests {
                 )
             );
             tx.commit().await.expect("committed");
+        })
+        .await;
+    }
+
+    /// The errors a command is refused as `busy` for, raised by the server
+    /// with each SQLSTATE: the busy class of the engine's Postgres layer,
+    /// and no other.
+    #[tokio::test]
+    async fn an_error_of_the_busy_class_is_busy_and_no_other_is() {
+        on_postgres(|url, schema| async move {
+            let client = connect(&url, Some(&schema)).await;
+            for (code, want) in [
+                ("40001", true),
+                ("40P01", true),
+                ("55P03", true),
+                ("57014", true),
+                ("23505", false),
+                ("42501", false),
+                ("XX000", false),
+            ] {
+                let error = client
+                    .batch_execute(&format!(
+                        "DO $$ BEGIN RAISE EXCEPTION 'raised' USING ERRCODE = '{code}'; END $$"
+                    ))
+                    .await
+                    .expect_err("the server raises");
+                assert_eq!(busy(&Error::from(error)), want, "{code}");
+            }
+            assert!(!busy(&Error::from(refusal(Err::<(), _>(Error::from(
+                internal("refused")
+            ))))));
+        })
+        .await;
+    }
+
+    /// A command whose write waits on another transaction's lock past the
+    /// transaction's `lock_timeout` (`55P03`) is refused as `busy`, nothing
+    /// of it written, and the caller's transaction goes on, its unit's
+    /// savepoint rolled back.
+    #[tokio::test]
+    async fn a_write_that_waits_past_the_lock_timeout_is_busy_with_nothing_written() {
+        on_postgres(|url, schema| async move {
+            let (core, layout) = (both(), db_layout());
+            let host = Host::new(&core, &layout).with_clock(|| 5000);
+            let mut client = connect(&url, Some(&schema)).await;
+            let options = CreateOptions {
+                id: Some(KEY.into()),
+                ..CreateOptions::default()
+            };
+            let made = client.transaction().await.expect("a transaction");
+            run_create(
+                &host,
+                &made,
+                "Order",
+                own(json!({"title": "Desk"})),
+                alice(),
+                &options,
+            )
+            .await
+            .expect("created");
+            made.commit().await.expect("committed");
+            let mut other = connect(&url, Some(&schema)).await;
+            let holder = other.transaction().await.expect("a transaction");
+            holder
+                .execute(
+                    r#"SELECT 1 FROM "order" WHERE id = $1 FOR UPDATE"#,
+                    &[&KEY_COLUMN],
+                )
+                .await
+                .expect("the row is locked");
+
+            let tx = client.transaction().await.expect("a transaction");
+            tx.batch_execute("SET LOCAL lock_timeout = '100ms'")
+                .await
+                .expect("the lock timeout is set");
+            let refused = refusal(
+                execute(
+                    &host,
+                    &tx,
+                    "Order",
+                    transition("paid"),
+                    &ExecuteOptions::default(),
+                )
+                .await,
+            );
+            assert_eq!((refused.code, refused.status), (Code::Busy, 503));
+            assert!(
+                refused
+                    .message
+                    .contains("it ran 1 times and nothing was written"),
+                "{}",
+                refused.message
+            );
+            let status: String = tx
+                .query_one(
+                    r#"SELECT status FROM "order" WHERE id = $1"#,
+                    &[&KEY_COLUMN],
+                )
+                .await
+                .expect("the transaction goes on")
+                .get(0);
+            assert_eq!(status, "draft");
+            tx.rollback().await.expect("rolled back");
+            holder.rollback().await.expect("released");
         })
         .await;
     }

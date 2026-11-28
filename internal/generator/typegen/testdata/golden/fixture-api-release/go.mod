@@ -6,7 +6,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/parable-work/superscalar/go v0.0.0-20260928143325-10cf493f485e
 	github.com/parable-work/superschematic/ir v1.2.3
-	gopkg.in/yaml.v3 v3.0.1
+	go.yaml.in/yaml/v3 v3.0.5
 )
 
 // The release of superschematic that generated this module pins the
