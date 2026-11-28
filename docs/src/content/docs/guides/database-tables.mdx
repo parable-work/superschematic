@@ -724,8 +724,10 @@ options its implementation's `NewWiring` answers in `Wiring.Search`; and a
 `@worker` of a `@searchable` declaration's queue hands each message to
 `IndexSearch` with `Wiring.Indexing`, with no method of the
 implementation's ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)).
-A Go server serves no MCP endpoint (D81, D116), so it serves neither
-tool. `ReindexSearch` builds every row's index row again.
+A Go server with `outputs.api.mcp` on serves the tool on its MCP endpoint
+(#616): the API package's `MCPTools` calls `CallSearchTool` as the
+endpoint's caller with its roles' permissions, with `Wiring.Search`'s
+options. `ReindexSearch` builds every row's index row again.
 Over a database that lists `sqlite`, the SQLite database's `CrossTables()`
 searches the file as the TypeScript runtime does on SQLite
 ([On SQLite and D1](#on-sqlite-and-d1), [Go on SQLite](#go-on-sqlite)).
@@ -4326,7 +4328,8 @@ stack's Go server mounts `CalendarRoutes` itself at `/api/calendar`,
 behind the API's auth step but for a feed's fetch, with the options its
 implementation's `NewWiring` answers in `Wiring.Calendar`
 ([the generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server));
-it serves no MCP endpoint, so no calendar tool. A Go server whose
+with `outputs.api.mcp` on, its MCP endpoint serves the calendar tool
+through `MCPTools`, as the endpoint's caller (#616). A Go server whose
 calendar source is titled by an `Encrypted<T>` field is refused it. Over a
 database that lists `sqlite`, Recurrence's operations run through the core
 in the SQLite repositories' transactions, and the SQLite database's

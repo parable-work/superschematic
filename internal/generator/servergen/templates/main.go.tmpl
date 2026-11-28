@@ -178,6 +178,17 @@ func run(logger *zap.Logger) error {
 		// Its @idempotent routes keep their keys in {{ .Database.Service }} (D140).
 		IdempotencyStore: idempotency.NewSQLStore({{ .Database.Var }}SQL, idempotency.{{ if .Database.SQLite }}SQLite{{ else }}Postgres{{ end }}, {{ .Package }}.IdempotencyTable),
 {{- end }}
+{{- if .MCP }}
+		// Its MCP endpoint at POST /api/mcp (D81, #660){{ if .MCPConfirmationKey }}, which signs the
+		// confirmations of its tools that ask with its config's key (D93){{ end }}{{ if .MCPGate }}, holds an
+		// agent run's call to the run's autonomy (D183, #621){{ end }}{{ if .MCPTools }}, and serves the
+		// tools of its reads across tables beside its routes' (#616){{ end }}.
+		MCP: {{ .Package }}.MCPOptions{
+{{- range .MCPOptions }}
+			{{ . }},
+{{- end }}
+		},
+{{- end }}
 		Logger:          {{ .Var }}Logger,
 		Implementations: {{ .Var }}Implementations,
 	})
