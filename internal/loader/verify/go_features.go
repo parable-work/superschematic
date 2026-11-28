@@ -1,11 +1,7 @@
 package verify
 
 import (
-	"fmt"
-	"strings"
-
 	"github.com/parable-work/superschematic/internal/generator/sqlutil"
-	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -24,10 +20,12 @@ import (
 // their plain repositories: the triggers and the core keep what each
 // feature writes, whichever ORM writes the row, and a TypeScript server
 // serves the feature. What would serve it wrongly is a Go server, which is
-// refused. That holds on Postgres; on SQLite, where the Go ORM keeps no
-// audience and no trigger keeps references and attachments, a database's
-// Go types are refused for them (sqlite_features.go, D182). Per-record access itself (D156) is served (D180), and an
-// audience on SQLite is refused for every language (checkAudience).
+// refused. That holds on SQLite too: the SQLite DDL's triggers keep an
+// audience, references and files whichever ORM writes the row (D182), and
+// the Go repositories there keep their reads to an audience and grants and
+// serve references, attachments and the access log as on Postgres
+// (sqlite_features.go, #611). Per-record access itself (D156) is served
+// (D180).
 //
 // Recurrence and the calendar (D152) and search across tables (D155) are
 // served on Postgres (D187): a Go server runs a Recurrence's operations,
@@ -35,29 +33,35 @@ import (
 // carries a table's calendar sources and search index, and the schema
 // runtime's crosstable package reads them. A calendar source a Go server
 // reads is refused a title of an Encrypted<T> field, which the Go read
-// across tables takes from its column. A Go server serves search,
-// Recurrence and the calendar on Postgres alone, so the build refuses
-// them over a database that lists sqlite first (GoServerSQLiteErr), as
-// Rust's refuses Recurrence and the calendar (D188): the loader lets a
-// database's TypeScript and Go types declare @searchable on SQLite (D186),
-// where only the TypeScript repositories search.
+// across tables takes from its column. On SQLite they are served too
+// (#615, part 2 of Go on SQLite): the behaviors' core runs a Recurrence's
+// operations in the SQLite repositories' transactions, and the SQLite
+// database's CrossTables is a crosstable.DialectHost, whose calendar and
+// search crosstable writes in SQLite's words, search's words the FTS5
+// table the index's triggers keep, as the TypeScript runtime's (D186).
+// Rust's server still refuses Recurrence and the calendar there (D188).
 //
 // Events and the notifier (D153) are served on Postgres (D190): the
 // generated ORM of a database that uses the notifier carries its tables'
 // events and notifier parts and hosts the HTTP runtime's notify package,
-// which raises, routes, delivers, escalates and reads replies. On SQLite
-// the notifier runs in TypeScript alone (D189), and GoServerSQLiteErr
-// refuses it to a Go server over a database that lists sqlite first.
+// which raises, routes, delivers, escalates and reads replies.
 //
 // Parties, the inbound path and conversations (D157) and the agent
 // dispatcher (D158), with D183's trust and narrowed paths, are served on
 // Postgres (D192): the generated ORM of a database with them hosts the
 // HTTP runtime's inbound and agents packages through the notifier's host,
-// so a database with them and no notifier is refused. On SQLite they run
-// in TypeScript alone (D189), and GoServerSQLiteErr refuses them to a Go
-// server over a database that lists sqlite first. An operation's @autonomy stays
-// refused: it holds an agent run's calls of the API's MCP tools, and a Go
-// server serves no MCP endpoint (D81, D116).
+// so a database with them and no notifier is refused. An operation's
+// @autonomy stays refused: it holds an agent run's calls of the API's MCP
+// tools, and a Go server serves no MCP endpoint (D81, D116).
+//
+// On SQLite the three are served too (#618, part 3 of Go on SQLite, as
+// TypeScript serves them since D189): the SQLite database's Notifications
+// and Orchestration are notifications.DialectHosts, whose statements the
+// notify, inbound and agents packages write in SQLite's words, and their
+// queues are enqueued in the caller's transaction and claimed on SQLite.
+// With parts 1 and 2 (#611, #615), a Go server over a database that lists
+// sqlite first is refused nothing for its dialect, and the build's check
+// of it (GoServerSQLiteErr) is gone.
 //
 // The Rust and SQLite ports refuse their own in files of their own; a
 // later Go workstream that serves one of these removes its line here.
@@ -87,50 +91,6 @@ func GoServerDatabaseErr(api, db *ir.Schema) error {
 	r := &Result{}
 	checkGoTables(db, "the Go server of "+api.Name+", over "+db.Name+",", r)
 	return r.Err()
-}
-
-// GoServerSQLiteErr is the refusal of the features of db, the database of
-// api, a Go server, that a Go server on a database that lists sqlite
-// first does not serve (D187, D190, D192), or nil: a table that composes
-// Recurrence, whose operations and deadline worker the Go adapter runs on
-// Postgres, a calendar source, and a @searchable table, which the
-// crosstable package reads and ranks with Postgres statements alone, a
-// table's events and notifications, which the notify package reads and
-// writes by Postgres's statements, and the parties' and agents' tables,
-// which the inbound path and the dispatcher read by Postgres's statements.
-// Since D189 the loader serves the notifier, the parties and the agents on
-// SQLite in TypeScript, so this is the Go server's own refusal of them. The generator calls it with
-// the database's dialects for every Go server over a database.
-func GoServerSQLiteErr(api, db *ir.Schema, dialects []string) error {
-	if api == nil || db == nil || len(dialects) == 0 || dialects[0] != registry.SQLDialectSQLite {
-		return nil
-	}
-	var features []string
-	for _, name := range sortedTypeNames(db.Types) {
-		td := db.Types[name]
-		if td == nil {
-			continue
-		}
-		if usesBehavior(td, recurrenceBehavior) {
-			features = append(features, name+": Recurrence")
-		}
-		if len(td.CalendarSources) > 0 {
-			features = append(features, name+": @calendarSource")
-		}
-		if td.Searchable != nil {
-			features = append(features, name+": @searchable")
-		}
-		for _, mark := range notifierMarks(td) {
-			features = append(features, name+": "+mark)
-		}
-		for _, mark := range orchestrationMarks(td) {
-			features = append(features, name+": "+mark)
-		}
-	}
-	if len(features) == 0 {
-		return nil
-	}
-	return fmt.Errorf("the Go server of %s is over %s, whose DB service lists sqlite first, and serves %s on Postgres alone so far (D152, D153, D155, D157, D158, D187, D190, D192); list postgres first in %s's outputs.sql.dialects, or serve the API in TypeScript", api.Name, db.Name, strings.Join(features, ", "), db.Name)
 }
 
 // checkGoTables refuses the table features of schema, a Go server's
@@ -165,23 +125,6 @@ func checkGoTables(schema *ir.Schema, where string, r *Result) {
 
 // orchestrationMarks are td's marks of D157's parties and conversations
 // and D158's agents.
-// notifierMarks are the marks of td's events and notifications (D153), which
-// the Go notifier reads and writes by Postgres's statements alone (D190):
-// on SQLite the notifier runs in TypeScript alone (D189).
-func notifierMarks(td *ir.TypeDef) []string {
-	var out []string
-	if len(td.Events) > 0 {
-		out = append(out, "@event")
-	}
-	if td.Notifier != nil {
-		out = append(out, "@notifier")
-	}
-	if td.ChannelIdentities != nil {
-		out = append(out, "@channelIdentities")
-	}
-	return out
-}
-
 func orchestrationMarks(td *ir.TypeDef) []string {
 	var out []string
 	if td.Party != nil {
@@ -224,18 +167,4 @@ func checkGoOperations(schema *ir.Schema, where string, r *Result) {
 			}
 		}
 	}
-}
-
-// usesBehavior reports whether td composes the behavior name, by
-// implements or as a behavior of the table.
-func usesBehavior(td *ir.TypeDef, name string) bool {
-	if _, ok := implementedConfig(td, name); ok {
-		return true
-	}
-	for _, ref := range td.Behaviors {
-		if ref.Name == name {
-			return true
-		}
-	}
-	return false
 }

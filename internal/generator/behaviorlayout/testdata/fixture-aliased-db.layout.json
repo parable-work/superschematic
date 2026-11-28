@@ -47,7 +47,8 @@
             {
               "name": "resolve",
               "writes": false,
-              "table": true
+              "table": true,
+              "answersRow": "row"
             }
           ],
           "tables": [
@@ -153,7 +154,8 @@
             {
               "name": "resolve",
               "writes": false,
-              "table": true
+              "table": true,
+              "answersRow": "row"
             }
           ],
           "tables": [

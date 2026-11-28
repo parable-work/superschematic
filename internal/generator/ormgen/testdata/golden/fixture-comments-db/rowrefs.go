@@ -142,6 +142,23 @@ func rowKey[K any](key string, number bool) (K, bool) {
 }
 
 func (h rowFeaturesHost) Visible(ctx context.Context, typeName string, keys []string) (map[string]bool, error) {
+	if h.tx != nil {
+		return visibleRows(ctx, h.tx, typeName, keys)
+	}
+	return visibleRows(ctx, h.db, typeName, keys)
+}
+
+// rowFeatureReaders are the repositories the references and attachments
+// read rows through: a database's or a transaction's, on either dialect.
+type rowFeatureReaders interface {
+	GetReviewReadOnlyRepository() ReadOnlyReviewRepositoryInterface
+	GetTicketReadOnlyRepository() ReadOnlyTicketRepositoryInterface
+}
+
+// visibleRows is which of keys, of a row of typeName in their wire form,
+// the caller of ctx reads through the table's repository of readers, which
+// keeps its reads to the caller (D156, D180).
+func visibleRows(ctx context.Context, readers rowFeatureReaders, typeName string, keys []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	switch typeName {
 	case "Review":
@@ -153,13 +170,7 @@ func (h rowFeaturesHost) Visible(ctx context.Context, typeName string, keys []st
 				ids = append(ids, id)
 			}
 		}
-		var repository ReadOnlyReviewRepositoryInterface
-		if h.tx != nil {
-			repository = h.tx.GetReviewReadOnlyRepository()
-		} else {
-			repository = h.db.GetReviewReadOnlyRepository()
-		}
-		found, err := repository.GetManyByIDs(ctx, ids)
+		found, err := readers.GetReviewReadOnlyRepository().GetManyByIDs(ctx, ids)
 		if err != nil {
 			return nil, err
 		}
@@ -175,13 +186,7 @@ func (h rowFeaturesHost) Visible(ctx context.Context, typeName string, keys []st
 				ids = append(ids, id)
 			}
 		}
-		var repository ReadOnlyTicketRepositoryInterface
-		if h.tx != nil {
-			repository = h.tx.GetTicketReadOnlyRepository()
-		} else {
-			repository = h.db.GetTicketReadOnlyRepository()
-		}
-		found, err := repository.GetManyByIDs(ctx, ids)
+		found, err := readers.GetTicketReadOnlyRepository().GetManyByIDs(ctx, ids)
 		if err != nil {
 			return nil, err
 		}

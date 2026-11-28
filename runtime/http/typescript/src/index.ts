@@ -136,7 +136,7 @@ export type {
   RequestFilter,
   TextFilter,
 } from './filter.js';
-export { authorize, covers, hasAnyPermission } from './auth.js';
+export { authorize, covers, hasAnyPermission, requestAuthenticator } from './auth.js';
 export type { ActingFor, Assurance, Authenticator, GrantReach, PermissionMatcher, Principal, PrincipalKind } from './auth.js';
 export { authorizeService, ed25519PublicJwkFromPem, serviceAuthenticator } from './serviceauth.js';
 export type {

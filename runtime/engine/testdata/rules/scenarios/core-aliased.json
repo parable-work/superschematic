@@ -1,6 +1,6 @@
 {
   "name": "core-aliased",
-  "description": "Aliased's names on a table, D147: a create gives the name, which no other row holds as a name or an alias in its normalized form (lower or slug), a name taken refused with the key of the row that holds it; rename keeps the old name as an alias; addAlias and removeAlias, a removed alias freed for another row; resolve on the table; a delete that frees the row's names; and the define refusals. Cases written by hand in the recorded format, since no engine implements Aliased. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
+  "description": "Aliased's names on a table, D147: a create gives the name, which no other row holds as a name or an alias in its normalized form (lower or slug), a name taken refused naming nothing of the row that holds it; rename keeps the old name as an alias; addAlias and removeAlias, a removed alias freed for another row; resolve on the table; a delete that frees the row's names; and the define refusals. Cases written by hand in the recorded format, since no engine implements Aliased. Each answer holds what the replayer compares: a record's id, data and behaviors, an operation's result, and a refusal whole, in the core's words; what only the engine's store answers (sequence numbers, versions, timestamps, the document a define echoes) is left out.",
   "source": "written by hand (D147): runtime/engine/testdata/rules/scenarios/core-aliased.json",
   "shared": {},
   "scenarios": [
@@ -140,17 +140,16 @@
           "error": {
             "class": "BehaviorVetoError",
             "code": "vetoed",
-            "message": "behavior Aliased vetoes create of Company c2: \"ACME\" is held by Company c1, as its name or an alias: a name is one row's",
+            "message": "behavior Aliased vetoes create of Company c2: \"ACME\" is held by another Company, as its name or an alias: a name is one row's",
             "details": {
               "behavior": "Aliased",
               "use": "name",
               "action": "create",
-              "reason": "\"ACME\" is held by Company c1, as its name or an alias: a name is one row's",
+              "reason": "\"ACME\" is held by another Company, as its name or an alias: a name is one row's",
               "vetoCode": "name_taken",
               "vetoDetails": {
                 "name": "ACME",
-                "normalized": "acme",
-                "holder": "c1"
+                "normalized": "acme"
               }
             }
           }
@@ -171,17 +170,16 @@
           "error": {
             "class": "BehaviorVetoError",
             "code": "vetoed",
-            "message": "behavior Aliased vetoes create of Company c2: \" acme   corp\" is held by Company c1, as its name or an alias: a name is one row's",
+            "message": "behavior Aliased vetoes create of Company c2: \" acme   corp\" is held by another Company, as its name or an alias: a name is one row's",
             "details": {
               "behavior": "Aliased",
               "use": "name",
               "action": "create",
-              "reason": "\" acme   corp\" is held by Company c1, as its name or an alias: a name is one row's",
+              "reason": "\" acme   corp\" is held by another Company, as its name or an alias: a name is one row's",
               "vetoCode": "name_taken",
               "vetoDetails": {
                 "name": " acme   corp",
-                "normalized": "acme corp",
-                "holder": "c1"
+                "normalized": "acme corp"
               }
             }
           }
@@ -226,17 +224,16 @@
           "error": {
             "class": "BehaviorVetoError",
             "code": "vetoed",
-            "message": "behavior Aliased vetoes rename of Company c2: \"acme corp\" is held by Company c1, as its name or an alias: a name is one row's",
+            "message": "behavior Aliased vetoes rename of Company c2: \"acme corp\" is held by another Company, as its name or an alias: a name is one row's",
             "details": {
               "behavior": "Aliased",
               "use": "name",
               "action": "rename",
-              "reason": "\"acme corp\" is held by Company c1, as its name or an alias: a name is one row's",
+              "reason": "\"acme corp\" is held by another Company, as its name or an alias: a name is one row's",
               "vetoCode": "name_taken",
               "vetoDetails": {
                 "name": "acme corp",
-                "normalized": "acme corp",
-                "holder": "c1"
+                "normalized": "acme corp"
               }
             }
           }
@@ -256,17 +253,16 @@
           "error": {
             "class": "BehaviorVetoError",
             "code": "vetoed",
-            "message": "behavior Aliased vetoes addAlias of Company c2: \"Acme\" is held by Company c1, as its name or an alias: a name is one row's",
+            "message": "behavior Aliased vetoes addAlias of Company c2: \"Acme\" is held by another Company, as its name or an alias: a name is one row's",
             "details": {
               "behavior": "Aliased",
               "use": "name",
               "action": "addAlias",
-              "reason": "\"Acme\" is held by Company c1, as its name or an alias: a name is one row's",
+              "reason": "\"Acme\" is held by another Company, as its name or an alias: a name is one row's",
               "vetoCode": "name_taken",
               "vetoDetails": {
                 "name": "Acme",
-                "normalized": "acme",
-                "holder": "c1"
+                "normalized": "acme"
               }
             }
           }
@@ -557,17 +553,16 @@
           "error": {
             "class": "BehaviorVetoError",
             "code": "vetoed",
-            "message": "behavior Aliased vetoes create of Company c2: \"Acme Group\" is held by Company c1, as its name or an alias: a name is one row's",
+            "message": "behavior Aliased vetoes create of Company c2: \"Acme Group\" is held by another Company, as its name or an alias: a name is one row's",
             "details": {
               "behavior": "Aliased",
               "use": "name",
               "action": "create",
-              "reason": "\"Acme Group\" is held by Company c1, as its name or an alias: a name is one row's",
+              "reason": "\"Acme Group\" is held by another Company, as its name or an alias: a name is one row's",
               "vetoCode": "name_taken",
               "vetoDetails": {
                 "name": "Acme Group",
-                "normalized": "acme group",
-                "holder": "c1"
+                "normalized": "acme group"
               }
             }
           }

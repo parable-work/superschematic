@@ -14,11 +14,11 @@ person who sent it.
 
 | Built | Not built yet |
 | --- | --- |
-| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Go and Rust on SQLite and D1 |
+| `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Rust on SQLite and D1, and Go on D1 |
 | the same notifier in the Rust runtime, on Postgres ([in Rust](#in-rust)) | a route to an agent in Rust (D158 is TypeScript's alone so far) |
-| the same notifier in the Go runtime, on Postgres ([in Go](#in-go)) | a route to an agent in Go (D158 is TypeScript's alone so far) |
+| the same notifier in the Go runtime, on Postgres and SQLite, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | the same generated over a database that lists `sqlite` first (#717) |
 | raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
-| routes as rows, by kind, table and filter, to relation paths, principals, roles and parties | a generated server that builds the notifier into its `Deps` |
+| routes as rows, by kind, table and filter, to relation paths, principals, roles and parties; a generated TypeScript server that builds the notifier into its `Deps`, mounts the relays' callbacks and the inbox, and drains the dispatch queue ([the generated server](#what-the-generated-server-wires)) | the same in a generated Go or Rust server |
 | the recipient's audience held at routing and at send time | a schedule that checks every adapter's health on its own |
 | urgent, normal, digest and record; quiet hours; digests and briefs | an inbox page in Topcoat |
 | deliveries that fall through, time out and escalate | an event at an occurrence's due time itself; a reply interpreter other than keywords |
@@ -185,6 +185,9 @@ app.post("/webhooks/sms/inbound", async c =>
   c.json(await notifier.inbound("SMS", { headers: Object.fromEntries(c.req.raw.headers), body: await c.req.text() })));
 ```
 
+The generated TypeScript server mounts that route for every channel slot
+itself ([below](#what-the-generated-server-wires)).
+
 A sender whose address is a verified channel identity runs as its
 principal. A reply names its notice by number (`ACK 142`, `done 142`)
 unless exactly one waits on its sender on that channel. `ack` acknowledges
@@ -218,6 +221,38 @@ sends a six-digit code to it, and a reply with the code, or
 sends a reset code to the address the login names, through the email
 adapter, and `complete` sets the new password with the identity service's
 `resetPassword`, which ends every session, and verifies the address.
+
+## What the generated server wires
+
+A generated TypeScript server of an API over a Postgres database that
+declares the notifier wires it itself (#702), in every entrypoint: `main.ts`,
+`fetch.ts`, and each job's and worker's `main.ts` and `drain.ts`.
+
+| Piece | What the server does |
+| --- | --- |
+| `deps.providers` | `providersOf(config)`, the API package's `providers.ts`: the slots of its `@providers` over the provider packages its config lists ([runtime providers](/superschematic/guides/runtime-providers/)) |
+| `deps.notifier` | `createNotifier` over `deps.orm` and the dispatch queue, sending on every channel slot |
+| relay callbacks | `POST /webhooks/<slot>/inbound` and `/webhooks/<slot>/status` per channel slot, the slot in lower case (`SMS` is `/webhooks/sms`) |
+| the inbox | `GET /api/inbox`, `POST /api/inbox/<id>/read` and `/ack`, as the caller the API's authenticator establishes |
+| a `@worker` of the dispatch queue | hands each message to `notifier.handle`; the implementation has no method for it |
+
+What only the app knows goes in `createRuntimeOptions`, which the
+implementation may export; the server builds the notifier with what it
+answers over what it fills:
+
+```ts
+import type { RuntimeOptionsConstructor } from "@acme/tickets-api-api";
+
+export const createRuntimeOptions: RuntimeOptionsConstructor = deps => ({
+  notifier: { replies: { "ticket.overdue": { done: markDone } }, defaultChannels: ["sms", "email"] },
+  notifierRoutes: { inbox: "/api/me/notices" },
+});
+```
+
+The seed rows of the preferences and the channels' trust, and password
+reset's routes, stay the app's. A Go or a Rust server builds no notifier
+of its own yet, and one over a database that lists sqlite first neither:
+an app builds it there as below.
 
 ## On SQLite and D1
 
@@ -359,5 +394,30 @@ adapter and sets the password with the identity service's
 Postgres, which holds the zone database. Whether an adapter reports
 statuses or reads inbound messages is whether it implements
 `providers.ChannelStatusReader` and `providers.ChannelInboundReader`. A
-route that names an agent is logged and reaches no one: the Go runtime
-does not serve agent runs yet.
+route that names an agent puts a run request on the dispatcher's queue
+when the notifier holds one (`Options.Agents`, D192); without it the
+route is logged and reaches no one.
+
+A stack's Go server builds the notifier into `Deps.Notifier` itself, with
+the reply actions and the rest of the options its implementation's
+`NewWiring` answers in `Wiring.Notifier`. It mounts the notifier's routes
+(`Notifier.Routes`): the caller's inbox at `GET /api/inbox`, and
+`POST /api/inbox/{id}/read` and `/ack`, behind the API's auth step, and
+each channel slot's relay callbacks at `POST /webhooks/<slot>/inbound`
+and `/status`, outside it, `/webhooks/sms` for slot `SMS`. A `@worker` of
+the dispatch queue is the notifier's, and the implementation has no
+method for it. [The generated Go server](/superschematic/guides/agent-runs/#the-generated-go-server)
+lists the whole wiring.
+
+On SQLite the Go runtime runs the same notifier (#618), as the TypeScript one
+does (D189). `(*SQLiteDatabase).Notifications()` is its host over the SQLite file,
+and the runtime writes its statements over its own tables in SQLite's
+words: a parameter `?n`, a list read through `json_each`, a time as RFC
+3339 text, each cell read back as the Postgres driver reads its column
+([Go on SQLite](/superschematic/guides/database-tables/#go-on-sqlite)). Its
+`Raise` enqueues in the caller's `*SQLiteTx`, so an event commits with
+the change, and `WorkerQueue()` claims the dispatch queue on SQLite, which
+has no slots and no next due time (D145). The wall time of quiet hours
+and digests is read from Go's zone database there, which the runtime
+carries. The generated server does not wire it over a database that lists
+`sqlite` first yet (#717): the implementation builds it over `Deps.DB`.

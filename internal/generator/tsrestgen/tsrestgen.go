@@ -2396,14 +2396,28 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 	} else if err := os.Remove(filepath.Join(outputDir, BehaviorWorkersFile)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove stale %s: %w", BehaviorWorkersFile, err)
 	}
-	// agents.ts builds Deps.agents (D183); one an earlier build wrote for a
-	// database that no longer uses the agent orchestration is removed.
-	if output.HasAgents() {
-		if err := generateFile("agents.tmpl", filepath.Join(outputDir, AgentsFile), output); err != nil {
-			return fmt.Errorf("generate %s: %w", AgentsFile, err)
-		}
-	} else if err := os.Remove(filepath.Join(outputDir, AgentsFile)); err != nil && !os.IsNotExist(err) {
+	// providers.ts reads the runtime providers (D159), and runtime.ts
+	// builds Deps' runtime pieces and their routes; one an earlier build
+	// wrote for what the API no longer has is removed, and so is agents.ts,
+	// which runtime.ts replaces.
+	if err := os.Remove(filepath.Join(outputDir, AgentsFile)); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove stale %s: %w", AgentsFile, err)
+	}
+	for _, file := range []struct {
+		write    bool
+		template string
+		name     string
+	}{
+		{output.HasProviders(), "providers.tmpl", ProvidersFile},
+		{output.HasRuntime(), "runtime.tmpl", RuntimeFile},
+	} {
+		if file.write {
+			if err := generateFile(file.template, filepath.Join(outputDir, file.name), output); err != nil {
+				return fmt.Errorf("generate %s: %w", file.name, err)
+			}
+		} else if err := os.Remove(filepath.Join(outputDir, file.name)); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove stale %s: %w", file.name, err)
+		}
 	}
 	// config.ts is envgen's, written after this when the API has a
 	// configuration; one an earlier build wrote would import what no

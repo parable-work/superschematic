@@ -402,6 +402,13 @@ func TestJSPackage(t *testing.T) {
 	_, err := resolve(t, files, resolvers.JSPackage, `{"dir":"apps/web"}`)
 	wantError(t, err, `apps/web/package.json depends on libb by "workspace:*", and no package of the workspace at . has that name`)
 
+	// A workspace dependency of a package in no tracked workspace: the
+	// workspace's root is a file a build writes, and the error says so.
+	files = jsFiles()
+	delete(files, "package.json")
+	_, err = resolve(t, files, resolvers.JSPackage, `{"dir":"web/shop"}`)
+	wantError(t, err, `web/shop/package.json depends on @acme/eslint-config by "workspace:^", and the commit holds no workspace above it`)
+
 	// The workspace root is a package too, without its members.
 	res = mustResolve(t, jsFiles(), resolvers.JSPackage, `{"dir":"."}`)
 	if contains(res.Paths, "packages/unrelated/package.json") || contains(res.Paths, "web/shop/src/app.ts") {
@@ -465,16 +472,18 @@ COPY bin/migrate /migrate
 	}
 }
 
-// TestImage: an image is its Dockerfile, its context's .dockerignore and
-// each file of the context a COPY, an ADD or a bind mount names. A
-// source the commit does not hold is generated.
+// TestImage: an image is its Dockerfile, its ignore files and each file
+// of the context a COPY, an ADD or a bind mount names, less what the
+// ignore file in effect leaves out. A source the commit does not hold is
+// generated.
 func TestImage(t *testing.T) {
 	res := mustResolve(t, imageFiles(), resolvers.Image, `{"dockerfile":"docker/api.Dockerfile","context":"."}`)
 	wantPaths(t, res,
 		"docker/api.Dockerfile", "docker/api.Dockerfile.dockerignore", ".dockerignore",
 		"go.mod", "go.sum",
-		// The ignore file is not applied: the README stays in.
-		"go/api/main.go", "go/api/README.md", "go/lib/lib.go",
+		// The Dockerfile's own ignore file is the one in effect, and it
+		// leaves the README out.
+		"go/api/main.go", "go/lib/lib.go",
 		"scripts/entry point.sh",
 		"configs/app.yaml",
 		// A pattern matches within one directory.
@@ -493,12 +502,207 @@ func TestImage(t *testing.T) {
 	res = mustResolve(t, imageFiles(), resolvers.Image, `{"dockerfile":"var/Dockerfile"}`)
 	wantPaths(t, res, "var/Dockerfile", "var/a.txt")
 
+	// With no ignore file of the Dockerfile's own, the context's is the
+	// one in effect: the README is back.
+	files := imageFiles()
+	delete(files, "docker/api.Dockerfile.dockerignore")
+	res = mustResolve(t, files, resolvers.Image, `{"dockerfile":"docker/api.Dockerfile","context":"."}`)
+	if !contains(res.Paths, "go/api/README.md") || contains(res.Paths, "docker/api.Dockerfile.dockerignore") {
+		t.Errorf("the context's ignore file is not the one in effect: %v", res.Paths)
+	}
+
 	_, err := resolve(t, imageFiles(), resolvers.Image, `{"dockerfile":"docker/web.Dockerfile"}`)
 	wantError(t, err, "the commit holds no Dockerfile at docker/web.Dockerfile")
-	files := imageFiles()
+	files = imageFiles()
 	files["var/Dockerfile"] = "FROM scratch\nCOPY ../outside /app\n"
 	_, err = resolve(t, files, resolvers.Image, `{"dockerfile":"var/Dockerfile","context":"."}`)
 	wantError(t, err, `var/Dockerfile names "../outside", which is outside the repository`)
+}
+
+// TestImageIgnoreFile: the ignore file's lines are read as Docker reads
+// them. A pattern is from the context's root, a matched directory leaves
+// out all under it, `**` crosses directories, `!` takes files back in
+// and the last matching line decides.
+func TestImageIgnoreFile(t *testing.T) {
+	files := map[string]string{
+		"app/Dockerfile": "FROM scratch\nCOPY . /app\n",
+		"app/.dockerignore": strings.Join([]string{
+			"# what the image never reads",
+			"",
+			"node_modules",
+			"/dist/",
+			"**/*.log",
+			"docs/*",
+			"!docs/keep.md",
+			"*.tmp",
+			"secrets/**",
+			"!secrets/public/key.pem",
+			"Dockerfile",
+			".dockerignore",
+		}, "\n") + "\n",
+		"app/main.go":                  "\n",
+		"app/node_modules/a/index.js":  "\n",
+		"app/src/node_modules/b.js":    "\n",
+		"app/dist/out.js":              "\n",
+		"app/src/dist/kept.js":         "\n",
+		"app/run.log":                  "\n",
+		"app/src/deep/run.log":         "\n",
+		"app/docs/guide.md":            "\n",
+		"app/docs/keep.md":             "\n",
+		"app/docs/deep/nested.md":      "\n",
+		"app/scratch.tmp":              "\n",
+		"app/src/scratch.tmp":          "\n",
+		"app/secrets/private/key.pem":  "\n",
+		"app/secrets/public/key.pem":   "\n",
+		"outside/of/the/context.go":    "\n",
+		"app/src/with space/readme.md": "\n",
+	}
+	res := mustResolve(t, files, resolvers.Image, `{"dockerfile":"app/Dockerfile"}`)
+	wantPaths(t, res,
+		// The Dockerfile and the ignore file are the image's whatever the
+		// ignore file says of them.
+		"app/Dockerfile", "app/.dockerignore",
+		"app/main.go",
+		// A pattern with no slash is from the root, as any other.
+		"app/src/node_modules/b.js", "app/src/dist/kept.js", "app/src/scratch.tmp",
+		// `docs/*` leaves out the directory under docs with all in it.
+		"app/docs/keep.md",
+		"app/secrets/public/key.pem",
+		"app/src/with space/readme.md",
+	)
+
+	// A named source goes through the same lines.
+	files["app/Dockerfile"] = "FROM scratch\nCOPY docs src/deep /app/\n"
+	res = mustResolve(t, files, resolvers.Image, `{"dockerfile":"app/Dockerfile"}`)
+	wantPaths(t, res, "app/Dockerfile", "app/.dockerignore", "app/docs/keep.md")
+
+	// A pattern Docker cannot read fails the resolution.
+	files["app/.dockerignore"] = "src/[\n"
+	_, err := resolve(t, files, resolvers.Image, `{"dockerfile":"app/Dockerfile"}`)
+	wantError(t, err, `app/.dockerignore: pattern "src/["`)
+}
+
+// TestJSPackageFollowsProjectReferences: a tsconfig's references are the
+// package's too. A referenced package comes with what it depends on, a
+// referenced project that is no package with the files under it, and a
+// reference the commit does not hold is generated.
+func TestJSPackageFollowsProjectReferences(t *testing.T) {
+	files := jsFiles()
+	files["web/shop/tsconfig.json"] = `{
+  "extends": "../../tsconfig.base.json",
+  "references": [
+    {"path": "../../packages/unrelated"},
+    {"path": "../../tools/codegen"},
+    {"path": "../../tools/lint/tsconfig.lint.json"},
+    {"path": "../../schemas/dist/types"},
+  ],
+}`
+	files["packages/unrelated/tsconfig.json"] = `{"references": [{"path": "../../web/shop"}]}`
+	files["packages/unrelated/index.ts"] = "\n"
+	files["tools/codegen/tsconfig.json"] = `{"extends": "./tsconfig.shared.json"}`
+	files["tools/codegen/tsconfig.shared.json"] = `{}`
+	files["tools/codegen/gen.ts"] = "\n"
+	files["tools/lint/tsconfig.lint.json"] = `{}`
+	files["tools/lint/rules.ts"] = "\n"
+	files["tools/other/x.ts"] = "\n"
+	res := mustResolve(t, files, resolvers.JSPackage, `{"dir":"web/shop"}`)
+	for _, want := range []string{
+		"packages/unrelated/package.json", "packages/unrelated/tsconfig.json", "packages/unrelated/index.ts",
+		"tools/codegen/tsconfig.json", "tools/codegen/tsconfig.shared.json", "tools/codegen/gen.ts",
+		"tools/lint/tsconfig.lint.json", "tools/lint/rules.ts",
+	} {
+		if !contains(res.Paths, want) {
+			t.Errorf("a referenced project's %s is missing: %v", want, res.Paths)
+		}
+	}
+	if contains(res.Paths, "tools/other/x.ts") {
+		t.Errorf("a project no tsconfig references is in the set: %v", res.Paths)
+	}
+	if !contains(generatedPaths(res), "schemas/dist/types") {
+		t.Errorf("a referenced project the commit does not hold is generated: %v", res.Generated)
+	}
+}
+
+// TestJSPackageReadsTheLockfile: a dependency a workspace answers and no
+// tracked member has is where the lockfile resolved it. A directory the
+// commit does not hold is generated, one it holds is taken, and a name
+// the registry answers is neither.
+func TestJSPackageReadsTheLockfile(t *testing.T) {
+	// bun's text lockfile, with its trailing commas.
+	files := jsFiles()
+	files["web/shop/package.json"] = `{"name": "@acme/web-shop", "dependencies": {"@acme/shop-api-types": "*", "left-pad": "*", "@acme/stray": "workspace:*"}}`
+	files["bun.lock"] = `{
+  "lockfileVersion": 1,
+  "workspaces": {
+    "": { "name": "shop", },
+    "schemas/dist/types/typescript/shop-api": { "name": "@acme/shop-api-types", },
+    "vendor/icons": { "name": "@acme/stray", },
+  },
+  "packages": {
+    "@acme/shop-api-types": ["@acme/shop-api-types@workspace:schemas/dist/types/typescript/shop-api"],
+    "left-pad": ["left-pad@1.3.0", "", {}, "sha512-abc"],
+  }
+}
+`
+	res := mustResolve(t, files, resolvers.JSPackage, `{"dir":"web/shop"}`)
+	// The exact directory, and not the pattern's: the lockfile names it.
+	wantGenerated(t, res, registry.TaskGeneratedPath{Path: "schemas/dist/types/typescript/shop-api", From: "bun.lock"})
+	// A member the lockfile names and the patterns do not is taken.
+	if !contains(res.Paths, "vendor/icons/index.js") {
+		t.Errorf("a member the lockfile resolved is missing: %v", res.Paths)
+	}
+
+	// The registry's `*` reports nothing, where the wider rule would
+	// report the pattern.
+	files["web/shop/package.json"] = `{"name": "@acme/web-shop", "dependencies": {"left-pad": "*"}}`
+	res = mustResolve(t, files, resolvers.JSPackage, `{"dir":"web/shop"}`)
+	wantGenerated(t, res)
+	// A name the lockfile does not resolve falls back to the wider rule.
+	files["web/shop/package.json"] = `{"name": "@acme/web-shop", "dependencies": {"right-pad": "*"}}`
+	res = mustResolve(t, files, resolvers.JSPackage, `{"dir":"web/shop"}`)
+	wantGenerated(t, res, registry.TaskGeneratedPath{Path: "schemas/dist/types/typescript", From: "package.json"})
+
+	// npm links a member under node_modules.
+	files = map[string]string{
+		"package.json": `{"name": "root", "workspaces": ["apps/*", "gen/*"]}`,
+		"package-lock.json": `{"lockfileVersion": 3, "packages": {
+  "": {"name": "root"},
+  "node_modules/@acme/gen-types": {"resolved": "gen/types", "link": true},
+  "node_modules/left-pad": {"version": "1.3.0", "resolved": "https://registry.npmjs.org/left-pad/-/left-pad-1.3.0.tgz"},
+  "node_modules/a/node_modules/left-pad": {"version": "1.0.0"}
+}}`,
+		"apps/web/package.json": `{"name": "web", "dependencies": {"@acme/gen-types": "*", "left-pad": "*"}}`,
+	}
+	res = mustResolve(t, files, resolvers.JSPackage, `{"dir":"apps/web"}`)
+	wantGenerated(t, res, registry.TaskGeneratedPath{Path: "gen/types", From: "package-lock.json"})
+
+	// pnpm resolves each importer's dependencies, a link from the
+	// importer.
+	files = map[string]string{
+		"pnpm-workspace.yaml": "packages:\n  - 'apps/*'\n  - 'gen/*'\n",
+		"pnpm-lock.yaml": `lockfileVersion: '9.0'
+importers:
+  .: {}
+  apps/web:
+    dependencies:
+      '@acme/gen-types':
+        specifier: workspace:*
+        version: link:../../gen/types
+      left-pad:
+        specifier: '*'
+        version: 1.3.0
+`,
+		"package.json":          `{"name": "root"}`,
+		"apps/web/package.json": `{"name": "web", "dependencies": {"@acme/gen-types": "workspace:*", "left-pad": "*"}}`,
+	}
+	res = mustResolve(t, files, resolvers.JSPackage, `{"dir":"apps/web"}`)
+	wantGenerated(t, res, registry.TaskGeneratedPath{Path: "gen/types", From: "pnpm-lock.yaml"})
+
+	// A lockfile the resolver cannot read says nothing, and the wider
+	// rule holds.
+	files["pnpm-lock.yaml"] = "\tnot: [yaml\n"
+	res = mustResolve(t, files, resolvers.JSPackage, `{"dir":"apps/web"}`)
+	wantGenerated(t, res, registry.TaskGeneratedPath{Path: "gen", From: "pnpm-workspace.yaml"})
 }
 
 // TestAResolverReadsManifestsAndNothingElse: a resolution reads the
@@ -526,7 +730,8 @@ func TestAResolverReadsManifestsAndNothingElse(t *testing.T) {
 		for _, name := range tree.read {
 			base := name[strings.LastIndex(name, "/")+1:]
 			manifest := base == "go.mod" || base == "go.work" || base == "Cargo.toml" || base == "package.json" ||
-				base == "pnpm-workspace.yaml" || strings.HasPrefix(base, "tsconfig") || strings.HasSuffix(base, "Dockerfile")
+				base == "pnpm-workspace.yaml" || strings.HasPrefix(base, "tsconfig") || strings.HasSuffix(base, "Dockerfile") ||
+				base == "bun.lock" || base == "package-lock.json" || base == "pnpm-lock.yaml" || strings.HasSuffix(base, ".dockerignore")
 			if !manifest {
 				t.Errorf("%s read %s, which is no manifest", kind, name)
 			}

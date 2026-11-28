@@ -9,15 +9,24 @@ guide covers it in full.
 | Path | What it is |
 |---|---|
 | `schemas/services/work-db` | DB, Postgres: `Task` (a schedule wakes an agent on it, a person and an agent talk in its thread), `TaskNote` and `Invoice`, which a run on a task reaches through its role, `Task` and `TaskNote` `@searchable` on the queue `SearchIndexing`; `Customer`, a party outside the user table (D157), and `Grant`, the grants a customer's and a run's token are; the notifier's tables; and the orchestration's: `Agent` (`@versioned` definitions), `AgentRun` (runs, holding a Lease while their instance runs and started again by Retries), `AgentRunRequest` (the dispatcher's queue), `AutonomyPolicy`, `AgentApproval`, `AgentControl` (each agent's stop switch and budget) and `AgentBudget` (every agent's); and D157's `Conversation`, `Message` and `RunRequest`, the queue a customer's inbound messages put run requests on |
-| `schemas/services/work-api` | API over `work-db`, served in TypeScript: `WorkApiConfig` names a sandbox, a model, a credential broker and an SMS channel slot, and where an instance reaches the agent routes; `getTask` and `payInvoice` say what they are to an agent's autonomy, `payInvoice` moving money; `Dispatch` runs the dispatcher on its queue, `InboundRuns` hands it each run request a customer's message made, `Notify` the notifier, `TaskDeadlines` each task's schedules and `RunDeadlines` each run's lease and backoff |
+| `schemas/services/work-api` | API over `work-db`, served in TypeScript: `WorkApiConfig` names a sandbox, a model, a credential broker and an SMS channel slot, and where an instance reaches the agent routes; `getTask` and `payInvoice` say what they are to an agent's autonomy, `payInvoice` moving money; `Dispatch` runs the dispatcher on its queue, `InboundRuns` hands it each run request a customer's message made, `Notify` the notifier, `Indexing` search's indexing, `TaskDeadlines` each task's schedules and `RunDeadlines` each run's lease and backoff |
 | `schemas/services/work-stack` | Stack: `work-api` on this machine, its provider slots bound in `Dev`'s env |
-| `typescript/work-api` | `work-api`'s implementation: `createAgentOptions`, what the dispatcher is built with beside its tables (the providers the config names, the notifier, the inbound path, the app's tools); the operations, each an agent's call held to its run's autonomy; and the workers the app runs itself |
+| `typescript/work-api` | `work-api`'s implementation: `createAgentOptions`, what the dispatcher is built with beside what the server fills (where an instance reaches it, the app's tools, what an instance needs beside its run); the operations, each an agent's call held to its run's autonomy; and the worker the app runs itself |
 
 The generated server does the rest of the wiring (D183): it builds the
-dispatcher into `work-api`'s `Deps` (`deps.agents`), mounts the agent
-routes an instance calls, and hands each message of `Dispatch`'s and
-`InboundRuns`' queues to the dispatcher, so the implementation has no
-method for either.
+providers the config names (`deps.providers`, D159), the notifier
+(`deps.notifier`, D153), the inbound path (`deps.inbound`, D157) and the
+dispatcher (`deps.agents`) into `work-api`'s `Deps`, the notifier's agent
+recipients and approval replies and the inbound path's approve hook
+reaching the dispatcher; it mounts the agent routes an instance calls and
+the approvals' approve and deny, the SMS relay's callbacks, the inbox and
+search; it runs a customer's grant's token as the customer around the
+implementation's authenticator (D156); and it hands each message of
+`Dispatch`'s and `InboundRuns`' queues to the dispatcher, `Notify`'s to the
+notifier and `Indexing`'s to search's indexing (D155), so the
+implementation has no method for any of them. `server/work-stack/work-api`
+has a `fetch.ts` and each worker a `drain.ts` with the same wiring when an
+environment places the stack on Cloudflare Workers.
 
 The providers are `examples/runtime-providers`'s: the local-process
 sandbox, the model stub, the vault broker and the first SMS relay.
@@ -68,7 +77,9 @@ API's, is config alone, though no such provider ships yet.
 (`internal/loader/agents`) load these schemas.
 `TestAgentOrchestrationExampleUsesTheGeneratedWiring` (`cmd/superschematic`)
 builds the stack and type-checks the generated server and workers against
-the implementation. The same scenario, under the
+the implementation, and `TestAgentOrchestrationExampleOnCloudflare` does
+the same with a Cloudflare environment beside `Dev`, holding the wiring to
+goldens (`cmd/superschematic/testdata/agent-orchestration`). The same scenario, under the
 fixture name `fixture-agent-runs-db`, runs end to end against Postgres in
 `TestAgentRunsEndToEnd` (`internal/generator/tsgen`): the dispatcher starts
 each instance in the local-process sandbox, which runs the runtime's
@@ -77,4 +88,7 @@ each instance in the local-process sandbox, which runs the runtime's
 The dispatcher is the TypeScript runtime's, on Postgres: the Go and Rust
 servers have no dispatcher or autonomy yet. The generated TypeScript server
 builds it into `work-api`'s `Deps` (D183), and `typescript/work-api` gives
-it the options only the app knows.
+it the options only the app knows. An implementation may export
+`createRuntimeOptions` too, which adds to or overrides what the notifier,
+the inbound path, the calendar and search are built with; this one needs
+none.
