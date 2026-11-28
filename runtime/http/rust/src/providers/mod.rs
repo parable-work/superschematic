@@ -46,8 +46,8 @@ pub use channel::{
     InboundAuthentication, InboundMessage, OptOut, OutboundMessage, SendResult, WebhookRequest,
 };
 pub use contracts::{
-    contract_of, extension_subject, CALLER_KEY, provider_config_field, RuntimeContract, RuntimeInterface,
-    RUNTIME_CONTRACTS,
+    contract_of, extension_subject, provider_config_field, RuntimeContract, RuntimeInterface,
+    CALLER_KEY, RUNTIME_CONTRACTS,
 };
 pub use credentials::{
     apply_injection, use_credential, CredentialListing, CredentialProvider, CredentialQuery,

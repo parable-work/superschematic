@@ -20,9 +20,9 @@ use std::sync::{Arc, Mutex};
 
 use super::define::{check_provider_manifest, extension_principal, ConfigValue, ExtensionKey};
 use super::{
-    provider_config_field, ChannelAdapter, CALLER_KEY, CredentialProvider, FileProcessor, ModelProvider,
+    provider_config_field, ChannelAdapter, CredentialProvider, FileProcessor, ModelProvider,
     ProviderContext, ProviderContractError, ProviderDefinition, ProviderInstance, ProviderSettings,
-    RuntimeInterface, SandboxProvider,
+    RuntimeInterface, SandboxProvider, CALLER_KEY,
 };
 use crate::auth::Principal;
 use crate::BoxError;
@@ -637,8 +637,8 @@ mod tests {
             ],
             &[("CHAT", "channel"), ("SMS", "channel")],
         );
-        options.definitions[1] = recording("relay-b")
-            .with_setting(CALLER_KEY, ProviderSettingSpec::secret().optional());
+        options.definitions[1] =
+            recording("relay-b").with_setting(CALLER_KEY, ProviderSettingSpec::secret().optional());
         let providers = providers_from(options).unwrap();
         let keys = providers.extension_keys();
         assert_eq!(keys.len(), 1, "{keys:?}");
