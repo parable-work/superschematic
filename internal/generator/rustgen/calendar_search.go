@@ -28,6 +28,7 @@ type rustCalendarSource struct {
 	Field       string                   `json:"field,omitempty"`
 	End         string                   `json:"end,omitempty"`
 	Owner       string                   `json:"owner,omitempty"`
+	Permission  string                   `json:"permission,omitempty"`
 	Occurrences *rustCalendarOccurrences `json:"occurrences,omitempty"`
 }
 
@@ -59,6 +60,8 @@ func calendarOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel) 
 			Field: source.Field,
 			End:   source.End,
 			Owner: source.Owner,
+			// Permission is the schema's (#601).
+			Permission: source.Permission,
 		}
 		if source.Occurrences {
 			occurrences, err := occurrencesOf(schema, td, tables)

@@ -33,7 +33,7 @@ use api::runtime::orm::{Error, Values};
 use api::runtime::postgres::Pool;
 use api::runtime::worker::{run_worker, Options};
 use api::runtime::{bearer_token, ApiError, Authenticator, Principal, Shutdown};
-use api::types::{FilingRecurrenceMissedEvent, FilingRecurrenceOpenedEvent, FilingRecurrenceRemindedEvent};
+use api::types::{FilingRecurrenceDueEvent, FilingRecurrenceMissedEvent, FilingRecurrenceOpenedEvent, FilingRecurrenceRemindedEvent};
 use api::{build_router, BoxError, Handlers, Implementations, Workers};
 use async_trait::async_trait;
 use axum::body::Body;
@@ -176,6 +176,11 @@ impl Workers for Heard3 {
 
     async fn filing_deadlines_recurrence_reminded(&self, event: FilingRecurrenceRemindedEvent, _: &EventRun<'_>) -> Result<(), BoxError> {
         self.0.hear("reminded", serde_json::to_value(event.key)?, &event.payload.key);
+        Ok(())
+    }
+
+    async fn filing_deadlines_recurrence_due(&self, event: FilingRecurrenceDueEvent, _: &EventRun<'_>) -> Result<(), BoxError> {
+        self.0.hear("due", serde_json::to_value(event.key)?, &event.payload.key);
         Ok(())
     }
 
@@ -478,6 +483,37 @@ async fn recurrence_on_postgres() {
         assert_eq!(app.hearing.of(&id), [("opened".to_owned(), fired.key.clone()), ("reminded".to_owned(), fired.key.clone())]);
     }
 
+    case("the due deadline fires on the worker at an occurrence due, records it and emits due (#601)");
+    {
+        let id = app.new_filing(json!({})).await;
+        // Due in ten days: its two-week window is open at once.
+        let (status, _) = app.call(&manager, &id, "set-recurrence", json!({ "anchor": "calendar", "rule": "FREQ=MONTHLY", "start": london_day(10) })).await;
+        assert_eq!(status, 200);
+        let first = app.occurrences(&id).await.remove(0);
+        assert_eq!(first.state, "open");
+        assert_eq!(app.deadlines(&id).await.get("due"), Some(&first.due_at));
+        // Its due comes: the occurrence's due is a second ago, and its
+        // deadline now.
+        let client = app.pool.get().await.unwrap();
+        let n = client
+            .execute(
+                "UPDATE filing_recurrence_occurrences SET due_at = now() - interval '1 second' WHERE filing_id = $1::text::uuid AND key = $2",
+                &[&hyphen(&id), &first.key],
+            )
+            .await
+            .unwrap();
+        assert_eq!(n, 1);
+        app.make_due(&id, "due").await;
+        app.work_until(async || app.hearing.of(&id).iter().any(|(kind, _)| kind == "due")).await;
+        let row = client
+            .query_one("SELECT state, fell_due_at IS NOT NULL FROM filing_recurrence_occurrences WHERE filing_id = $1::text::uuid AND key = $2", &[&hyphen(&id), &first.key])
+            .await
+            .unwrap();
+        assert_eq!((row.get::<_, String>(0).as_str(), row.get::<_, bool>(1)), ("open", true));
+        let dues: Vec<String> = app.hearing.of(&id).into_iter().filter(|(kind, _)| kind == "due").map(|(_, key)| key).collect();
+        assert_eq!(dues, std::slice::from_ref(&first.key));
+    }
+
     case("complete records what completed an occurrence and who, and an afterDone recurrence dates its next from it");
     {
         let id = app.new_filing(json!({})).await;
@@ -528,6 +564,12 @@ async fn recurrence_on_postgres() {
         let mut sorted = starts.clone();
         sorted.sort_unstable();
         assert_eq!(starts, sorted);
+        // The filing source needs filings.work, the schema's permission
+        // (#601): a caller without it reads the contract's end alone.
+        let unworked = Principal::new(manager_id.clone(), ["filings.manage"]);
+        let other = read_calendar(repos.untyped(), Some(&unworked), &read, &CalendarOptions::default()).await.unwrap();
+        assert!(!other.entries.iter().any(|e| e.source == "filing"), "{:?}", other.entries);
+        assert!(other.entries.iter().any(|e| e.source == "contract" && e.key == contract));
         // A read with no instant is refused.
         let refused = read_calendar(repos.untyped(), Some(&principal), &CalendarRead { from: "soon".to_owned(), to: iso(now), ..CalendarRead::default() }, &CalendarOptions::default()).await;
         assert!(matches!(refused, Err(Error::Invalid(_))), "{refused:?}");

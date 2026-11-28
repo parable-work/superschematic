@@ -12,6 +12,7 @@ import (
 	types "example.com/schemas/types/go/fixture-search-db"
 	"github.com/parable-work/superschematic/runtime/schema/go/access"
 	"github.com/parable-work/superschematic/runtime/schema/go/crosstable"
+	"github.com/parable-work/superschematic/runtime/schema/go/fieldcrypt"
 )
 
 /*
@@ -109,6 +110,13 @@ func (h crossTablesHost) Conditions(ctx context.Context, typeName string, args *
 
 func (h crossTablesHost) Definitions() *crosstable.Definitions {
 	return crossTables
+}
+
+// FieldKeys are the keys of the database's Encrypted<T> fields
+// (WithFieldKeys), which a calendar source titled by one opens its titles
+// under (crosstable.Unsealer, #616).
+func (h crossTablesHost) FieldKeys() *fieldcrypt.Keyring {
+	return h.db.fieldKeys
 }
 
 func (h crossTablesHost) Grants() crosstable.Grants {

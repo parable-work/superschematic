@@ -39,6 +39,9 @@ export const createWorkers: WorkersConstructor = deps => ({
   async filingDeadlinesRecurrenceReminded(event, tx) {
     throw notImplemented('event handler filingDeadlinesRecurrenceReminded');
   },
+  async filingDeadlinesRecurrenceDue(event, tx) {
+    throw notImplemented('event handler filingDeadlinesRecurrenceDue');
+  },
   async filingDeadlinesRecurrenceMissed(event, tx) {
     throw notImplemented('event handler filingDeadlinesRecurrenceMissed');
   },

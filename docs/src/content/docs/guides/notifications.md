@@ -17,7 +17,7 @@ person who sent it.
 | `@event` on a table; the notifier's tables and the channel identities, which the build fills, on Postgres, SQLite and D1 | Rust and Go on D1 |
 | the same notifier in the Rust runtime, on Postgres and SQLite ([in Rust](#in-rust)) | a generated Rust server that builds it over a database that lists `sqlite` first (#725) |
 | the same notifier in the Go runtime, on Postgres and SQLite, which a generated Go server builds into its `Deps` with its inbox, its relay callbacks and its worker ([in Go](#in-go)) | the same generated over a database that lists `sqlite` first (#717) |
-| raising an event in the caller's transaction; Recurrence's opened, reminded and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
+| raising an event in the caller's transaction; Recurrence's opened, reminded, due and missed; a cleared reference | events raised by Comments (mentions, follows) into the same inbox |
 | routes as rows, by kind, table and filter, to relation paths, principals, roles and parties; a generated TypeScript server that builds the notifier into its `Deps`, mounts the relays' callbacks and the inbox, and drains the dispatch queue ([the generated server](#what-the-generated-server-wires)) | the same in a generated Go or Rust server |
 | the recipient's audience held at routing and at send time; every adapter's health asked on a schedule by the dispatch queue's worker | |
 | urgent, normal, digest and record; quiet hours, held to the instants they start and end on a night the clocks change (TypeScript and Go); digests and briefs | an inbox page in Topcoat; Rust's quiet hours, which count wall minutes |
@@ -44,7 +44,7 @@ export abstract class Ticket { ... }
 ```
 
 A behavior's events are kinds too: the use's member, a dot and the
-behavior's kind. Recurrence emits `opened`, `reminded` and `missed` as it
+behavior's kind. Recurrence emits `opened`, `reminded`, `due` and `missed` as it
 moves an occurrence on, so `recurrence.missed` is a kind an `@event` may
 make urgent:
 
