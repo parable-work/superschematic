@@ -1,6 +1,6 @@
 //! StateRules, the own fields a state of a Workflow requires or freezes
-//! (D56), ported onto the pure core (D103) from the engine's
-//! (`../behaviors/src/staterules.rs`), with who may change a frozen field
+//! (D56), ported onto the pure core (D103) from the engine's, which is
+//! gone (D103, #587), with who may change a frozen field
 //! (D104). A record's fields mean more as it moves on: an invoice is
 //! drafted with any amount, sent only with a customer and an amount that
 //! then stay, and paid with nothing left to change. The config gives, by
@@ -111,9 +111,9 @@ use crate::workflow;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "StateRules";
 
-/// StateRules' declaration, the file the compiler registers and the engine
-/// embeds, read in place: what a host describes the behavior with.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/StateRules.behavior.json");
+/// StateRules' declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers, what a host describes the behavior with.
+pub const DECLARATION: &str = include_str!("../declarations/StateRules.behavior.json");
 
 // The members the configSchema's closed objects take.
 const CONFIG_KEYS: [&str; 3] = ["permission", "states", "status"];

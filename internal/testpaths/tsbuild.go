@@ -47,8 +47,7 @@ func BuildHTTPRuntime(t testing.TB, bun string, paths naming.LocalPaths) {
 // rulesSources are what the behaviors' core's npm package
 // (runtime/rules/typescript) builds its wasm module from, by a path
 // relative to the package: the crates scripts/build-wasm.mjs compiles,
-// the declarations the behaviors' crate reads in place (the engine's, and
-// its own of the behaviors no engine implements, D104), and the
+// the declarations the behaviors' crate reads in place, and the
 // workspace's lock file (D103).
 var rulesSources = []string{
 	"../../engine/rust/Cargo.lock",
@@ -60,7 +59,6 @@ var rulesSources = []string{
 	"../../engine/rust/rules-behaviors/src",
 	"../../engine/rust/rules-wasm/Cargo.toml",
 	"../../engine/rust/rules-wasm/src",
-	"../../engine/rust/behaviors/declarations",
 }
 
 // BuildRulesPackage builds the behaviors' core's npm package

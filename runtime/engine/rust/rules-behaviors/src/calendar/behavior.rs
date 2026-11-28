@@ -98,9 +98,9 @@ use crate::supply::{
 /// The behavior's name.
 pub const NAME: &str = "Calendar";
 
-/// Calendar's declaration, the commerce package's file, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../../../../engine-commerce/rust/declarations/Calendar.behavior.json");
+/// Calendar's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../../declarations/Calendar.behavior.json");
 
 /// The sub-table of the contract's records: one per holder's item.
 pub const BOOKINGS: &str = "bookings";

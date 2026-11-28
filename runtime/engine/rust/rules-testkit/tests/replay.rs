@@ -5,11 +5,11 @@
 
 use serde_json::{json, Value};
 
-use superschematic_engine_testkit::ScenarioFile;
 use superschematic_rules::{
     Behavior, ConfigError, ConfigTarget, Core, Cx, Declaration, GuardRequest, Hook, Veto, View,
 };
 use superschematic_rules_testkit::replay;
+use superschematic_rules_testkit::ScenarioFile;
 
 // Flag: a switch on the row, which only toggle moves, refused while the
 // row's own field locked is true.

@@ -1,5 +1,5 @@
 //! Constants, fields a create sets for good (D16), ported onto the pure core
-//! (D103) from the engine's (`../behaviors/src/constants.rs`), with the
+//! (D103) from the engine's, which is gone (D103, #587), with the
 //! fields that move one way (D104). Work is routed by what a row is: a
 //! step's kind, the key a blueprint stamped it with, the owner its create
 //! named. When any writer can change them, a worker can turn the step it
@@ -85,9 +85,9 @@ use crate::values::{date_time_text, equal, one_way_order};
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Constants";
 
-/// Constants' declaration, the file the compiler registers and the engine
-/// embeds, read in place: what a host describes the behavior with.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Constants.behavior.json");
+/// Constants' declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers, what a host describes the behavior with.
+pub const DECLARATION: &str = include_str!("../declarations/Constants.behavior.json");
 
 /// The IR types a oneWay field may have that hold a boolean (D104).
 pub const ONE_WAY_BOOLEANS: [&str; 1] = ["boolean"];

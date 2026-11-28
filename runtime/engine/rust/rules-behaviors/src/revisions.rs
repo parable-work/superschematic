@@ -76,9 +76,9 @@ use crate::values;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Revisions";
 
-/// Its declaration file, which the compiler registers and the engine
-/// embeds.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Revisions.behavior.json");
+/// Revisions' declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Revisions.behavior.json");
 
 /// The owned field that holds the row's latest revision.
 pub const REVISION: &str = "revision";

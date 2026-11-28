@@ -1,6 +1,6 @@
 //! Lease, an exclusive, time-bounded lease on a row (D16), ported onto the
-//! pure core (D103) from the engine's
-//! (`runtime/engine-workqueue/rust/src/lease.rs`), held by one principal
+//! pure core (D103) from the engine's, which is gone (D103, #587), held by
+//! one principal
 //! and numbered by a fencing token (D104). The token is the row's own
 //! integer that starts at 0 and advances at every acquire, every release
 //! and every applied expiry, so (row, token) names one lease. A caller
@@ -179,10 +179,9 @@ pub const DEFAULT_TTL_MS: i64 = 60_000;
 /// build's list by its test.
 pub const HOLD_TYPES: [&str; 1] = ["Generic.Int64"];
 
-/// Lease's declaration, the file `make behaviors` writes for the work
-/// queue's crate, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../../../engine-workqueue/rust/declarations/Lease.behavior.json");
+/// Lease's declaration, read in place: the copy `make behaviors` writes of the
+/// one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Lease.behavior.json");
 
 // The members the configSchema's closed objects take.
 const CONFIG_KEYS: [&str; 15] = [

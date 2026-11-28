@@ -101,7 +101,7 @@ func TestRatingBehavior(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := loader.LoadService(shopRatings, loader.WithRegistry(core)); err == nil ||
-		!strings.Contains(err.Error(), `behavior "acme.Rating" on type "Product" is not a registered behavior (registered: Aliased, Approvals, Assignment, Blueprint, Branches, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Links, Numbering, Payments, Pool, Presence, Provenance, Queue, Reactions, Reconcile, Recurrence, Retries, Revisions, Rollups, Schedules, Search, Seats, StateRules, Stock, Timers, Variants, Workflow)`) {
+		!strings.Contains(err.Error(), `behavior "acme.Rating" on type "Product" is not a registered behavior (registered: Aliased, Approvals, Assignment, Blueprint, Budget, Calendar, Comments, Constants, Dependencies, Derived, Holds, Lease, Numbering, Payments, Pool, Presence, Provenance, Reactions, Reconcile, Recurrence, Retries, Revisions, Rollups, Schedules, Seats, StateRules, Stock, Timers, Variants, Workflow)`) {
 		t.Fatalf("core registry: err = %v", err)
 	}
 }

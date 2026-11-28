@@ -1,6 +1,6 @@
 //! Presence, a heartbeat on a row that stands for a principal (D16), ported
-//! onto the pure core (D103) from the engine's
-//! (`runtime/engine-workqueue/rust/src/presence.rs`). The row's
+//! onto the pure core (D103) from the engine's, which is gone (D103,
+//! #587). The row's
 //! `principalField` holds the subject of the principal it stands for, and
 //! only that principal may beat it: `beat` moves its deadline on. A row not
 //! beaten by its deadline is missed. Its initializer sets the first deadline
@@ -113,10 +113,9 @@ use crate::workflow;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Presence";
 
-/// Presence's declaration, the file the compiler registers for the work
-/// queue and the engine embeds, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../../../engine-workqueue/rust/declarations/Presence.behavior.json");
+/// Presence's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Presence.behavior.json");
 
 /// The deadline a row's miss falls due at (D103, step 3), which calls the
 /// use's own miss.

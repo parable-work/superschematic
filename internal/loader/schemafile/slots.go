@@ -147,6 +147,12 @@ func checkBehaviorRefs(td map[string]any, where string, reg *registry.Registry) 
 			continue
 		}
 		behavior, ok := reg.Behavior(name)
+		if replacement, folded := registry.FoldedBehavior(name); !ok && folded {
+			// No registry declares a behavior D103 folds into a schema
+			// feature (D103, #587): say what replaces it, as the
+			// verification pass does.
+			return fmt.Errorf("%s composes %s, which is no longer a behavior (D103): %s", where, name, replacement)
+		}
 		if !ok {
 			known := "none are registered"
 			if names := reg.BehaviorNames(); len(names) > 0 {

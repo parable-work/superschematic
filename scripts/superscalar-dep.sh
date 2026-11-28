@@ -48,8 +48,8 @@
 # (scripts/release-archives.sh), and leaves the stamp below as it was, so a
 # later full run still builds the binding; it needs no wasm-pack. --checkout
 # builds nothing and needs no Go: a Rust crate that depends on superscalar's
-# core by path (the engine's schema reader, runtime/schema/rust-ir) needs
-# only the sources.
+# core by path (the behaviors' core's, runtime/engine/rust/rules-behaviors)
+# needs only the sources.
 #
 # When superscalar publishes a release, replace step 2 with that
 # repository's fetch_release_archive.sh and drop the Rust requirement.

@@ -1,6 +1,7 @@
-//! A behavior's declaration as the core reads it (D103), from the file the
-//! compiler registers and the engine embeds
-//! (`runtime/engine/rust/behaviors/declarations`): its name, the fields it
+//! A behavior's declaration as the core reads it (D103), from the copy
+//! `make behaviors` writes of the file the compiler registers
+//! (`runtime/engine/rust/rules-behaviors/declarations`, D103, #587): its
+//! name, the fields it
 //! owns and the one that holds a field anchor's value (`value`), the ones it
 //! computes at a read (a field with no `type`, which no column holds, or a
 //! `volatile` one), its sub-tables (`tables`: each one's name, key and

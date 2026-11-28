@@ -23,11 +23,10 @@
 //! an operation's result, an event's change, the events a step's commands
 //! wrote about rows (D104), and every refusal whole, the define and publish
 //! refusals of a behavior's config with them, written as the engine's
-//! error. It reads a file through the engine's test kit
-//! ([`superschematic_engine_testkit::load`]), runs what a test wrote in
-//! TypeScript where [`fixtures`] ports it, skips what only the engine's
-//! store answers with its reason, and returns a [`Report`]. [`ported`] is
-//! the core it runs the corpus on.
+//! error. It reads a file through [`scenario::load`], runs what a test
+//! wrote in TypeScript where [`fixtures`] ports it, skips what only the
+//! engine's store answered with its reason, and returns a [`Report`].
+//! [`ported`] is the core it runs the corpus on.
 //!
 //! ```
 //! use serde_json::json;
@@ -59,6 +58,7 @@
 pub mod fixtures;
 pub mod host;
 pub mod replay;
+pub mod scenario;
 pub mod shape;
 mod symbols;
 pub mod transcript;
@@ -70,6 +70,7 @@ pub use host::{
 pub use replay::{
     declarations_of, replay, replay_path, scenario_path, Mismatch, Report, ScenarioReport, Skipped,
 };
+pub use scenario::{iso_of, load, ms_of_iso, ScenarioFile};
 pub use transcript::{
     hand_written_path, hand_written_transcript, hand_written_transcript_declaring, transcript,
     transcript_path, Transcript, TranscriptClock, TranscriptDeadline, TranscriptEvent,

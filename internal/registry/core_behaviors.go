@@ -13,13 +13,14 @@ import (
 // optional @superschematic/engine-workqueue package does, and the commerce
 // behaviors the optional @superschematic/engine-commerce package does
 // (D70), and the behaviors the behaviors' core alone implements
-// (RulesPackage, D104). Each package's Rust crate (D58:
-// runtime/engine/rust/behaviors, runtime/engine-workqueue/rust,
-// runtime/engine-commerce/rust, and the core's
-// runtime/engine/rust/rules-behaviors, which reads its copy in place)
-// carries a copy of the declarations it implements, which `superschematic
-// behaviors --package <name> --out` writes and CI checks
-// (docs/extension-model.md section 3.16).
+// (RulesPackage, D104). The behaviors' core's crate
+// (runtime/engine/rust/rules-behaviors/declarations) carries a copy of
+// every one, which `superschematic behaviors --out` writes and CI checks
+// (docs/extension-model.md section 3.16), and reads the copies of those it
+// implements in place. The engine's crates carried their packages' copies
+// until the engine went (D103, #587), and Links, Search, Queue and
+// Branches, which D103 folds into schema features, went with it: the
+// loader still refuses each by name (verify.FoldedBehaviors).
 //
 //go:embed behaviors/*.behavior.json
 var coreBehaviorFiles embed.FS
@@ -51,13 +52,10 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"comments", EnginePackage},
 	{"revisions", EnginePackage},
 	{"dependencies", EnginePackage},
-	{"links", EnginePackage},
 	{"rollups", EnginePackage},
-	{"search", EnginePackage},
 	{"reactions", EnginePackage},
 	{"constants", EnginePackage},
 	{"variants", EnginePackage},
-	{"branches", EnginePackage},
 	{"staterules", EnginePackage},
 	{"approvals", EnginePackage},
 	{"numbering", EnginePackage},
@@ -66,7 +64,6 @@ var coreBehaviors = []struct{ file, pkg string }{
 	{"provenance", EnginePackage},
 	{"lease", WorkQueuePackage},
 	{"assignment", WorkQueuePackage},
-	{"queue", WorkQueuePackage},
 	{"presence", WorkQueuePackage},
 	{"blueprint", WorkQueuePackage},
 	{"budget", WorkQueuePackage},

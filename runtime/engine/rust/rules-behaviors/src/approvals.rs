@@ -1,5 +1,5 @@
 //! Approvals, sign-offs on the moves of a Workflow (D56), ported onto the
-//! pure core (D103) from the engine's (`../behaviors/src/approvals.rs`),
+//! pure core (D103) from the engine's, which is gone (D103, #587),
 //! with gates whose sign-offs a change of chosen fields consumes and that
 //! pin the version their signer read (D104), and with requirements each
 //! instance sets (D200). The config gates states: a transition into a gated
@@ -193,9 +193,9 @@ pub const WITHDRAW_SIGN_OFF: &str = "withdrawSignOff";
 /// The operation that lists a row's sign-offs, a page at a time.
 pub const LIST_SIGN_OFFS: &str = "listSignOffs";
 
-/// Approvals' declaration, the file the compiler registers and the engine
-/// embeds, read in place: what a host describes the behavior with.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Approvals.behavior.json");
+/// Approvals' declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers, what a host describes the behavior with.
+pub const DECLARATION: &str = include_str!("../declarations/Approvals.behavior.json");
 
 /// The most requirement rows a gate reads (D200): twenty linked pages, as
 /// Rollups reads. Past it the gate does not hold.

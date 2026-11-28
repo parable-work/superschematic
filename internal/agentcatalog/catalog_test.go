@@ -71,9 +71,9 @@ func TestEveryDecoratorIsListed(t *testing.T) {
 
 // Every behavior @behavior composes is listed, and one the behaviors' core
 // alone implements (Seats, Reconcile, Schedules, Pool, D104, Recurrence,
-// D152, and Aliased, D147) is not: only a table composes it. Nor is one
-// D103 folds into a schema feature (Links, Search, Queue and Branches),
-// which the build refuses.
+// D152, and Aliased, D147) is not: only a table composes it. One D103
+// folds into a schema feature (Links, Search, Queue and Branches) is no
+// registered behavior since the engine went (D103, #587).
 func TestEveryBehaviorIsListed(t *testing.T) {
 	acme := withAcme(t)
 	catalog := render(t, Behaviors, acme)
@@ -83,9 +83,6 @@ func TestEveryBehaviorIsListed(t *testing.T) {
 		switch {
 		case verify.IsFoldedBehavior(beh.Name):
 			folded++
-			if listed {
-				t.Errorf("behavior %s, which D103 folds into a schema feature, has an entry", beh.Name)
-			}
 		case !registry.EngineImplements(beh):
 			coreOnly++
 			if listed {
@@ -98,8 +95,8 @@ func TestEveryBehaviorIsListed(t *testing.T) {
 	if coreOnly != 6 {
 		t.Errorf("%d behaviors only a table composes, want Seats, Reconcile, Schedules, Pool, Recurrence and Aliased", coreOnly)
 	}
-	if folded != 4 {
-		t.Errorf("%d folded behaviors registered, want Links, Search, Queue and Branches", folded)
+	if folded != 0 {
+		t.Errorf("%d folded behaviors registered, want none", folded)
 	}
 	if !strings.Contains(catalog, "- Config: `WorkflowConfig`, required.\n") {
 		t.Error("Workflow's entry does not name its config type")

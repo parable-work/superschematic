@@ -1,6 +1,6 @@
 //! Reactions, rules that move Workflow statuses after a write commits (D16,
-//! amended; D56), ported onto the pure core (D103) from the engine's
-//! (`../behaviors/src/reactions.rs`): a task that starts moves its project
+//! amended; D56), ported onto the pure core (D103) from the engine's,
+//! which is gone (D103, #587): a task that starts moves its project
 //! to active, a project whose tasks are all done is done, one whose task
 //! fails is failed, a ticket marked urgent escalates.
 //!
@@ -106,9 +106,9 @@ use crate::workflow::{self, state_outcome, WorkflowOutcome};
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Reactions";
 
-/// Reactions' declaration, the file the compiler registers and the engine
-/// embeds, read in place: what a host describes the behavior with.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Reactions.behavior.json");
+/// Reactions' declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers, what a host describes the behavior with.
+pub const DECLARATION: &str = include_str!("../declarations/Reactions.behavior.json");
 
 // The members the configSchema's closed objects take.
 const CONFIG_KEYS: [&str; 2] = ["rules", "status"];

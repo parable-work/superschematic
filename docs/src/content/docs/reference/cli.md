@@ -871,9 +871,8 @@ with number literals as written, two-space indents and a final newline.
 It changes only when the declaration does.
 
 ```
-superschematic behaviors --package @superschematic/engine --out runtime/engine/rust/behaviors/declarations
-superschematic behaviors --package @superschematic/engine-workqueue --out runtime/engine-workqueue/rust/declarations --check
-superschematic behaviors --package @superschematic/rules --out runtime/engine/rust/rules-behaviors/declarations --check
+superschematic behaviors --out runtime/engine/rust/rules-behaviors/declarations
+superschematic behaviors --out runtime/engine/rust/rules-behaviors/declarations --check
 my-schematic behaviors --extension my --out crates/my-rules/declarations
 my-schematic behaviors --extension my --out crates/my-rules/declarations --check
 ```
@@ -891,23 +890,13 @@ extension's declarations are registered only in its own binary: an
 extension's copy comes from it, into the crate whose hooks run its
 behavior on the behaviors' core (its registration's `Rules` crate).
 acme.Rating's rules are declarative, so no crate implements it and acme
-keeps no copy. The core binary writes the behaviors the core
-declares into the four Rust crates that implement them: `Workflow`,
-`Comments`, `Revisions`, `Dependencies`, `Links`, `Rollups`, `Search`,
-`Reactions`, `Constants`, `Variants`, `Branches`, `Timers`,
-`StateRules`, `Numbering` and `Approvals` with `--package
-@superschematic/engine` into the engine's behaviors crate
-(`runtime/engine/rust/behaviors/declarations`), and `Lease`,
-`Assignment`, `Queue`, `Presence`, `Blueprint`, `Budget` and `Retries`
-with `--package @superschematic/engine-workqueue` into the work queue's
-(`runtime/engine-workqueue/rust/declarations`), `Stock`, `Calendar`,
-`Holds` and `Payments` with `--package @superschematic/engine-commerce`
-into the commerce crate's (`runtime/engine-commerce/rust/declarations`,
-D70), and `Seats`, `Reconcile`, `Schedules` and `Pool`, which no engine implements, with
-`--package @superschematic/rules` into the behaviors' core's
-(`runtime/engine/rust/rules-behaviors/declarations`, D104) (`make
-behaviors`; `make behaviors-check` in CI). Without `--extension`, an extension's binary
-writes the core's declarations beside its own.
+keeps no copy. The core binary writes every behavior the core declares
+into the behaviors' core's crate
+(`runtime/engine/rust/rules-behaviors/declarations`), which reads the
+copies of those it implements in place (`make behaviors`; `make
+behaviors-check` in CI). The engine's crates carried their own packages'
+copies until the engine went (D103, #587). Without `--extension`, an
+extension's binary writes the core's declarations beside its own.
 
 ## `stack init [<services-root>]`
 

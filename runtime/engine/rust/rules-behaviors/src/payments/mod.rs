@@ -128,9 +128,9 @@ use rows::{
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Payments";
 
-/// Payments' declaration, the commerce package's file, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../../../../engine-commerce/rust/declarations/Payments.behavior.json");
+/// Payments' declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../../declarations/Payments.behavior.json");
 
 /// How many attempts `Payments.attempts` shows, newest first.
 pub const ATTEMPTS_SHOWN: usize = 20;

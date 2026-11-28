@@ -1,5 +1,5 @@
 //! Paging for a behavior's list operations (D16, D58), ported from the
-//! engine's (`../engine/src/behaviors/paging.rs`) word for word: the
+//! engine's, which is gone (D103, #587), word for word: the
 //! engine's page size (a paramsSchema bounds `limit` to 1-500, and 50 is
 //! the default) and an opaque cursor over a number the behavior gives each
 //! record (Approvals' sign-off number). A page is the records after the

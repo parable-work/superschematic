@@ -1,5 +1,5 @@
 //! The status moves the work-queue behaviors make through Workflow (D16),
-//! ported from the engine's (`runtime/engine-workqueue/rust/src/moves.rs`):
+//! ported from the engine's, which is gone (D103, #587):
 //! the config rule each holds to the type's Workflow (`checkMove`, which
 //! Lease's onExpiry and escalate, Presence's onMissed and onBeat, Budget's
 //! escalate and Retries' then share, with the engine's messages), and the

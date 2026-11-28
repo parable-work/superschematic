@@ -1,26 +1,25 @@
-# The engine in Rust (D58): one workspace and one lock file, every crate built
-# with the toolchain tools.env pins, since the archives a Go binary links must
-# come from one Rust release. Nothing consumes these crates from a registry.
+# The behaviors' core in Rust (D103, #587): one workspace and one lock file,
+# every crate built with the toolchain tools.env pins, since the archives a
+# Go binary links must come from one Rust release. Nothing consumes these
+# crates from a registry.
 
 [workspace]
 resolver = "2"
-# The work queue's behaviors (runtime/engine-workqueue/rust) and the
-# commerce behaviors (runtime/engine-commerce/rust) are members too, outside
-# this directory: they build with this lock file and this toolchain, and
-# `cargo --workspace` lints and tests them with the rest. The pure core of
-# D103 (rules), the behaviors ported onto it (rules-behaviors), its
-# in-memory reference host (rules-testkit), its WebAssembly binding
-# (rules-wasm, which @superschematic/rules loads) and its adapter for a
-# hand-written Rust server over tokio-postgres or rusqlite (rules-adapter)
-# sit beside the engine until it goes. Development mode (D117) is the pure
-# request handler over the development layout (rules-handler) and its store
-# over SQLite, a file or a database in memory (rules-dev); runtime mode is
-# the same handler over each type's own table, a publish a migration
-# (rules-runtime). The handler's WebAssembly binding (rules-handler-wasm)
-# is what @superschematic/rules-handler loads. The Postgres layer the storage,
-# runtime and development mode and the adapter share (pg) classifies a
-# server's error and opens a connection with the TLS its sslmode asks.
-members = ["abi", "addon", "behaviors", "engine", "ffi", "napi", "pg", "rules", "rules-adapter", "rules-behaviors", "rules-dev", "rules-handler", "rules-handler-wasm", "rules-runtime", "rules-testkit", "rules-wasm", "storage", "testkit", "testkit-ffi", "../../engine-workqueue/rust", "../../engine-commerce/rust"]
+# The pure core of D103 (rules), the behaviors ported onto it
+# (rules-behaviors), its in-memory reference host (rules-testkit), its
+# WebAssembly binding (rules-wasm, which @superschematic/rules loads and
+# whose native build is the rules archive a Go binary links) and its
+# adapter for a hand-written Rust server over tokio-postgres or rusqlite
+# (rules-adapter). Development mode (D117) is the pure request handler over
+# the development layout (rules-handler) and its store over SQLite, a file
+# or a database in memory (rules-dev); runtime mode is the same handler
+# over each type's own table, a publish a migration (rules-runtime). The
+# handler's WebAssembly binding (rules-handler-wasm) is what
+# @superschematic/rules-handler loads. The Postgres layer that runtime and
+# development mode and the adapter share (pg) classifies a server's error
+# and opens a connection with the TLS its sslmode asks. The engine of D58,
+# whose crates sat here beside these, is gone (D103, #587).
+members = ["pg", "rules", "rules-adapter", "rules-behaviors", "rules-dev", "rules-handler", "rules-handler-wasm", "rules-runtime", "rules-testkit", "rules-wasm"]
 
 [workspace.package]
 version = "0.0.0"
@@ -34,11 +33,12 @@ publish = false
 all = { level = "deny", priority = -1 }
 cognitive_complexity = "warn"
 
-# What a release ships (D58): the prebuilt addons (@superschematic/engine-<target>,
-# scripts/engine-napi.sh --dist). One codegen unit and LTO across the crates
-# let the linker drop what no export reaches, and stripping drops the
-# symbol table; a release build without them is quicker to link, which a
-# test run wants.
+# What a release ships: the WebAssembly modules @superschematic/rules and
+# @superschematic/rules-handler load (their scripts/build-wasm.mjs), which a
+# generated TypeScript server's Dockerfile builds too. One codegen unit and
+# LTO across the crates let the linker drop what no export reaches, and
+# stripping drops the symbol table; a release build without them is quicker
+# to link, which a test run wants.
 [profile.dist]
 inherits = "release"
 lto = "fat"

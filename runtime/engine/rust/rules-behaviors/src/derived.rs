@@ -86,9 +86,9 @@ use crate::workflow;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Derived";
 
-/// Its declaration file, which the compiler registers and the engine
-/// embeds.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Derived.behavior.json");
+/// Derived's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Derived.behavior.json");
 
 /// The sub-table of a row's derived fields, keyed by the field's name.
 pub const DERIVATIONS: &str = "derivations";

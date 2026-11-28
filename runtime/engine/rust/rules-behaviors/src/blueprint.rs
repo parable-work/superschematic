@@ -1,6 +1,6 @@
 //! Blueprint, children created with their parent (D16, amended), ported
-//! onto the pure core (D149) from the engine's
-//! (`../../engine-workqueue/rust/src/blueprint.rs`). A table says
+//! onto the pure core (D149) from the engine's, which is gone (D103,
+//! #587). A table says
 //! `implements Blueprint<Batch, { schema, parentLink, keyField, steps,
 //! copyFields?, copyLinks? }>`. A map of steps, by key, says which children
 //! a row has: one row of the child table (`schema`) per step, whose to-one
@@ -85,10 +85,9 @@ use crate::values;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Blueprint";
 
-/// Blueprint's declaration, the file the compiler registers and the
-/// engine embeds, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../../../engine-workqueue/rust/declarations/Blueprint.behavior.json");
+/// Blueprint's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Blueprint.behavior.json");
 
 /// The field a read shows what the row's children are in.
 pub const CHILDREN: &str = "children";
