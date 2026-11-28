@@ -1,5 +1,5 @@
 //! Workflow, the core's state machine (D16), ported onto the pure core
-//! (D103) from the engine's (`../behaviors/src/workflow.rs`): a status that
+//! (D103) from the engine's, which is gone (D103, #587): a status that
 //! starts in the config's initial state and changes only through
 //! `transition`, along a transition the config lists, which may name a
 //! permission the caller must hold. A state that no transition leaves is
@@ -141,9 +141,9 @@ pub const ENTERED_AT: &str = "enteredAt";
 /// The operation that moves the status.
 pub const TRANSITION: &str = "transition";
 
-/// Workflow's declaration, the file the compiler registers and the engine
-/// embeds, read in place: what a host describes the behavior with.
-pub const DECLARATION: &str = include_str!("../../behaviors/declarations/Workflow.behavior.json");
+/// Workflow's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers, what a host describes the behavior with.
+pub const DECLARATION: &str = include_str!("../declarations/Workflow.behavior.json");
 
 // What the configSchema holds a state's name to, in its states and in the
 // keys of its outcomes and its finished: the rule every declared name

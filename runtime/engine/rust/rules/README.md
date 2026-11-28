@@ -30,8 +30,7 @@ it, and Holds asks it and calls its operations on a supply's row;
 `superschematic-rules-testkit` (`../rules-testkit`) is its
 reference host, an adapter over memory, and the replayer that holds the core
 to the recorded scenarios (`runtime/engine/testdata/scenarios`). The engine
-(`../engine`, D58) stays beside them until the order of the work in D103
-removes it.
+(D58), which sat beside them, is gone (D103, #587).
 
 ```rust
 use superschematic_rules::{Action, Caller, Command, Core, TypeSpec, UseSpec};
@@ -1452,7 +1451,8 @@ one older than the crates (cargo skips a build of crates that have not
 changed, and `scripts/build-wasm.mjs` leaves `dist/` alone when the module
 is the one it holds). The Go tests that build the package
 (`internal/testpaths`' `BuildRulesPackage`) rebuild it when a file of these
-crates, of `behaviors/declarations` or the workspace's lock file changes.
+crates, of `rules-behaviors/declarations` or the workspace's lock file
+changes.
 
 The generator's layout is held to the adapter by
 `go test ./internal/generator/tsgen -run TestWorkflowTablesEndToEnd`: it
@@ -1475,9 +1475,10 @@ build of `../rules-wasm` as a staticlib). The second runs the binding from
 many goroutines at once, the adapter's and the stores' tests and the
 transcript's replay on SQLite, and on Postgres as well when
 `SUPERSCHEMATIC_RULES_TEST_DATABASE_URL` names one, each in a schema it
-creates and drops. The third links the four archives a Go server links,
-superscalar's, the version graph's, the engine's and this one, into one
-binary, after checking that each defines its own C functions alone. The
+creates and drops. The third links the three archives a Go server links,
+superscalar's, the version graph's and this one, into one binary, after
+checking that each defines its own C functions alone (the engine's archive
+was a fourth until the engine went, D103, #587). The
 generated Go ORM is held to the adapter by
 `go test ./internal/generator/ormgen -run TestWorkflowTablesOnPostgres`:
 it generates `fixture-workflow-db`'s Go types, ORM and DDL, and builds and

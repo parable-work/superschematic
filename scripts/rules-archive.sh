@@ -74,10 +74,10 @@ fi
 RUSTUP_TOOLCHAIN="$(grep -E '^RUST_VERSION=' "$ROOT/tools.env" | cut -d= -f2)"
 export RUSTUP_TOOLCHAIN
 
-# The crate is a member of the engine's workspace, which cargo loads whole:
-# the engine reads schemas through runtime/schema/rust-ir, which depends on
+# The crate is a member of the workspace runtime/engine/rust, which cargo
+# loads whole: the behaviors (rules-behaviors) read scalars through
 # superscalar's core by path, so the checkout must be there, nothing of it
-# built (as scripts/engine-archive.sh has it).
+# built.
 if [ ! -f "$ROOT/third_party/superscalar/crates/core/Cargo.toml" ]; then
   "$ROOT/scripts/superscalar-dep.sh" --checkout
 fi

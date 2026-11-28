@@ -1,6 +1,6 @@
 //! Retries, logical retries per failure class on a row (D16), ported onto
-//! the pure core (D103) from the engine's
-//! (`runtime/engine-workqueue/rust/src/retries.rs`), with retries that wait
+//! the pure core (D103) from the engine's, which is gone (D103, #587),
+//! with retries that wait
 //! (D104): a backoff after a failure, a time to give up after, a cap of the
 //! attempts in a window, and a field whose value keys the counts. A worker
 //! that ran records the attempt with `recordAttempt`: a success, with no
@@ -128,10 +128,9 @@ pub const RETRY: &str = "retry";
 /// list by its test.
 pub const LIMITS_TYPES: [&str; 1] = ["Generic.JSON"];
 
-/// Retries' declaration, the file `make behaviors` writes for the work
-/// queue's crate, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../../../engine-workqueue/rust/declarations/Retries.behavior.json");
+/// Retries' declaration, read in place: the copy `make behaviors` writes of the
+/// one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Retries.behavior.json");
 
 // The members the configSchema's closed objects take.
 const CONFIG_KEYS: [&str; 16] = [

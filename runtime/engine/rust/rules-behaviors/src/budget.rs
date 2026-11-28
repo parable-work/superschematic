@@ -1,6 +1,6 @@
 //! Budget, reserve-then-settle budgets on a row (D16), ported onto the pure
-//! core (D103) from the engine's
-//! (`runtime/engine-workqueue/rust/src/budget.rs`), in units the deployment
+//! core (D103) from the engine's, which is gone (D103, #587), in units the
+//! deployment
 //! names. Each meter of the config has, per row, a row of Budget's `meters`
 //! sub-table: what the row has used, what it has reserved, the limit
 //! setLimit gave it, the start of the period its usage counts from, and the
@@ -154,10 +154,9 @@ use crate::workflow;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Budget";
 
-/// Budget's declaration, the file the compiler registers for the work
-/// queue and the engine embeds, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../../../engine-workqueue/rust/declarations/Budget.behavior.json");
+/// Budget's declaration, read in place: the copy `make behaviors` writes of the
+/// one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Budget.behavior.json");
 
 /// The sub-table of a row's meters, keyed by the meter's name, and the
 /// field a read computes from it.

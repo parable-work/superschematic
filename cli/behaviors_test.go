@@ -463,18 +463,9 @@ func TestCoreBehaviorsWithNoExtension(t *testing.T) {
 		assert.Equal(t, commerceJSON[name], commerceTS[name], name)
 	}
 
-	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine",
-		"--out", filepath.Join("..", "runtime", "engine", "rust", "behaviors", "declarations"), "--check")
-	require.NoError(t, err, "the engine's copies of the core declarations are stale; run make behaviors")
-	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-workqueue",
-		"--out", filepath.Join("..", "runtime", "engine-workqueue", "rust", "declarations"), "--check")
-	require.NoError(t, err, "the work queue's copies of the core declarations are stale; run make behaviors")
-	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/engine-commerce",
-		"--out", filepath.Join("..", "runtime", "engine-commerce", "rust", "declarations"), "--check")
-	require.NoError(t, err, "the commerce crate's copies of the core declarations are stale; run make behaviors")
-	_, err = runCommandWith(t, nil, "behaviors", "--package", "@superschematic/rules",
+	_, err = runCommandWith(t, nil, "behaviors",
 		"--out", filepath.Join("..", "runtime", "engine", "rust", "rules-behaviors", "declarations"), "--check")
-	require.NoError(t, err, "the behaviors' core's copies of the declarations only it implements are stale; run make behaviors")
+	require.NoError(t, err, "the behaviors' core's copies of the core declarations are stale; run make behaviors")
 }
 
 // Stock and Payments read a currency from a Finance.Currency own field

@@ -88,8 +88,8 @@ use crate::workflow;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Reconcile";
 
-/// Reconcile's declaration, the file `make behaviors` writes for the core
-/// alone (no engine implements it), read in place.
+/// Reconcile's declaration, read in place: the copy `make behaviors` writes of
+/// the one the compiler registers.
 pub const DECLARATION: &str = include_str!("../declarations/Reconcile.behavior.json");
 
 /// The value field: the state the last observation reported.

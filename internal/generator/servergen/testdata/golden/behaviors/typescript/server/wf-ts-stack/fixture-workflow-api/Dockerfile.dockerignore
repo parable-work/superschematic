@@ -3,17 +3,12 @@
 # The build context of the Dockerfile beside this file, which BuildKit reads
 # from here: the repository root, cut down to what the image builds from.
 *
-!runtime/engine-commerce/rust
-!runtime/engine-workqueue/rust
 !runtime/engine/rust
 !runtime/http/rust
 !runtime/http/typescript
 !runtime/migrate/rust
 !runtime/rules/typescript
 !runtime/schema/rust
-!runtime/schema/rust-ir
-!runtime/versiongraph/rust
-!runtime/versiongraph/rust-engine
 !schemas/dist/api/*/package.json
 !schemas/dist/api/fixture-workflow-api
 !schemas/dist/bun.lock*

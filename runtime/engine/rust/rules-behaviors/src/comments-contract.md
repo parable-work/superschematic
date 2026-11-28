@@ -1,5 +1,11 @@
 # Comments v2, batches 1 to 5: the contract
 
+This note was written for the engine's Comments (D58), which went with the
+engine (D103, #587); it moved here with the core's Comments (`comments/`),
+which ports the engine's rules and words and cites the note by section.
+Where it speaks of the engine, its runner, its storage or its clients, it
+describes the engine as it was.
+
 This note is the contract the Rust behavior (`comments.rs`), the Go
 generators and the corpora implement for batches 1 to 5 of D77
 ("Comments, rebuilt", steps 1 to 5 of its build order). The declaration is

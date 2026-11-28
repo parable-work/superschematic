@@ -119,9 +119,9 @@ use crate::workflow;
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = supply::HOLDS;
 
-/// Holds' declaration, the commerce package's file, read in place.
-pub const DECLARATION: &str =
-    include_str!("../../../../engine-commerce/rust/declarations/Holds.behavior.json");
+/// Holds' declaration, read in place: the copy `make behaviors` writes of the
+/// one the compiler registers.
+pub const DECLARATION: &str = include_str!("../declarations/Holds.behavior.json");
 
 /// The sub-table of the items the claim has taken.
 pub const ITEMS: &str = "items";

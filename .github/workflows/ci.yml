@@ -1235,30 +1235,10 @@ jobs:
           workspaces: |
             runtime/http/rust
             runtime/schema/rust
-            runtime/schema/rust-ir
             runtime/migrate/rust
           key: ${{ matrix.part }}
           # Outside a pull request alone (engine-rust says why).
           save-if: ${{ github.event_name != 'pull_request' }}
-
-      - name: Restore the superscalar checkout
-        # Restored and never saved from here: this job checks the sources
-        # out and builds nothing of superscalar, and the jobs that build
-        # all of it (go, typescript, python) save under the same key. A
-        # checkout saved first had each of those build superscalar again on
-        # every run until the pin moved.
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            third_party/superscalar
-            !third_party/superscalar/target
-          key: superscalar-${{ runner.os }}-${{ hashFiles('superscalar.pin', 'scripts/superscalar-dep.sh', 'tools.env') }}
-
-      - name: Check out the superscalar sources
-        # The engine's schema reader (runtime/schema/rust-ir) depends on
-        # superscalar's core by path ([paths] scalar_rust). Nothing of
-        # superscalar is built here but that crate.
-        run: scripts/superscalar-dep.sh --checkout
 
       - name: Start Valkey
         # The memory store tests that read SUPERSCHEMATIC_TEST_MEMORY_STORE
@@ -1354,21 +1334,6 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo test
           cargo test --features serde_json/arbitrary_precision,serde_json/preserve_order
-
-      # The engine's schema reader links superscalar's core, which keeps
-      # preserve_order on; it runs with its schemafile feature and without,
-      # and again with arbitrary_precision.
-      - name: engine schema reader fmt / clippy / test (every vector of both corpora)
-        if: matrix.part == 'stores'
-        working-directory: runtime/schema/rust-ir
-        run: |
-          cargo fmt --check
-          cargo clippy --all-targets -- -D warnings
-          cargo clippy --all-targets --all-features -- -D warnings
-          cargo clippy --all-targets --all-features --features serde_json/arbitrary_precision -- -D warnings
-          cargo test
-          cargo test --all-features
-          cargo test --all-features --features serde_json/arbitrary_precision
 
   engine-rust:
     # The workspace has the work queue's crate (runtime/engine-workqueue/rust)

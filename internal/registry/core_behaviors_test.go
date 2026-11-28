@@ -1178,15 +1178,12 @@ func TestPoolIsTheCoresAlone(t *testing.T) {
 }
 
 // The contracts the core's declarations name are those the behaviors' core
-// defines (Contracts, D104): every declaration the core reads, its own and
-// the work queue's copy, held to the list, each role one of the two.
+// defines (Contracts, D104): every declaration the core reads, the copies
+// in its behaviors' crate, held to the list, each role one of the two.
 func TestContractsAreTheCores(t *testing.T) {
 	var named []string
 	for _, dir := range []string{
 		filepath.Join("..", "..", "runtime", "engine", "rust", "rules-behaviors", "declarations"),
-		filepath.Join("..", "..", "runtime", "engine-workqueue", "rust", "declarations"),
-		filepath.Join("..", "..", "runtime", "engine", "rust", "behaviors", "declarations"),
-		filepath.Join("..", "..", "runtime", "engine-commerce", "rust", "declarations"),
 	} {
 		files, err := filepath.Glob(filepath.Join(dir, "*.behavior.json"))
 		if err != nil || len(files) == 0 {

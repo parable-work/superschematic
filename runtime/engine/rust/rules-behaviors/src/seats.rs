@@ -109,8 +109,8 @@ use crate::subjects::{canonical_subject, holds_subject, names_subject};
 /// The behavior's name, as its declaration has it.
 pub const NAME: &str = "Seats";
 
-/// Seats' declaration, the file `make behaviors` writes for the core alone
-/// (no engine implements it), read in place.
+/// Seats' declaration, read in place: the copy `make behaviors` writes of the
+/// one the compiler registers.
 pub const DECLARATION: &str = include_str!("../declarations/Seats.behavior.json");
 
 /// The sub-table of a row's occupants.
