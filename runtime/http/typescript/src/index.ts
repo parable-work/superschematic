@@ -186,6 +186,8 @@ export {
 export type { GraphFacade, GraphKind, GraphOperation, GraphOperationName, GraphRelation, GraphRequest, GraphSet } from './graph-routes.js';
 export { rowFeatureOperation } from './rowfeature-routes.js';
 export type { RowFeatureOperation, RowFeatureOperationName, RowFeatureRequest } from './rowfeature-routes.js';
+export { triageOperation } from './triage-routes.js';
+export type { TriageInbound, TriageOperation, TriageOperationName, TriageRequest } from './triage-routes.js';
 export { declaredKeysOnly } from './operation.js';
 export type {
   OperationAuth,

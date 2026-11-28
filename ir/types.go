@@ -785,6 +785,13 @@ type FieldDef struct {
 	// have no key for it. See [RowFeatureOperation].
 	RowFeatureOperation *RowFeatureOperation `json:"rowFeatureOperation,omitempty" yaml:"rowFeatureOperation,omitempty" jsonschema:"-"`
 
+	// TriageOperation marks an operation the loader added for a
+	// @triageOperations set (#746, D157): a TypeScript server routes it to
+	// a generated handler that runs it through the inbound path. Nil for
+	// every authored operation. The data forms have no key for it. See
+	// [TriageOperation].
+	TriageOperation *TriageOperation `json:"triageOperation,omitempty" yaml:"triageOperation,omitempty" jsonschema:"-"`
+
 	// TableOperation is @tableOperation (D106): the operation reads or
 	// writes one table through its @source views, with a handler the build
 	// writes and no implementation method. Nil for every other operation.

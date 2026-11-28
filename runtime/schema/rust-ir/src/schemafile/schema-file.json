@@ -6441,6 +6441,9 @@
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
         },
+        "triageOperations": {
+          "$ref": "#/$defs/TriageOperationsConfig"
+        },
         "userAdministration": {
           "$ref": "#/$defs/UserAdministrationConfig"
         },
@@ -6515,6 +6518,9 @@
         },
         "serviceCallers": {
           "$ref": "#/$defs/ServiceCallers"
+        },
+        "triageOperations": {
+          "$ref": "#/$defs/TriageOperationsConfig"
         },
         "userAdministration": {
           "$ref": "#/$defs/UserAdministrationConfig"
@@ -7852,6 +7858,22 @@
       },
       "required": [
         "name"
+      ],
+      "type": "object"
+    },
+    "TriageOperationsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "party": {
+          "type": "string"
+        },
+        "refersTo": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "party"
       ],
       "type": "object"
     },

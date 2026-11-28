@@ -30,6 +30,7 @@ export {
   source,
   tableOperation,
   timeout,
+  triageOperations,
   uiHidden,
   userAdministration,
   userSessions,
@@ -70,6 +71,7 @@ export type {
   ServiceHandleRef,
   TableOperationRule,
   TimeoutConfig,
+  TriageOperationsOptions,
   UserAdministrationConfig,
   UserSessionsConfig,
   WorkerOptions

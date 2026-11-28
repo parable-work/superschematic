@@ -8,12 +8,14 @@ Deps, mounts the route each relay posts what it received to (POST
 /webhooks/sms/inbound and /webhooks/mail/inbound), which hands every
 message down the one inbound path, and hands each message of the
 notifier's dispatch queue to notifier.handle, so the Notify worker has no
-method here.
+method here. The office's triage is the API's Triage set (#746): the
+generated routes run it through Deps.inbound, so it has no method here
+either.
 
 Left to the app: what the inbound path is built with beyond that
 (createRuntimeOptions: the inbound address and the approval policy of a
-send), the staff's sends, timeline and triage, and Runs, the worker that
-acts on a run request when no agent does. The roles and each channel
+send), the staff's sends and timeline, and Runs, the worker that acts on
+a run request when no agent does. The roles and each channel
 kind's trust are seed rows of jobs-db's schema (@seedRows, #625), which
 its migrations write.
 
@@ -42,16 +44,13 @@ export const createRuntimeOptions: RuntimeOptionsConstructor = deps => ({
 /**
  * The staff's side of the conversations, each as its caller: writing to a
  * party, held to parties.message, the party's identity, the rate limit and
- * the approval policy; a party's timeline; and triage, what came from no
- * one the deployment trusts, held to parties.triage. The handlers of the
- * API's own operations call these.
+ * the approval policy; and a party's timeline. The handlers of the API's
+ * own operations call these; triage is the generated routes' (#746).
  */
 export function staff(deps: Deps) {
   return {
     send: (as: Principal, party: { table: string; key: string }, input: { channel: string; body: string; subject?: string }) => deps.inbound.send({ as, party, ...input }),
     timeline: (as: Principal, party: { table: string; key: string }) => deps.inbound.timeline(as, party),
-    triage: (as: Principal) => deps.inbound.triage(as),
-    settle: (as: Principal, message: string) => deps.inbound.settle(as, message),
   };
 }
 
