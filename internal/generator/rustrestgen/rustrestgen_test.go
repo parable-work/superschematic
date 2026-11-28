@@ -128,6 +128,15 @@ func writeGoldenAPI(t *testing.T, name string, output *APIOutput) map[string]str
 	if output.HasGraphOperations() {
 		files = append(files, filepath.Join("src", GraphsFile))
 	}
+	if output.HasRowFeatureOperations() {
+		files = append(files, filepath.Join("src", RowFeaturesFile))
+	}
+	if output.HasFileProcessing() {
+		files = append(files, filepath.Join("src", FilesFile))
+	}
+	if output.HasFileProcessing() {
+		files = append(files, filepath.Join("src", FilesFile))
+	}
 	if output.MCP != nil {
 		files = append(files, filepath.Join("src", filepath.FromSlash(MCPFile)))
 	}

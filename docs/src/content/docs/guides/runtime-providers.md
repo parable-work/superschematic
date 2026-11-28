@@ -28,7 +28,7 @@ depends on none of them.
 | a provider package's manifest in its `package.json`, which the build checks against its interface's contract; a package listed by its directory or by its npm name, in build-all's dependency graph and its cache key | a TypeScript server that imports an npm-named provider by its name; it imports the directory the name resolved to |
 | `@providers` on an API's `@envVars` class, and the API config's `providers`; a generated TypeScript, Go and Rust server that links the packages and builds `Providers` in its `Deps` | |
 | the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)), and search over attachments' text, which needs a file processor | a check for `credentials`: an agent's credentials are rows of its definition, which the build does not read |
-| the file processor's pass over attachments' `pending` (`processFiles`, a generated API's `processPendingFiles`), whose text search indexes ([References and files on any row](/superschematic/guides/database-tables/)), in TypeScript, in Go (`fileprocessing.Process`, a generated API's `ProcessPendingFiles`) and in Rust (`orm::file_processing::process_files`) | a generated Rust API's own call of the pass |
+| the file processor's pass over attachments' `pending` (`processFiles`, a generated API's `processPendingFiles`), whose text search indexes ([References and files on any row](/superschematic/guides/database-tables/)), in TypeScript, in Go (`fileprocessing.Process`, a generated API's `ProcessPendingFiles`) and in Rust (`orm::file_processing::process_files`, a generated API's `files::process_pending_files`) | |
 | credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
 
 [D159](https://github.com/parable-work/superschematic/issues/608)
@@ -311,6 +311,17 @@ which a job runs on a schedule (#603):
 let orm = Repositories::new(&client)?.as_system();
 let pass = FileProcessingOptions::new(&deps.providers, deps.uploads.as_ref());
 let run = process_files(&orm.attachments()?, &pass).await?;
+```
+
+An API whose database declares `@attachments` and whose `@envVars`
+class names a files slot gets the call in its crate's `src/files.rs`
+(#614): `process_pending_files(&deps, bucket)` runs the pass over the
+attachments of `Deps.db` and `Deps.providers`, on a connection of the
+pool, or on a SQLite file in a transaction of its writing connection,
+with the bucket that holds the files:
+
+```rust
+let run = api::files::process_pending_files(&deps, Arc::clone(&deps.uploads)).await?;
 ```
 
 Rust has no ambient caller, so a provider does not run within its
