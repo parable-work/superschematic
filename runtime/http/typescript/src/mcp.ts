@@ -41,9 +41,8 @@ export type {
 /*
 The MCP endpoint of a generated API (D81): POST /api/mcp serves the API's
 visible @mcp operations as MCP tools over the streamable HTTP transport,
-statelessly, as the engine serves its own (runtime/engine/rust/engine/src/
-api/mcp.rs, whose conventions this file copies; the runtime does not
-depend on the engine):
+statelessly, with the conventions this file copied from the engine's own
+endpoint, which went with the engine (D103, #587):
 
 - The 2025 revisions (a request with no per-request _meta envelope):
   initialize, negotiating one of MCP_INITIALIZE_VERSIONS, ping, tools/list

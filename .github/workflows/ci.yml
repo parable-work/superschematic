@@ -925,7 +925,7 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: runtime/engine/rust
-          # Outside a pull request alone (engine-rust says why).
+          # Outside a pull request alone (rules-rust says why).
           save-if: ${{ github.event_name != 'pull_request' }}
 
       - name: Cache wasm-pack

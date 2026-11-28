@@ -256,8 +256,8 @@ pub enum Indexed {
     Unknown,
 }
 
-/// Reciprocal rank fusion's constant and window, the engine's
-/// (`superschematic_engine::search`, D16).
+/// Reciprocal rank fusion's constant and window, the ones the engine's
+/// Search used (D16) until the engine went (D103, #587).
 pub const RRF_K: u32 = 60;
 pub const RRF_WINDOW: u32 = 200;
 /// The most words of a query that count.

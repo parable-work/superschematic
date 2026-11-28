@@ -88,8 +88,8 @@ trap 'rm -f "$BUILD_LOG" "$NEW_STAMP"' EXIT
 # cargo names the archive it built in its artifact records, wherever
 # CARGO_TARGET_DIR or a config puts the target directory: the staticlib of
 # the package whose manifest is rules-wasm's. The crate is a member of the
-# engine's workspace, so it builds against the workspace's committed lock
-# file.
+# runtime/engine/rust workspace, so it builds against the workspace's
+# committed lock file.
 LOCKED=--locked
 if [ -n "$PROJECT" ]; then
   LOCKED=""

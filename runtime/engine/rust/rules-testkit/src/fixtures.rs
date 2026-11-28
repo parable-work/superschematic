@@ -368,7 +368,8 @@ impl Behavior for Gate {
     }
 }
 
-/// test.Gate of `runtime/engine-workqueue/typescript/test/fixtures.ts`: it
+/// test.Gate, as the work queue's TypeScript tests defined it until the
+/// engine went (D103, #587): it
 /// refuses Workflow's transition of a row titled held, and Lease's expire
 /// of one titled stuck, with no code, whoever calls.
 pub struct LeaseGate;
@@ -405,7 +406,8 @@ impl Behavior for LeaseGate {
     }
 }
 
-/// test.Signal of `runtime/engine-workqueue/typescript/test/fixtures.ts`:
+/// test.Signal, as the work queue's TypeScript tests defined it until the
+/// engine went (D103, #587):
 /// its own operation, `signal({ name })`, sends the holder a directive
 /// through Lease's direct (`Cx::call`), as a budget does on an overrun.
 pub struct Signal;

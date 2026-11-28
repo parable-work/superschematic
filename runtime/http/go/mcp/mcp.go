@@ -1,8 +1,8 @@
 // Package mcp is the MCP endpoint of a generated Go API (D81, D116, #660):
 // POST /api/mcp serves the API's visible @mcp operations as MCP tools over
 // the streamable HTTP transport, statelessly, as the TypeScript runtime's
-// mcp.ts and the Rust runtime's mcp module serve them and the engine
-// serves its own. The three are held to the same recorded exchanges,
+// mcp.ts and the Rust runtime's mcp module serve them. The three are held
+// to the exchanges the engine recorded before it went (D103, #587),
 // runtime/engine/testdata/http/mcp.json.
 //
 //   - The 2025 revisions (a request with no per-request _meta envelope):

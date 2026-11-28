@@ -33,11 +33,11 @@ or otherwise:
   diacritics fold too (the search_unaccent configuration, the definition's
   config).
 - The order: ts_rank_cd over the row's words, weighed by where each is
-  (title A, body B, conversation C, files D, the weights the engine gives
+  (title A, body B, conversation C, files D, the weights the engine gave
   four weight classes), then the table and the key. With an embedding, the
   first RRF_WINDOW by text are re-ranked by reciprocal rank fusion of their
-  text place and their place by cosine similarity, RRF_K the engine's
-  constant (superschematic_engine::search); a row past the window keeps its
+  text place and their place by cosine similarity, RRF_K the constant the
+  engine's Search used (D103, #587); a row past the window keeps its
   text order after them. A query with no term to hold that brings a
   vector ranks by the vector alone: every index row the caller may read
   whose embedding is of the model, by cosine similarity (#740).
@@ -178,7 +178,7 @@ export interface SearchIndexing {
   readonly sourceKey: string;
 }
 
-/** Reciprocal rank fusion's constant and window, the engine's (superschematic_engine::search, D16). */
+/** Reciprocal rank fusion's constant and window, the ones the engine's Search used (D16) until the engine went (D103, #587). */
 export const RRF_K = 60;
 export const RRF_WINDOW = 200;
 
