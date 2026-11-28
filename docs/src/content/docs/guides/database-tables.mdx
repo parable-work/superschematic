@@ -1511,10 +1511,15 @@ file, err := deps.DB.Attachments().Complete(ctx, rowrefs.FileRef{Table: "Issue",
 
 The types and the refusals (`rowrefs.Error` and its `Code`) are the
 schema runtime's `rowrefs` package; `bucket.ForAttachments` of the HTTP
-runtime is a listed bucket as the ORM reads it. A Go server serves
-neither as routes yet, as the TypeScript server does not: the
-implementation writes its routes over them. They run on SQLite too, over
+runtime is a listed bucket as the ORM reads it. They run on SQLite too, over
 the SQLite database and its transactions ([Go on SQLite](#go-on-sqlite)).
+
+An API serves a table's references, backlinks and files as routes, SDK
+methods and MCP tools with no code of yours, from a
+`@rowFeatureOperations` set
+([A table's references and files](/superschematic/guides/api-routes/#a-tables-references-and-files)),
+in TypeScript and Go; a Rust server keeps each a method of the
+implementation's trait for now (#723).
 
 ## State machines
 

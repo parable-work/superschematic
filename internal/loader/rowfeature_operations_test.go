@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/parable-work/superschematic/internal/loader/rowfeatureops"
+	"github.com/parable-work/superschematic/internal/loader/verify"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -147,5 +148,65 @@ func TestRowFeatureOperationsExpand(t *testing.T) {
 		if schema.Scalars[name] == nil {
 			t.Errorf("the API holds no scalar %s", name)
 		}
+	}
+}
+
+// TestRowFeatureOperationsRefusals: the checks the loader runs before it
+// fills a @rowFeatureOperations set refuse what the expansion could not
+// serve: an operation that is none of the set's, a permission list for one
+// it does not serve, a table its database does not declare, a bucket the
+// API does not list, and files with no bucket to hold them.
+func TestRowFeatureOperationsRefusals(t *testing.T) {
+	db, err := LoadService(filepath.FromSlash(rowFeaturesDBFixture))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name   string
+		change func(api *ir.Schema, cfg *ir.RowFeatureOperationsConfig)
+		want   string
+	}{
+		{"an operation that is none of the set's", func(_ *ir.Schema, cfg *ir.RowFeatureOperationsConfig) {
+			cfg.Operations = []string{"backlinks", "release"}
+		}, `TicketActions: @rowFeatureOperations lists the operation "release", which is none of a table's references and files`},
+		{"permissions for an operation the set does not serve", func(_ *ir.Schema, cfg *ir.RowFeatureOperationsConfig) {
+			cfg.Operations = []string{"backlinks"}
+			cfg.Permissions = map[string][]string{"beginUpload": {"tickets.upload"}}
+		}, "TicketActions: @rowFeatureOperations names permissions for beginUpload, which the set does not serve"},
+		{"a table the database does not declare", func(_ *ir.Schema, cfg *ir.RowFeatureOperationsConfig) {
+			cfg.Type = "Elsewhere"
+		}, "TicketActions: @rowFeatureOperations names Elsewhere, which fixture-references-api does not import"},
+		{"a bucket the API does not list", func(_ *ir.Schema, cfg *ir.RowFeatureOperationsConfig) {
+			cfg.Bucket = "other-files"
+		}, "TicketActions: @rowFeatureOperations names the bucket other-files, which is none of fixture-references-api's buckets (fixture-references-files)"},
+		{"files with no bucket to hold them", func(api *ir.Schema, _ *ir.RowFeatureOperationsConfig) {
+			api.Buckets = nil
+		}, "TicketActions: @rowFeatureOperations(Ticket) serves Ticket's files, which an upload puts in a bucket, and fixture-references-api lists none"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := loadRowFeaturesAPI(t)
+			var set *ir.OperationSet
+			for _, each := range api.OperationSets {
+				if each.IsRowFeatureOperations() {
+					each.Operations = nil
+				}
+				if each.Name == "TicketActions" {
+					set = each
+				}
+			}
+			tc.change(api, set.RowFeatureOperations)
+			result := verify.CheckRowFeatureOperations(api, verify.Input{Database: db})
+			var got []string
+			for _, d := range result.Errors {
+				got = append(got, d.Msg)
+			}
+			found := false
+			for _, message := range got {
+				found = found || strings.Contains(message, tc.want)
+			}
+			if !found {
+				t.Errorf("CheckRowFeatureOperations = %q, want %q among them", got, tc.want)
+			}
+		})
 	}
 }
