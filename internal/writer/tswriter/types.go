@@ -3,6 +3,7 @@ package tswriter
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
@@ -86,7 +87,7 @@ func (e *emitter) emitType(def *ir.TypeDef) {
 		e.failf("type %s: descriptions have no TypeScript authoring form", def.Name)
 	}
 	if len(def.Extensions) > 0 {
-		e.failf("type %s: extension data (%s) has no TypeScript authoring form in this writer", def.Name, strings.Join(sortedKeys(def.Extensions), ", "))
+		e.failf("type %s: extension data (%s) has no TypeScript authoring form in this writer", def.Name, strings.Join(slices.Sorted(maps.Keys(def.Extensions)), ", "))
 	}
 
 	switch def.Role {
@@ -400,7 +401,7 @@ func literalType(value any) string {
 			return "{}"
 		}
 		parts := make([]string, 0, len(v))
-		for _, key := range sortedKeys(v) {
+		for _, key := range slices.Sorted(maps.Keys(v)) {
 			parts = append(parts, propertyName(key)+": "+literalType(v[key]))
 		}
 		return "{ " + strings.Join(parts, "; ") + " }"
@@ -452,7 +453,7 @@ func displayArgs(d *ir.TypeDisplay) string {
 	}
 	if len(d.States) > 0 {
 		states := make([]string, 0, len(d.States))
-		for _, name := range sortedKeys(d.States) {
+		for _, name := range slices.Sorted(maps.Keys(d.States)) {
 			state := d.States[name]
 			var members []string
 			if state.Label != "" {
@@ -470,9 +471,9 @@ func displayArgs(d *ir.TypeDisplay) string {
 	}
 	if len(d.Transitions) > 0 {
 		froms := make([]string, 0, len(d.Transitions))
-		for _, from := range sortedKeys(d.Transitions) {
+		for _, from := range slices.Sorted(maps.Keys(d.Transitions)) {
 			tos := make([]string, 0, len(d.Transitions[from]))
-			for _, to := range sortedKeys(d.Transitions[from]) {
+			for _, to := range slices.Sorted(maps.Keys(d.Transitions[from])) {
 				tos = append(tos, propertyName(to)+": "+quote(d.Transitions[from][to]))
 			}
 			froms = append(froms, propertyName(from)+": { "+strings.Join(tos, ", ")+" }")

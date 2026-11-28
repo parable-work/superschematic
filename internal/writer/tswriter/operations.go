@@ -2,6 +2,7 @@ package tswriter
 
 import (
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
 	"slices"
@@ -29,7 +30,7 @@ func (e *emitter) emitOperationSet(set *ir.OperationSet) {
 		e.failf("%s: descriptions have no TypeScript authoring form", owner)
 	}
 	if len(set.Extensions) > 0 {
-		e.failf("%s: extension data (%s) has no TypeScript authoring form in this writer", owner, strings.Join(sortedKeys(set.Extensions), ", "))
+		e.failf("%s: extension data (%s) has no TypeScript authoring form in this writer", owner, strings.Join(slices.Sorted(maps.Keys(set.Extensions)), ", "))
 	}
 	if set.IsIdentityRoutes() {
 		e.emitIdentityRoutesSet(set, owner)
@@ -220,7 +221,7 @@ func (e *emitter) emitGraphOperationsSet(set *ir.OperationSet, owner string) {
 	}
 	if len(cfg.Permissions) > 0 {
 		var entries []string
-		for _, operation := range sortedKeys(cfg.Permissions) {
+		for _, operation := range slices.Sorted(maps.Keys(cfg.Permissions)) {
 			entries = append(entries, operation+": ["+quotedList(cfg.Permissions[operation])+"]")
 		}
 		options = append(options, "permissions: { "+strings.Join(entries, ", ")+" }")
@@ -284,7 +285,7 @@ func (e *emitter) emitRowFeatureOperationsSet(set *ir.OperationSet, owner string
 	}
 	if len(cfg.Permissions) > 0 {
 		var entries []string
-		for _, operation := range sortedKeys(cfg.Permissions) {
+		for _, operation := range slices.Sorted(maps.Keys(cfg.Permissions)) {
 			entries = append(entries, operation+": ["+quotedList(cfg.Permissions[operation])+"]")
 		}
 		options = append(options, "permissions: { "+strings.Join(entries, ", ")+" }")

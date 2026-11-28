@@ -25,7 +25,7 @@ import (
 // a map) is not checked; the generators do not emit one either.
 func validateDefaultValues(schema *ir.Schema, externalEnums map[string]*ir.EnumDef) error {
 	var errs []error
-	check := func(owner string, ref ir.TypeRef, rules valueRules, text string) {
+	check := func(owner string, ref ir.TypeRef, rules ir.ValueRules, text string) {
 		if err := validateDefaultValue(schema, externalEnums, ref, rules, text); err != nil {
 			errs = append(errs, fmt.Errorf("%s: %s: %w", schema.Name, owner, err))
 		}
@@ -38,11 +38,11 @@ func validateDefaultValues(schema *ir.Schema, externalEnums map[string]*ir.EnumD
 				// where it may stand.
 				nowDefault := !field.TypeRef.IsArray && !field.TypeRef.IsMap && codegen.IsDefaultNow(field.TypeRef.Name, field.Default)
 				if field.Default != nil && !nowDefault {
-					check(name+"."+field.Name, field.TypeRef, fieldValueRules(field), *field.Default)
+					check(name+"."+field.Name, field.TypeRef, field.ValueRules, *field.Default)
 				}
 				for _, arg := range field.Arguments {
 					if arg.Default != nil {
-						check(fmt.Sprintf("%s.%s(%s)", name, field.Name, arg.Name), arg.TypeRef, argumentValueRules(arg), *arg.Default)
+						check(fmt.Sprintf("%s.%s(%s)", name, field.Name, arg.Name), arg.TypeRef, arg.ValueRules, *arg.Default)
 					}
 				}
 			}
@@ -52,7 +52,7 @@ func validateDefaultValues(schema *ir.Schema, externalEnums map[string]*ir.EnumD
 		for _, op := range set.Operations {
 			for _, arg := range op.Arguments {
 				if arg.Default != nil {
-					check(fmt.Sprintf("%s.%s(%s)", set.Name, op.Name, arg.Name), arg.TypeRef, argumentValueRules(arg), *arg.Default)
+					check(fmt.Sprintf("%s.%s(%s)", set.Name, op.Name, arg.Name), arg.TypeRef, arg.ValueRules, *arg.Default)
 				}
 			}
 		}
@@ -69,7 +69,7 @@ func validateDefaultValues(schema *ir.Schema, externalEnums map[string]*ir.EnumD
 				value, ok, err := defaultValue(schema, externalEnums, field.TypeRef, seed.Name)
 				if err == nil && ok {
 					if err = validateCompositeValue(schema, externalEnums, field.TypeRef, value, "name"); err == nil {
-						err = validateCompositeFieldConstraints(fieldValueRules(field), field.TypeRef, value, "name")
+						err = validateCompositeFieldConstraints(field.ValueRules, field.TypeRef, value, "name")
 					}
 				}
 				if err != nil {
@@ -102,7 +102,7 @@ func validateDefaultValues(schema *ir.Schema, externalEnums map[string]*ir.EnumD
 
 // validateDefaultValue checks one default, written as the IR's default
 // text, against its type and the rules of the field or argument it fills.
-func validateDefaultValue(schema *ir.Schema, externalEnums map[string]*ir.EnumDef, ref ir.TypeRef, rules valueRules, text string) error {
+func validateDefaultValue(schema *ir.Schema, externalEnums map[string]*ir.EnumDef, ref ir.TypeRef, rules ir.ValueRules, text string) error {
 	value, ok, err := defaultValue(schema, externalEnums, ref, text)
 	if err != nil || !ok {
 		return err

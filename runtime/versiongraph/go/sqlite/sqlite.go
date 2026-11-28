@@ -52,6 +52,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/parable-work/superschematic/runtime/versiongraph/go/descriptor"
 	"github.com/parable-work/superschematic/runtime/versiongraph/go/storage"
 )
 
@@ -130,40 +131,14 @@ type kind struct {
 	content  []string
 }
 
-// descriptor is what the adapter reads of a graph descriptor.
-type descriptor struct {
-	Version int `json:"version"`
-	Kinds   []struct {
-		Kind          string   `json:"kind"`
-		Key           string   `json:"key"`
-		ID            string   `json:"id"`
-		Ref           string   `json:"ref"`
-		Root          string   `json:"root"`
-		Tombstone     string   `json:"tombstone"`
-		Version       string   `json:"version"`
-		Author        string   `json:"author"`
-		Excluded      []string `json:"excluded"`
-		ReleasedTable string   `json:"releasedTable"`
-		History       *struct {
-			RetentionDays *int      `json:"retentionDays"`
-			Exclude       *[]string `json:"exclude"`
-			Actor         string    `json:"actor"`
-		} `json:"history"`
-		Columns map[string]string `json:"columns"`
-	} `json:"kinds"`
-}
-
 // New reads a graph's descriptor (version 3). The adapter reads only its
 // kinds: each kind's role columns (the root among them), its columns' value
 // classes and its history; the tables the descriptor names are the Postgres
 // adapter's.
 func New(raw json.RawMessage, opts Options) (*Adapter, error) {
-	var d descriptor
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return nil, fmt.Errorf("sqlite: read the descriptor: %w", err)
-	}
-	if d.Version != 3 {
-		return nil, fmt.Errorf("sqlite: descriptor version %d; this adapter reads version 3", d.Version)
+	d, err := descriptor.Read(raw)
+	if err != nil {
+		return nil, fmt.Errorf("sqlite: %w", err)
 	}
 	if opts.Graph == "" {
 		return nil, errors.New("sqlite: an adapter needs its graph's name (Options.Graph)")
@@ -184,7 +159,6 @@ func New(raw json.RawMessage, opts Options) (*Adapter, error) {
 	if a.resultCode == nil {
 		a.resultCode = ResultCode
 	}
-	var err error
 	if a.t, err = tablesOf(a.tableName); err != nil {
 		return nil, err
 	}

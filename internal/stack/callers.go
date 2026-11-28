@@ -2,6 +2,7 @@ package stack
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -44,14 +45,14 @@ func (r *resolver) callersFields(d *deployable) map[string]string {
 // It reports the env keys it refused, which bindConfig then skips.
 func (r *resolver) checkCallersFields(d *deployable, callers map[string]string, derived map[string]*edge) map[string]bool {
 	refused := map[string]bool{}
-	for _, name := range sortedKeys(callers) {
+	for _, name := range slices.Sorted(maps.Keys(callers)) {
 		api := callers[name]
-		for _, fieldName := range sortedKeys(d.fields) {
+		for _, fieldName := range slices.Sorted(maps.Keys(d.fields)) {
 			if f := d.fields[fieldName]; ir.DerivedFieldClaims(name, f.name) {
 				r.fail(CodeFieldCollision, "%s %s: config field %s of %s collides with %s, the callers field of %s", d.res.Kind, d.res.Name, f.name, f.declaring, name, api)
 			}
 		}
-		for _, other := range sortedKeys(derived) {
+		for _, other := range slices.Sorted(maps.Keys(derived)) {
 			if ir.DerivedFieldClaims(name, other) || ir.DerivedFieldClaims(other, name) {
 				r.fail(CodeFieldCollision, "%s %s: %s, the field edge %s derives, collides with %s, the callers field of %s", d.res.Kind, d.res.Name, other, derived[other].res.ID, name, api)
 			}
@@ -68,10 +69,10 @@ func (r *resolver) checkCallersFields(d *deployable, callers map[string]string, 
 // to its API from other servers, whose values connectEdges merges.
 func (r *resolver) callersBindings(d *deployable, callers map[string]string) []*ir.Binding {
 	var out []*ir.Binding
-	for _, name := range sortedKeys(callers) {
+	for _, name := range slices.Sorted(maps.Keys(callers)) {
 		api := callers[name]
 		b := &ir.Binding{Field: name, Source: ir.BindingDerived, CallersOf: api}
-		for _, id := range sortedKeys(r.edges) {
+		for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 			e := r.edges[id]
 			if e.res.Kind == ir.EdgeHTTP && e.res.Service.Name == api && e.res.To == d.res.Name && e.res.From != d.res.Name {
 				b.Edges = append(b.Edges, id)
@@ -116,7 +117,7 @@ func checkCallee(e *edge, callee any) error {
 // connectors of its edges gave, merged by issuer. callees holds each
 // edge's entry, and connected the edges whose connector ran.
 func (r *resolver) fillCallers(callees map[string]any, connected map[string]bool) {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		for _, b := range r.deployables[name].res.Bindings {
 			if b.CallersOf == "" {
 				continue
@@ -198,7 +199,7 @@ func mergeCallers(entries []callerEntry) (map[string]any, error) {
 		}
 	}
 	issuers := []any{}
-	for _, key := range sortedKeys(byIssuer) {
+	for _, key := range slices.Sorted(maps.Keys(byIssuer)) {
 		m := byIssuer[key]
 		slices.SortFunc(m.callers, func(a, b any) int {
 			ca, cb := a.(map[string]any), b.(map[string]any)

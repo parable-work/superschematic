@@ -1,7 +1,9 @@
 import type { MiddlewareHandler } from 'hono';
 import { HttpProblem, badRequest, payloadTooLarge, serviceUnavailable } from './problem.js';
 import { parseDuration } from './queue-core.js';
+import { readCapped } from './read-capped.js';
 import { base64urlDecode, fetchKeySet } from './serviceauth.js';
+import { subtleSha256Hex } from './sha256.js';
 
 /*
 jwtBodyHashVerifier (D81): the webhook verifier of a provider that signs each
@@ -191,7 +193,7 @@ export function jwtBodyHashVerifier(options: JwtBodyHashVerifierOptions): Middle
     if (typeof claimed !== 'string') refused(`the token has no ${claim} claim`);
 
     const body = await readBody(request, maxBodyBytes);
-    const digest = hex(new Uint8Array(await crypto.subtle.digest('SHA-256', body)));
+    const digest = await subtleSha256Hex(body);
     if (!equalText(claimed, digest)) refused(`the body's SHA-256 is not the token's ${claim}`);
     await next();
   };
@@ -355,38 +357,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 async function readBody(request: Request, limit: number): Promise<Uint8Array<ArrayBuffer>> {
   const declared = request.headers.get('content-length');
   if (declared !== null && /^\d+$/u.test(declared) && Number(declared) > limit) throw payloadTooLarge();
-  if (request.body === null) return new Uint8Array(0);
-  const chunks: Uint8Array[] = [];
-  let size = 0;
+  let body: Uint8Array<ArrayBuffer> | undefined;
   try {
-    const reader = request.body.getReader();
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limit) {
-        await reader.cancel();
-        throw payloadTooLarge();
-      }
-      chunks.push(value);
-    }
+    body = await readCapped(request.body, limit);
   } catch (error) {
-    if (error instanceof HttpProblem) throw error;
     throw badRequest('The request body could not be read', { cause: error });
   }
-  const body = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  if (!body) throw payloadTooLarge();
   return body;
-}
-
-function hex(bytes: Uint8Array): string {
-  let text = '';
-  for (const byte of bytes) text += byte.toString(16).padStart(2, '0');
-  return text;
 }
 
 /** Whether two strings are equal, in time that depends on their length alone. */

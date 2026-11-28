@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -55,7 +56,7 @@ func (t AudienceTrigger) sqlite(quote func(string) string) sqliteAudience {
 		if c == "" {
 			return ""
 		}
-		return quote(unquoted(c))
+		return quote(sqlutil.Unquote(c))
 	}
 	a := sqliteAudience{
 		table: quote(t.Table), key: q(t.Key), audience: q(t.Audience), named: q(t.Named), agents: q(t.Agents),
@@ -109,7 +110,7 @@ func agentRank(x string) string {
 	var b strings.Builder
 	b.WriteString("CASE " + x)
 	for i, v := range ir.AgentAccesses {
-		fmt.Fprintf(&b, " WHEN %s THEN %d", stringLiteral(v), i)
+		fmt.Fprintf(&b, " WHEN %s THEN %d", sqlutil.QuoteLiteral(v), i)
 	}
 	b.WriteString(" END")
 	return b.String()
@@ -142,11 +143,11 @@ func (a sqliteAudience) invalidAgents() string {
 func (t AudienceTrigger) SQLiteTriggers(quote func(string) string) []SQLiteTrigger {
 	a := t.sqlite(quote)
 	refusals := fmt.Sprintf("  SELECT RAISE(ABORT, %s) WHERE %s;\n  SELECT RAISE(ABORT, %s) WHERE %s;\n",
-		stringLiteral(fmt.Sprintf("%s.%s is none of %s", t.Table, unquoted(t.Audience), strings.Join(a.values, ", "))), a.invalidAudience(),
-		stringLiteral(fmt.Sprintf("%s.%s is none of %s", t.Table, unquoted(t.Agents), strings.Join(ir.AgentAccesses, ", "))), a.invalidAgents())
+		sqlutil.QuoteLiteral(fmt.Sprintf("%s.%s is none of %s", t.Table, sqlutil.Unquote(t.Audience), strings.Join(a.values, ", "))), a.invalidAudience(),
+		sqlutil.QuoteLiteral(fmt.Sprintf("%s.%s is none of %s", t.Table, sqlutil.Unquote(t.Agents), strings.Join(ir.AgentAccesses, ", "))), a.invalidAgents())
 	set := fmt.Sprintf("  UPDATE %s SET %s = %s,\n    %s = %s\n    WHERE %s.%s = NEW.%s;\n",
 		a.table, a.effective, a.resolved(a.table), a.effectiveAgents, a.resolvedAgents(a.table), a.table, a.key, a.key)
-	comment := fmt.Sprintf("  -- The @audience of %s (D156, D182): the row's audience resolved into\n  -- %s and %s, whatever writes the row.\n", t.Origin, unquoted(t.Effective), unquoted(t.EffectiveAgents))
+	comment := fmt.Sprintf("  -- The @audience of %s (D156, D182): the row's audience resolved into\n  -- %s and %s, whatever writes the row.\n", t.Origin, sqlutil.Unquote(t.Effective), sqlutil.Unquote(t.EffectiveAgents))
 	insert := fmt.Sprintf("CREATE TRIGGER %s AFTER INSERT ON %s FOR EACH ROW\nBEGIN\n%s%s%sEND",
 		quote(t.TriggerName+"_insert"), a.table, comment, refusals, set)
 	update := fmt.Sprintf("CREATE TRIGGER %s AFTER UPDATE ON %s FOR EACH ROW\nWHEN %s\n  OR %s\n  OR NEW.%s IS NOT %s\n  OR NEW.%s IS NOT %s\nBEGIN\n%s%s%sEND",

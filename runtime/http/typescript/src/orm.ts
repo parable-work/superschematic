@@ -1252,6 +1252,28 @@ export interface SoftDeleteRepository<
   hardDeleteOne(id: Key): Promise<void>;
 }
 
+/**
+ * A table's repository as the runtime's own modules (per-record access,
+ * the notifier, the inbound path, the agents, search, the calendar and the
+ * routes) reach it through an ORM whose generated types they do not hold:
+ * the definition it runs on, and its reads and writes over plain rows, Row
+ * as the module reads a row. Each repository of an ORM is one, beneath the
+ * Repository its generated orm.ts types it as; a module that needs less
+ * picks what it needs.
+ */
+export interface PlainRepository<Row = Record<string, unknown>> {
+  readonly def: TableDefinition;
+  findOne(filter: Readonly<Record<string, unknown>> | null | undefined, options?: Readonly<Record<string, unknown>>): Promise<Row | null>;
+  findMany(filter: Readonly<Record<string, unknown>> | null | undefined, options?: Readonly<Record<string, unknown>>): Promise<{ rows: Row[]; total?: number }>;
+  findPage(filter: Readonly<Record<string, unknown>> | null | undefined, options?: Readonly<Record<string, unknown>>): Promise<RowPage<Row, unknown>>;
+  createOne(input: Readonly<Record<string, unknown>>): Promise<Row>;
+  createMany(inputs: readonly Readonly<Record<string, unknown>>[]): Promise<Row[]>;
+  updateOne(id: unknown, update: Readonly<Record<string, unknown>>, options?: WriteOptions): Promise<Row>;
+  updateMany(filter: Readonly<Record<string, unknown>> | null, update: Readonly<Record<string, unknown>>): Promise<number>;
+  deleteOne(id: unknown, options?: WriteOptions): Promise<void>;
+  deleteMany(filter: Readonly<Record<string, unknown>> | null): Promise<number>;
+}
+
 /** What createOrm and ormOf take beside the pool. */
 export interface OrmOptions {
   /**
@@ -1573,7 +1595,7 @@ function actingUser(acting: Acting): string | undefined {
 }
 
 /** The repository of one table over a runner, acting as whom acting resolves to. */
-class TableRepository {
+class TableRepository implements PlainRepository<Values> {
   private readonly encrypted: readonly TableColumn[];
   /** The table's layout in the behaviors' layout document, when it composes behaviors (D103). */
   private readonly behaviors: RulesTable | undefined;

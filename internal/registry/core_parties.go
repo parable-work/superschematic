@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -82,7 +83,7 @@ func partyOf(typeName string, args []any) (*ir.PartyDef, error) {
 	if !ok {
 		return nil, ArgErrorf(0, "@party on %s takes an options object: %s", typeName, shape)
 	}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		text, ok := obj[key].(string)
 		if !ok || strings.TrimSpace(text) == "" {
 			return nil, ArgErrorf(0, "@party on %s: %s is a non-empty string; got %v", typeName, key, obj[key])

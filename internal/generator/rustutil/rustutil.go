@@ -3,6 +3,7 @@
 package rustutil
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"unicode"
@@ -214,5 +215,38 @@ func UseLine(path string, items []string) string {
 		row += next
 	}
 	b.WriteString("    " + row + "\n};")
+	return b.String()
+}
+
+// Quote writes s as a Rust string literal: a backslash, a double quote, a
+// newline, a carriage return, a tab and NUL are escaped as \\, \", \n, \r,
+// \t and \0, any other control character and DEL as \u{XX}.
+func Quote(s string) string {
+	var b strings.Builder
+	b.Grow(len(s) + 2)
+	b.WriteByte('"')
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		case 0:
+			b.WriteString(`\0`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&b, `\u{%x}`, r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	b.WriteByte('"')
 	return b.String()
 }

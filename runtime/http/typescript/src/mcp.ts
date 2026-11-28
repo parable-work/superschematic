@@ -16,6 +16,7 @@ import {
 import type { Principal } from './auth.js';
 import type { OperationSpec, RequestContext } from './operation.js';
 import { ErrorCode, HttpProblem, problemBody, type ProblemBody } from './problem.js';
+import { readCapped } from './read-capped.js';
 import type { Revealable } from './secret.js';
 
 export {
@@ -256,7 +257,7 @@ export async function serveMcp(request: Request, tools: McpToolSet, options: Mcp
   if (!isJson(request.headers.get('content-type'))) {
     return entryError(415, rpcError(SERVER_ERROR, 'Unsupported Media Type: Content-Type must be application/json'), null);
   }
-  const bytes = await readCapped(request, MCP_MAX_BODY_BYTES);
+  const bytes = await readRequestBody(request, MCP_MAX_BODY_BYTES);
   if (bytes === undefined) {
     return entryError(413, rpcError(SERVER_ERROR, `Payload Too Large: Request body must not exceed ${MCP_MAX_BODY_BYTES} bytes`), null);
   }
@@ -783,32 +784,13 @@ function refuseAccept(request: Request): Response | undefined {
   return entryError(406, rpcError(SERVER_ERROR, 'Not Acceptable: Client must accept both application/json and text/event-stream'), null);
 }
 
-// readCapped reads the body, or undefined once it passes limit bytes; it
-// stops reading there, so an oversized body is never held.
-async function readCapped(request: Request, limit: number): Promise<Uint8Array | undefined> {
+// readRequestBody reads the body, or undefined once it passes limit bytes,
+// or its Content-Length says it will; it stops reading there, so an
+// oversized body is never held.
+async function readRequestBody(request: Request, limit: number): Promise<Uint8Array | undefined> {
   const declared = Number(request.headers.get('content-length') ?? '');
   if (Number.isFinite(declared) && declared > limit) return undefined;
-  if (!request.body) return new Uint8Array();
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > limit) {
-      await reader.cancel().catch(() => {});
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  const bytes = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return bytes;
+  return readCapped(request.body, limit);
 }
 
 function resultMessage(result: unknown, id: unknown): Record<string, unknown> {

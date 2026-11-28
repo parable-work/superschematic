@@ -57,13 +57,7 @@ type Param struct {
 	IsMap           bool
 	DefaultValue    *string
 
-	ValidateMin       *float64
-	ValidateMax       *float64
-	ValidateMinLength *int
-	ValidateMaxLength *int
-	ValidateListMin   *int
-	ValidateListMax   *int
-	ValidatePattern   string
+	ir.ValueRules
 
 	// Reference is the reference the argument or field holds (D61), as
 	// written or, for a field, derived from a relation's key, resolved in
@@ -807,9 +801,9 @@ func (p Param) queryParamUsesTypes() bool {
 	case p.IsArray, strings.HasPrefix(p.GoType, "types."):
 		return true
 	case p.IsInt, p.IsFloat:
-		return p.ValidateMin != nil || p.ValidateMax != nil
+		return p.HasRange()
 	case p.IsString:
-		return p.ValidateMinLength != nil || p.ValidateMaxLength != nil || p.ValidatePattern != ""
+		return p.HasText()
 	}
 	return false
 }
@@ -825,7 +819,7 @@ func (p Param) queryArgUsesTypes() bool {
 	case p.IsArray:
 		return true
 	case p.IsInt, p.IsFloat:
-		return p.ValidateMin != nil || p.ValidateMax != nil
+		return p.HasRange()
 	case p.IsBool:
 		return false
 	}
@@ -1796,23 +1790,17 @@ func (m *typeMapper) isPathParamType(ref ir.TypeRef) bool {
 // parse strategy resolved.
 func (m *typeMapper) mapArgument(arg *ir.ArgumentDef) (Param, error) {
 	param := Param{
-		Name:              arg.Name,
-		GoName:            codegen.ToPascalCase(arg.Name),
-		Type:              arg.TypeRef.Name,
-		Required:          arg.Required,
-		IsArray:           arg.TypeRef.IsArray,
-		IsArrayOfArrays:   arg.TypeRef.IsArrayOfArrays,
-		IsMap:             arg.TypeRef.IsMap,
-		DefaultValue:      arg.Default,
-		ValidateMin:       arg.ValidateMin,
-		ValidateMax:       arg.ValidateMax,
-		ValidateMinLength: arg.ValidateMinLength,
-		ValidateMaxLength: arg.ValidateMaxLength,
-		ValidateListMin:   arg.ValidateListMin,
-		ValidateListMax:   arg.ValidateListMax,
-		ValidatePattern:   arg.ValidatePattern,
-		Reference:         resolveReference(m.schema, m.dependencies, arg.References),
-		Search:            arg.Search,
+		Name:            arg.Name,
+		GoName:          codegen.ToPascalCase(arg.Name),
+		Type:            arg.TypeRef.Name,
+		Required:        arg.Required,
+		IsArray:         arg.TypeRef.IsArray,
+		IsArrayOfArrays: arg.TypeRef.IsArrayOfArrays,
+		IsMap:           arg.TypeRef.IsMap,
+		DefaultValue:    arg.Default,
+		ValueRules:      arg.ValueRules,
+		Reference:       resolveReference(m.schema, m.dependencies, arg.References),
+		Search:          arg.Search,
 	}
 	m.applyGoMapping(&param, arg.TypeRef.Name)
 	return param, nil
@@ -1898,21 +1886,15 @@ func (m *typeMapper) fieldsFromTypeDef(typeDef *ir.TypeDef) []Param {
 	var fields []Param
 	for _, field := range typeDef.Fields {
 		param := Param{
-			Name:              field.Name,
-			GoName:            codegen.ToPascalCase(field.Name),
-			Type:              field.TypeRef.Name,
-			Required:          field.Required,
-			IsArray:           field.TypeRef.IsArray,
-			IsArrayOfArrays:   field.TypeRef.IsArrayOfArrays,
-			IsMap:             field.TypeRef.IsMap,
-			ValidateMin:       field.ValidateMin,
-			ValidateMax:       field.ValidateMax,
-			ValidateMinLength: field.ValidateMinLength,
-			ValidateMaxLength: field.ValidateMaxLength,
-			ValidateListMin:   field.ValidateListMin,
-			ValidateListMax:   field.ValidateListMax,
-			ValidatePattern:   field.ValidatePattern,
-			Reference:         m.fieldReference(typeDef, field),
+			Name:            field.Name,
+			GoName:          codegen.ToPascalCase(field.Name),
+			Type:            field.TypeRef.Name,
+			Required:        field.Required,
+			IsArray:         field.TypeRef.IsArray,
+			IsArrayOfArrays: field.TypeRef.IsArrayOfArrays,
+			IsMap:           field.TypeRef.IsMap,
+			ValueRules:      field.ValueRules,
+			Reference:       m.fieldReference(typeDef, field),
 		}
 		m.applyGoMapping(&param, field.TypeRef.Name)
 		fields = append(fields, param)

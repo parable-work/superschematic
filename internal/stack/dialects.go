@@ -3,6 +3,8 @@ package stack
 import (
 	"github.com/parable-work/superschematic/internal/registry"
 	ir "github.com/parable-work/superschematic/ir"
+	"maps"
+	"slices"
 )
 
 // checkDatabaseDialects refuses a server, job or worker whose generated
@@ -26,7 +28,7 @@ import (
 //
 // It runs after deriveEdges, on each sql edge.
 func (r *resolver) checkDatabaseDialects() {
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		e := r.edges[id]
 		if e.res.Kind != ir.EdgeSQL || e.to == nil || e.to.res.Dialect == "" {
 			continue

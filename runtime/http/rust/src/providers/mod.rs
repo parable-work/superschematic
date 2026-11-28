@@ -112,16 +112,7 @@ pub(crate) mod time {
         let secs = since.as_secs();
         let days = i64::try_from(secs / 86_400).unwrap_or(i64::MAX);
         let rest = secs % 86_400;
-        // Howard Hinnant's civil_from_days.
-        let z = days + 719_468;
-        let era = z.div_euclid(146_097);
-        let doe = z.rem_euclid(146_097);
-        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-        let mp = (5 * doy + 2) / 153;
-        let day = doy - (153 * mp + 2) / 5 + 1;
-        let month = if mp < 10 { mp + 3 } else { mp - 9 };
-        let year = yoe + era * 400 + i64::from(month <= 2);
+        let (year, month, day) = crate::civil::from_days(days);
         format!(
             "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}.{:03}Z",
             rest / 3600,
@@ -148,14 +139,8 @@ pub(crate) mod time {
         if !text.ends_with('Z') {
             return None;
         }
-        let y = if month <= 2 { year - 1 } else { year };
-        let era = y.div_euclid(400);
-        let yoe = y.rem_euclid(400);
-        let mp = (month + 9) % 12;
-        let doy = (153 * mp + 2) / 5 + day - 1;
-        let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-        let days = era * 146_097 + doe - 719_468;
-        let secs = days * 86_400 + hour * 3600 + minute * 60 + second;
+        let secs =
+            crate::civil::to_days(year, month, day) * 86_400 + hour * 3600 + minute * 60 + second;
         let secs = u64::try_from(secs).ok()?;
         Some(UNIX_EPOCH + Duration::from_secs(secs) + Duration::from_millis(millis))
     }

@@ -2,6 +2,7 @@ package generator
 
 import (
 	"fmt"
+	"maps"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -24,7 +25,7 @@ func (r run) typeScriptProviders() (*tsrestgen.DepsProviders, error) {
 		return nil, err
 	}
 	out := &tsrestgen.DepsProviders{}
-	for _, slot := range sortedKeys(slots) {
+	for _, slot := range slices.Sorted(maps.Keys(slots)) {
 		out.Slots = append(out.Slots, tsrestgen.DepsProviderSlot{Slot: slot, Interface: slots[slot]})
 	}
 	providers := slices.Clone(r.Schema.Providers)
@@ -93,16 +94,6 @@ func typeScriptRuntime(deps *tsrestgen.DepsInfo, db *ir.Schema) {
 	}
 	deps.Routes.Grants = db.AccessGrantsTable() != nil
 	deps.Routes.AccessLog = db.AccessLogTable() != nil
-}
-
-// sortedKeys are m's keys, sorted.
-func sortedKeys[V any](m map[string]V) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
 }
 
 // typeScriptRuntimeQueues are the queues of db, schema, whose @worker a

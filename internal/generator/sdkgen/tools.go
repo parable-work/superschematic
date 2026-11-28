@@ -1,7 +1,6 @@
 package sdkgen
 
 import (
-	"crypto/sha256"
 	"fmt"
 	"sort"
 	"strings"
@@ -22,45 +21,34 @@ type JSONSchemaReturn = toolsutil.JSONSchemaReturn
 
 // ToolDefinition represents a single tool for LLM function calling
 type ToolDefinition struct {
-	Name                     string                   // Namespaced name e.g., "auth.sendMagicLink"
-	OperationID              string                   // OpenAPI operation id
-	Title                    string                   // @docs title
-	MCP                      *ir.OperationMCP         // resolved @mcp record, _meta with the guidance; nil without @mcp
-	Capability               string                   // @docs capability
-	Lifecycle                string                   // @docs lifecycle
-	Visibility               string                   // @docs visibility
-	Audience                 string                   // @docs audience
-	Guidance                 ir.ToolOperationGuidance // @docs guidance
-	ReplayMode               string                   // @docs replay mode
-	IdempotencyKeyPointers   []string                 // pointers into Parameters
-	ExpectedRevisionPointers []string                 // pointers into Parameters
-	RequiredPerms            []string                 // permissions the route requires
-	APIID                    string                   // API identifier e.g., "orders-api"
-	MethodName               string                   // SDK method name e.g., "sendMagicLink"
-	HTTPMethod               string                   // HTTP method e.g., "GET", "POST"
-	HTTPPath                 string                   // HTTP path template e.g., "/api/auth/send-magic-link"
-	Description              string                   // @docs description, else the comment with an auth note
-	RequiresAuth             bool                     // Whether authentication is required
-	Namespace                string                   // Namespace for grouping e.g., "auth"
-	IsScopedNS               bool                     // Whether the endpoint's namespace hoists a scope parameter
-	Parameters               JSONSchemaObject         // JSON Schema for parameters
-	ParamTypes               map[string]string        // TypeScript type of each parameter, keyed like Parameters.Properties
-	TypeImports              []string                 // types-package types ParamTypes names, sorted
-	Returns                  JSONSchemaReturn         // JSON Schema for return type
-	PathParams               []ToolPathParam          // Path parameters for invocation
-	HasInput                 bool                     // Whether endpoint has input type
-	InputType                string                   // Input type name if HasInput
-	InputFields              []ToolInputField         // the input type's fields, in order, if HasInput
-	ScalarArgs               []ToolScalarArg          // Scalar arguments (not path params)
-	QueryArgs                []ToolQueryArg           // Query arguments, with shape and bounds
-	Page                     *apigen.PageInfo         // @paginated (D60): cursor and limit join the query; nil otherwise
-	Filter                   *apigen.FilterInfo       // FilterBy (D106): the filter joins the query; nil otherwise
-	FilterParam              string                   // the filter's parameter, the argument's name in camelCase; set with Filter
-	FilterType               string                   // the SDK's type of the filter, which tools/index.ts types the parameter with; set with Filter
-	Encrypted                bool                     // Whether endpoint payload must be encrypted
-	BindingStatus            string                   // ready, or unsupported_multipart for a file upload
-	InputSchemaDigest        string                   // sha256 of the encoded Parameters
-	MCPBinding               MCPToolBinding           // Explicit MCP invocation binding metadata
+	toolsutil.ToolOperation // the operation as every SDK's tool documents write it
+
+	Name         string             // Namespaced name e.g., "auth.sendMagicLink"
+	OperationID  string             // OpenAPI operation id
+	APIID        string             // API identifier e.g., "orders-api"
+	MethodName   string             // SDK method name e.g., "sendMagicLink"
+	HTTPMethod   string             // HTTP method e.g., "GET", "POST"
+	HTTPPath     string             // HTTP path template e.g., "/api/auth/send-magic-link"
+	Description  string             // @docs description, else the comment with an auth note
+	RequiresAuth bool               // Whether authentication is required
+	Namespace    string             // Namespace for grouping e.g., "auth"
+	IsScopedNS   bool               // Whether the endpoint's namespace hoists a scope parameter
+	Parameters   JSONSchemaObject   // JSON Schema for parameters
+	ParamTypes   map[string]string  // TypeScript type of each parameter, keyed like Parameters.Properties
+	TypeImports  []string           // types-package types ParamTypes names, sorted
+	Returns      JSONSchemaReturn   // JSON Schema for return type
+	PathParams   []ToolPathParam    // Path parameters for invocation
+	HasInput     bool               // Whether endpoint has input type
+	InputType    string             // Input type name if HasInput
+	InputFields  []ToolInputField   // the input type's fields, in order, if HasInput
+	ScalarArgs   []ToolScalarArg    // Scalar arguments (not path params)
+	QueryArgs    []ToolQueryArg     // Query arguments, with shape and bounds
+	Page         *apigen.PageInfo   // @paginated (D60): cursor and limit join the query; nil otherwise
+	Filter       *apigen.FilterInfo // FilterBy (D106): the filter joins the query; nil otherwise
+	FilterParam  string             // the filter's parameter, the argument's name in camelCase; set with Filter
+	FilterType   string             // the SDK's type of the filter, which tools/index.ts types the parameter with; set with Filter
+	Encrypted    bool               // Whether endpoint payload must be encrypted
+	MCPBinding   MCPToolBinding     // Explicit MCP invocation binding metadata
 }
 
 // ToolInputField is one field of a tool's input type: its name in the types
@@ -223,15 +211,7 @@ func endpointToTool(
 ) ToolDefinition {
 	toolName := endpoint.ToolName
 
-	description := endpoint.Description
-	if description == "" {
-		description = fmt.Sprintf("%s endpoint", endpoint.Name)
-	}
-	if endpoint.Docs == nil && endpoint.RequiresAuth {
-		description = fmt.Sprintf("%s (Requires authentication)", description)
-	}
-	description = toolsutil.PagedDescription(description, endpoint.Page)
-	description = toolsutil.FilteredDescription(description, endpoint.Filter, endpoint.Page)
+	description := toolsutil.ToolDescription(endpoint.Description, endpoint.Name, endpoint.Docs, endpoint.RequiresAuth, endpoint.Page, endpoint.Filter)
 
 	pathParams := make([]ToolPathParam, len(endpoint.PathParams))
 	for i, p := range endpoint.PathParams {
@@ -245,19 +225,7 @@ func endpointToTool(
 
 	scalarArgs := make([]ToolScalarArg, len(endpoint.ScalarArgs))
 	for i, arg := range endpoint.ScalarArgs {
-		scalarArgs[i] = ToolScalarArg{
-			Name:     arg.Name,
-			TSName:   tsutil.ToCamelCase(arg.Name),
-			Type:     arg.Type,
-			Required: arg.Required,
-			// The shape: the argument schema is T, T[] or T[][], or a map
-			// of T or T[].
-			IsArray:         arg.IsArray,
-			IsArrayOfArrays: arg.IsArrayOfArrays,
-			IsMap:           arg.IsMap,
-			Reference:       arg.Reference,
-			Search:          arg.Search,
-		}
+		scalarArgs[i] = toolsutil.NewToolScalarArg(arg.ScalarArg)
 	}
 
 	queryArgs := make([]ToolQueryArg, len(endpoint.QueryParams))
@@ -265,11 +233,8 @@ func endpointToTool(
 		queryArgs[i] = ToolQueryArg{
 			Name: arg.Name, TSName: tsutil.ToCamelCase(arg.Name), Type: arg.IRType,
 			Required: arg.Required, IsArray: arg.IsArray, IsMap: arg.IsMap,
-			ValidateMin: arg.ValidateMin, ValidateMax: arg.ValidateMax,
-			ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
-			ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
-			ValidatePattern: arg.ValidatePattern,
-			Reference:       arg.Reference, Search: arg.Search, Sort: arg.Sort,
+			ValueRules: arg.ValueRules,
+			Reference:  arg.Reference, Search: arg.Search, Sort: arg.Sort,
 		}
 	}
 
@@ -286,14 +251,7 @@ func endpointToTool(
 		endpoint.Page,
 		endpoint.Filter,
 	)
-	parametersJSON, _ := parameters.DigestJSON(keys.DigestInternalTypes)
 	paramTypes, typeImports := toolParamTSTypes(endpoint, parameters, inputTypeFields, scalars)
-
-	bindingStatus := "ready"
-	if endpoint.HasFileUpload {
-		bindingStatus = "unsupported_multipart"
-	}
-	guidance := toolsutil.OperationGuidance(endpoint.Docs)
 
 	var inputFields []ToolInputField
 	if endpoint.HasInput {
@@ -302,50 +260,35 @@ func endpointToTool(
 		}
 	}
 
-	tool := ToolDefinition{
-		Name:                     toolName,
-		OperationID:              endpoint.OperationID,
-		Title:                    endpoint.Title,
-		MCP:                      toolsutil.MCPWithGuidance(endpoint.MCP, guidance, keys.Guidance),
-		Guidance:                 guidance,
-		ReplayMode:               toolsutil.ReplayMode(endpoint.Docs),
-		IdempotencyKeyPointers:   toolsutil.IdempotencyKeyPointers(endpoint.Docs),
-		ExpectedRevisionPointers: toolsutil.ExpectedRevisionPointers(endpoint.Docs),
-		RequiredPerms:            append([]string(nil), endpoint.RequiredPerms...),
-		APIID:                    apiID,
-		MethodName:               endpoint.MethodPath(),
-		HTTPMethod:               endpoint.Method,
-		HTTPPath:                 endpoint.Path,
-		Description:              description,
-		RequiresAuth:             endpoint.RequiresAuth,
-		Namespace:                ns.Name,
-		IsScopedNS:               ns.IsScopedNS,
-		Parameters:               parameters,
-		ParamTypes:               paramTypes,
-		TypeImports:              typeImports,
-		Returns:                  toolsutil.BuildEndpointReturnSchema(endpoint.OutputType, endpoint.OutputArrayDepth(), endpoint.Page, scalars),
-		PathParams:               pathParams,
-		HasInput:                 endpoint.HasInput,
-		InputType:                endpoint.InputType,
-		InputFields:              inputFields,
-		ScalarArgs:               scalarArgs,
-		QueryArgs:                queryArgs,
-		Page:                     endpoint.Page,
-		Filter:                   endpoint.Filter,
-		FilterParam:              endpoint.FilterParam(),
-		FilterType:               endpoint.FilterType,
-		Encrypted:                endpoint.Encrypted,
-		BindingStatus:            bindingStatus,
-		InputSchemaDigest:        fmt.Sprintf("sha256:%x", sha256.Sum256(parametersJSON)),
-		MCPBinding:               buildMCPToolBinding(apiID, toolName, endpoint, ns, inputTypeFields, parameters),
+	return ToolDefinition{
+		ToolOperation: toolsutil.NewToolOperation(endpoint.Title, endpoint.Docs, endpoint.MCP, endpoint.RequiredPerms, endpoint.HasFileUpload, parameters, keys),
+		Name:          toolName,
+		OperationID:   endpoint.OperationID,
+		APIID:         apiID,
+		MethodName:    endpoint.MethodPath(),
+		HTTPMethod:    endpoint.Method,
+		HTTPPath:      endpoint.Path,
+		Description:   description,
+		RequiresAuth:  endpoint.RequiresAuth,
+		Namespace:     ns.Name,
+		IsScopedNS:    ns.IsScopedNS,
+		Parameters:    parameters,
+		ParamTypes:    paramTypes,
+		TypeImports:   typeImports,
+		Returns:       toolsutil.BuildEndpointReturnSchema(endpoint.OutputType, endpoint.OutputArrayDepth(), endpoint.Page, scalars),
+		PathParams:    pathParams,
+		HasInput:      endpoint.HasInput,
+		InputType:     endpoint.InputType,
+		InputFields:   inputFields,
+		ScalarArgs:    scalarArgs,
+		QueryArgs:     queryArgs,
+		Page:          endpoint.Page,
+		Filter:        endpoint.Filter,
+		FilterParam:   endpoint.FilterParam(),
+		FilterType:    endpoint.FilterType,
+		Encrypted:     endpoint.Encrypted,
+		MCPBinding:    buildMCPToolBinding(apiID, toolName, endpoint, ns, inputTypeFields, parameters),
 	}
-	if docs := endpoint.Docs; docs != nil {
-		tool.Capability = docs.Capability
-		tool.Lifecycle = string(docs.Lifecycle)
-		tool.Visibility = string(docs.Visibility)
-		tool.Audience = string(docs.Audience)
-	}
-	return tool
 }
 
 // toolParamTSTypes returns the TypeScript type tools/index.ts gives each

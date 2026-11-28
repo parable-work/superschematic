@@ -36,6 +36,7 @@ import (
 	"github.com/parable-work/superschematic/internal/generator/codegen"
 	"github.com/parable-work/superschematic/internal/generator/goutil"
 	"github.com/parable-work/superschematic/internal/generator/naming"
+	"github.com/parable-work/superschematic/internal/generator/tsutil"
 	"github.com/parable-work/superschematic/internal/release"
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -368,6 +369,31 @@ func (s *Server) Pinned() bool {
 type Loopback struct {
 	Var    string
 	Serves []string
+}
+
+// planLoopback is the loopback key of a server that calls an API it serves
+// itself, whose operations have a service clause, and which of its clients
+// send it, by index: apis are the APIs it serves, apiOf giving each one's
+// service and whether its operations have a service clause, clients its
+// clients, clientOf giving the service each calls, and take the variable
+// of the key. It is nil, and no client sends it, when no client calls such
+// an API.
+func planLoopback[A, C any](apis []A, apiOf func(A) (string, bool), clients []C, clientOf func(C) string, take func(string) string) (*Loopback, []bool) {
+	serves := make([]string, len(apis))
+	guarded := map[string]bool{}
+	for i, a := range apis {
+		service, guard := apiOf(a)
+		serves[i] = service
+		guarded[service] = guard
+	}
+	sends := make([]bool, len(clients))
+	for i, c := range clients {
+		sends[i] = guarded[clientOf(c)]
+	}
+	if !slices.Contains(sends, true) {
+		return nil, sends
+	}
+	return &Loopback{Var: take("loopback"), Serves: serves}, sends
 }
 
 // Job is the job a job's entrypoint runs: its @job class and the method of
@@ -1113,17 +1139,11 @@ func (s *Server) planLoopback(taken names) {
 	if s.Background() {
 		return
 	}
-	serves := make([]string, len(s.APIs))
-	guarded := map[string]bool{}
-	for i, a := range s.APIs {
-		serves[i] = a.Service
-		guarded[a.Service] = a.ServiceAuth
-	}
-	for _, c := range s.Clients {
-		c.Loopback = guarded[c.Service]
-	}
-	if slices.ContainsFunc(s.Clients, func(c *Client) bool { return c.Loopback }) {
-		s.Loopback = &Loopback{Var: taken.take("loopback"), Serves: serves}
+	var sends []bool
+	s.Loopback, sends = planLoopback(s.APIs, func(a *API) (string, bool) { return a.Service, a.ServiceAuth },
+		s.Clients, func(c *Client) string { return c.Service }, taken.take)
+	for i, c := range s.Clients {
+		c.Loopback = sends[i]
 	}
 }
 
@@ -1602,7 +1622,7 @@ func templateFuncs() template.FuncMap {
 
 // tsQuote is s as a TypeScript string literal, in single quotes.
 func tsQuote(s string) string {
-	return "'" + strings.NewReplacer(`\`, `\\`, `'`, `\'`, "\n", `\n`).Replace(s) + "'"
+	return tsutil.Quote(s)
 }
 
 // joinNames joins names as a sentence lists them: a, b and c.

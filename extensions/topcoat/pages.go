@@ -3,6 +3,7 @@ package topcoat
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"unicode"
@@ -221,7 +222,7 @@ func (m *pagesModel) Uses(item string) bool { return m.uses[item] }
 
 // Imports is the names pages.rs imports from module, sorted and joined.
 func (m *pagesModel) Imports(module string) string {
-	names := sortedKeys(m.imports[module])
+	names := slices.Sorted(maps.Keys(m.imports[module]))
 	return strings.Join(names, ", ")
 }
 
@@ -620,10 +621,10 @@ func pagesOf(c *crate, schemas schemaSet, site *pageSite, prefix, title string, 
 			}
 		}
 	}
-	for _, name := range sortedKeys(b.params) {
+	for _, name := range slices.Sorted(maps.Keys(b.params)) {
 		m.Params = append(m.Params, routeParam{Name: name})
 	}
-	for _, name := range sortedKeys(b.prefills) {
+	for _, name := range slices.Sorted(maps.Keys(b.prefills)) {
 		m.Prefills = append(m.Prefills, b.prefills[name])
 	}
 	m.Tree = b.tree(roots, 0)

@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	validator "github.com/santhosh-tekuri/jsonschema/v6"
+
+	"github.com/parable-work/superschematic/internal/jsonschemas"
 )
 
 // The JSON Schemas of the task file and of the plan. Each is strict:
@@ -43,11 +45,7 @@ func validate(schema, data []byte) error {
 	if err != nil {
 		return err
 	}
-	instance, err := validator.UnmarshalJSON(bytes.NewReader(data))
-	if err != nil {
-		return err
-	}
-	return sch.Validate(instance)
+	return jsonschemas.Validate(sch, data)
 }
 
 func compile(schema []byte) (*validator.Schema, error) {
@@ -57,16 +55,7 @@ func compile(schema []byte) (*validator.Schema, error) {
 	if sch, ok := compiled[key]; ok {
 		return sch, nil
 	}
-	doc, err := validator.UnmarshalJSON(bytes.NewReader(schema))
-	if err != nil {
-		return nil, fmt.Errorf("tasks: schema: %w", err)
-	}
-	c := validator.NewCompiler()
-	const url = "superschematic://tasks/schema.json"
-	if err := c.AddResource(url, doc); err != nil {
-		return nil, fmt.Errorf("tasks: schema: %w", err)
-	}
-	sch, err := c.Compile(url)
+	sch, err := jsonschemas.Compile("superschematic://tasks/schema.json", schema)
 	if err != nil {
 		return nil, fmt.Errorf("tasks: schema: %w", err)
 	}

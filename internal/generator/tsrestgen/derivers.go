@@ -1,7 +1,6 @@
 package tsrestgen
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 
@@ -103,9 +102,25 @@ func (m DeriverMethod) FromList() string {
 // take.
 func (o *APIOutput) SetDerivers(tables []apigen.DeriverInfo) error {
 	o.Derivers = nil
-	derivers := slices.Clone(tables)
-	slices.SortStableFunc(derivers, func(a, b apigen.DeriverInfo) int { return strings.Compare(a.Name, b.Name) })
-	for _, d := range derivers {
+	plans, err := apigen.PlanDerivers("tsrestgen", o.SchemaName, tables, true, apigen.DeriverRenderer[DeriverMethod]{
+		Method: func(_ apigen.DeriverInfo, schema apigen.DerivedSchema, f apigen.DerivedField) (DeriverMethod, string, error) {
+			m := DeriverMethod{
+				Schema:      schema.Name,
+				Field:       f.Name,
+				Method:      tsutil.ToCamelCase(schema.Name) + tsutil.ToClassName(f.Name),
+				Instruction: f.Instruction,
+				Model:       f.Model,
+			}
+			for _, from := range f.From {
+				m.From = append(m.From, from.Name)
+			}
+			return m, m.Method, nil
+		},
+	})
+	if err != nil {
+		return err
+	}
+	for _, d := range plans {
 		info := DeriverInfo{
 			Name:        d.Name,
 			Member:      tsutil.ToCamelCase(d.Name),
@@ -114,28 +129,11 @@ func (o *APIOutput) SetDerivers(tables []apigen.DeriverInfo) error {
 			Permissions: d.Permissions,
 			Concurrency: d.Concurrency,
 			BatchSize:   d.BatchSize,
+			Schemas:     d.SchemaNames(),
+			Methods:     d.Methods,
 		}
-		methods := map[string]string{}
-		for _, schema := range d.Schemas {
-			info.Schemas = append(info.Schemas, schema.Name)
-			info.Repositories = append(info.Repositories, tsgen.RepositoryMember(schema.Name))
-			for _, f := range schema.Fields {
-				m := DeriverMethod{
-					Schema:      schema.Name,
-					Field:       f.Name,
-					Method:      tsutil.ToCamelCase(schema.Name) + tsutil.ToClassName(f.Name),
-					Instruction: f.Instruction,
-					Model:       f.Model,
-				}
-				for _, from := range f.From {
-					m.From = append(m.From, from.Name)
-				}
-				if other, clash := methods[m.Method]; clash {
-					return fmt.Errorf("tsrestgen: deriver %s of %s fills %s and %s, which would both be its method %s", d.Name, o.SchemaName, other, m.Key(), m.Method)
-				}
-				methods[m.Method] = m.Key()
-				info.Methods = append(info.Methods, m)
-			}
+		for _, schema := range info.Schemas {
+			info.Repositories = append(info.Repositories, tsgen.RepositoryMember(schema))
 		}
 		o.Derivers = append(o.Derivers, info)
 	}

@@ -15,7 +15,7 @@ import type {
 {{- range .Namespaces}}
 {{- range $tool := .Tools}}
 
-export interface {{toPascalCase $tool.Name}}Params {
+export interface {{toolTypeName $tool.Name}}Params {
 {{- $props := $tool.Parameters.Properties}}
 {{- range $propName := sortedKeys $props}}
   {{$propName}}{{if not (contains $tool.Parameters.Required $propName)}}?{{end}}: {{index $tool.ParamTypes $propName}};
@@ -336,7 +336,7 @@ export const anthropicTools: AnthropicTool[] = [
  */
 export type ToolParams = {
 {{- range .Tools}}
-  [{{formatToolName .Name}}]: {{toPascalCase .Name}}Params;
+  [{{formatToolName .Name}}]: {{toolTypeName .Name}}Params;
 {{- end}}
 };
 
@@ -368,11 +368,11 @@ export async function invokeTool<T extends ToolName>(
 {{- range .Tools}}
     case {{formatToolName .Name}}:
 {{- if eq .BindingStatus "unsupported_multipart"}}
-      throw new Error("{{.Name}} uploads a file, which tool parameters cannot carry (bindingStatus unsupported_multipart); call sdk.{{toCamelCase $ns.Name}}{{if $ns.IsScopedNS}}(...){{end}}.{{.MethodName}} with the files");
+      throw new Error("{{.Name}} uploads a file, which tool parameters cannot carry (bindingStatus unsupported_multipart); call sdk.{{joinCamelCase $ns.Name}}{{if $ns.IsScopedNS}}(...){{end}}.{{.MethodName}} with the files");
 {{- else if $ns.IsScopedNS}}
-      return sdk.{{toCamelCase $ns.Name}}((params as {{toPascalCase .Name}}Params).{{$ns.ScopeParam}}).{{.MethodName}}({{buildInvocationArgs . $ns}});
+      return sdk.{{joinCamelCase $ns.Name}}((params as {{toolTypeName .Name}}Params).{{$ns.ScopeParam}}).{{.MethodName}}({{buildInvocationArgs . $ns}});
 {{- else}}
-      return sdk.{{toCamelCase $ns.Name}}.{{.MethodName}}({{buildInvocationArgs . $ns}});
+      return sdk.{{joinCamelCase $ns.Name}}.{{.MethodName}}({{buildInvocationArgs . $ns}});
 {{- end}}
 {{- end}}
 {{- end}}

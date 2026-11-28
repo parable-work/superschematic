@@ -250,10 +250,7 @@ func (e *emitter) argumentTypeExpr(arg *ir.ArgumentDef, item, owner string) stri
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Default"), expr, e.defaultLiteral(fd, owner))
 	}
 	if cfg := validateConfigExpr(&ir.FieldDef{
-		ValidateMin: arg.ValidateMin, ValidateMax: arg.ValidateMax,
-		ValidateMinLength: arg.ValidateMinLength, ValidateMaxLength: arg.ValidateMaxLength,
-		ValidateListMin: arg.ValidateListMin, ValidateListMax: arg.ValidateListMax,
-		ValidatePattern: arg.ValidatePattern,
+		ValueRules: arg.ValueRules,
 	}); cfg != "" {
 		expr = fmt.Sprintf("%s<%s, %s>", e.use("Validate"), expr, cfg)
 	}
@@ -287,8 +284,7 @@ func (e *emitter) sortByExpr(arg *ir.ArgumentDef, item, owner string) string {
 		e.failf("%s: a sort argument that is not an optional query parameter has no TypeScript authoring form", owner)
 	}
 	if arg.TypeRef != (ir.TypeRef{Name: "string"}) || arg.Default != nil || arg.References != nil || arg.Search ||
-		arg.ValidateMin != nil || arg.ValidateMax != nil || arg.ValidateMinLength != nil || arg.ValidateMaxLength != nil ||
-		arg.ValidateListMin != nil || arg.ValidateListMax != nil || arg.ValidatePattern != "" {
+		arg.ValueRules.Any() {
 		e.failf("%s: a sort argument is SortBy's text alone; one of another type, or with a default, a reference, a search or a rule, has no TypeScript authoring form", owner)
 	}
 	fields := make([]string, len(arg.Sort))

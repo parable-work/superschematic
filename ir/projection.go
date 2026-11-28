@@ -1,5 +1,10 @@
 package ir
 
+import (
+	"maps"
+	"slices"
+)
+
 // RoleProjection marks a @projection declaration in a DB schema: a read-only
 // relation over tables of the same schema, generated as a Postgres view.
 // A projection is never a table; the type generators do not emit it, and
@@ -262,7 +267,7 @@ func (d *ProjectionDef) Relation() string {
 // Projections returns the schema's RoleProjection types sorted by name.
 func (s *Schema) Projections() []*TypeDef {
 	var defs []*TypeDef
-	for _, name := range sortedStringMapKeys(s.Types) {
+	for _, name := range slices.Sorted(maps.Keys(s.Types)) {
 		if td := s.Types[name]; td != nil && td.Role == RoleProjection {
 			defs = append(defs, td)
 		}

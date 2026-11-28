@@ -2,6 +2,8 @@ package registry
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	ir "github.com/parable-work/superschematic/ir"
 )
@@ -69,7 +71,7 @@ func audienceOf(typeName string, args []any) (*ir.AudienceDef, error) {
 	if !ok {
 		return nil, ArgErrorf(0, "@audience on %s takes an options object: %s", typeName, shape)
 	}
-	for _, key := range sortedKeys(obj) {
+	for _, key := range slices.Sorted(maps.Keys(obj)) {
 		value, ok := obj[key].(string)
 		if !ok || value == "" {
 			return nil, ArgErrorf(0, "@audience on %s: %s is a non-empty string; got %v", typeName, key, obj[key])

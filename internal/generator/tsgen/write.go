@@ -165,7 +165,7 @@ func WriteTypesWithProfile(output *ModuleOutput, outputDir string, prof *profile
 	for i := range output.Scalars {
 		scalar := &output.Scalars[i]
 		scalarTasks = append(scalarTasks, func() error {
-			outPath := filepath.Join(validatorsDir, "scalars", scalar.Module+".ts")
+			outPath := filepath.Join(validatorsDir, "scalars", scalar.Module()+".ts")
 			data := struct {
 				Scalar *ScalarInfo
 				Module *ModuleOutput

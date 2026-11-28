@@ -48,13 +48,7 @@ const DAY: i64 = 24 * HOUR;
 
 /// Epoch milliseconds of a UTC date and time.
 fn utc(year: i64, month: i64, day: i64, hour: i64, minute: i64) -> i64 {
-    // Howard Hinnant's days_from_civil.
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let of_era = year - era * 400;
-    let of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + day - 1;
-    let days = era * 146_097 + of_era * 365 + of_era / 4 - of_era / 100 + of_year - 719_468;
-    days * DAY + hour * HOUR + minute * MINUTE
+    superschematic_engine::civil::to_days(year, month, day) * DAY + hour * HOUR + minute * MINUTE
 }
 
 /// Monday 19 October 2026 in London, on summer time (UTC+1).

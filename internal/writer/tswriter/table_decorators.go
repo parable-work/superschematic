@@ -2,6 +2,8 @@ package tswriter
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -63,7 +65,7 @@ func (e *emitter) emitTableFeatureDecorators(def *ir.TypeDef) {
 	}
 	if len(def.ProviderSlots) > 0 {
 		slots := make([]string, 0, len(def.ProviderSlots))
-		for _, slot := range sortedKeys(def.ProviderSlots) {
+		for _, slot := range slices.Sorted(maps.Keys(def.ProviderSlots)) {
 			slots = append(slots, propertyName(slot)+": "+quote(def.ProviderSlots[slot]))
 		}
 		e.decorator("providers", "", objectLiteral(slots))

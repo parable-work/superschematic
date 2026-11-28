@@ -180,7 +180,7 @@ func (f Fence) coveredRow(row string) string {
 // write that keeps a fence at its type's last value is not failed for it.
 func (f Fence) FunctionSQL() string {
 	before, after := "OLD."+f.QuotedColumn, "NEW."+f.QuotedColumn
-	using := fmt.Sprintf("USING ERRCODE = 'check_violation', CONSTRAINT = %s;", stringLiteral(f.FunctionName))
+	using := fmt.Sprintf("USING ERRCODE = 'check_violation', CONSTRAINT = %s;", sqlutil.QuoteLiteral(f.FunctionName))
 	advance := func(indent string) string {
 		return fmt.Sprintf("%sIF %s IS DISTINCT FROM %s + 1 THEN\n%s  RAISE EXCEPTION '%s must advance from %% to %%, not to %%', %s, %s + 1, %s\n%s    %s\n%sEND IF;\n",
 			indent, after, before, indent, raiseFormat(f.name()), before, before, after, indent, using, indent)
@@ -237,6 +237,6 @@ func (f Fence) SQLiteTrigger(quote func(string) string) SQLiteTrigger {
 		}
 		fmt.Fprintf(&b, " AND (\n  %s)", strings.Join(conditions, "\n  OR "))
 	}
-	fmt.Fprintf(&b, "\nBEGIN\n  SELECT RAISE(ABORT, %s);\nEND", stringLiteral(f.SQLiteMessage()))
+	fmt.Fprintf(&b, "\nBEGIN\n  SELECT RAISE(ABORT, %s);\nEND", sqlutil.QuoteLiteral(f.SQLiteMessage()))
 	return SQLiteTrigger{Name: f.TriggerName, Table: f.Table, Definition: b.String(), Refuses: true}
 }

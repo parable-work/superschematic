@@ -1167,22 +1167,30 @@ func (b Behavior) ConfigRequired() bool {
 // config schema. An absent config is checked as {}, the value a config of
 // {} is stored as. A behavior without a config schema takes no config.
 func (b Behavior) ValidateConfig(config json.RawMessage) error {
+	return validateOptionalObject(b.config, config, "behavior "+b.Name, "config")
+}
+
+// validateOptionalObject checks raw, the config of a behavior or the
+// settings of a bundle (what, owner's), against schema. Absent, raw is
+// checked as {}; with no schema, only {} passes. owner and what name the
+// value in each error.
+func validateOptionalObject(schema *validator.Schema, raw json.RawMessage, owner, what string) error {
 	instance := any(map[string]any{})
-	if len(config) > 0 {
-		decoded, err := validator.UnmarshalJSON(bytes.NewReader(config))
+	if len(raw) > 0 {
+		decoded, err := validator.UnmarshalJSON(bytes.NewReader(raw))
 		if err != nil {
-			return fmt.Errorf("behavior %s config: %w", b.Name, err)
+			return fmt.Errorf("%s %s: %w", owner, what, err)
 		}
 		instance = decoded
 	}
-	if b.config == nil {
+	if schema == nil {
 		if m, ok := instance.(map[string]any); ok && len(m) == 0 {
 			return nil
 		}
-		return fmt.Errorf("behavior %s takes no config", b.Name)
+		return fmt.Errorf("%s takes no %s", owner, what)
 	}
-	if err := b.config.Validate(instance); err != nil {
-		return fmt.Errorf("behavior %s config: %w", b.Name, err)
+	if err := schema.Validate(instance); err != nil {
+		return fmt.Errorf("%s %s: %w", owner, what, err)
 	}
 	return nil
 }

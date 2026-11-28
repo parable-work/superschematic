@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -742,7 +744,7 @@ func (a *Attachments) Release(ctx context.Context, objectKey string, bucket Buck
 			return err
 		}
 		var held int64
-		for _, table := range sortedKeys(a.def.Holders) {
+		for _, table := range slices.Sorted(maps.Keys(a.def.Holders)) {
 			holder := a.def.Holders[table]
 			// An upload never completed goes once its URL has expired.
 			w := wordsOf(h)
@@ -784,7 +786,7 @@ func (a *Attachments) Pending(ctx context.Context, kind string, limit int) ([]Pe
 		column = `"preview"`
 	}
 	var unions []string
-	for _, table := range sortedKeys(a.def.Holders) {
+	for _, table := range slices.Sorted(maps.Keys(a.def.Holders)) {
 		unions = append(unions, fmt.Sprintf(`SELECT "object_key", "media_type", "content_hash", "uploaded_at" FROM %s WHERE %s = 'pending' AND "state" = 'ready'`, a.def.Holders[table].Table, column))
 	}
 	rows, err := a.host.Query(ctx, fmt.Sprintf(`SELECT "object_key", min("media_type") AS media_type, min("content_hash") AS content_hash FROM (%s) AS files GROUP BY "object_key" ORDER BY min("uploaded_at") LIMIT %d`, strings.Join(unions, " UNION ALL "), limit))
@@ -824,7 +826,7 @@ func (a *Attachments) Processed(ctx context.Context, in ProcessedInput) (int64, 
 		return 0, nil
 	}
 	var n int64
-	for _, table := range sortedKeys(a.def.Holders) {
+	for _, table := range slices.Sorted(maps.Keys(a.def.Holders)) {
 		touched, err := a.host.Exec(ctx, fmt.Sprintf(`UPDATE %s SET %s WHERE "object_key" = $1`, a.def.Holders[table].Table, strings.Join(sets, ", ")), args...)
 		if err != nil {
 			return n, err

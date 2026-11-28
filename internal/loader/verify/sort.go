@@ -85,7 +85,7 @@ func checkSort(schema *ir.Schema, in Input, owner string, op *ir.FieldDef, r *Re
 	if sort.References != nil {
 		r.errorf("", "%s: sort argument %s refers to %s (RefersTo); a sort's value names a field of its item", owner, sort.Name, sort.References.Type)
 	}
-	if rules := validateRules(sort); len(rules) > 0 {
+	if rules := sort.ValueRules.Names(); len(rules) > 0 {
 		r.errorf("", "%s: sort argument %s has Validate's %s; a sort's values are its fields, which the sort checks itself", owner, sort.Name, strings.Join(rules, ", "))
 	}
 
@@ -156,29 +156,6 @@ func checkSortFields(schema *ir.Schema, owner string, sort *ir.ArgumentDef, item
 		}
 		r.errorf("", "%s: a sort breaks ties by id, and %s.id holds %s; it must be one required value", owner, item.Name, label)
 	}
-}
-
-// validateRules names the Validate rules an argument declares, in the
-// order Validate's config lists them.
-func validateRules(arg *ir.ArgumentDef) []string {
-	var rules []string
-	for _, rule := range []struct {
-		name string
-		set  bool
-	}{
-		{"min", arg.ValidateMin != nil},
-		{"max", arg.ValidateMax != nil},
-		{"minLength", arg.ValidateMinLength != nil},
-		{"maxLength", arg.ValidateMaxLength != nil},
-		{"listMin", arg.ValidateListMin != nil},
-		{"listMax", arg.ValidateListMax != nil},
-		{"pattern", arg.ValidatePattern != ""},
-	} {
-		if rule.set {
-			rules = append(rules, rule.name)
-		}
-	}
-	return rules
 }
 
 // unboundedText reports whether a sort field holds text whose length

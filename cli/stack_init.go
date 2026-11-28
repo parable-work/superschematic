@@ -125,7 +125,7 @@ Examples:
 	cmd.Flags().StringSliceVar(&flags.ci, "ci", nil, "the CI renderer the stack's config turns on, github for GitHub Actions (outputs.ci)")
 	cmd.Flags().StringSliceVar(&flags.expose, "expose", nil, "the API services to expose, comma-separated, in place of those derived from their operations; none exposes none")
 	cmd.Flags().BoolVar(&flags.force, "force", false, "write the stack although the tree has a Stack service: replace the one of the same name, or add another")
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default <services-root>/../superschematic.toml)")
+	addNamingFlag(cmd, &flags.namingPath, "(default <services-root>/../superschematic.toml)")
 	return cmd
 }
 
@@ -191,11 +191,7 @@ func runStackInit(cmd *cobra.Command, a *app, flags *stackInitFlags, servicesRoo
 		return fmt.Errorf("services root not found: %s; name the directory that holds the schema services", servicesRoot)
 	}
 	tree := &stackInitTree{servicesRoot: servicesRoot, schemasRoot: filepath.Dir(servicesRoot)}
-	names, err := resolveNaming(flags.namingPath, tree.schemasRoot)
-	if err != nil {
-		return err
-	}
-	reg, err := a.resolveRegistry(names)
+	names, reg, err := a.openNaming(flags.namingPath, tree.schemasRoot)
 	if err != nil {
 		return err
 	}

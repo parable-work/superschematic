@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/parable-work/superschematic/internal/generator/sqlutil"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -163,7 +164,7 @@ func parseTrigger(t *Trigger) (timing, function string, ok bool) {
 	if m == nil {
 		return "", "", false
 	}
-	return m[1], strings.Trim(m[2], `"`), true
+	return m[1], sqlutil.Unquote(m[2]), true
 }
 
 // prevColumnNames are the names a trigger named after a column of its

@@ -514,142 +514,10 @@ func (r *BatchRepository) GetOne(ctx context.Context, id types.IdentityUUID, opt
 	}
 
 	// Hydrate relationship foreign keys into nested objects from typed field selections.
-	if opts != nil && opts.Fields.JobsNested != nil {
-		childFields := *opts.Fields.JobsNested
-		if childFields.IsZero() {
-			childFields = JobFields{Id: true}
+	if opts != nil {
+		if err := r.hydrateHasMany(ctx, []*types.Batch{result}, opts.Fields); err != nil {
+			return nil, err
 		}
-		childFieldsValue := reflect.ValueOf(&childFields).Elem()
-		parentRelationFieldCandidates := []string{
-			"Batch",
-			"Batch",
-			"Jobs",
-		}
-		for _, candidate := range parentRelationFieldCandidates {
-			field := childFieldsValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Bool {
-				continue
-			}
-			field.SetBool(true)
-			break
-		}
-
-		// Get repository for related type
-		var repo *JobRepository
-		if r.tx != nil {
-			txDB := r.txDB
-			if txDB == nil {
-				txDB = r.db
-			}
-			repo = &JobRepository{tx: r.tx, txDB: txDB}
-		} else if r.db != nil {
-			repo = r.db.Job
-		} else if r.txDB != nil {
-			repo = r.txDB.Job
-		} else {
-			return nil, fmt.Errorf("no database connection available for jobs hydration")
-		}
-
-		resultID, ok := batchUUIDValue(result.Id)
-		if !ok {
-			return nil, fmt.Errorf("missing id for Batch.jobs hydration")
-		}
-
-		childFilter := &JobFilter{}
-		childFilterValue := reflect.ValueOf(childFilter).Elem()
-		filterFieldCandidates := []string{
-			"BatchID",
-			"BatchID",
-			"JobsID",
-		}
-		var selectedFilterField string
-		filterSet := false
-		for _, candidate := range filterFieldCandidates {
-			field := childFilterValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() {
-				continue
-			}
-			field.Set(reflect.ValueOf(&UUIDFilter{
-				In: []types.IdentityUUID{resultID},
-			}))
-			selectedFilterField = candidate
-			filterSet = true
-			break
-		}
-		if !filterSet {
-			return nil, fmt.Errorf("failed to locate hasMany FK filter for Batch.jobs")
-		}
-
-		// The other recursion point: these children hydrate their own relations.
-		// This block only runs on an explicit nested selection, so the cycle half
-		// of the guard does not apply and only the depth cap can refuse it.
-		children := []*types.Job{}
-		if hydrationCtx, allowed := enterRelationHydration(ctx, "Batch", "jobs", "Job", false); allowed {
-			fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &JobFindOptions{
-				Fields: childFields,
-				Limit:  1000000,
-			})
-			if findErr != nil {
-				return nil, fmt.Errorf("failed to fetch jobs: %w", findErr)
-			}
-			children = fetched
-		}
-
-		parentFieldCandidates := []string{
-			"Batch",
-			strings.TrimSuffix(selectedFilterField, "ID"),
-			"Batch",
-			"Jobs",
-		}
-		related := make([]types.Job, 0, len(children))
-		for _, child := range children {
-			if child == nil {
-				continue
-			}
-			childValue := reflect.ValueOf(child)
-			if childValue.Kind() == reflect.Ptr {
-				if childValue.IsNil() {
-					continue
-				}
-				childValue = childValue.Elem()
-			}
-			if !childValue.IsValid() || childValue.Kind() != reflect.Struct {
-				continue
-			}
-
-			matchesParent := false
-			for _, candidate := range parentFieldCandidates {
-				parentField := childValue.FieldByName(candidate)
-				if !parentField.IsValid() {
-					continue
-				}
-				if parentField.Kind() == reflect.Ptr {
-					if parentField.IsNil() {
-						continue
-					}
-					parentField = parentField.Elem()
-				}
-				if !parentField.IsValid() || parentField.Kind() != reflect.Struct {
-					continue
-				}
-				idField := parentField.FieldByName("Id")
-				if !idField.IsValid() || !idField.CanInterface() {
-					continue
-				}
-				parentID, ok := batchUUIDValue(idField.Interface())
-				if !ok {
-					continue
-				}
-				if parentID == resultID {
-					matchesParent = true
-					break
-				}
-			}
-			if matchesParent {
-				related = append(related, *child)
-			}
-		}
-		result.Jobs = related
 	}
 
 	return result, nil
@@ -948,6 +816,9 @@ func (r *BatchRepository) FindOne(ctx context.Context, filter *BatchFilter, opts
 	}
 
 	// Hydrate relationship foreign keys into nested objects from typed field selections.
+	if err := r.hydrateHasMany(ctx, []*types.Batch{result}, opts.Fields); err != nil {
+		return nil, err
+	}
 
 	return result, nil
 }
@@ -1160,25 +1031,27 @@ func (r *BatchRepository) findRows(ctx context.Context, method, query string, ar
 	}
 
 	// Batch hydrate relationships (outside the row loop for efficiency)
+	if err := r.hydrateHasMany(ctx, results, fields); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// hydrateHasMany loads the @hasMany relations fields selects into results:
+// for each, one read of the target's rows whose relation back to this
+// table, the one sqlutil.ToMany names (D90), points at any of results,
+// grouped by that relation's key. A result whose key no row points at gets
+// an empty list, as the TypeScript repositories' include gives it. GetOne,
+// FindOne and findRows load the relations through it.
+func (r *BatchRepository) hydrateHasMany(ctx context.Context, results []*types.Batch, fields BatchFields) error {
 	if fields.JobsNested != nil {
 		childFields := *fields.JobsNested
 		if childFields.IsZero() {
 			childFields = JobFields{Id: true}
 		}
-		childFieldsValue := reflect.ValueOf(&childFields).Elem()
-		parentRelationFieldCandidates := []string{
-			"Batch",
-			"Batch",
-			"Jobs",
-		}
-		for _, candidate := range parentRelationFieldCandidates {
-			field := childFieldsValue.FieldByName(candidate)
-			if !field.IsValid() || !field.CanSet() || field.Kind() != reflect.Bool {
-				continue
-			}
-			field.SetBool(true)
-			break
-		}
+		// The relation back groups the rows by their parent's key.
+		childFields.Batch = true
 
 		parentIDSet := make(map[types.IdentityUUID]bool, len(results))
 		parentIDs := make([]types.IdentityUUID, 0, len(results))
@@ -1186,15 +1059,12 @@ func (r *BatchRepository) findRows(ctx context.Context, method, query string, ar
 			if result == nil {
 				continue
 			}
-			resultID, ok := batchUUIDValue(result.Id)
-			if !ok {
-				continue
-			}
-			if !parentIDSet[resultID] {
+			if resultID, ok := batchUUIDValue(result.Id); ok && !parentIDSet[resultID] {
 				parentIDSet[resultID] = true
 				parentIDs = append(parentIDs, resultID)
 			}
 		}
+		childrenByParentID := make(map[types.IdentityUUID][]types.Job, len(parentIDs))
 		if len(parentIDs) > 0 {
 			// Get repository for related type
 			var repo *JobRepository
@@ -1209,120 +1079,44 @@ func (r *BatchRepository) findRows(ctx context.Context, method, query string, ar
 			} else if r.txDB != nil {
 				repo = r.txDB.Job
 			} else {
-				return nil, fmt.Errorf("no database connection available for jobs hydration")
-			}
-
-			childFilter := &JobFilter{}
-			childFilterValue := reflect.ValueOf(childFilter).Elem()
-			filterFieldCandidates := []string{
-				"BatchID",
-				"BatchID",
-				"JobsID",
-			}
-			var selectedFilterField string
-			filterSet := false
-			for _, candidate := range filterFieldCandidates {
-				field := childFilterValue.FieldByName(candidate)
-				if !field.IsValid() || !field.CanSet() {
-					continue
-				}
-				field.Set(reflect.ValueOf(&UUIDFilter{
-					In: parentIDs,
-				}))
-				selectedFilterField = candidate
-				filterSet = true
-				break
-			}
-			if !filterSet {
-				return nil, fmt.Errorf("failed to locate hasMany FK filter for Batch.jobs")
+				return fmt.Errorf("no database connection available for jobs hydration")
 			}
 
 			// The other recursion point: these children hydrate their own relations.
 			// This block only runs on an explicit nested selection, so the cycle half
 			// of the guard does not apply and only the depth cap can refuse it.
-			children := []*types.Job{}
 			if hydrationCtx, allowed := enterRelationHydration(ctx, "Batch", "jobs", "Job", false); allowed {
-				fetched, findErr := repo.findRelated(hydrationCtx, childFilter, &JobFindOptions{
+				children, err := repo.findRelated(hydrationCtx, &JobFilter{BatchID: &UUIDFilter{In: parentIDs}}, &JobFindOptions{
 					Fields: childFields,
 					Limit:  1000000,
 				})
-				if findErr != nil {
-					return nil, fmt.Errorf("failed to batch fetch jobs: %w", findErr)
+				if err != nil {
+					return fmt.Errorf("failed to fetch jobs: %w", err)
 				}
-				children = fetched
+				for _, child := range children {
+					if child == nil {
+						continue
+					}
+					if parentID, ok := batchUUIDValue(child.Batch.Id); ok {
+						childrenByParentID[parentID] = append(childrenByParentID[parentID], *child)
+					}
+				}
 			}
-
-			parentFieldCandidates := []string{
-				"Batch",
-				strings.TrimSuffix(selectedFilterField, "ID"),
-				"Batch",
-				"Jobs",
+		}
+		for _, result := range results {
+			if result == nil {
+				continue
 			}
-			childrenByParentID := make(map[types.IdentityUUID][]types.Job, len(parentIDs))
-			for _, child := range children {
-				if child == nil {
-					continue
+			if resultID, ok := batchUUIDValue(result.Id); ok {
+				related := childrenByParentID[resultID]
+				if related == nil {
+					related = []types.Job{}
 				}
-				childValue := reflect.ValueOf(child)
-				if childValue.Kind() == reflect.Ptr {
-					if childValue.IsNil() {
-						continue
-					}
-					childValue = childValue.Elem()
-				}
-				if !childValue.IsValid() || childValue.Kind() != reflect.Struct {
-					continue
-				}
-
-				var parentID types.IdentityUUID
-				foundParent := false
-				for _, candidate := range parentFieldCandidates {
-					parentField := childValue.FieldByName(candidate)
-					if !parentField.IsValid() {
-						continue
-					}
-					if parentField.Kind() == reflect.Ptr {
-						if parentField.IsNil() {
-							continue
-						}
-						parentField = parentField.Elem()
-					}
-					if !parentField.IsValid() || parentField.Kind() != reflect.Struct {
-						continue
-					}
-					idField := parentField.FieldByName("Id")
-					if !idField.IsValid() || !idField.CanInterface() {
-						continue
-					}
-					id, ok := batchUUIDValue(idField.Interface())
-					if !ok {
-						continue
-					}
-					parentID = id
-					foundParent = true
-					break
-				}
-				if !foundParent {
-					continue
-				}
-
-				childrenByParentID[parentID] = append(childrenByParentID[parentID], *child)
-			}
-
-			for _, result := range results {
-				if result == nil {
-					continue
-				}
-				resultID, ok := batchUUIDValue(result.Id)
-				if !ok {
-					continue
-				}
-				result.Jobs = childrenByParentID[resultID]
+				result.Jobs = related
 			}
 		}
 	}
-
-	return results, nil
+	return nil
 }
 
 // FindPage reads a page of the Batch rows filter finds (D60, amended), in

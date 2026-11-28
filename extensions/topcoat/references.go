@@ -2,6 +2,8 @@ package topcoat
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strings"
 
@@ -1035,7 +1037,7 @@ func (b *refBuilder) finish() {
 		return taken[name] || module[name+"_target_choices"] || module[name+"_target_labels"] || module[name+"_target_label"] ||
 			module[name+"_target_picks"] || module[name+"_pick"]
 	}
-	for _, key := range sortedKeys(b.sources) {
+	for _, key := range slices.Sorted(maps.Keys(b.sources)) {
 		s := b.sources[key]
 		base := componentName(s.Target)
 		if s.Value != ir.DefaultReferenceValue {

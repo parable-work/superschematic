@@ -1,7 +1,9 @@
 import type { Principal } from './auth.js';
 import { accessCallerOf } from './caller.js';
-import { audienceConditions, ormDialect } from './orm.js';
-import { sha256 } from './sha256.js';
+import { requestIdOf } from './envelope.js';
+import { audienceConditions, ormDialect, type PlainRepository } from './orm.js';
+import { badRequest, methodNotAllowed, problemResponse, unauthorized, type HttpProblem } from './problem.js';
+import { sha256Hex } from './sha256.js';
 import { uuidFromDb, uuidToDb } from './uuid.js';
 
 /*
@@ -190,10 +192,10 @@ const WEIGHTS = `'{0.1, 0.2, 0.4, 1}'::real[]`;
 
 type Values = Record<string, unknown>;
 
-interface RepositoryShape {
-  readonly def?: { readonly name?: string; readonly searchable?: SearchableDefinition };
+/** A repository as search runs it: its definition, and the conditions of its reads, which no generated Repository type has. */
+type RepositoryShape = Pick<PlainRepository, 'def'> & {
   conditions(filter: null, args: unknown[], offset: number, write?: boolean): string[];
-}
+};
 
 interface OrmShape {
   as(principal: Principal | null | undefined): OrmShape;
@@ -548,10 +550,6 @@ function clean(text: unknown): string | null {
   return out.trim() === '' ? null : out;
 }
 
-function hex(bytes: Uint8Array): string {
-  return [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
 /**
  * Builds the index row of the row a @searchable declaration's queue names
  * (D155), as the system, which its worker calls for each message: the
@@ -639,7 +637,7 @@ async function indexRows(system: OrmShape, table: string, d: SearchableDefinitio
       const comment = comments ? clean(comments.get(key)) : null;
       const file = files ? clean(files.get(key)) : null;
       const text = [title, body, comment, file].filter((t): t is string => t !== null).join('\n');
-      const hash = hex(sha256(new TextEncoder().encode(text)));
+      const hash = sha256Hex(text);
       return { key, title, body, comment, file, scope: (row.scope ?? null) as unknown, text, hash, model: undefined as string | null | undefined };
     });
     // The access columns come from the row itself, which the share lock
@@ -745,7 +743,7 @@ async function indexOnSQLite(system: OrmShape, d: SearchableDefinition, message:
       files = clean(read.rows[0]?.text);
     }
     const text = [title, body, comments, files].filter((t): t is string => t !== null).join('\n');
-    const hash = hex(sha256(new TextEncoder().encode(text)));
+    const hash = sha256Hex(text);
     const key = String(row.key);
     const audience = d.audience ? `s.${d.audience.effective.split('.').pop()}` : 'NULL';
     const agents = d.audience ? `s.${d.audience.agents.split('.').pop()}` : `'followRole'`;
@@ -827,8 +825,9 @@ export interface SearchRoutesOptions extends SearchOptions {
   readonly base?: string;
 }
 
-function problem(status: number, title: string, detail: string): Response {
-  return new Response(JSON.stringify({ type: 'about:blank', title, status, detail }), { status, headers: { 'content-type': 'application/problem+json' } });
+/** The refusal of a request, through the shared problem envelope, which carries its requestId and code. */
+function problem(request: Request, refusal: HttpProblem): Response {
+  return problemResponse(refusal, requestIdOf(request));
 }
 
 function list(values: readonly string[]): string[] {
@@ -848,9 +847,9 @@ export function searchRoutes(options: SearchRoutesOptions): (request: Request) =
   return async (request: Request) => {
     const url = new URL(request.url);
     if (url.pathname !== base) return null;
-    if (request.method !== 'GET') return problem(405, 'Method Not Allowed', 'search is a GET');
+    if (request.method !== 'GET') return problem(request, methodNotAllowed('search is a GET'));
     const principal = await options.authenticate(request);
-    if (!principal) return problem(401, 'Unauthorized', 'Authentication required');
+    if (!principal) return problem(request, unauthorized());
     const tables = list(url.searchParams.getAll('tables'));
     const scope = list(url.searchParams.getAll('scope'));
     const number = (name: string) => (url.searchParams.has(name) ? Number(url.searchParams.get(name)) : undefined);
@@ -871,7 +870,7 @@ export function searchRoutes(options: SearchRoutesOptions): (request: Request) =
       );
       return new Response(JSON.stringify({ data: result }), { status: 200, headers: { 'content-type': 'application/json' } });
     } catch (error) {
-      if (error instanceof TypeError) return problem(400, 'Bad Request', error.message);
+      if (error instanceof TypeError) return problem(request, badRequest(error.message));
       throw error;
     }
   };

@@ -2,6 +2,8 @@ package tswriter
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	"github.com/parable-work/superschematic/internal/generator/naming"
@@ -184,7 +186,7 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	if settings.Idle != "" {
 		parts = append(parts, "idle: "+quote(settings.Idle))
 	}
-	for _, key := range sortedKeys(settings.Values) {
+	for _, key := range slices.Sorted(maps.Keys(settings.Values)) {
 		switch key {
 		case "of", "job", "worker", "deriver", "app", "platform", "env", "schedule", "timeZone", "enabled", "onDeploy", "instances", "concurrency":
 			e.failf("%s: a platform setting named %q has no TypeScript form; the element's own key takes it", owner, key)
@@ -194,7 +196,7 @@ func (e *emitter) settingsLiteral(owner string, settings *ir.DeployableSettings)
 	}
 	if len(settings.Env) > 0 {
 		env := make([]string, 0, len(settings.Env))
-		for _, field := range sortedKeys(settings.Env) {
+		for _, field := range slices.Sorted(maps.Keys(settings.Env)) {
 			value := settings.Env[field]
 			if value.Parameter != "" {
 				env = append(env, propertyName(field)+": { parameter: "+quote(value.Parameter)+" }")

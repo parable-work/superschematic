@@ -130,7 +130,7 @@ that needs an extension this binary does not link is refused unless
 		},
 	}
 	cmd.Flags().StringVar(&stackDir, "stack", "", "the Stack service directory (default: the working directory when it is one, else the one Stack service under ./schemas/services)")
-	cmd.Flags().StringVar(&namingPath, "naming", "", "naming config file (default <stack>/../../superschematic.toml)")
+	addNamingFlag(cmd, &namingPath, "(default <stack>/../../superschematic.toml)")
 	cmd.Flags().StringVar(&outputRoot, "out", "", "the output root build-all wrote (default <schemas-root>/dist)")
 	cmd.Flags().StringVar(&dir, "dir", "", "write here (default <output-root>/prepared/<stack>)")
 	cmd.Flags().BoolVar(&noBuild, "no-build", false, "write the sidecar documents alone: build no context, site or bundle")

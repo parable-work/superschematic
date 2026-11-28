@@ -363,12 +363,39 @@ func structuredJSONListValue(field codegen.FieldInfo) string {
 }
 
 // pythonString escapes a string for use inside a double-quoted Python string
-// literal and normalizes arrow glyphs to ASCII.
+// literal (pythonEscape) and normalizes arrow glyphs to ASCII.
 func pythonString(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	return asciiArrows(s)
+	return asciiArrows(pythonEscape(s))
+}
+
+// pythonEscape escapes s for a double-quoted Python string literal: a
+// backslash, a double quote, a newline, a carriage return and a tab are
+// escaped as \\, \", \n, \r and \t, any other control character and DEL
+// as \xXX.
+func pythonEscape(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case '"':
+			b.WriteString(`\"`)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		default:
+			if r < 0x20 || r == 0x7f {
+				fmt.Fprintf(&b, `\x%02x`, r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
 }
 
 // pythonPattern is a schema pattern, RE2's syntax, rewritten so re.compile

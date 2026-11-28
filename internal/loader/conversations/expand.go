@@ -14,7 +14,7 @@ package conversations
 import (
 	"sort"
 
-	"github.com/parable-work/superschematic/internal/generator/codegen"
+	"github.com/parable-work/superschematic/internal/loader/fielddef"
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -80,60 +80,60 @@ func Expand(schema *ir.Schema) []string {
 // per unknown address and channel.
 func conversationFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	return []*ir.FieldDef{
-		keyField(),
-		required("channelKind", "string", "The kind of channel it is on: sms, email, chat."),
-		required("address", "string", "The outside party's address on the channel, normalised as its channel identity holds it."),
-		optional("partyTable", "string", "The table of the party it is with, by its type's name; null for an unknown sender's."),
-		optional("party", uuidScalar, "The party row's key; null for an unknown sender's."),
-		optional("subject", "string", "What it is about: the subject of its first email."),
-		withDefault(required("createdAt", dateTimeScalar, ""), now()),
-		optional("lastMessageAt", dateTimeScalar, "When its latest message came or went."),
-	}, []ir.IndexDef{
-		{Keys: []string{"channelKind", "address"}, Name: "address"},
-		{Keys: []string{"party", "channelKind"}, Name: "party"},
-	}
+			fielddef.Key(),
+			fielddef.Required("channelKind", "string", "The kind of channel it is on: sms, email, chat."),
+			fielddef.Required("address", "string", "The outside party's address on the channel, normalised as its channel identity holds it."),
+			fielddef.Optional("partyTable", "string", "The table of the party it is with, by its type's name; null for an unknown sender's."),
+			fielddef.Optional("party", uuidScalar, "The party row's key; null for an unknown sender's."),
+			fielddef.Optional("subject", "string", "What it is about: the subject of its first email."),
+			fielddef.WithDefault(fielddef.Required("createdAt", dateTimeScalar, ""), fielddef.Now()),
+			fielddef.Optional("lastMessageAt", dateTimeScalar, "When its latest message came or went."),
+		}, []ir.IndexDef{
+			{Keys: []string{"channelKind", "address"}, Name: "address"},
+			{Keys: []string{"party", "channelKind"}, Name: "party"},
+		}
 }
 
 // messageFields are a message's: one inbound or outbound message of a
 // conversation, what became of it, and who sent it for whom.
 func messageFields() ([]*ir.FieldDef, []ir.IndexDef) {
 	return []*ir.FieldDef{
-		keyField(),
-		required("conversation", uuidScalar, "The conversation it is a message of."),
-		required("direction", "string", "inbound or outbound."),
-		required("via", "string", "The kind of channel it came or went on: sms, email, chat."),
-		optional("slot", "string", "The provider slot that received or sent it (D159)."),
-		required("fromAddress", "string", "The address it came from, normalised; the deployment's for an outbound one."),
-		optional("toAddress", "string", "The address it went to; the deployment's inbound address for an inbound email."),
-		optional("subject", "string", "Its subject, for a channel that shows one."),
-		required("body", "string", "Its text as it came or went."),
-		optional("messageId", "string", "Its id in the channel's threads: an email's Message-ID."),
-		optional("inReplyTo", "string", "The id of the message it answers: an email's In-Reply-To, or the service's id of the message a text replies to."),
-		{Name: "threadRefs", Comment: "The ids of the messages of its thread before it: an email's References.", TypeRef: ir.TypeRef{Name: "string", IsArray: true}},
-		optional("providerMessageId", "string", "The service's id of the message."),
-		optional("authentication", jsonScalar, "What the adapter reported of an email's authentication: { spf, dkim, dmarc }, each pass, fail, softfail, neutral or none."),
-		optional("identity", uuidScalar, "The channel identity its sender resolved through; null for an unknown sender."),
-		optional("trust", "string", "How that identity was confirmed when it came: verified, or entered by hand."),
-		optional("partyTable", "string", "The table of the party it came from or went to."),
-		optional("party", uuidScalar, "The party row's key."),
-		optional("author", "string", "The principal that sent an outbound message: a user's, an agent run's."),
-		optional("authorKind", "string", "Its kind: user, agent."),
-		optional("forSubject", "string", "On whose behalf it was sent: the subject the author acted for; null when it acted for itself."),
-		optional("disposition", "string", "What became of an inbound message: run, timeline, unknown, lapsed, optOut or verified."),
-		optional("state", "string", "Where an outbound message stands: queued, sent, failed, refused or awaitingApproval."),
-		optional("triage", "string", "open while it is held in triage, closed once someone settled it; null for one never held."),
-		optional("triageClosedBy", "string", "Who settled it."),
-		optional("triageClosedAt", dateTimeScalar, "When."),
-		optional("grant", uuidScalar, "The grant an inbound message's run request was made under."),
-		optional("detail", "string", "Why it went where it went: an authentication that failed, a refusal."),
-		withDefault(required("at", dateTimeScalar, "When it came, or when it was sent."), now()),
-		withDefault(required("createdAt", dateTimeScalar, ""), now()),
-	}, []ir.IndexDef{
-		{Keys: []string{"conversation", "at"}, Name: "conversation"},
-		{Keys: []string{"messageId"}, Name: "message_id"},
-		{Keys: []string{"providerMessageId"}, Name: "provider_message"},
-		{Keys: []string{"triage"}, Name: "triage"},
-	}
+			fielddef.Key(),
+			fielddef.Required("conversation", uuidScalar, "The conversation it is a message of."),
+			fielddef.Required("direction", "string", "inbound or outbound."),
+			fielddef.Required("via", "string", "The kind of channel it came or went on: sms, email, chat."),
+			fielddef.Optional("slot", "string", "The provider slot that received or sent it (D159)."),
+			fielddef.Required("fromAddress", "string", "The address it came from, normalised; the deployment's for an outbound one."),
+			fielddef.Optional("toAddress", "string", "The address it went to; the deployment's inbound address for an inbound email."),
+			fielddef.Optional("subject", "string", "Its subject, for a channel that shows one."),
+			fielddef.Required("body", "string", "Its text as it came or went."),
+			fielddef.Optional("messageId", "string", "Its id in the channel's threads: an email's Message-ID."),
+			fielddef.Optional("inReplyTo", "string", "The id of the message it answers: an email's In-Reply-To, or the service's id of the message a text replies to."),
+			{Name: "threadRefs", Comment: "The ids of the messages of its thread before it: an email's References.", TypeRef: ir.TypeRef{Name: "string", IsArray: true}},
+			fielddef.Optional("providerMessageId", "string", "The service's id of the message."),
+			fielddef.Optional("authentication", jsonScalar, "What the adapter reported of an email's authentication: { spf, dkim, dmarc }, each pass, fail, softfail, neutral or none."),
+			fielddef.Optional("identity", uuidScalar, "The channel identity its sender resolved through; null for an unknown sender."),
+			fielddef.Optional("trust", "string", "How that identity was confirmed when it came: verified, or entered by hand."),
+			fielddef.Optional("partyTable", "string", "The table of the party it came from or went to."),
+			fielddef.Optional("party", uuidScalar, "The party row's key."),
+			fielddef.Optional("author", "string", "The principal that sent an outbound message: a user's, an agent run's."),
+			fielddef.Optional("authorKind", "string", "Its kind: user, agent."),
+			fielddef.Optional("forSubject", "string", "On whose behalf it was sent: the subject the author acted for; null when it acted for itself."),
+			fielddef.Optional("disposition", "string", "What became of an inbound message: run, timeline, unknown, lapsed, optOut or verified."),
+			fielddef.Optional("state", "string", "Where an outbound message stands: queued, sent, failed, refused or awaitingApproval."),
+			fielddef.Optional("triage", "string", "open while it is held in triage, closed once someone settled it; null for one never held."),
+			fielddef.Optional("triageClosedBy", "string", "Who settled it."),
+			fielddef.Optional("triageClosedAt", dateTimeScalar, "When."),
+			fielddef.Optional("grant", uuidScalar, "The grant an inbound message's run request was made under."),
+			fielddef.Optional("detail", "string", "Why it went where it went: an authentication that failed, a refusal."),
+			fielddef.WithDefault(fielddef.Required("at", dateTimeScalar, "When it came, or when it was sent."), fielddef.Now()),
+			fielddef.WithDefault(fielddef.Required("createdAt", dateTimeScalar, ""), fielddef.Now()),
+		}, []ir.IndexDef{
+			{Keys: []string{"conversation", "at"}, Name: "conversation"},
+			{Keys: []string{"messageId"}, Name: "message_id"},
+			{Keys: []string{"providerMessageId"}, Name: "provider_message"},
+			{Keys: []string{"triage"}, Name: "triage"},
+		}
 }
 
 // runRequestFields are a run request's: what started it, and for an
@@ -141,31 +141,9 @@ func messageFields() ([]*ir.FieldDef, []ir.IndexDef) {
 // run (D158) takes it.
 func runRequestFields() []*ir.FieldDef {
 	return []*ir.FieldDef{
-		required("trigger", "string", "What asked for the run: inbound, for a message from a party with an active grant."),
-		optional("party", jsonScalar, "The party the run acts for: { table, key }."),
-		optional("message", uuidScalar, "The inbound message that asked for it."),
-		optional("grant", uuidScalar, "The party's grant it acts under: the one the message's thread ran under, else the party's newest active grant."),
+		fielddef.Required("trigger", "string", "What asked for the run: inbound, for a message from a party with an active grant."),
+		fielddef.Optional("party", jsonScalar, "The party the run acts for: { table, key }."),
+		fielddef.Optional("message", uuidScalar, "The inbound message that asked for it."),
+		fielddef.Optional("grant", uuidScalar, "The party's grant it acts under: the one the message's thread ran under, else the party's newest active grant."),
 	}
-}
-
-func keyField() *ir.FieldDef {
-	return &ir.FieldDef{Name: "id", TypeRef: ir.TypeRef{Name: uuidScalar}, Required: true, Key: true, AutoGenerated: true}
-}
-
-func required(name, typeName, comment string) *ir.FieldDef {
-	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: typeName}, Required: true}
-}
-
-func optional(name, typeName, comment string) *ir.FieldDef {
-	return &ir.FieldDef{Name: name, Comment: comment, TypeRef: ir.TypeRef{Name: typeName}}
-}
-
-func withDefault(fd *ir.FieldDef, value *string) *ir.FieldDef {
-	fd.Default = value
-	return fd
-}
-
-func now() *string {
-	s := codegen.DefaultNow
-	return &s
 }

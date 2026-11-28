@@ -2,6 +2,8 @@ package stack
 
 import (
 	ir "github.com/parable-work/superschematic/ir"
+	"maps"
+	"slices"
 )
 
 // checkFieldKeys refuses a deployable that runs code on a database with
@@ -13,7 +15,7 @@ import (
 // what each target's lowering hands the deployable (local secrets.env,
 // Secret Manager, the Secrets Store).
 func (r *resolver) checkFieldKeys() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		d := r.deployables[name].res
 		if !d.Kind.RunsCode() {
 			continue

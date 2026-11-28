@@ -1,6 +1,8 @@
 import type { Principal } from './auth.js';
+import { requestIdOf } from './envelope.js';
 import type { Inbound } from './inbound.js';
 import { INAPP, NotifierError, type Notifier, type RecipientRef } from './notify.js';
+import { badRequest, forbidden, methodNotAllowed, notFound, problemResponse, unauthorized, type HttpProblem } from './problem.js';
 import type { WebhookRequest } from './providers/channel.js';
 
 /*
@@ -37,8 +39,9 @@ export function slotSegment(slot: string): string {
   return slot.toLowerCase().replace(/_/gu, '-');
 }
 
-function problem(status: number, title: string, detail: string): Response {
-  return new Response(JSON.stringify({ type: 'about:blank', title, status, detail }), { status, headers: { 'content-type': 'application/problem+json' } });
+/** The refusal of a request, through the shared problem envelope, which carries its requestId and code. */
+function problem(request: Request, refusal: HttpProblem): Response {
+  return problemResponse(refusal, requestIdOf(request));
 }
 
 function json(value: unknown): Response {
@@ -81,39 +84,39 @@ export function notifierRoutes(options: NotifierRoutesOptions): (request: Reques
       const callback = /^\/([^/]+)\/(inbound|status)$/u.exec(path.slice(webhooks.length));
       const slot = callback ? bySegment.get(callback[1]!) : undefined;
       if (!callback || slot === undefined) return null;
-      if (request.method !== 'POST') return problem(405, 'Method Not Allowed', 'a relay posts its callbacks');
+      if (request.method !== 'POST') return problem(request, methodNotAllowed('a relay posts its callbacks'));
       try {
         const webhook = await webhookOf(request);
         if (callback[2] === 'status') return json({ moved: await options.notifier.statuses(slot, webhook) });
         const outcomes = options.inbound ? await options.inbound.inbound(slot, webhook) : await options.notifier.inbound(slot, webhook);
         return json(outcomes);
       } catch (error) {
-        if (error instanceof NotifierError) return problem(400, 'Bad Request', error.message);
+        if (error instanceof NotifierError) return problem(request, badRequest(error.message));
         throw error;
       }
     }
     if (path !== inbox && !path.startsWith(`${inbox}/`)) return null;
     const principal = await options.authenticate(request);
-    if (!principal) return problem(401, 'Unauthorized', 'Authentication required');
+    if (!principal) return problem(request, unauthorized());
     const recipient = recipientOf(principal);
-    if (!recipient) return problem(403, 'Forbidden', "the inbox is a user's");
+    if (!recipient) return problem(request, forbidden("the inbox is a user's"));
     const rest = path.slice(inbox.length);
     try {
       if (rest === '' || rest === '/') {
-        if (request.method !== 'GET') return problem(405, 'Method Not Allowed', 'the inbox is a GET');
+        if (request.method !== 'GET') return problem(request, methodNotAllowed('the inbox is a GET'));
         const state = url.searchParams.getAll('state').flatMap(value => value.split(',')).filter(value => value !== '');
         const limit = url.searchParams.has('limit') ? Number(url.searchParams.get('limit')) : undefined;
         return json(await options.notifier.inbox(recipient, { ...(state.length > 0 ? { state } : {}), ...(limit !== undefined && Number.isInteger(limit) ? { limit } : {}) }));
       }
       const action = /^\/([^/]+)\/(read|ack)$/u.exec(rest);
-      if (!action) return problem(404, 'Not Found', 'no such inbox route');
-      if (request.method !== 'POST') return problem(405, 'Method Not Allowed', `${action[2]} is a POST`);
+      if (!action) return problem(request, notFound('no such inbox route'));
+      if (request.method !== 'POST') return problem(request, methodNotAllowed(`${action[2]} is a POST`));
       const notice = decodeURIComponent(action[1]!);
       if (action[2] === 'read') await options.notifier.markRead(recipient, notice);
       else await options.notifier.acknowledge(recipient, notice, INAPP);
       return new Response(null, { status: 204 });
     } catch (error) {
-      if (error instanceof NotifierError) return problem(404, 'Not Found', error.message);
+      if (error instanceof NotifierError) return problem(request, notFound(error.message));
       throw error;
     }
   };

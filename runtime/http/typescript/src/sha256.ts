@@ -121,8 +121,27 @@ export function sha256(data: Uint8Array): Uint8Array {
   return new Sha256().update(data).digest();
 }
 
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+/** bytes in lowercase hex, two digits a byte. */
+export function hex(bytes: Uint8Array | ArrayBuffer): string {
+  return Array.from(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function bytesOf(data: Uint8Array | string): Uint8Array {
+  return typeof data === 'string' ? new TextEncoder().encode(data) : data;
+}
+
+/** The SHA-256 of data, a string as its UTF-8, in lowercase hex, through Sha256: synchronous, for short input. */
+export function sha256Hex(data: Uint8Array | string): string {
+  return hex(sha256(bytesOf(data)));
+}
+
+/**
+ * The SHA-256 of data, a string as its UTF-8, in lowercase hex, through
+ * WebCrypto's digest, which runs natively: for input as large as a body or
+ * an object, which Sha256 would spend CPU time on.
+ */
+export async function subtleSha256Hex(data: Uint8Array | string): Promise<string> {
+  return hex(await crypto.subtle.digest('SHA-256', bytesOf(data) as Uint8Array<ArrayBuffer>));
 }
 
 /** A Worker's native streaming digest (workerd's crypto.DigestStream), where the runtime has one. */

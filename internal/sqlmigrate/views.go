@@ -26,7 +26,7 @@ func renameInView(statement string, r *renames) string {
 	aliases := map[string]string{} // alias -> previous table
 	for _, pattern := range []*regexp.Regexp{viewFromPattern, viewJoinPattern} {
 		for _, m := range pattern.FindAllStringSubmatch(statement, -1) {
-			aliases[unquoteIdent(m[2])] = unquoteIdent(m[1])
+			aliases[sqlutil.Unquote(m[2])] = sqlutil.Unquote(m[1])
 		}
 	}
 
@@ -49,8 +49,8 @@ func renameInView(statement string, r *renames) string {
 		if m == nil {
 			continue
 		}
-		table, ok := aliases[unquoteIdent(m[1])]
-		column := unquoteIdent(m[2])
+		table, ok := aliases[sqlutil.Unquote(m[1])]
+		column := sqlutil.Unquote(m[2])
 		if ok && r.column(table, column) != column {
 			lines[i] = "  " + m[1] + "." + m[2] + " AS " + sqlutil.QuoteIdentifier(column) + m[3]
 		}
@@ -143,7 +143,7 @@ func tokenizeSQL(sql string) []token {
 			if i > len(sql) {
 				i = len(sql)
 			}
-			out = append(out, token{kind: tokIdent, text: sql[start:i], value: unquoteIdent(sql[start:i])})
+			out = append(out, token{kind: tokIdent, text: sql[start:i], value: sqlutil.Unquote(sql[start:i])})
 		case isIdent(ch) && (ch < '0' || ch > '9'):
 			for i < len(sql) && isIdent(sql[i]) {
 				i++
@@ -155,12 +155,4 @@ func tokenizeSQL(sql string) []token {
 		}
 	}
 	return out
-}
-
-// unquoteIdent strips the double quotes of a quoted identifier.
-func unquoteIdent(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return strings.ReplaceAll(s[1:len(s)-1], `""`, `"`)
-	}
-	return s
 }

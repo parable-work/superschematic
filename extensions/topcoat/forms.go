@@ -2,6 +2,8 @@ package topcoat
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -290,7 +292,7 @@ type formBuilder struct {
 
 func (b *formBuilder) sorted() []*formStruct {
 	out := make([]*formStruct, 0, len(b.structs))
-	for _, name := range sortedKeys(b.structs) {
+	for _, name := range slices.Sorted(maps.Keys(b.structs)) {
 		out = append(out, b.structs[name])
 	}
 	return out

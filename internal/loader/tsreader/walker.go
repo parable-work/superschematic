@@ -2044,13 +2044,7 @@ func (w *walker) argumentFromParameter(p *astNode) (*ir.ArgumentDef, string, *Sc
 		if fd.ValidatePrecision != nil || fd.ValidateScale != nil || fd.ValidateDimensions != nil {
 			return nil, "", errorAtNode(p, "Validate precision, scale and dimensions bound a field of a type, not an operation's argument; take the value in a type's field (support for arguments follows)")
 		}
-		arg.ValidateMin = fd.ValidateMin
-		arg.ValidateMax = fd.ValidateMax
-		arg.ValidateMinLength = fd.ValidateMinLength
-		arg.ValidateMaxLength = fd.ValidateMaxLength
-		arg.ValidateListMin = fd.ValidateListMin
-		arg.ValidateListMax = fd.ValidateListMax
-		arg.ValidatePattern = fd.ValidatePattern
+		arg.ValueRules = fd.ValueRules
 	}
 	return arg, info.sortItem, nil
 }

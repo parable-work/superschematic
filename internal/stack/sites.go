@@ -2,6 +2,8 @@ package stack
 
 import (
 	ir "github.com/parable-work/superschematic/ir"
+	"maps"
+	"slices"
 )
 
 // The static sites of a stack (D55; docs/stack-model.md, section 8.10). A
@@ -19,7 +21,7 @@ import (
 // after the API it reaches (ir.DerivedFieldNames.Field). A site reads no
 // environment variable, so an env key set on it is refused.
 func (r *resolver) bindSite(d *deployable) {
-	for _, key := range sortedKeys(d.settings.env) {
+	for _, key := range slices.Sorted(maps.Keys(d.settings.env)) {
 		r.fail(CodeUnknownEnvKey, "environment %s sets env %s on site %s; a site reads no environment variable, only the address of each API it calls from its config", d.settings.envFrom[key], key, d.res.Name)
 	}
 	var bindings []*ir.Binding
@@ -35,7 +37,7 @@ func (r *resolver) bindSite(d *deployable) {
 // that origin, which needs no CORS.
 func (r *resolver) siteEdgesTo(api string) []string {
 	var ids []string
-	for _, id := range sortedKeys(r.edges) {
+	for _, id := range slices.Sorted(maps.Keys(r.edges)) {
 		if e := r.edges[id]; e.res.Kind == ir.EdgeSite && e.res.Service.Name == api && !inOrigin(e) {
 			ids = append(ids, id)
 		}
@@ -62,24 +64,24 @@ func (r *resolver) corsFields(d *deployable) map[string]string {
 // bindConfig then skips.
 func (r *resolver) checkCORSFields(d *deployable, cors, callers, identity map[string]string, derived map[string]*edge) map[string]bool {
 	refused := map[string]bool{}
-	for _, name := range sortedKeys(cors) {
+	for _, name := range slices.Sorted(maps.Keys(cors)) {
 		api := cors[name]
-		for _, fieldName := range sortedKeys(d.fields) {
+		for _, fieldName := range slices.Sorted(maps.Keys(d.fields)) {
 			if f := d.fields[fieldName]; ir.DerivedFieldClaims(name, f.name) {
 				r.fail(CodeFieldCollision, "server %s: config field %s of %s collides with %s, the CORS field of %s", d.res.Name, f.name, f.declaring, name, api)
 			}
 		}
-		for _, other := range sortedKeys(derived) {
+		for _, other := range slices.Sorted(maps.Keys(derived)) {
 			if ir.DerivedFieldClaims(name, other) || ir.DerivedFieldClaims(other, name) {
 				r.fail(CodeFieldCollision, "server %s: %s, the field edge %s derives, collides with %s, the CORS field of %s", d.res.Name, other, derived[other].res.ID, name, api)
 			}
 		}
-		for _, other := range sortedKeys(callers) {
+		for _, other := range slices.Sorted(maps.Keys(callers)) {
 			if ir.DerivedFieldClaims(name, other) || ir.DerivedFieldClaims(other, name) {
 				r.fail(CodeFieldCollision, "server %s: %s, the callers field of %s, collides with %s, the CORS field of %s", d.res.Name, other, callers[other], name, api)
 			}
 		}
-		for _, other := range sortedKeys(identity) {
+		for _, other := range slices.Sorted(maps.Keys(identity)) {
 			if ir.DerivedFieldClaims(name, other) || ir.DerivedFieldClaims(other, name) {
 				r.fail(CodeFieldCollision, "server %s: %s, the identity config field of %s, collides with %s, the CORS field of %s", d.res.Name, other, identity[other], name, api)
 			}
@@ -96,7 +98,7 @@ func (r *resolver) checkCORSFields(d *deployable, cors, callers, identity map[st
 // API, whose sites' origins fillCORS lists.
 func (r *resolver) corsBindings(d *deployable, cors map[string]string) []*ir.Binding {
 	var out []*ir.Binding
-	for _, name := range sortedKeys(cors) {
+	for _, name := range slices.Sorted(maps.Keys(cors)) {
 		api := cors[name]
 		out = append(out, &ir.Binding{Field: name, Source: ir.BindingDerived, CORSOf: api, Edges: r.siteEdgesTo(api)})
 	}
@@ -106,7 +108,7 @@ func (r *resolver) corsBindings(d *deployable, cors map[string]string) []*ir.Bin
 // fillCORS sets the value of each CORS field: the public origin of the
 // site of each of its edges, in the order of the edges, each once.
 func (r *resolver) fillCORS() {
-	for _, name := range sortedKeys(r.deployables) {
+	for _, name := range slices.Sorted(maps.Keys(r.deployables)) {
 		for _, b := range r.deployables[name].res.Bindings {
 			if b.CORSOf == "" {
 				continue

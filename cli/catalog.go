@@ -8,7 +8,6 @@ import (
 
 	"github.com/parable-work/superschematic/docs"
 	"github.com/parable-work/superschematic/internal/agentcatalog"
-	"github.com/parable-work/superschematic/internal/generator/naming"
 	"github.com/parable-work/superschematic/packages"
 )
 
@@ -47,19 +46,12 @@ with the binary it runs.`,
 			return runCatalog(cmd, a, flags, args[0])
 		},
 	}
-	cmd.Flags().StringVar(&flags.namingPath, "naming", "", "naming config file (default: built-in names), for a binary whose extensions read it")
+	addNamingFlag(cmd, &flags.namingPath, "(default: built-in names), for a binary whose extensions read it")
 	return cmd
 }
 
 func runCatalog(cmd *cobra.Command, a *app, flags *catalogFlags, name string) error {
-	names := naming.Default()
-	if flags.namingPath != "" {
-		var err error
-		if names, err = resolveNaming(flags.namingPath, ""); err != nil {
-			return err
-		}
-	}
-	reg, err := a.resolveRegistry(names)
+	reg, err := a.flagRegistry(flags.namingPath)
 	if err != nil {
 		return err
 	}

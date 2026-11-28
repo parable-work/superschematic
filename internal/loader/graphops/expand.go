@@ -681,16 +681,12 @@ func (b *builder) content(member graphdesc.Member, described graphdesc.Kind) []*
 	var out []*ir.FieldDef
 	for _, fd := range graphroutes.ContentFields(b.db, member, described) {
 		field := &ir.FieldDef{
-			Name:              fd.Name,
-			Comment:           fd.Comment,
-			TypeRef:           fd.TypeRef,
-			Required:          fd.Required,
-			ValidateMinLength: fd.ValidateMinLength,
-			ValidateMaxLength: fd.ValidateMaxLength,
-			ValidatePattern:   fd.ValidatePattern,
-			ValidateMin:       fd.ValidateMin,
-			ValidateMax:       fd.ValidateMax,
-			Origin:            ir.OriginGraphOperations,
+			Name:       fd.Name,
+			Comment:    fd.Comment,
+			TypeRef:    fd.TypeRef,
+			Required:   fd.Required,
+			ValueRules: fd.ValueRules.Element(),
+			Origin:     ir.OriginGraphOperations,
 		}
 		name := fd.TypeRef.Name
 		switch target := graphroutes.RelationTarget(b.db, fd); {
@@ -717,8 +713,7 @@ func (b *builder) content(member graphdesc.Member, described graphdesc.Kind) []*
 		default:
 			// A struct of the database, which the API does not declare.
 			field.TypeRef = ir.TypeRef{Name: jsonScalar}
-			field.ValidateMinLength, field.ValidateMaxLength, field.ValidatePattern = nil, nil, ""
-			field.ValidateMin, field.ValidateMax = nil, nil
+			field.ValueRules = ir.ValueRules{}
 			b.useScalar(jsonScalar)
 		}
 		out = append(out, field)

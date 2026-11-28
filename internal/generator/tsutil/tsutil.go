@@ -5,85 +5,23 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
+
+	"github.com/parable-work/superschematic/internal/generator/codegen"
 )
 
-// ToCamelCase converts a string to camelCase
-// Handles snake_case, kebab-case, and PascalCase
+// ToCamelCase is the camelCase the TypeScript SDK names its members and
+// the tool documents their parameters with: codegen.JoinCamelCase.
 // Example: "send_magic_link" -> "sendMagicLink", "SendMagicLink" -> "sendMagicLink"
 func ToCamelCase(name string) string {
-	// Handle snake_case
-	if strings.Contains(name, "_") {
-		parts := strings.Split(name, "_")
-		var result strings.Builder
-		for i, part := range parts {
-			if len(part) > 0 {
-				if i == 0 {
-					result.WriteString(strings.ToLower(part[:1]))
-					if len(part) > 1 {
-						result.WriteString(part[1:])
-					}
-				} else {
-					result.WriteString(strings.ToUpper(part[:1]))
-					if len(part) > 1 {
-						result.WriteString(part[1:])
-					}
-				}
-			}
-		}
-		return result.String()
-	}
-
-	// Handle kebab-case
-	if strings.Contains(name, "-") {
-		parts := strings.Split(name, "-")
-		var result strings.Builder
-		for i, part := range parts {
-			if len(part) > 0 {
-				if i == 0 {
-					result.WriteString(strings.ToLower(part[:1]))
-					if len(part) > 1 {
-						result.WriteString(part[1:])
-					}
-				} else {
-					result.WriteString(strings.ToUpper(part[:1]))
-					if len(part) > 1 {
-						result.WriteString(part[1:])
-					}
-				}
-			}
-		}
-		return result.String()
-	}
-
-	// Handle PascalCase -> camelCase
-	if len(name) > 0 {
-		return strings.ToLower(name[:1]) + name[1:]
-	}
-
-	return name
+	return codegen.JoinCamelCase(name)
 }
 
-// ToClassName converts a name to TypeScript class name (PascalCase)
+// ToClassName converts a name to TypeScript class name (PascalCase):
+// codegen.JoinPascalCase.
 // Example: "auth" -> "Auth", "my-namespace" -> "MyNamespace"
 func ToClassName(name string) string {
-	parts := strings.Split(strings.ReplaceAll(name, "_", "-"), "-")
-	var result strings.Builder
-	for _, part := range parts {
-		if len(part) > 0 {
-			result.WriteString(strings.ToUpper(part[:1]))
-			result.WriteString(part[1:])
-		}
-	}
-	return result.String()
-}
-
-// ToSnakeCase converts PascalCase/camelCase to snake_case
-func ToSnakeCase(s string) string {
-	re := regexp.MustCompile("([a-z0-9])([A-Z])")
-	snake := re.ReplaceAllString(s, "${1}_${2}")
-	return strings.ToLower(snake)
+	return codegen.JoinPascalCase(name)
 }
 
 // IRTypeToTSType converts an IR type-reference name to a TypeScript wire
@@ -100,14 +38,62 @@ func IRTypeToTSType(typeName string) string {
 	}
 }
 
-// EscapeString escapes a string for use in TypeScript string literals
+// EscapeString escapes s for a double-quoted TypeScript string literal,
+// which is then a JSON string too: a backslash, a double quote, a newline,
+// a carriage return and a tab are escaped as \\, \", \n, \r and \t, any
+// other control character and the line and paragraph separators (U+2028,
+// U+2029) as \uXXXX.
 func EscapeString(s string) string {
-	s = strings.ReplaceAll(s, "\\", "\\\\")
-	s = strings.ReplaceAll(s, "\"", "\\\"")
-	s = strings.ReplaceAll(s, "\n", "\\n")
-	s = strings.ReplaceAll(s, "\r", "\\r")
-	s = strings.ReplaceAll(s, "\t", "\\t")
-	return s
+	return escapeString(s, '"')
+}
+
+// EscapeSingleQuoted escapes s for a single-quoted TypeScript string
+// literal, as EscapeString does for a double-quoted one.
+func EscapeSingleQuoted(s string) string {
+	return escapeString(s, '\'')
+}
+
+// Quote writes s as a single-quoted TypeScript string literal.
+func Quote(s string) string {
+	return "'" + EscapeSingleQuoted(s) + "'"
+}
+
+// EscapeTemplateLiteral escapes s for a TypeScript template literal, which
+// holds its newlines as they are: a backslash, a backquote and the ${ that
+// would start a substitution are escaped.
+func EscapeTemplateLiteral(s string) string {
+	return templateLiteralEscaper.Replace(s)
+}
+
+var templateLiteralEscaper = strings.NewReplacer(`\`, `\\`, "`", "\\`", "${", `\${`)
+
+func escapeString(s string, quote rune) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\\':
+			b.WriteString(`\\`)
+		case quote:
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\u2028', '\u2029':
+			fmt.Fprintf(&b, `\u%04x`, r)
+		default:
+			if r < 0x20 {
+				fmt.Fprintf(&b, `\u%04x`, r)
+			} else {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return b.String()
 }
 
 // FormatTypeScript runs prettier on TypeScript files in the given directory

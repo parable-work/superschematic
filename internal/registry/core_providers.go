@@ -2,6 +2,7 @@ package registry
 
 import (
 	"fmt"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -39,7 +40,7 @@ func providersDecorator() DecoratorSpec {
 				return ArgErrorf(0, "@providers on %s takes an object of one slot or more: %s", n.Type.Name, shape)
 			}
 			slots := map[string]string{}
-			for _, slot := range sortedKeys(obj) {
+			for _, slot := range slices.Sorted(maps.Keys(obj)) {
 				iface, ok := obj[slot].(string)
 				if !ok {
 					return ArgErrorf(0, "@providers on %s: slot %s takes an interface's name as a string; got %v", n.Type.Name, slot, obj[slot])

@@ -168,7 +168,7 @@ func (g StateGuard) Trigger() Trigger {
 func stateLiterals(states []string) string {
 	literals := make([]string, len(states))
 	for i, state := range states {
-		literals[i] = stringLiteral(state)
+		literals[i] = sqlutil.QuoteLiteral(state)
 	}
 	return strings.Join(literals, ", ")
 }
@@ -195,7 +195,7 @@ func (g StateGuard) listed(before, after, same string) []string {
 		default:
 			continue
 		}
-		out = append(out, fmt.Sprintf("(%s %s %s AND %s)", before, same, stringLiteral(move.From), to))
+		out = append(out, fmt.Sprintf("(%s %s %s AND %s)", before, same, sqlutil.QuoteLiteral(move.From), to))
 	}
 	return out
 }
@@ -290,6 +290,6 @@ func (g StateGuard) SQLiteTrigger(quote func(string) string) SQLiteTrigger {
 	var b strings.Builder
 	fmt.Fprintf(&b, "CREATE TRIGGER %s BEFORE UPDATE OF %s ON %s FOR EACH ROW\n", quote(g.TriggerName), column, quote(g.Table))
 	fmt.Fprintf(&b, "WHEN %s IS NOT %s AND (\n  %s)\n", after, before, refused)
-	fmt.Fprintf(&b, "BEGIN\n  SELECT RAISE(ABORT, %s);\nEND", stringLiteral(g.SQLiteMessage()))
+	fmt.Fprintf(&b, "BEGIN\n  SELECT RAISE(ABORT, %s);\nEND", sqlutil.QuoteLiteral(g.SQLiteMessage()))
 	return SQLiteTrigger{Name: g.TriggerName, Table: g.Table, Definition: b.String(), Refuses: true}
 }
