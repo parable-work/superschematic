@@ -34,6 +34,20 @@ var partiesRustCases = []string{
 	"sending to a party takes the permission, keeps to the rate limit, waits for approval when asked, and stops after STOP",
 }
 
+// rustPostgresOnly narrows cfg's SQL dialects to postgres. The fixtures
+// these Rust tests build list sqlite for the TypeScript runtime's sake
+// (D186, #560), and the parts they run (the notifier, parties, the agent
+// orchestration) are Postgres's alone in Rust so far, which rustgen
+// refuses on SQLite (D181, D191).
+func rustPostgresOnly(cfg *schemaconfig.SchemaConfig) {
+	sql, _ := cfg.Outputs["sql"].(map[string]any)
+	if sql == nil {
+		sql = map[string]any{}
+		cfg.Outputs["sql"] = sql
+	}
+	sql["dialects"] = []any{"postgres"}
+}
+
 // rustRuntimeCrate builds db's Rust types (Rust and Go types enabled
 // beside its config's) under a temporary output root, writes a test crate
 // of manifest (given the types crate's name and directory and the HTTP
@@ -57,6 +71,7 @@ func rustRuntimeCrate(t *testing.T, cargo, db, name, manifest, source string, en
 	// The Go ORM, which a DB service always generates, imports its Go
 	// types.
 	types["go"] = map[string]any{"enabled": true}
+	rustPostgresOnly(cfg)
 	if _, err := Run(schema, cfg, Options{
 		OutputRoot:       outputRoot,
 		Paths:            paths,
