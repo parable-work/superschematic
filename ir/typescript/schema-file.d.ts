@@ -624,6 +624,7 @@ export interface OperationSet {
   operations: FieldDef[];
   permissions?: string[];
   public?: boolean;
+  rowFeatureOperations?: RowFeatureOperationsConfig;
   serviceCallers?: ServiceCallers;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
@@ -643,6 +644,7 @@ export interface OperationSetFile {
   operations: FieldDef[];
   permissions?: string[];
   public?: boolean;
+  rowFeatureOperations?: RowFeatureOperationsConfig;
   serviceCallers?: ServiceCallers;
   userAdministration?: UserAdministrationConfig;
   userSessions?: UserSessionsConfig;
@@ -794,6 +796,13 @@ export interface RelationDef {
 export interface RoleSeed {
   name: string;
   permissions: string[];
+}
+
+export interface RowFeatureOperationsConfig {
+  bucket?: string;
+  operations?: string[];
+  permissions?: { [key: string]: string[] };
+  type: string;
 }
 
 export interface RowReferencesDef {

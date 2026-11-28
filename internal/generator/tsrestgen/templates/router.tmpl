@@ -100,6 +100,19 @@
 // not_found, and so is a change set the set's row rule keeps from the
 // caller; a refusal of the graph's engine is the problem of its code.
 {{- end }}
+{{- if .HasRowFeatures }}
+//
+// The operations of its @rowFeatureOperations sets (#723) are each an
+// operation of a table's references, backlinks or files of {{ .Deps.Database }} and
+// have no implementation method: the route runs the runtime's
+// rowFeatureOperation, with its entry of rowFeatureOperations, through
+// the references and attachments of options.orm, the
+// database's repositories, as the request's caller (orm.as), so every read
+// keeps to the rows the caller may read{{ if .RowFeatureBucket }}, and a file's upload and download
+// sign a URL of options.attachmentsBucket{{ end }}. A row the caller cannot read, and a
+// file of another row, is 404 not_found; a refusal of the declaration's
+// rules is the 422 of its code.
+{{- end }}
 {{- if .Identity }}
 //
 // The API's authDb, {{ .Identity.AuthDB }}, has a User table (D50): the identity
@@ -300,6 +313,21 @@ export const graphOperations = {
 {{- end }}
 } as const satisfies Partial<Record<OperationName, GraphOperation>>;
 {{- end }}
+{{- if .HasRowFeatures }}
+
+/**
+ * What each row feature operation runs (#723): the table, the path
+ * parameter that holds its row's key, and the operation of its references
+ * and files.
+ */
+export const rowFeatureOperations = {
+{{- range .Endpoints }}
+{{- if .RowFeature }}
+  {{ .Key }}: {{ .RowFeature.Literal }},
+{{- end }}
+{{- end }}
+} as const satisfies Partial<Record<OperationName, RowFeatureOperation>>;
+{{- end }}
 
 {{ if .Identity -}}
 export interface RouterOptions<E extends Env = Env> extends Omit<RouterRuntimeOptions, 'authenticate'>, OpenAPIOptions {
@@ -351,6 +379,21 @@ export interface RouterOptions<E extends Env = Env> extends RouterRuntimeOptions
    * operations (D138) read the root and the graph's refs and commits.
    */
   orm: {{ .Deps.ORM }};
+{{- else if .HasRowFeatures }}
+  /**
+   * The repositories of {{ .Deps.Database }} (Deps.orm), whose references and
+   * attachments run the references and files (#723), as the request's
+   * caller.
+   */
+  orm: {{ .Deps.ORM }};
+{{- end }}
+{{- if .RowFeatureBucket }}
+  /**
+   * The bucket that holds the files (#723), {{ .RowFeatureBucket }} (Deps.{{ .RowFeatureBucketField }}): an
+   * upload's begin and a download sign a URL of it, and an upload's
+   * completion reads the object back.
+   */
+  attachmentsBucket: Bucket;
 {{- end }}
 {{- if .HasGraphs }}
   /**
@@ -583,6 +626,20 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
 {{- if .WebhookProvider }}
       webhookVerifier: implementations.webhookVerifiers[{{ tsString .WebhookProvider }}],
 {{- end }}
+    }
+  );
+{{- else if .RowFeature }}
+  // {{ .RowFeature.Type }}'s {{ .RowFeature.Operation }} (#723): the runtime's handler runs it through the
+  // repositories' references and attachments, as the request's caller.
+  mountOperation(
+    router,
+    operationSpecs.{{ .Key }},
+    (ctx, request) => rowFeatureOperation(options.orm, rowFeatureOperations.{{ .Key }}, ctx, request{{ if .RowFeature.TakesBucket }}, options.attachmentsBucket{{ end }}),
+    {{ $runtime }},
+    {
+      bodyLimitBytes: bodyLimits.{{ .Key }},
+      rateLimitPerMinute: rateLimits.{{ .Key }},
+      timeoutSeconds: timeouts.{{ .Key }},
     }
   );
 {{- else if .Graph }}

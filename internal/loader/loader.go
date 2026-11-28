@@ -25,6 +25,7 @@ import (
 	"github.com/parable-work/superschematic/internal/loader/bundles"
 	"github.com/parable-work/superschematic/internal/loader/conversations"
 	"github.com/parable-work/superschematic/internal/loader/graphops"
+	"github.com/parable-work/superschematic/internal/loader/rowfeatureops"
 	"github.com/parable-work/superschematic/internal/loader/idempotency"
 	"github.com/parable-work/superschematic/internal/loader/identity"
 	"github.com/parable-work/superschematic/internal/loader/jsonreader"
@@ -475,6 +476,9 @@ func (o *loadOptions) databaseFor(servicePath string, schema, authDB *ir.Schema,
 		if set.IsGraphOperations() {
 			why = "whose version graphs its @graphOperations sets serve"
 		}
+		if set.IsRowFeatureOperations() {
+			why = "whose tables' references and files its @rowFeatureOperations sets serve"
+		}
 	}
 	if schema.HasTableOperations() {
 		why = "whose tables its @tableOperation operations read and write"
@@ -730,6 +734,21 @@ func (o *loadOptions) runVerify(schema *ir.Schema, vin verify.Input) (*ir.Schema
 		refused = append(refused, err)
 	} else {
 		added, err := graphops.Expand(schema, vin.Database, reg)
+		if err != nil {
+			return nil, err
+		}
+		if len(added) > 0 {
+			if err := hydrateScalarsFromRegistry(schema, reg.Scalars()); err != nil {
+				return nil, err
+			}
+		}
+	}
+	// A table's references and files join their @rowFeatureOperations
+	// sets the same way (#723), with the types they take and return.
+	if err := verify.CheckRowFeatureOperations(schema, vin).Err(); err != nil {
+		refused = append(refused, err)
+	} else {
+		added, err := rowfeatureops.Expand(schema, vin.Database, reg)
 		if err != nil {
 			return nil, err
 		}

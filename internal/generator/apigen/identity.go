@@ -42,15 +42,23 @@ import (
 // (UnservedTableOperations); one the loader did not fill is an error that
 // names it.
 func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
-	identity, behavior, table, graph := false, false, false, false
+	identity, behavior, table, graph, rowFeature := false, false, false, false, false
 	for _, endpoint := range output.Endpoints {
 		identity = identity || endpoint.IdentityOperation != ""
 		behavior = behavior || endpoint.BehaviorOperation() != nil
 		table = table || endpoint.ServedTable() != nil
 		graph = graph || endpoint.GraphOperation() != nil
+		rowFeature = rowFeature || endpoint.RowFeatureOperation() != nil
 	}
-	if !identity && !behavior && !table && !graph {
+	if !identity && !behavior && !table && !graph && !rowFeature {
 		return output, nil
+	}
+	// The row feature operations go to RowFeatureEndpoints, and
+	// rowfeatures.go serves them (#723).
+	if rowFeature {
+		if err := output.checkRowFeatures(); err != nil {
+			return nil, err
+		}
 	}
 	var tables *tablePlan
 	if table {
@@ -75,6 +83,7 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 	view.BehaviorEndpoints = nil
 	view.TableEndpoints = nil
 	view.GraphEndpoints = nil
+	view.RowFeatureEndpoints = nil
 	view.Graphs = graphs
 	for _, endpoint := range output.Endpoints {
 		switch {
@@ -84,6 +93,8 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 			set := graphSets[endpoint.Operation]
 			endpoint.GraphRoutes, endpoint.GraphMember = set.Routes, set.Member
 			view.GraphEndpoints = append(view.GraphEndpoints, endpoint)
+		case endpoint.RowFeatureOperation() != nil:
+			view.RowFeatureEndpoints = append(view.RowFeatureEndpoints, endpoint)
 		case endpoint.BehaviorOperation() != nil:
 			view.BehaviorEndpoints = append(view.BehaviorEndpoints, endpoint)
 		case endpoint.ServedTable() != nil && tables.byHand[endpoint.Operation]:
@@ -119,6 +130,10 @@ func ImplementedOutput(output *APIOutput) (*APIOutput, error) {
 	}
 	// And a graph operation's (D138).
 	for _, endpoint := range view.GraphEndpoints {
+		view.summarizeRoute(endpoint)
+	}
+	// And a row feature operation's (#723).
+	for _, endpoint := range view.RowFeatureEndpoints {
 		view.summarizeRoute(endpoint)
 	}
 	if table {

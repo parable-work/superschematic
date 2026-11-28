@@ -437,6 +437,14 @@ type APIOutput struct {
 	GraphEndpoints []EndpointInfo
 	Graphs         *GraphsInfo
 
+	// RowFeatureEndpoints are the operations of the API's
+	// @rowFeatureOperations sets (#723), which rowfeatures.go serves through
+	// References() and Attachments() of the ORM of the API's database:
+	// ImplementedOutput moves them here from Endpoints, so the Go server
+	// mounts them on its handlers and implements none of them. Nil in the
+	// output Generate returns.
+	RowFeatureEndpoints []EndpointInfo
+
 	// graphOwner is the API's schema, which holds each @graphOperations
 	// set, and graphSchemas its dependencies, its database's among them,
 	// which graphs.go is modelled from.
@@ -592,10 +600,10 @@ func (o *APIOutput) TypesModuleReplaces() []string {
 // TableEndpoints, in Generate's order (by path, then method). Without the
 // last three they are Endpoints.
 func (o *APIOutput) RoutedEndpoints() []EndpointInfo {
-	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0 {
+	if len(o.IdentityEndpoints) == 0 && len(o.BehaviorEndpoints) == 0 && len(o.TableEndpoints) == 0 && len(o.GraphEndpoints) == 0 && len(o.RowFeatureEndpoints) == 0 {
 		return o.Endpoints
 	}
-	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints, o.TableEndpoints, o.GraphEndpoints)
+	return sortedEndpoints(o.Endpoints, o.IdentityEndpoints, o.BehaviorEndpoints, o.TableEndpoints, o.GraphEndpoints, o.RowFeatureEndpoints)
 }
 
 // ManualEndpoints are the @manualRouteRegistration endpoints among
@@ -1074,6 +1082,15 @@ func Generate(schema *ir.Schema, opts Options) (*APIOutput, error) {
 		output.graphOwner, output.graphSchemas = schema, opts.Dependencies
 		if output.Deps.Database == "" {
 			output.Deps = DepsInfo{Database: db, ORMModule: opts.Naming.GoORMModule(db), VersionGraph: true, Rules: DeclaresTableBehaviors(opts.Dependencies[db])}
+		}
+		output.setTableDeps()
+	}
+	// A table's references and files run through References() and
+	// Attachments() of the ORM of the API's database (#723), which Deps
+	// holds too.
+	if db := rowFeatureDatabase(output.Endpoints); db != "" {
+		if output.Deps.Database == "" {
+			output.Deps = DepsInfo{Database: db, ORMModule: opts.Naming.GoORMModule(db), Rules: DeclaresTableBehaviors(opts.Dependencies[db])}
 		}
 		output.setTableDeps()
 	}

@@ -546,6 +546,12 @@ type API struct {
 	// which read through the ORM of its database and run through each
 	// graph's facade, GraphsOf its ORM (D138).
 	Graphs bool
+	// RowFeatures is true when the API serves a table's references and
+	// files, which run through the ORM of its database (#723), and
+	// Attachments when one of them reads the bucket that holds the files,
+	// AttachmentsOf its Deps.
+	RowFeatures bool
+	Attachments bool
 
 	// CORS is true when a site of the stack calls the API, whose server
 	// then answers CORS for the origins its CORS field lists, with
@@ -953,6 +959,8 @@ func Plan(in Input) (*Server, error) {
 			apis[i].Behaviors = o.HasBehaviorEndpoints()
 			apis[i].Tables = o.HasTableEndpoints()
 			apis[i].Graphs = o.HasGraphEndpoints()
+			apis[i].RowFeatures = o.HasRowFeatureEndpoints()
+			apis[i].Attachments = o.RowFeatureBucket() != ""
 			if a.CORS {
 				apis[i].CORS = true
 				apis[i].CORSMethods = endpointMethods(o)
