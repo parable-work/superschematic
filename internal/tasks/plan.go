@@ -193,9 +193,12 @@ func resolveInputs(in PlanInput, name string, task tasks.Task, strict bool) ([]t
 			resolution, err := resolver.Resolve(registry.TaskResolveRequest{Tree: in.Tree, Task: name, Spec: input.Spec})
 			if err == nil {
 				res.generated = resolution.Generated
-				var lines []string
+				var lines, values []string
 				if lines, err = entryLines(in.Tree, resolution.Paths); err == nil {
-					res.digest, res.files = digest(lines), len(lines)
+					values, err = valueLines(resolution.Values)
+				}
+				if err == nil {
+					res.digest, res.files = digest(merge(lines, values)), len(lines)
 				}
 			}
 			res.err = err
@@ -238,14 +241,52 @@ func (in PlanInput) timing(kind string) *KindTiming {
 }
 
 // InputDigest is the digest of an input that resolves to paths in a
-// tree: the SHA-256 over one line per tracked file, `<mode> <path>
-// <object id>`, each once and sorted.
-func InputDigest(tree registry.TaskTree, paths []string) (string, error) {
+// tree, and to values: the SHA-256 over one line per tracked file,
+// `<mode> <path> <object id>`, and one per value, `value <sha256> <name>`,
+// each once and sorted. A file's line starts with its mode, which is
+// digits, so no value's line is a file's.
+func InputDigest(tree registry.TaskTree, paths []string, values ...registry.TaskValue) (string, error) {
 	lines, err := entryLines(tree, paths)
 	if err != nil {
 		return "", err
 	}
-	return digest(lines), nil
+	named, err := valueLines(values)
+	if err != nil {
+		return "", err
+	}
+	return digest(merge(lines, named)), nil
+}
+
+// valueLines returns one line per value, `value <sha256> <name>`. The
+// digest comes first, so a name may hold a space.
+func valueLines(values []registry.TaskValue) ([]string, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+	seen := make(map[string]bool, len(values))
+	lines := make([]string, 0, len(values))
+	for _, value := range values {
+		switch {
+		case value.Name == "" || strings.ContainsAny(value.Name, "\r\n"):
+			return nil, fmt.Errorf("the resolver named a value %q; a value's name is one line and not empty", value.Name)
+		case seen[value.Name]:
+			return nil, fmt.Errorf("the resolver gave the value %q twice", value.Name)
+		}
+		seen[value.Name] = true
+		sum := sha256.Sum256(value.Data)
+		lines = append(lines, "value "+hex.EncodeToString(sum[:])+" "+value.Name)
+	}
+	return lines, nil
+}
+
+// merge returns the lines of both, sorted.
+func merge(lines, more []string) []string {
+	if len(more) == 0 {
+		return lines
+	}
+	out := append(append(make([]string, 0, len(lines)+len(more)), lines...), more...)
+	sort.Strings(out)
+	return out
 }
 
 // entryLines returns one line per tracked file of paths, each once and

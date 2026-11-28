@@ -180,7 +180,7 @@ func Render(reg *registry.Registry, schema *ir.Schema, service string, o Options
 		if dir == "" {
 			dir = spec.Dir
 		}
-		files, err := spec.RenderTasks(registry.CITasksRequest{Service: service, File: file})
+		files, err := spec.RenderTasks(registry.CITasksRequest{Service: service, File: file, TaskFile: o.Install})
 		if err != nil {
 			return nil, fmt.Errorf("CI renderer %s: %w", name, err)
 		}

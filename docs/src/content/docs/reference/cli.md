@@ -1825,6 +1825,7 @@ tasks it uses and follows
 ```
 superschematic tasks plan HEAD --file ci/tasks.json
 superschematic tasks plan "$MERGE_COMMIT" --base origin/main --file ci/tasks.json
+superschematic tasks plan HEAD --file ci/tasks.json --keys >> "$GITHUB_OUTPUT"
 ```
 
 It reads the task file the commit holds at `--file` and the commit's
@@ -1840,6 +1841,7 @@ the key `null`.
 | `--naming` | built-in names | naming config file |
 | `--sandbox` | false | hold the process to a resolver's rules while it resolves: no program, no socket, and no file opened, created, renamed or removed. A seccomp filter, on Linux on amd64 and arm64; the flag fails anywhere else ([The sandbox](/superschematic/guides/tasks/#the-sandbox)) |
 | `--profile` | false | write what the plan cost to standard error: the time to read the commit, and for each resolver kind the inputs the tasks name, how many differ, the files they hold and the time |
+| `--keys` | false | print the keys alone and not the plan: a line for each task that has a key, as `<task>=<key>`, by task name. It is what the `github` renderer's plan job appends to its outputs ([Reuse a pass](/superschematic/guides/tasks/#reuse-a-pass)) |
 
 It fails when a task names an input kind no resolver of the binary
 resolves, when a path with no wildcard covers no tracked file, and when
