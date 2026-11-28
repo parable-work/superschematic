@@ -374,16 +374,17 @@ func (o *APIOutput) checkSQLiteDeps(deps *DepsInfo) error {
 		return refuse("the Rust server opens an engine")
 	}
 	if len(o.PostgresFeatures) > 0 {
-		return refuse("the Rust server serves " + strings.Join(o.PostgresFeatures, ", ") + " (D152, D157, D158, D188, D193)")
+		return refuse("the Rust server serves " + strings.Join(o.PostgresFeatures, ", ") + " (D157, D158, D193)")
 	}
 	return nil
 }
 
 // postgresFeaturesOf are the features of databases a Rust server serves on
-// Postgres alone (D188), each "Type: feature", in type order: a table that
-// composes Recurrence, whose operations and deadline worker the Rust
-// adapter runs on Postgres, and a calendar source, which the runtime's
-// orm::calendar reads through the Postgres repositories.
+// Postgres alone, each "Type: feature", in type order: parties, the
+// inbound path and the agent orchestration (D193). Recurrence, whose
+// operations and deadline worker the Rust adapter runs on SQLite too, and
+// a calendar source, which orm::calendar::sqlite reads (#615), are served
+// on either dialect.
 func postgresFeaturesOf(databases []*ir.Schema) []string {
 	var out []string
 	for _, database := range databases {
@@ -394,14 +395,6 @@ func postgresFeaturesOf(databases []*ir.Schema) []string {
 		slices.Sort(names)
 		for _, name := range names {
 			td := database.Types[name]
-			for _, ref := range td.ImplementsBehaviors() {
-				if ref.Name == "Recurrence" {
-					out = append(out, name+": Recurrence")
-				}
-			}
-			if len(td.CalendarSources) > 0 {
-				out = append(out, name+": @calendarSource")
-			}
 			// Parties and the inbound path (D157) and the agent
 			// orchestration (D158) claim their queues through the Postgres
 			// queue client alone (D193).

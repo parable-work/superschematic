@@ -307,6 +307,11 @@ impl Tables {
         &self.database
     }
 
+    /// The keys of the database's `Encrypted<T>` fields, when given.
+    pub fn keys(&self) -> Option<&Arc<dyn FieldKeys>> {
+        self.keys.as_ref()
+    }
+
     /// The definition of the database's tables.
     pub fn definition(&self) -> Result<&'static Definition, Error> {
         (self.definition)()
@@ -777,6 +782,66 @@ impl Repository<'_> {
     pub fn reencrypt(&self, batch: Option<u32>) -> Result<u64, Error> {
         finish(self.runner().reencrypt(batch))
     }
+
+    /// The conditions that keep a read of the table's rows to what the
+    /// repositories' caller sees (D156), each value appended to `args` and
+    /// written `?n` by its place there, each column qualified by the
+    /// table: the Postgres `Repository::conditions` on SQLite, what a
+    /// search across tables holds a table's rows to with an `EXISTS` back
+    /// to the table (D155, D186, #615).
+    pub fn conditions(&self, args: &mut Vec<Bound>) -> Result<Vec<String>, Error> {
+        self.plan.read_conditions(self.table, args)
+    }
+}
+
+/// Runs `sql` on `connection` with `args` bound as SQLite holds each
+/// ([`param`]), and answers each row's cells in order: text a string, an
+/// integer or a real a number, NULL null. What a read across tables runs
+/// beside the repositories (D152, D155, #615): a calendar's occurrences
+/// and a search's ranking.
+pub fn query_rows(
+    connection: &Connection,
+    sql: &str,
+    args: &[Bound],
+) -> Result<Vec<Vec<Value>>, Error> {
+    let params = args
+        .iter()
+        .map(|bound| param(bound).map_err(|err| Error::Invalid(format!("{sql}: {err}"))))
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut prepared = connection
+        .prepare_cached(sql)
+        .map_err(|err| failure(sql, &err))?;
+    let columns = prepared.column_count();
+    let mut rows = prepared
+        .query(params_from_iter(params))
+        .map_err(|err| failure(sql, &err))?;
+    let mut out = Vec::new();
+    while let Some(row) = rows.next().map_err(|err| failure(sql, &err))? {
+        let mut cells = Vec::with_capacity(columns);
+        for i in 0..columns {
+            let cell = row.get_ref(i).map_err(|err| failure(sql, &err))?;
+            cells.push(
+                member(cell, &Column::default())
+                    .map_err(|err| Error::Definition(format!("{sql}: {err}")))?,
+            );
+        }
+        out.push(cells);
+    }
+    Ok(out)
+}
+
+/// Runs `sql`, a statement that changes rows, on `connection` with `args`
+/// bound as [`query_rows`] binds them, and answers how many it changed.
+pub fn execute_rows(connection: &Connection, sql: &str, args: &[Bound]) -> Result<u64, Error> {
+    let params = args
+        .iter()
+        .map(|bound| param(bound).map_err(|err| Error::Invalid(format!("{sql}: {err}"))))
+        .collect::<Result<Vec<_>, _>>()?;
+    let changed = connection
+        .prepare_cached(sql)
+        .and_then(|mut prepared| prepared.execute(params_from_iter(params)))
+        .map_err(|err| failure(sql, &err))?;
+    Ok(changed as u64)
 }
 
 /// A SQLite connection as a repository's runner drives it: each statement

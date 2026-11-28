@@ -17,8 +17,8 @@ import (
 //
 // A DB service that lists sqlite and declares one of them is refused for
 // the types of a language whose repositories would read the rows without
-// it there. No ORM is now, for these five; @searchable's search is Rust's
-// on Postgres alone (D188), so its Rust types are refused beside it.
+// it there. No ORM is now, for these five, nor for @searchable, whose
+// search the TypeScript, Go and Rust runtimes run there (D186, #615).
 
 // sqliteReaders are the languages each feature is not refused for here on
 // SQLite: those whose repositories serve it there, or, for @searchable,
@@ -30,12 +30,12 @@ var sqliteReaders = map[string][]string{
 	"@accessGrants": {registry.LangTypeScript, registry.LangGo, registry.LangRust},
 	"@accessLog":    {registry.LangTypeScript, registry.LangGo, registry.LangRust},
 	// The search index on SQLite (D186): its triggers keep a row's index
-	// row whichever ORM writes it, and the TypeScript runtime searches it.
-	// Rust's search runs on Postgres alone (D188), and a Go server is
-	// refused search over a SQLite database (go_features.go's
+	// row whichever ORM writes it, and the TypeScript runtime searches it,
+	// as the Rust runtime's orm::search_tables::sqlite does (#615). A Go
+	// server is refused search over a SQLite database (go_features.go's
 	// GoServerSQLiteErr), so Go's types, which the DB kind builds always,
 	// are served beside it.
-	"@searchable": {registry.LangTypeScript, registry.LangGo},
+	"@searchable": {registry.LangTypeScript, registry.LangGo, registry.LangRust},
 }
 
 // refuseSQLiteReaders refuses decorator on td in a DB service that lists the

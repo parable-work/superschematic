@@ -2312,8 +2312,10 @@ serve yet: `@party`, `@conversations`, `@runRequests` and `@agents` on a
 table of a DB service with Rust types, and on a Rust server `@autonomy`
 and a provider with no Rust crate. References and attachments and the
 runtime providers are served (D185), and so are Recurrence, the calendar
-and search across tables, on Postgres (D188): a Rust server whose database
-lists `sqlite` first is refused Recurrence and a calendar source. Events,
+and search across tables, on Postgres (D188) and on SQLite (#615): a Rust
+server whose database lists `sqlite` first serves Recurrence on the file,
+and `orm::calendar::sqlite` and `orm::search_tables::sqlite` read the
+calendar and search it there. Events,
 the notifier's tables and the channel identities are served on Postgres
 too (D191), through the runtime's `orm::notify`.
 
@@ -2322,6 +2324,7 @@ too (D191), through the runtime's `orm::notify`.
 | Not built | Until then |
 | --- | --- |
 | a generated Rust server over a database that lists `sqlite` first that wires the grants' authenticator and the access log | build `access::sqlite::GrantAuthenticator` and `Logged` over the file's tables in the implementation |
+| a generated Rust server over a database that lists `sqlite` first that mounts the calendar's and the search's routes and runs the search queue's worker | merge `orm::calendar::sqlite::calendar_routes` and `orm::search_tables::sqlite::search_routes` into the router, and call `index_search` in a worker of the queue |
 | a Go table operation that writes `audienceNamed`, a list | set it through the ORM |
 | an audience in a declared query (`@query`) and in raw SQL | a declared query reads every row; filter it by `effective_audience` yourself |
 | a generated route that lists only the active grants, and a declared query of them | `activeGrants` in the TypeScript runtime, or a `@tableOperation` over a view of every grant |

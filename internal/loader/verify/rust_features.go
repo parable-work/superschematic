@@ -21,14 +21,12 @@ import (
 // attachments (D154, D185) are served on both too, and the runtime
 // providers of an API's @providers slots (D159, D185), each a provider
 // crate the server links. So are Recurrence and the calendar (D152) and
-// search across tables (D155), on Postgres (D188): a Rust server serves a
-// Recurrence's operations, deadlines and occurrences through the Rust
-// adapter, the Postgres repositories carry a table's calendar sources and
-// search index, and the runtime's orm::calendar and orm::search_tables
-// read them. A Rust server whose database lists sqlite first is refused
-// Recurrence and the calendar by rustrestgen, which knows the database's
-// dialect; the loader refuses the Rust types of a service that lists sqlite
-// and declares @searchable (refuseSQLiteReaders, D186).
+// search across tables (D155), on Postgres (D188) and on SQLite (#615): a
+// Rust server serves a Recurrence's operations, deadlines and occurrences
+// through the Rust adapter, on either dialect, the repositories of both
+// carry a table's calendar sources and search index, and the runtime's
+// orm::calendar and orm::search_tables read them, on SQLite through their
+// sqlite modules, the search over the FTS5 table beside the index (D186).
 // Events and notifications (D153) are served on Postgres (D191): the
 // Postgres definition carries each table's events and what it is to the
 // notifier, and the runtime's notify module raises, routes, delivers and

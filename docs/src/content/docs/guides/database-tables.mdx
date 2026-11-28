@@ -704,10 +704,24 @@ const { items, total } = await searchTables(orm, principal, { q: "walnut desk" }
 | the FTS5 table is a piece of the model's SQL of its own, after every object | the migration model has no form of a virtual table; a plan that adds the index runs it, and a table made `@searchable` with rows needs `reindexSearch` once |
 
 The triggers keep a row's index row whichever ORM writes it, so a
-service's Go types are built beside it. Go's search (D187) and Rust's
-(D188) run on Postgres alone: a Go server is refused search over a
-database that lists `sqlite` first, and a service that lists `sqlite` and
-declares `@searchable` takes no Rust types.
+service's Go and Rust types are built beside it. Go's search (D187) runs
+on Postgres alone in a Go server, which is refused search over a database
+that lists `sqlite` first. Rust's runs on SQLite too (#615), the same
+statements and ranking in `orm::search_tables::sqlite`:
+
+```rust
+use superschematic_http_runtime::orm::search_tables::sqlite::{index_search, search_routes, search_tables, SearchRoutes};
+
+// A worker's handler, in a write of the file.
+database.write(|connection| index_search(connection, sqlite_definition()?, &message, &SearchOptions::default()))?;
+let hits = database.read(|connection| search_tables(Repositories::new(connection)?.untyped(), Some(&principal), &request, &options))?;
+// GET /api/search, on a reading connection of the file.
+let routes = search_routes(SearchRoutes::new(types::orm::sqlite::tables(database), authenticator));
+```
+
+Each function runs on the connection it is given, in the caller's
+transaction, and answers at once; a request's `vector` is refused as
+invalid and embeddings in the options as a definition's error.
 
 ## Pages
 
@@ -4141,8 +4155,25 @@ let routes = calendar_routes(CalendarRoutes::new(Tables::new(pool, postgres_defi
 
 `call_calendar_tool` answers the MCP tool `calendar_mcp_tool` describes,
 and `issue_calendar_feed`, `rotate_calendar_feed` and
-`revoke_calendar_feed` are the feed's operations. A Rust server whose
-database lists `sqlite` first is refused Recurrence and a calendar source.
+`revoke_calendar_feed` are the feed's operations.
+
+A Rust server whose database lists `sqlite` first serves Recurrence there
+too (#615): the router's `recurrence` routes run the operations through
+the core in a transaction of the file, and the behavior worker claims on
+it. `orm::calendar::sqlite` holds the same read, feed and routes over the
+SQLite repositories, an occurrences source read by one statement in
+SQLite's words, and each answers at once on the connection it is given:
+
+```rust
+use superschematic_http_runtime::orm::calendar::sqlite::{calendar_routes, read_calendar, CalendarRoutes};
+
+let calendar = database.read(|connection| read_calendar(Repositories::new(connection)?.untyped(), Some(&principal), &read, &CalendarOptions::default()))?;
+// A read on a reading connection; a feed's issue, rotation and revocation on the writing one.
+let routes = calendar_routes(CalendarRoutes::new(types::orm::sqlite::tables(database), authenticator));
+```
+
+A generated Rust server does not mount the calendar's or the search's
+routes over a SQLite file yet; an app merges them into its router.
 
 A Go server serves Recurrence on Postgres as the TypeScript one does
 (D187): its `recurrence` routes run the operations through the behaviors'

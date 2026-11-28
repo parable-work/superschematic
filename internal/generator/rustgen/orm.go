@@ -74,7 +74,8 @@ type ORMInfo struct {
 
 	// Calendar and Searchable are whether a table of the database is a
 	// calendar source (D152) or @searchable (D155), which the runtime's
-	// orm::calendar and orm::search_tables read on Postgres (D188).
+	// orm::calendar and orm::search_tables read on Postgres (D188) and on
+	// SQLite (#615).
 	Calendar   bool
 	Searchable bool
 
@@ -241,7 +242,7 @@ type ormTable struct {
 	Access   string       `json:"access,omitempty"`
 	// Calendar are the table's @calendarSource declarations (D152), and
 	// Searchable its search index (D155), which the runtime's calendar and
-	// search read (D188); on Postgres alone.
+	// search read on Postgres (D188) and on SQLite (#615).
 	Calendar   []rustCalendarSource `json:"calendar,omitempty"`
 	Searchable *rustSearchable      `json:"searchable,omitempty"`
 	// Events are the table's @event declarations, and Notifier what the
@@ -754,6 +755,11 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 					k = k.SQLite()
 					onSQLite.UniqueKeys[k.Name] = ormUniqueKey{Conflict: k.Conflict, Keep: k.Keep, Rows: k.Rows, Held: k.Held, Expression: k.Expression}
 				}
+				// The calendar and search read the same tables on SQLite
+				// (#615), the search's words in the FTS5 table beside the
+				// index (D186).
+				onSQLite.Calendar = onPostgres.Calendar
+				onSQLite.Searchable = sqliteSearchable(onPostgres.Searchable)
 			}
 			sqlite.Tables = append(sqlite.Tables, onSQLite)
 		}

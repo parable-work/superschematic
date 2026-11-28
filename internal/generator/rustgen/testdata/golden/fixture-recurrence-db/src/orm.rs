@@ -1463,6 +1463,14 @@ pub const SQLITE: &str = r#"{
           "target": "Filing",
           "column": "contractId"
         }
+      ],
+      "calendar": [
+        {
+          "name": "contract",
+          "kind": "renewal",
+          "title": "title",
+          "field": "endsOn"
+        }
       ]
     },
     {
@@ -1669,7 +1677,23 @@ pub const SQLITE: &str = r#"{
             "listOccurrences"
           ]
         }
-      }
+      },
+      "calendar": [
+        {
+          "name": "filing",
+          "kind": "deadline",
+          "title": "title",
+          "color": "filing",
+          "occurrences": {
+            "table": "filing_recurrence_occurrences",
+            "row": "filing_id",
+            "key": "key",
+            "due": "due",
+            "dueAt": "due_at",
+            "state": "state"
+          }
+        }
+      ]
     },
     {
       "name": "Holiday",
@@ -1812,6 +1836,9 @@ pub mod sqlite {
     use super::*;
 
     pub use orm::sqlite::rusqlite;
+    // The calendar read, feed and routes over the database's calendar
+    // sources on SQLite (D152, #615).
+    pub use orm::calendar::sqlite as calendar;
 
     /// The repository of `Contract` on a SQLite connection.
     pub type ContractRepository<'a> =

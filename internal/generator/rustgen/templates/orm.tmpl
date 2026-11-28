@@ -782,6 +782,16 @@ pub mod sqlite {
     // answer (D154, #611).
     pub use orm::rowfeatures;
 {{- end}}
+{{- if .ORM.Calendar}}
+    // The calendar read, feed and routes over the database's calendar
+    // sources on SQLite (D152, #615).
+    pub use orm::calendar::sqlite as calendar;
+{{- end}}
+{{- if .ORM.Searchable}}
+    // Search across the database's @searchable tables on SQLite, its
+    // indexing and its route (D155, D186, #615).
+    pub use orm::search_tables::sqlite as search_tables;
+{{- end}}
 {{- if .BindsRules}}
     use rules::adapter;
 {{- end}}
