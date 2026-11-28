@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	fixturevariantfielddb "example.com/schemas/types/go/fixture-variant-field-db"
 	"fmt"
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 	"reflect"
 	"regexp"
 	"strings"

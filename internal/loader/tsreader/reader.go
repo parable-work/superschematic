@@ -91,6 +91,9 @@ func ReadServiceIdentity(servicePath string, reg *registry.Registry) (*SchemaCon
 		if sp.configFile == nil {
 			return schemaconfig.ReadFile(sp.servicePath, w.reg)
 		}
+		if _, _, _, err := schemaconfig.Locate(sp.servicePath); err != nil {
+			return nil, err
+		}
 		return readConfigIdentityTS(w, sp.configFile)
 	})
 }

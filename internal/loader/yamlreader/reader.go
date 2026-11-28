@@ -1,7 +1,7 @@
 // Package yamlreader is the YAML frontend: *.schema.yaml -> Schema IR.
 //
 // The YAML format is the same IR-mirroring shape as the JSON format, in YAML
-// syntax. The reader works on gopkg.in/yaml.v3 yaml.Node values directly so
+// syntax. The reader works on go.yaml.in/yaml/v3 yaml.Node values directly so
 // native '#' head and line comments survive a read -> write round trip: they
 // are mapped onto the IR's Comment metadata (see comments.go).
 package yamlreader
@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"os"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/parable-work/superschematic/internal/loader/schemafile"
 	"github.com/parable-work/superschematic/internal/registry"

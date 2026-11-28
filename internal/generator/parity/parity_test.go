@@ -178,7 +178,12 @@ const schemaConfigJSON = `{
 // every validator (D14, amended): an astral character is one character, as
 // in Go's regexp and Python's re, and TypeScript compiles every pattern
 // with the "u" flag. Without it "." and "[^a-z]" match one UTF-16 unit,
-// half an astral character.
+// half an astral character. Its other fields hold the constructs whose
+// meaning differs between RE2 and JavaScript's RegExp or Python's re as
+// written: $ and \z against a final newline, \s against \r, \f, \v and
+// U+00A0, "." against \n and \r, \w, \pL and \d against letters and digits
+// outside ASCII, and the (?i), (?s) and (?m) flags. Every pattern means
+// what it means to RE2 (internal/generator/patterndialect).
 const parityMatrixSchemaJSON = `{
   "scalars": {
     "Generic.Int64": {
@@ -669,6 +674,51 @@ const parityMatrixSchemaJSON = `{
           "name": "pairNames",
           "typeRef": { "name": "Identity.Name", "isArray": true },
           "validatePattern": "^[^a-z]{2}$"
+        },
+        {
+          "name": "lineEnd",
+          "typeRef": { "name": "string" },
+          "validatePattern": "^[a-z]+$"
+        },
+        {
+          "name": "textEnd",
+          "typeRef": { "name": "string" },
+          "validatePattern": "\\Aab\\z"
+        },
+        {
+          "name": "spaces",
+          "typeRef": { "name": "string", "isArray": true },
+          "validatePattern": "^\\s$"
+        },
+        {
+          "name": "wordChar",
+          "typeRef": { "name": "string" },
+          "validatePattern": "^\\w$"
+        },
+        {
+          "name": "letters",
+          "typeRef": { "name": "string", "isArray": true },
+          "validatePattern": "^\\pL$"
+        },
+        {
+          "name": "digit",
+          "typeRef": { "name": "string" },
+          "validatePattern": "^\\d$"
+        },
+        {
+          "name": "caseless",
+          "typeRef": { "name": "string" },
+          "validatePattern": "(?i)^[a-z]+$"
+        },
+        {
+          "name": "dotAll",
+          "typeRef": { "name": "string" },
+          "validatePattern": "(?s)^a.b$"
+        },
+        {
+          "name": "lines",
+          "typeRef": { "name": "string", "isArray": true },
+          "validatePattern": "(?m)^b$"
         }
       ]
     },
@@ -1882,12 +1932,49 @@ var vectors = []parityVector{
 	{
 		// \d, \w, \s and \b are ASCII classes, as Go's RE2 reads them: é
 		// is "\W", so "aéb" is a word character, another character and a
-		// word character. Python's re read é as "\w" until it matched with
-		// re.ASCII.
+		// word character. Python's re reads it as "\w", so its validators
+		// and runtime spell \w out as [0-9A-Za-z_] (patterndialect).
 		name:     "pattern_word_class_is_ascii",
 		typeName: "PatternMatrix",
 		payload:  `{"spaced": "a\u00e9b"}`,
 		want:     map[string][]string{},
+	},
+	{
+		// $ and \z are the text's end, "." is any character but \n, \s is
+		// [\t\n\f\r ] and (?m)'s lines end at \n alone, as RE2 reads them
+		// (internal/generator/patterndialect). Python's $ also matched before
+		// a final newline, JavaScript's "." refused \r, and neither has \z,
+		// \pL or (?s) as written.
+		name:     "pattern_reads_ends_and_line_terminators_as_re2",
+		typeName: "PatternMatrix",
+		payload: `{"glyphs": ["\r"], "lineEnd": "abc", "textEnd": "ab",
+			"spaces": ["\r", "\f", "\t", " ", "\n"], "wordChar": "_", "letters": ["\u00e9", "a", "\u4e2d"],
+			"digit": "7", "caseless": "ABC", "dotAll": "a\nb", "lines": ["a\nb", "b\nc"]}`,
+		want: map[string][]string{},
+	},
+	{
+		// A final newline is not the end of the text to $ or \z; "." is not
+		// \n; \v, U+00A0 and U+2028 are not \s; a (?m) line does not end at
+		// \r.
+		name:     "pattern_refuses_what_re2_refuses_at_line_ends",
+		typeName: "PatternMatrix",
+		payload: `{"glyph": "\n", "lineEnd": "abc\n", "textEnd": "ab\n",
+			"spaces": ["\u000b", "\u00a0", "\u2028"], "lines": ["a\rb"]}`,
+		want: map[string][]string{
+			"glyph": {"pattern"}, "lineEnd": {"pattern"}, "textEnd": {"pattern"},
+			"spaces[0]": {"pattern"}, "spaces[1]": {"pattern"}, "spaces[2]": {"pattern"}, "lines[0]": {"pattern"},
+		},
+	},
+	{
+		// \w and \d are ASCII and \pL is every letter: e-acute is \pL and
+		// not \w, ARABIC-INDIC DIGIT THREE is not \d, and (?i) folds [a-z] to
+		// [A-Za-z] alone.
+		name:     "pattern_ascii_classes_and_letters",
+		typeName: "PatternMatrix",
+		payload:  `{"wordChar": "\u00e9", "letters": ["1", "\u00e9"], "digit": "\u0663", "caseless": "\u00e9"}`,
+		want: map[string][]string{
+			"wordChar": {"pattern"}, "letters[0]": {"pattern"}, "digit": {"pattern"}, "caseless": {"pattern"},
+		},
 	},
 	{
 		// A scalar's own pattern reads \w as ASCII too: Network.Url's host

@@ -107,11 +107,11 @@ func DefaultName(deployed []string, names naming.Naming, schemasRoot string) str
 		return word + "-stack"
 	}
 	if scope := strings.TrimPrefix(names.NpmScope, "@"); scope != "" && names.NpmScope != naming.Default().NpmScope {
-		if word := kebab(scope); word != "" {
+		if word := stackWord(scope); word != "" {
 			return word + "-stack"
 		}
 	}
-	if word := kebab(filepath.Base(filepath.Dir(schemasRoot))); word != "" {
+	if word := stackWord(filepath.Base(filepath.Dir(schemasRoot))); word != "" {
 		return word + "-stack"
 	}
 	return "stack"
@@ -136,27 +136,13 @@ func sharedFirstWord(names []string) string {
 	return word
 }
 
-// kebab turns s into lower-case words joined by hyphens, or "".
-func kebab(s string) string {
-	var b strings.Builder
-	hyphen := false
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case r >= 'a' && r <= 'z', r >= '0' && r <= '9' && b.Len() > 0:
-			if hyphen && b.Len() > 0 {
-				b.WriteByte('-')
-			}
-			hyphen = false
-			b.WriteRune(r)
-		default:
-			hyphen = true
-		}
+// stackWord is naming.Slug of text when that is a stack service's name
+// (it starts with a letter), or "".
+func stackWord(text string) string {
+	if word := naming.Slug(text); namePattern.MatchString(word) {
+		return word
 	}
-	out := b.String()
-	if !namePattern.MatchString(out) {
-		return ""
-	}
-	return out
+	return ""
 }
 
 // ClassName is the @stack class's name: the stack's name without its
