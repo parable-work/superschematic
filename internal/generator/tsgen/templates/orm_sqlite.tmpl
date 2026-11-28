@@ -153,6 +153,9 @@ export const {{.Const}}: TableDefinition = {
 {{- if .Access}}
   access: {{jsonString .Access}},
 {{- end}}
+{{- if .Teams}}
+  teams: {{jsonString .Teams}},
+{{- end}}
 {{- if .Notifier}}
   notifier: {{jsonString .Notifier}},
 {{- end}}

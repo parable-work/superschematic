@@ -13,6 +13,8 @@ import {
   calendarSource,
   key,
   searchField,
+  team,
+  teamMembers,
   unique
 } from "@superschematic/db";
 
@@ -128,3 +130,17 @@ export abstract class Grant {}
 // grant (D156).
 @accessLog()
 export abstract class AccessEntry {}
+
+// A team: a set of accounts, and of other teams, that a row's audience
+// names once for all its members (#735).
+@team()
+export abstract class Team {
+  @key
+  id: AutoGenerate<Identity.UUID>;
+
+  name: string;
+}
+
+// Who is in which team: an account, or another team nested in it (#735).
+@teamMembers()
+export abstract class TeamMember {}

@@ -92,6 +92,11 @@ type Principal struct {
 	// one of them reaches; nil for a user, who reaches rows through roles
 	// and row rules.
 	Grants []GrantReach
+	// Teams are the teams the principal belongs to (#735), directly or
+	// through another team, by their ids, which session.TeamAuthenticator
+	// reads on every call: an audience that names one admits the
+	// principal. Nil for a principal in no team.
+	Teams []string
 	// Credential is the credential the call came with; nil for a session.
 	Credential *Credential
 }

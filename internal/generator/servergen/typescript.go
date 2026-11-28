@@ -531,6 +531,9 @@ type TypeScriptAPI struct {
 	Providers      bool
 	Grants         bool
 	AccessLog      bool
+	// Teams wraps the router's authenticator in teamAuthenticator, which
+	// puts a caller's teams on its principal (#735).
+	Teams bool
 
 	// MCP is true when the server serves the API's MCP endpoint (D81).
 	MCP bool

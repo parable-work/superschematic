@@ -50,6 +50,12 @@ func (e *emitter) emitTableFeatureDecorators(def *ir.TypeDef) {
 	if def.AccessLog != nil {
 		e.decorator("accessLog", "", "")
 	}
+	if def.Team != nil {
+		e.decorator("team", "", "")
+	}
+	if def.TeamMembers != nil {
+		e.decorator("teamMembers", "", "")
+	}
 	if party := def.Party; party != nil {
 		var parts []string
 		if party.Title != "" {

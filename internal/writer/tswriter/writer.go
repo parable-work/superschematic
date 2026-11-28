@@ -161,7 +161,7 @@ var symbolPackages = map[string]string{
 	"calendarSource": "@superschematic/db", "event": "@superschematic/db", "notifier": "@superschematic/db",
 	"channelIdentities": "@superschematic/db", "references": "@superschematic/db", "attachments": "@superschematic/db",
 	"searchable": "@superschematic/db", "audience": "@superschematic/db", "accessGrants": "@superschematic/db",
-	"accessLog": "@superschematic/db", "party": "@superschematic/db", "conversations": "@superschematic/db", "runRequests": "@superschematic/db",
+	"accessLog": "@superschematic/db", "team": "@superschematic/db", "teamMembers": "@superschematic/db", "party": "@superschematic/db", "conversations": "@superschematic/db", "runRequests": "@superschematic/db",
 	"projection": "@superschematic/db", "join": "@superschematic/db", "query": "@superschematic/db", "column": "@superschematic/db", "table": "@superschematic/db",
 	"versionGraph": "@superschematic/db", "graphMember": "@superschematic/db", "conflictUnit": "@superschematic/db",
 	"AutoGenerate": "@superschematic/db", "HasMany": "@superschematic/db", "JsonField": "@superschematic/db",

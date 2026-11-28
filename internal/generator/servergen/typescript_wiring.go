@@ -36,6 +36,7 @@ func (api *TypeScriptAPI) planRuntime(o *tsrestgen.APIOutput, stem string, taken
 	}
 	if !background {
 		api.Grants = o.Deps.Routes.Grants && api.Identity == ""
+		api.Teams = o.Deps.Routes.Teams && api.Identity == ""
 		api.AccessLog = o.Deps.Routes.AccessLog
 	}
 }
@@ -91,10 +92,18 @@ func (a *TypeScriptAPI) RouteAuthenticator() string {
 // AuthenticatorFactory is the expression a server builds the router's
 // authenticator with: the implementation's authenticate over Deps, inside
 // grantAuthenticator for a database with grants (D156), which hands a run's
-// token on to it (D194).
+// token on to it (D194), and inside teamAuthenticator for a database with
+// teams, which puts the caller's teams on its principal (#735).
 func (a *TypeScriptAPI) AuthenticatorFactory() string {
+	inner := "await " + a.Impl + ".authenticate(" + a.Deps + ")"
 	if a.Grants {
-		return "async () => grantAuthenticator({ orm: " + a.Deps + ".orm, inner: await " + a.Impl + ".authenticate(" + a.Deps + "), runTokens: 'inner' })"
+		inner = "grantAuthenticator({ orm: " + a.Deps + ".orm, inner: " + inner + ", runTokens: 'inner' })"
+	}
+	if a.Teams {
+		inner = "teamAuthenticator({ orm: " + a.Deps + ".orm, inner: " + inner + " })"
+	}
+	if a.Grants || a.Teams {
+		return "async () => " + inner
 	}
 	return "() => " + a.Impl + ".authenticate(" + a.Deps + ")"
 }
@@ -131,9 +140,10 @@ func (s *TypeScriptServer) AccessEntry() string {
 // AccessImports are the names an entrypoint imports from the HTTP
 // runtime's AccessEntry for its APIs' grants and access log (D156).
 func (s *TypeScriptServer) AccessImports() []string {
-	var grants, log bool
+	var grants, log, teams bool
 	for _, a := range s.APIs {
 		grants = grants || (a.Grants && a.Authenticate != "")
+		teams = teams || (a.Teams && a.Authenticate != "")
 		log = log || a.AccessLog
 	}
 	var out []string
@@ -142,6 +152,9 @@ func (s *TypeScriptServer) AccessImports() []string {
 	}
 	if grants {
 		out = append(out, "grantAuthenticator")
+	}
+	if teams {
+		out = append(out, "teamAuthenticator")
 	}
 	return out
 }

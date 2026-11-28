@@ -240,6 +240,10 @@ type ormTable struct {
 	// the table is to per-record access: grants, log or roles (D156).
 	Audience *ormAudience `json:"audience,omitempty"`
 	Access   string       `json:"access,omitempty"`
+	// Teams is the @teamMembers table's statement that reads the teams ids
+	// are members of, through every nesting (#735, sqlutil.TeamsSQL), in
+	// the definition's dialect.
+	Teams string `json:"teams,omitempty"`
 	// Calendar are the table's @calendarSource declarations (D152), and
 	// Searchable its search index (D155), which the runtime's calendar and
 	// search read on Postgres (D188) and on SQLite (#615).
@@ -713,6 +717,14 @@ func rustORM(schema *ir.Schema, opts Options, output *ModuleOutput) (*ORMInfo, e
 			postgres.ClearHistoryActor = sqlutil.ClearHistoryActor(opts.Naming.HistoryActorSetting)
 		}
 		onPostgres.Statements = tableStatements(sqlutil.TableStatementsOf(t).AllStatements())
+		if t.Access == sqlutil.AccessTeamMembers {
+			if onPostgres.Teams, err = sqlutil.TeamsSQL(*t); err != nil {
+				return nil, err
+			}
+			if onSQLite.Teams, err = sqlutil.SQLiteTeamsSQL(*t); err != nil {
+				return nil, err
+			}
+		}
 		mergeable := false
 		if td := schema.Types[t.Type]; td != nil && td.Mergeable {
 			mergeable = true

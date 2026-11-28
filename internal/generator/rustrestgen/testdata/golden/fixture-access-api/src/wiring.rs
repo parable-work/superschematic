@@ -22,6 +22,7 @@ use axum::Router;
 
 use crate::database_types;
 use crate::runtime::access::{access_log_of, GrantAuthenticator, Logged};
+use crate::runtime::access::{PostgresTeams, TeamAuthenticator};
 use crate::runtime::mcp::EndpointTool;
 use crate::runtime::orm::calendar::{
     calendar_routes, CalendarOptions, CalendarRoutes, CalendarTool,
@@ -97,6 +98,11 @@ impl Wired {
         let grants = GrantAuthenticator::new(self.tables.clone())?;
         let wired: Arc<dyn Authenticator> =
             Arc::new(grants.with_inner(Arc::clone(&implementation)));
+        // The caller's teams, read on every call, go on its principal (#735).
+        let wired: Arc<dyn Authenticator> = Arc::new(TeamAuthenticator::new(
+            Arc::new(PostgresTeams::new(self.tables.clone())?),
+            wired,
+        ));
         let wired: Arc<dyn Authenticator> = match access_log_of(&self.tables)? {
             Some(log) => Arc::new(Logged::new(wired, Arc::new(log))),
             None => wired,

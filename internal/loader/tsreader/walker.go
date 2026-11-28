@@ -1471,6 +1471,7 @@ var externalFieldDecorators = map[string]bool{
 	"audience":          true,
 	"accessGrants":      true,
 	"accessLog":         true,
+	"teamMembers":       true,
 	"notifier":          true,
 	"channelIdentities": true,
 }

@@ -206,10 +206,9 @@ func accessConditions(ctx context.Context, table string, args *[]any, paramNum *
 // or with write write them. A caller with no id that is a UUID sees the
 // rows everyone may.
 func audienceCondition(def accessTable, caller access.Principal, args *[]any, paramNum *int, write bool) string {
-	subjects := []string{caller.Subject}
-	if caller.Kind == access.KindAgent && caller.ActingFor != nil {
-		subjects = append(subjects, caller.ActingFor.Subject)
-	}
+	// The caller's ids: its own, whom an agent run acts for, and its teams
+	// (#735).
+	subjects := access.AudienceSubjects(caller)
 	var placeholders []string
 	for _, subject := range subjects {
 		id, err := ParseUserID(subject)

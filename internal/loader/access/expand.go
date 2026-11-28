@@ -49,6 +49,10 @@ func Expand(schema *ir.Schema) []string {
 		fillLog(td)
 		used = true
 	}
+	if td := schema.TeamMembersTable(); td != nil && len(td.Fields) == 0 {
+		fillTeamMembers(td)
+		used = true
+	}
 	if !used {
 		return nil
 	}
@@ -232,6 +236,27 @@ func fillLog(td *ir.TypeDef) {
 	)
 }
 
+// fillTeamMembers fills a @teamMembers class's fields (#735): one row per
+// member of a team, a user or another team. A team holds a member once,
+// and the authenticator's read of a caller's teams, which starts from the
+// caller's own id and steps from each team to the teams it is a member
+// of, reads the member index.
+func fillTeamMembers(td *ir.TypeDef) {
+	td.Fields = []*ir.FieldDef{
+		fielddef.Key(),
+		fielddef.Required(ir.TeamMemberTeamField, uuidScalar, "The team, a row of the @team table, by its key."),
+		fielddef.Required(ir.TeamMemberMemberField, uuidScalar, "The member: a user's id, or another team's, which nests that team in this one."),
+		fielddef.Required(ir.TeamMemberCreatedAtField, dateTimeScalar, "When the member joined."),
+	}
+	for _, fd := range td.Fields {
+		fd.Origin = ir.OriginAccess
+	}
+	td.Indexes = append(td.Indexes,
+		ir.IndexDef{Keys: []string{ir.TeamMemberTeamField, ir.TeamMemberMemberField}, Name: "membership", Unique: true, Origin: ir.OriginAccess},
+		ir.IndexDef{Keys: []string{ir.TeamMemberMemberField}, Name: "member", Origin: ir.OriginAccess},
+	)
+}
+
 func hasField(td *ir.TypeDef, name string) bool {
 	for _, fd := range td.Fields {
 		if fd != nil && fd.Name == name {
@@ -260,6 +285,9 @@ func ExpandExternal(types map[string]*ir.TypeDef) {
 		}
 		if td.AccessLog != nil && len(td.Fields) == 0 {
 			fillLog(td)
+		}
+		if td.TeamMembers != nil && len(td.Fields) == 0 {
+			fillTeamMembers(td)
 		}
 	}
 }

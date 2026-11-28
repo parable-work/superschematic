@@ -11,7 +11,9 @@ import (
 // accessDecorators returns the per-record access decorators of
 // @superschematic/db (D156), each only in DB schemas: @audience on a table,
 // @accessGrants on the class that is the table of grants, and @accessLog on
-// the class that is the access log. Apply reads each declaration's shape;
+// the class that is the access log; @team on the table whose rows are
+// teams an audience may name, and @teamMembers on their membership (#735).
+// Apply reads each declaration's shape;
 // ir.Schema.Validate checks what the declaration alone decides, and the
 // loader's verification pass checks it against the fields and the tables.
 func accessDecorators() []DecoratorSpec {
@@ -50,6 +52,28 @@ func accessDecorators() []DecoratorSpec {
 					return fmt.Errorf("@accessLog on %s takes no arguments: the loader fills the class's fields", n.Type.Name)
 				}
 				n.Type.AccessLog = &ir.AccessLogDef{}
+				return nil
+			},
+		},
+		{
+			Name: "team", Packages: []string{pkgDB}, Target: TargetType,
+			Kinds: []string{string(ir.SchemaKindDB)},
+			Apply: func(n Node, args []any, _ Site) error {
+				if len(args) != 0 {
+					return fmt.Errorf("@team on %s takes no arguments: its rows are teams, whose members the @teamMembers class holds", n.Type.Name)
+				}
+				n.Type.Team = &ir.TeamDef{}
+				return nil
+			},
+		},
+		{
+			Name: "teamMembers", Packages: []string{pkgDB}, Target: TargetType,
+			Kinds: []string{string(ir.SchemaKindDB)},
+			Apply: func(n Node, args []any, _ Site) error {
+				if len(args) != 0 {
+					return fmt.Errorf("@teamMembers on %s takes no arguments: the loader fills the class's fields", n.Type.Name)
+				}
+				n.Type.TeamMembers = &ir.TeamMembersDef{}
 				return nil
 			},
 		},

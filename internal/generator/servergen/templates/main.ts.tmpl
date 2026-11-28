@@ -256,6 +256,9 @@ async function main(): Promise<void> {
   // authenticator establishes every other caller, a run's token among
   // them where it is the dispatcher's (D194).
 {{- end }}
+{{- if .Teams }}
+  // The caller's teams, read on every call, go on its principal (#735).
+{{- end }}
   const {{ .Authenticate }} = await construct({{ tsQuote .Service }}, 'authenticator', {{ .AuthenticatorFactory }});
 {{- end }}
 {{- if .Identity }}

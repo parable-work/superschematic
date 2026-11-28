@@ -164,7 +164,7 @@ export type { Mergeable } from "./mergeable";
 export { seedRoles } from "./user";
 export { seedRows } from "./seed";
 export type { SeedRow, SeedRowsOptions, SeedValue } from "./seed";
-export { accessGrants, accessLog, audience, calendarSource } from "./access";
+export { accessGrants, accessLog, audience, calendarSource, team, teamMembers } from "./access";
 export type { AgentAccessValue, AudienceOptions, AudienceValue, CalendarSourceOptions } from "./access";
 export { attachments, references } from "./rowrefs";
 export { channelIdentities, event, notifier } from "./notifications";

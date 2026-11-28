@@ -10,7 +10,8 @@
 //! token runs as the grant's holder (GrantAuthenticator);
 //! `<subject>:<permissions>` is a user holding those permissions; and
 //! `agent=<subject>/<for>:<permissions>` an agent run acting for the user
-//! <for>. The router records the access log through Logged over the
+//! <for>. Each caller's teams go on its principal (TeamAuthenticator,
+//! #735). The router records the access log through Logged over the
 //! database's @accessLog table.
 
 use std::sync::Arc;
@@ -19,7 +20,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use api::database_types::orm::postgres_definition;
 use api::runtime::access::{
     access_log_of, active_grants, issue_grant, revoke_grant, ActiveGrantsFilter, EndsWhen,
-    GrantAuthenticator, IssueGrant, Logged,
+    GrantAuthenticator, IssueGrant, Logged, PostgresTeams, TeamAuthenticator,
 };
 use api::runtime::orm::calendar::{calendar_routes, CalendarRoutes};
 use api::runtime::orm::postgres::{deadpool_postgres, tokio_postgres, Repositories};
@@ -275,8 +276,10 @@ async fn per_record_access() {
     let tables = api::tables::tables(database.pool.clone(), Arc::clone(&keys));
     let grants = GrantAuthenticator::new(tables.clone()).expect("the database holds grants and roles").with_inner(Arc::new(Callers));
     let log = access_log_of(&tables).expect("the definition").expect("the database holds an access log");
+    // Each caller's teams go on its principal, read on every call (#735).
+    let teams = TeamAuthenticator::new(Arc::new(PostgresTeams::new(tables.clone()).expect("the database holds teams")), Arc::new(grants));
     let handlers = Handlers {
-        authenticator: Arc::new(Logged::new(grants, Arc::new(log))),
+        authenticator: Arc::new(Logged::new(teams, Arc::new(log))),
     };
     let router = build_router(Implementations::new(handlers, database.pool.clone(), Arc::clone(&keys)));
     let app = App {
@@ -391,6 +394,41 @@ async fn per_record_access() {
     assert!(app.titles("/api/documents", &people.named()).await.contains(&"Shared notes".to_owned()));
     assert!(!app.titles("/api/documents", &people.other()).await.contains(&"Shared notes".to_owned()));
     case("a named row is visible to its owner and to the principals it names");
+
+    // A member of a nested team sees a row named for the outer team, and
+    // stops seeing it once removed (#735): the named one is in the inner
+    // team, which is in the outer team, and the outer team is in the inner
+    // one too, a cycle the read of a caller's teams ends.
+    let (outer, membership) = app
+        .system(async |db| {
+            let create = async |table: &str, row: Value| db.table(table).unwrap().create_one(&values(row)).await.unwrap();
+            let outer = create("Team", json!({"name": "Outer"})).await;
+            let inner = create("Team", json!({"name": "Inner"})).await;
+            let membership = create("TeamMember", json!({"team": inner["id"], "member": people.named_id})).await;
+            create("TeamMember", json!({"team": outer["id"], "member": inner["id"]})).await;
+            create("TeamMember", json!({"team": inner["id"], "member": outer["id"]})).await;
+            (outer, membership)
+        })
+        .await;
+    let for_team = app
+        .ok(
+            Method::POST,
+            "/api/documents",
+            &people.owner(),
+            Some(json!({"title": "For the outer team", "audience": "named", "audienceNamed": [outer["id"]]})),
+        )
+        .await;
+    let team_doc = format!("/api/documents/{}", for_team["id"].as_str().unwrap());
+    assert_eq!(app.status(Method::GET, &team_doc, &people.named(), None).await, 200);
+    assert!(app.titles("/api/documents", &people.named()).await.contains(&"For the outer team".to_owned()));
+    assert_eq!(app.status(Method::GET, &team_doc, &people.agent_for(&people.named_id), None).await, 200);
+    assert_eq!(app.status(Method::GET, &team_doc, &people.other(), None).await, 404);
+    assert!(!app.titles("/api/documents", &people.other()).await.contains(&"For the outer team".to_owned()));
+    app.system(async |db| db.table("TeamMember").unwrap().delete_one(&membership["id"], &Default::default()).await.unwrap())
+        .await;
+    assert_eq!(app.status(Method::GET, &team_doc, &people.named(), None).await, 404);
+    assert!(!app.titles("/api/documents", &people.named()).await.contains(&"For the outer team".to_owned()));
+    case("a member of a nested team sees a row named for the outer team, and stops seeing it once removed");
 
     // A document inherits its folder's audience, and follows it when the
     // folder's changes.

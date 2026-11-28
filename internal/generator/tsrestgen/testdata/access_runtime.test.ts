@@ -14,10 +14,11 @@ file.
 
 A request names its caller in its Authorization header: a grant's token
 runs as the grant's holder (grantAuthenticator), but an agent run's, which
-it refuses (D194); `<subject>:<permissions>`
-is a user holding those permissions; and `agent=<subject>/<for>:<permissions>`
-an agent run acting for the user <for>. The router records the access log
-through accessLogOf.
+it refuses (D194); `<subject>:<permissions>` is a user holding those
+permissions; and `agent=<subject>/<for>:<permissions>` an agent run acting
+for the user <for>. Each caller's teams go on its principal
+(teamAuthenticator, #735). The router records the access log through
+accessLogOf.
 */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -25,7 +26,7 @@ import pg from 'pg';
 import { Hono } from 'hono';
 import type { Principal, RequestContext } from '@superschematic/http-runtime';
 import { errorHandler, notFoundHandler } from '@superschematic/http-runtime/hono';
-import { accessLogOf, activeGrants, calendarRoutes, grantAuthenticator, issueGrant, revokeGrant } from '@superschematic/http-runtime/postgres';
+import { accessLogOf, activeGrants, calendarRoutes, grantAuthenticator, issueGrant, revokeGrant, teamAuthenticator } from '@superschematic/http-runtime/postgres';
 import { createOrm } from '@schemas/fixture-access-db-types/orm';
 import { parseIdentityUUID } from 'superscalar/scalars';
 
@@ -161,7 +162,7 @@ beforeAll(async () => {
     orm = createOrm(pool, { fieldKeys: FIELD_KEY });
   }
   app = new Hono();
-  app.route('/', buildRouter({}, { authenticate: grantAuthenticator({ orm, inner: callers }), orm, accessLog: accessLogOf(orm) }));
+  app.route('/', buildRouter({}, { authenticate: teamAuthenticator({ orm, inner: grantAuthenticator({ orm, inner: callers }) }), orm, accessLog: accessLogOf(orm) }));
   app.notFound(notFoundHandler());
   app.onError(errorHandler());
 
@@ -222,6 +223,29 @@ describe('the access of fixture-access-api', () => {
     expect(await status('GET', `/api/documents/${shared.id}`, OTHER)).toBe(404);
     expect(titles(await items('/api/documents', NAMED))).toContain('Shared notes');
     expect(titles(await items('/api/documents', OTHER))).not.toContain('Shared notes');
+  });
+
+  test('a member of a nested team sees a row named for the outer team, and stops seeing it once removed', async () => {
+    // NAMED is in the inner team, which is in the outer team; the outer team
+    // is in the inner one too, a cycle the read of a caller's teams ends.
+    const system = orm.asSystem();
+    const outer = await system.team.createOne({ name: 'Outer' } as never);
+    const inner = await system.team.createOne({ name: 'Inner' } as never);
+    const membership = await system.teamMember.createOne({ team: inner.id, member: NAMED_ID } as never);
+    await system.teamMember.createOne({ team: outer.id, member: inner.id } as never);
+    await system.teamMember.createOne({ team: inner.id, member: outer.id } as never);
+    const doc = await ok('POST', '/api/documents', OWNER, { title: 'For the outer team', audience: 'named', audienceNamed: [outer.id] });
+    expect(await status('GET', `/api/documents/${doc.id}`, NAMED)).toBe(200);
+    expect(titles(await items('/api/documents', NAMED))).toContain('For the outer team');
+    // An agent run acting for the member sees what the member sees.
+    expect(await status('GET', `/api/documents/${doc.id}`, `agent=${RUN_ID}/${NAMED_ID}:${READS}`)).toBe(200);
+    // A user in no team never sees it.
+    expect(await status('GET', `/api/documents/${doc.id}`, OTHER)).toBe(404);
+    expect(titles(await items('/api/documents', OTHER))).not.toContain('For the outer team');
+    // Removed from the inner team, the member is refused at the next call.
+    await system.teamMember.deleteOne(membership.id);
+    expect(await status('GET', `/api/documents/${doc.id}`, NAMED)).toBe(404);
+    expect(titles(await items('/api/documents', NAMED))).not.toContain('For the outer team');
   });
 
   test("a document inherits its folder's audience, and follows it when the folder's changes", async () => {

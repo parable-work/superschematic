@@ -802,6 +802,8 @@ func tablesOf(schema *ir.Schema, dependencies map[string]*ir.Schema, first bool)
 			tables[i].Access = AccessGrants
 		case td.AccessLog != nil:
 			tables[i].Access = AccessLog
+		case td.TeamMembers != nil:
+			tables[i].Access = AccessTeamMembers
 		case td.UserRole != nil && grants:
 			tables[i].Access = AccessRoles
 		}

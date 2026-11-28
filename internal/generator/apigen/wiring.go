@@ -83,6 +83,11 @@ type DepsWiring struct {
 	// Postgres or on SQLite (#703's AuthenticateGrant).
 	Grants bool
 
+	// Teams reports whether the database keeps @teamMembers (#735), whose
+	// teams Authenticator puts on each caller (session.TeamAuthenticator),
+	// on Postgres or on SQLite.
+	Teams bool
+
 	// Files reports whether wiring.go holds ProcessPendingFiles, the file
 	// processor's pass (#603): the database declares @attachments and the
 	// API fills a files slot (WithFiles).
@@ -139,7 +144,8 @@ func WiringOf(db *ir.Schema, sqlite bool) *DepsWiring {
 	}
 	sort.Strings(w.AudienceQueues)
 	w.Grants = db.AccessGrantsTable() != nil
-	if !w.Builds() && !w.Calendar && !w.Search && !w.Grants && len(w.AudienceQueues) == 0 {
+	w.Teams = db.TeamMembersTable() != nil
+	if !w.Builds() && !w.Calendar && !w.Search && !w.Grants && !w.Teams && len(w.AudienceQueues) == 0 {
 		return nil
 	}
 	return w
@@ -157,8 +163,10 @@ func (w *DepsWiring) Constructs() bool {
 }
 
 // Authenticates reports whether Authenticator adds a step to the API's
-// own: a grant's token, or a run's.
-func (w *DepsWiring) Authenticates() bool { return w != nil && (w.Grants || w.Agents != "") }
+// own: a grant's token, a run's, or the caller's teams.
+func (w *DepsWiring) Authenticates() bool {
+	return w != nil && (w.Grants || w.Teams || w.Agents != "")
+}
 
 // Serves reports whether Routes serves a route: the inbox and the relays'
 // callbacks, the agent routes, the calendar or search.

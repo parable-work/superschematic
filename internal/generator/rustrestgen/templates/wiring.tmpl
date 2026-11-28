@@ -61,6 +61,9 @@ use crate::runtime::access::GrantAuthenticator;
 use crate::runtime::access::{access_log_of, Logged};
 {{ end -}}
 {{ end -}}
+{{ if $w.Teams -}}
+use crate::runtime::access::{PostgresTeams, TeamAuthenticator};
+{{ end -}}
 {{ if and $w.Agents (or $w.Search $w.Calendar) -}}
 use crate::runtime::mcp::{CallGate, EndpointTool};
 {{ else if $w.Agents -}}
@@ -338,6 +341,13 @@ impl Wired {
             Arc::new(grants.with_inner(Arc::clone(&implementation)));
 {{- else }}
         let wired = Arc::clone(&implementation);
+{{- end }}
+{{- if $w.Teams }}
+        // The caller's teams, read on every call, go on its principal (#735).
+        let wired: Arc<dyn Authenticator> = Arc::new(TeamAuthenticator::new(
+            Arc::new(PostgresTeams::new(self.tables.clone())?),
+            wired,
+        ));
 {{- end }}
 {{- if $w.AccessLog }}
         let wired: Arc<dyn Authenticator> = match access_log_of(&self.tables)? {

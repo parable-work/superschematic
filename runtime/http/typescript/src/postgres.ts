@@ -400,6 +400,9 @@ export {
   type GrantRow,
   type IssueGrantInput,
 } from './access.js';
+// A caller's teams (#735): the authenticator that reads them onto the
+// principal on every call, and the read itself.
+export { teamAuthenticator, teamsOf, type TeamAuthenticatorOptions } from './teams.js';
 // The calendar (D152): the read that merges every @calendarSource of a
 // database's tables as a caller reads them, its routes and MCP tool, and
 // the iCalendar feed, whose token is a grant that reads the feed alone.

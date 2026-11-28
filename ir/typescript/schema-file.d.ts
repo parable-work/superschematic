@@ -995,6 +995,12 @@ export interface TasksDecl {
   sections?: { [key: string]: { [key: string]: unknown } };
 }
 
+export interface TeamDef {
+}
+
+export interface TeamMembersDef {
+}
+
 export interface TraitConfigSchema {
   fields?: FieldDef[];
 }
@@ -1071,6 +1077,8 @@ export interface TypeDef {
   strictJSON?: boolean;
   task?: TaskDecl;
   tasks?: TasksDecl;
+  team?: TeamDef;
+  teamMembers?: TeamMembersDef;
   traitConfig?: TraitConfigSchema;
   user?: UserTrait;
   userRole?: UserRoleTrait;

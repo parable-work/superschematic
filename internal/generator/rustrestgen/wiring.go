@@ -73,6 +73,10 @@ type DepsWiring struct {
 	// an @accessLog table.
 	Grants    bool
 	AccessLog bool
+
+	// Teams is whether the database holds @teamMembers (#735): the
+	// caller's teams go on its principal, read on every call.
+	Teams bool
 }
 
 // SearchQueue is a @searchable declaration's queue.
@@ -118,7 +122,8 @@ func wiringOf(db *ir.Schema) *DepsWiring {
 	}
 	w.Grants = db.AccessGrantsTable() != nil && db.UserRoleTable() != nil
 	w.AccessLog = db.AccessLogTable() != nil
-	if !w.Notifier() && !w.Agents() && len(w.Search) == 0 && !w.Calendar && !w.Grants && !w.AccessLog {
+	w.Teams = db.TeamMembersTable() != nil
+	if !w.Notifier() && !w.Agents() && len(w.Search) == 0 && !w.Calendar && !w.Grants && !w.AccessLog && !w.Teams {
 		return nil
 	}
 	return w
@@ -202,11 +207,11 @@ func (o *APIOutput) Wiring() *DepsWiring {
 
 // WiringAuthenticates reports whether src/wiring.rs wraps the
 // implementation's authenticator: in the grants' authenticator, the
-// access log, or both (#610). An API over the user model (D50) keeps the
+// caller's teams (#735), the access log, or each (#610). An API over the user model (D50) keeps the
 // identity runtime's.
 func (o *APIOutput) WiringAuthenticates() bool {
 	w := o.Wiring()
-	return w != nil && o.ChecksEndUsers() && (w.Grants || w.AccessLog)
+	return w != nil && o.ChecksEndUsers() && (w.Grants || w.Teams || w.AccessLog)
 }
 
 // RoutesAuthenticator is the expression of Implementations' authenticator

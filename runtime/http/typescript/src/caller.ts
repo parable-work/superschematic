@@ -28,6 +28,7 @@ export interface Caller {
   readonly kind?: PrincipalKind;
   readonly actingFor?: ActingFor;
   readonly grants?: readonly GrantReach[];
+  readonly teams?: readonly string[];
 }
 
 /**
@@ -40,6 +41,8 @@ export interface AccessCaller {
   readonly kind: PrincipalKind;
   readonly actingFor?: ActingFor;
   readonly grants?: readonly GrantReach[];
+  /** The teams the caller belongs to, by their ids (#735): an audience that names one admits it. */
+  readonly teams?: readonly string[];
 }
 
 const callers = new AsyncLocalStorage<AccessCaller>();
@@ -55,6 +58,7 @@ export function accessCallerOf(caller: Caller | null | undefined): AccessCaller 
     kind: caller.kind ?? 'user',
     ...(caller.actingFor ? { actingFor: caller.actingFor } : {}),
     ...(caller.grants ? { grants: caller.grants } : {}),
+    ...(caller.teams && caller.teams.length > 0 ? { teams: caller.teams } : {}),
   };
 }
 

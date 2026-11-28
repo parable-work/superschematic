@@ -100,6 +100,7 @@ func typeScriptRuntime(deps *tsrestgen.DepsInfo, db *ir.Schema) {
 	}
 	deps.Routes.Grants = db.AccessGrantsTable() != nil
 	deps.Routes.AccessLog = db.AccessLogTable() != nil
+	deps.Routes.Teams = db.TeamMembersTable() != nil
 }
 
 // typeScriptRuntimeQueues are the queues of db, schema, whose @worker a

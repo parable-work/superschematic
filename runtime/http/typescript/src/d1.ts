@@ -63,6 +63,7 @@ export { AccessRefusedError, MergeError, NoUserError, NotFoundError, PageKeyErro
 // imports a driver.
 export { GRANT_TOKEN_PREFIX, accessLogOf, activeGrants, grantAuthenticator, grantEnded, grantTokenHash, issueGrant, reachesOf, revokeGrant } from './access.js';
 export type { AccessLog, AccessLogEntry, ActiveGrantsFilter, GrantAuthenticatorOptions, GrantRow, IssueGrantInput } from './access.js';
+export { teamAuthenticator, teamsOf, type TeamAuthenticatorOptions } from './teams.js';
 export {
   CALENDAR_FEED,
   CALENDAR_FEED_DAYS,

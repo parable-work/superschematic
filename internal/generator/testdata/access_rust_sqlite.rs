@@ -15,7 +15,8 @@ use std::task::{Context, Poll, Waker};
 use std::time::{Duration, SystemTime};
 
 use runtime::access::sqlite::{access_log_of, active_grants, authenticate_grant, issue_grant, revoke_grant, GrantAuthenticator};
-use runtime::access::{ActiveGrantsFilter, EndsWhen, IssueGrant, Logged};
+use runtime::access::teams::sqlite::SqliteTeams;
+use runtime::access::{team_subjects, ActiveGrantsFilter, EndsWhen, IssueGrant, Logged, TeamReader};
 use runtime::orm::routes::{TableOperation, TableRequest};
 use runtime::orm::sqlite::{rusqlite, Database, Repositories};
 use runtime::orm::{AccessCaller, Error, FieldKeyring, FindOptions, Values};
@@ -225,6 +226,39 @@ fn per_record_access_on_sqlite() {
     assert!(file.titles(&named, "Document").contains(&"Shared notes".to_owned()));
     assert!(!file.titles(&other, "Document").contains(&"Shared notes".to_owned()));
     case("a named row is visible to its owner and to the principals it names");
+
+    // A member of a nested team sees a row named for the outer team, and
+    // stops seeing it once removed (#735): the named one is in the inner
+    // team, which is in the outer team, and the outer team is in the inner
+    // one too, a cycle the read of a caller's teams ends.
+    let outer = id(&file.create(&system, "Team", json!({"name": "Outer"})).unwrap());
+    let inner = id(&file.create(&system, "Team", json!({"name": "Inner"})).unwrap());
+    let membership = id(&file.create(&system, "TeamMember", json!({"team": inner, "member": named_id})).unwrap());
+    file.create(&system, "TeamMember", json!({"team": outer, "member": inner})).unwrap();
+    file.create(&system, "TeamMember", json!({"team": inner, "member": outer})).unwrap();
+    let for_team = id(&file
+        .create(&owner, "Document", json!({"title": "For the outer team", "audience": "named", "audienceNamed": [outer]}))
+        .unwrap());
+    let team_tables = types::orm::sqlite::tables(Arc::clone(&file.database)).with_keys(file.keys.clone());
+    let reader = SqliteTeams::new(team_tables).unwrap();
+    // The caller as the teams' authenticator establishes it: its teams read
+    // on the call.
+    let with_teams = |who: &str| {
+        let mut principal = Principal::new(who, Vec::<String>::new());
+        let teams = ready(reader.teams(team_subjects(&principal))).unwrap();
+        principal.teams = (!teams.is_empty()).then_some(teams);
+        Who::As(Box::new(principal))
+    };
+    let named_teams = ready(reader.teams(team_subjects(&Principal::new(&named_id, Vec::<String>::new())))).unwrap();
+    assert_eq!(named_teams.len(), 2, "{named_teams:?}");
+    assert!(file.sees(&with_teams(&named_id), "Document", &for_team));
+    assert!(file.titles(&with_teams(&named_id), "Document").contains(&"For the outer team".to_owned()));
+    assert!(!file.sees(&with_teams(&other_id), "Document", &for_team));
+    assert!(!file.titles(&with_teams(&other_id), "Document").contains(&"For the outer team".to_owned()));
+    file.tx(&system, |r| r.table("TeamMember")?.delete_one(&Value::from(membership.as_str()), &Default::default())).unwrap();
+    assert!(!file.sees(&with_teams(&named_id), "Document", &for_team));
+    assert!(!file.titles(&with_teams(&named_id), "Document").contains(&"For the outer team".to_owned()));
+    case("a member of a nested team sees a row named for the outer team, and stops seeing it once removed");
 
     // A document inherits its folder's audience, and follows it when the
     // folder's changes: the file's trigger cascades it.
