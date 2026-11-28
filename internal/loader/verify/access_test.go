@@ -53,22 +53,20 @@ func TestAudienceDeclarationsHoldToTheirTables(t *testing.T) {
 	if got := checked(schema, in); len(got) != 0 {
 		t.Fatalf("a sound schema has findings: %v", got)
 	}
-	// On SQLite the TypeScript repositories serve it (D182), and the Go
-	// ones, which the DB kind writes always, refuse its calls at run time,
-	// so a service with Go's types builds too.
-	for _, langs := range [][]string{{"typescript"}, {"go", "typescript"}, {"go"}} {
+	// On SQLite the TypeScript, Go and Rust repositories serve it (D182,
+	// #611).
+	for _, langs := range [][]string{{"typescript"}, {"go", "typescript"}, {"go"}, {"go", "typescript", "rust"}, {"rust"}} {
 		if got := checked(schema, Input{Dialects: []string{"postgres", "sqlite"}, TypesLanguages: langs}); len(got) != 0 {
 			t.Fatalf("a schema whose %v types read it on SQLite has findings: %v", langs, got)
 		}
 	}
-	// The grants and the access log run on SQLite in TypeScript, whose
-	// repositories alone keep a caller's reads to its grants there, and the
-	// Go repositories refuse their calls there at run time.
+	// The grants and the access log run on SQLite in TypeScript, Go and
+	// Rust (#611).
 	grants, _ := accessSchema()
 	grants.Types["Folder"].Audience, grants.Types["Note"].Audience, grants.Types["Document"].Audience = nil, nil, nil
 	grants.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
 	grants.Types["Log"] = &ir.TypeDef{Name: "Log", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
-	for _, langs := range [][]string{{"typescript"}, {"go", "typescript"}, {"go"}} {
+	for _, langs := range [][]string{{"typescript"}, {"go", "typescript"}, {"go"}, {"rust"}} {
 		if got := checked(grants, Input{Dialects: []string{"sqlite", "postgres"}, TypesLanguages: langs}); len(got) != 0 {
 			t.Fatalf("grants and an access log read on SQLite by %v have findings: %v", langs, got)
 		}
@@ -82,9 +80,10 @@ func TestAudienceDeclarationsHoldToTheirTables(t *testing.T) {
 		edit func(*ir.Schema, *Input)
 		want string
 	}{
-		{"the sqlite dialect with Rust's types", func(_ *ir.Schema, in *Input) {
-			in.Dialects, in.TypesLanguages = []string{"sqlite"}, []string{"rust"}
-		}, "on SQLite only the TypeScript repositories serve @audience so far (D182)"},
+		// Python's types have no repositories to keep the rows to it.
+		{"the sqlite dialect with Python's types", func(_ *ir.Schema, in *Input) {
+			in.Dialects, in.TypesLanguages = []string{"sqlite"}, []string{"python"}
+		}, "on SQLite only the TypeScript, Go, Rust repositories serve @audience so far (D182)"},
 		{"an owner that is no field", func(s *ir.Schema, _ *Input) { s.Types["Folder"].Audience.Owner = "keeper" }, "owner keeper is no field of Folder"},
 		{"an owner that holds no id", func(s *ir.Schema, _ *Input) {
 			s.Types["Folder"].Fields = append(s.Types["Folder"].Fields, &ir.FieldDef{Name: "label", TypeRef: ir.TypeRef{Name: "string"}})
@@ -96,16 +95,16 @@ func TestAudienceDeclarationsHoldToTheirTables(t *testing.T) {
 		{"a column the table declares", func(s *ir.Schema, _ *Input) {
 			s.Types["Folder"].Fields = append(s.Types["Folder"].Fields, &ir.FieldDef{Name: ir.AudienceField, TypeRef: ir.TypeRef{Name: "string"}})
 		}, "declares audience, a column @audience adds"},
-		{"grants on the sqlite dialect with Rust's types", func(s *ir.Schema, in *Input) {
+		{"grants on the sqlite dialect with Python's types", func(s *ir.Schema, in *Input) {
 			s.Types["Grant"] = &ir.TypeDef{Name: "Grant", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
 			s.Types["Folder"].Audience, s.Types["Note"].Audience, s.Types["Document"].Audience = nil, nil, nil
-			in.Dialects, in.TypesLanguages = []string{"postgres", "sqlite"}, []string{"go", "typescript", "rust"}
-		}, "@accessGrants on Grant: docs-db lists the sqlite dialect and enables the Rust types, whose"},
-		{"an access log on the sqlite dialect with Rust's types", func(s *ir.Schema, in *Input) {
+			in.Dialects, in.TypesLanguages = []string{"postgres", "sqlite"}, []string{"go", "typescript", "rust", "python"}
+		}, "@accessGrants on Grant: docs-db lists the sqlite dialect and enables the Python types, whose"},
+		{"an access log on the sqlite dialect with Python's types", func(s *ir.Schema, in *Input) {
 			s.Types["Log"] = &ir.TypeDef{Name: "Log", Role: ir.RoleDBTable, AccessLog: &ir.AccessLogDef{}}
 			s.Types["Folder"].Audience, s.Types["Note"].Audience, s.Types["Document"].Audience = nil, nil, nil
-			in.Dialects, in.TypesLanguages = []string{"sqlite"}, []string{"rust"}
-		}, "@accessLog on Log: docs-db lists the sqlite dialect and enables the Rust types"},
+			in.Dialects, in.TypesLanguages = []string{"sqlite"}, []string{"python"}
+		}, "@accessLog on Log: docs-db lists the sqlite dialect and enables the Python types"},
 		{"two grants tables", func(s *ir.Schema, _ *Input) {
 			s.Types["GrantA"] = &ir.TypeDef{Name: "GrantA", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}
 			s.Types["GrantB"] = &ir.TypeDef{Name: "GrantB", Role: ir.RoleDBTable, AccessGrants: &ir.AccessGrantsDef{}}

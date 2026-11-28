@@ -21,10 +21,10 @@ import (
 // The depfile pattern is sound without pre-build knowledge of the imports: a
 // new import can only appear by editing a file that is already hashed (the
 // document itself lives in the schema directory, and every previously
-// recorded import is hashed by path). The one deliberate cost is that a
-// fresh worktree, having no depfile, computes a hash that never matches an
-// entry stored by an import-carrying build, so those schemas rebuild once.
-// For the same reason, StoreEntry and WriteStamp must use a hash computed
+// recorded import is hashed by path). A fresh worktree has no depfile, so
+// its hash would never match an entry stored by an import-carrying build;
+// each entry keeps the depfile, and a hasher with the cache reads it from
+// there (depfiles.go). StoreEntry and WriteStamp must use a hash computed
 // AFTER the build wrote the depfile -- storing under the pre-build hash
 // would let a later worktree with different import contents false-hit.
 
@@ -104,6 +104,14 @@ func WriteAuthoringImports(schemasRoot, name, servicePath string, imports []stri
 func ReadAuthoringImports(repoRoot, name string) []string {
 	data, err := os.ReadFile(authoringImportsPath(filepath.Join(repoRoot, SchemasDir), name))
 	if err != nil {
+		return nil
+	}
+	return parseAuthoringImports(data)
+}
+
+// parseAuthoringImports reads the depfile's bytes, nil for none.
+func parseAuthoringImports(data []byte) []string {
+	if data == nil {
 		return nil
 	}
 	var rels []string

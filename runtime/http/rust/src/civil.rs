@@ -49,7 +49,7 @@ pub(crate) fn basic_timestamp(t: std::time::SystemTime) -> String {
 /// Reads an RFC 3339 timestamp, as Cloud Storage writes an object's
 /// `updated`: `2026-10-19T12:34:56.789Z`, with a fraction of up to nine
 /// digits, and `Z` or an offset. `None` for anything else.
-#[cfg(any(feature = "gcs", feature = "postgres"))]
+#[cfg(any(feature = "gcs", feature = "postgres", feature = "sqlite"))]
 pub(crate) fn parse_rfc3339(text: &str) -> Option<std::time::SystemTime> {
     use std::time::{Duration, UNIX_EPOCH};
     let b = text.as_bytes();
