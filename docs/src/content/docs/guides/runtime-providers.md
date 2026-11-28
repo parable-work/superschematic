@@ -28,7 +28,7 @@ depends on none of them.
 | a provider package's manifest in its `package.json`, which the build checks against its interface's contract; a package listed by its directory or by its npm name, in build-all's dependency graph and its cache key | a TypeScript server that imports an npm-named provider by its name; it imports the directory the name resolved to |
 | `@providers` on an API's `@envVars` class, and the API config's `providers`; a generated TypeScript, Go and Rust server that links the packages and builds `Providers` in its `Deps` | |
 | the stack's checks: each slot names a provider the API lists, of its interface, with its settings bound; a feature that needs an interface no slot fills is refused, notifications among them ([events and notifications](/superschematic/guides/notifications/)), agents, which need a sandbox and a model ([agent runs](/superschematic/guides/agent-runs/)), and search over attachments' text, which needs a file processor | a check for `credentials`: an agent's credentials are rows of its definition, which the build does not read |
-| the file processor's pass over attachments' `pending` (`processFiles`, a generated API's `processPendingFiles`), whose text search indexes ([References and files on any row](/superschematic/guides/database-tables/)) | the pass in the Go and Rust runtimes |
+| the file processor's pass over attachments' `pending` (`processFiles`, a generated API's `processPendingFiles`), whose text search indexes ([References and files on any row](/superschematic/guides/database-tables/)), in TypeScript, in Go (`fileprocessing.Process`, a generated API's `ProcessPendingFiles`) and in Rust (`orm::file_processing::process_files`) | a generated Rust API's own call of the pass |
 | credentials that never reach the caller: a sealed `Injection`, `useCredential` and the record of each use | |
 
 [D159](https://github.com/parable-work/superschematic/issues/608)
@@ -297,6 +297,16 @@ let sms = deps.providers.channel("SMS")?;
 sms.send(&OutboundMessage { to: "+15550100".into(), body: "Review moved to Thursday".into(), ..Default::default() }).await?;
 ```
 
+The file processor's pass is `orm::file_processing::process_files`,
+over the repositories' `attachments()` on Postgres or on a SQLite file,
+which a job runs on a schedule (#603):
+
+```rust
+let orm = Repositories::new(&client)?.as_system();
+let pass = FileProcessingOptions::new(&deps.providers, deps.uploads.as_ref());
+let run = process_files(&orm.attachments()?, &pass).await?;
+```
+
 Rust has no ambient caller, so a provider does not run within its
 principal: its context carries it, and `deps.providers.principal_of(slot)`
 gives it to the app. A provider that writes through the app's
@@ -358,6 +368,16 @@ use, err := providers.UseCredential(ctx, providers.UseCredentialInput{
 	Target: providers.HeaderTarget("https://reports.example.test", "Authorization"),
 	Runner: runner, // Fill(ctx, selector, value) and SetHeader(ctx, name, value)
 })
+```
+
+The file processor's pass is `fileprocessing.Process` (#603). An API
+whose database declares `@attachments` and whose config names a `files`
+slot gets `ProcessPendingFiles` in its `wiring.go`, over `Deps.DB`,
+`Deps.Providers` and the bucket `Wiring.Files` names, which a job runs
+on a schedule:
+
+```go
+run, err := api.ProcessPendingFiles(ctx, deps, api.Wiring{Files: fileprocessing.Options{Bucket: deps.Uploads}})
 ```
 
 Every call into a provider is made with a context of its own principal,

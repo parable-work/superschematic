@@ -1312,6 +1312,9 @@ func (r run) goServerOutput() (*apigen.APIOutput, error) {
 func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, error) {
 	var deps apigen.DepsInfo
 	var roots []*ir.Schema
+	// database is the API's database's schema, whose @attachments the
+	// file processor's pass reads (apigen.WithFiles).
+	var database *ir.Schema
 	needs := func(service, what, lang string, enabled func(*registry.Outputs) bool) error {
 		if r.Options.DependencyConfig == nil {
 			return nil
@@ -1363,6 +1366,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		// notifier, dispatcher and inbound path, its calendar and search,
 		// and its grants (D190, D192, D187, D180).
 		deps.Wiring = apigen.WiringOf(schema, deps.SQLite)
+		database = schema
 		// The ORM opens with the keys of the database's Encrypted<T>
 		// fields, which the API's config holds (D85).
 		keys, err := r.fieldKeysField(db, schema)
@@ -1442,6 +1446,7 @@ func (r run) goDeps(output *apigen.APIOutput) (apigen.DepsInfo, []*ir.Schema, er
 		}
 	}
 	deps.Providers = providers
+	deps.Wiring = apigen.WithFiles(deps.Wiring, database, providers)
 	return deps, roots, nil
 }
 

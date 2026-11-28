@@ -3,6 +3,7 @@ package ormgen
 import (
 	_ "embed"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -25,10 +26,12 @@ var sqliteSearchResultsTest string
 
 // sqliteCrossTablesCase is a generated module's test of the reads across
 // tables on SQLite: its fixture, the script and the test it runs, and the
-// cases that must pass.
+// cases that must pass. httpRuntime requires the Go HTTP runtime, whose
+// file processor's pass a script runs (#603).
 type sqliteCrossTablesCase struct {
 	fixture, test, source string
 	behaviors             bool
+	httpRuntime           bool
 	cases                 []string
 }
 
@@ -54,13 +57,14 @@ var sqliteCrossTablesCases = []sqliteCrossTablesCase{
 		},
 	},
 	{
-		fixture: "fixture-search-db", test: "TestSearchOnSQLite", source: sqliteSearchResultsTest, behaviors: true,
+		fixture: "fixture-search-db", test: "TestSearchOnSQLite", source: sqliteSearchResultsTest, behaviors: true, httpRuntime: true,
 		cases: []string{
 			"two principals with different access each find exactly the rows their list reads show, ranked across five tables",
 			"a party finds the rows its grant reaches, and no table a grant reaches no row of",
 			"a hit's match, its snippet and its place, the words every one required, a page and its total",
 			"a row's write is indexed by the queue's worker, and its delete and soft delete leave the index",
 			"a conversation's messages and a file's extracted text are indexed with their row",
+			"an uploaded file's text the file processor extracts is indexed with its row, and a file the processor fails on ends failed",
 			"a scope keeps to its rows, and an embedding is refused on SQLite",
 			"reindexSearch indexes every row of a table that became searchable",
 		},
@@ -116,6 +120,14 @@ func TestTheGoReadsAcrossTablesOnSQLite(t *testing.T) {
 			} {
 				if !strings.Contains(string(text), want) {
 					t.Errorf("crosstable.go of %s on SQLite holds no %q", c.fixture, want)
+				}
+			}
+			if c.httpRuntime {
+				module := naming.Default().HTTPRuntimeGoModule
+				edit := exec.Command("go", "mod", "edit", "-require="+module+"@v0.0.0-00010101000000-000000000000", "-replace="+module+"="+paths.HTTPRuntimeGo)
+				edit.Dir = ormDir
+				if out, err := edit.CombinedOutput(); err != nil {
+					t.Fatalf("go mod edit: %v\n%s", err, out)
 				}
 			}
 			out := runSQLiteTestIn(t, ormDir, schema, c.fixture, c.source, c.test)

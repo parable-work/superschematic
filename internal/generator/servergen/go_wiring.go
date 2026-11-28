@@ -20,7 +20,9 @@ package servergen
 func (s *Server) planWiring(in Input) {
 	for i, a := range s.APIs {
 		w := in.APIs[i].Output.Deps.Wiring
-		if w == nil || a.Database == nil || a.Database.SQLite {
+		// A wiring of the file processor's pass alone is the
+		// implementation's to call (apigen.WithFiles).
+		if !w.Wires() || a.Database == nil || a.Database.SQLite {
 			continue
 		}
 		switch {

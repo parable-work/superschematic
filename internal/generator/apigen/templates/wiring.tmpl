@@ -17,14 +17,18 @@
 // Each queue whose messages the runtime handles is built here for its
 // @worker, which the Workers interface then has no method for.
 {{- end }}
+{{- if $w.Files }}
+// ProcessPendingFiles is the file processor's pass over what the
+// attachments have pending (#603), which an implementation's job runs.
+{{- end }}
 
 package {{ toPackageName .SchemaName }}
 
 import (
-{{- if .HasSearchWorkers }}
+{{- if or .HasSearchWorkers $w.Files }}
 	"context"
 {{- end }}
-{{- if or $w.Builds .RuntimeWorkers }}
+{{- if or $w.Builds .RuntimeWorkers $w.Files }}
 	"errors"
 {{- end }}
 {{- if $w.Builds }}
@@ -43,6 +47,9 @@ import (
 {{- end }}
 {{- if $w.Inbound }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/inbound"
+{{- end }}
+{{- if $w.Files }}
+	"{{ $.Naming.HTTPRuntimeGoModule }}/fileprocessing"
 {{- end }}
 {{- if $w.Builds }}
 	"{{ $.Naming.HTTPRuntimeGoModule }}/notify"
@@ -123,6 +130,15 @@ type Wiring struct {
 	// Indexing are the options a @searchable declaration's queue indexes
 	// a row with: its embeddings.
 	Indexing crosstable.SearchOptions
+{{- end }}
+{{- if $w.Files }}
+
+	// Files are the file processor's pass's options (D159, #603): the
+	// bucket the attachments' objects are in, which a preview is put in
+	// too, the preview's size, the largest file read and how many a pass
+	// takes. ProcessPendingFiles gives it Deps.DB's Attachments(),
+	// Deps.Providers and Deps.Logger when it names none.
+	Files fileprocessing.Options
 {{- end }}
 }
 
@@ -230,6 +246,39 @@ func Wire(deps Deps, db *orm.Database, wiring Wiring) (Deps, error) {
 	deps.Inbound = path
 {{- end }}
 	return deps, nil
+}
+{{- end }}
+
+{{- if $w.Files }}
+
+// ProcessPendingFiles is one pass of the file processor over what the
+// attachments of {{ .Deps.Database }} have pending (D154, D159, #603): each file's text
+// extracted and its preview made by the processors the environment's files
+// slots name, in slot order, the text recorded as its extractedText, which
+// search indexes with its row, and the preview put beside the object. A
+// file no processor reads or one a processor fails on is recorded failed.
+// An implementation's job runs it on a schedule, or an operation after an
+// upload completes, with the bucket wiring.Files names:
+//
+//	run, err := api.ProcessPendingFiles(ctx, deps, api.Wiring{Files: fileprocessing.Options{Bucket: deps.Uploads}})
+func ProcessPendingFiles(ctx context.Context, deps Deps, wiring Wiring) (fileprocessing.Run, error) {
+	options := wiring.Files
+	if options.Attachments == nil {
+		if deps.DB == nil {
+			return fileprocessing.Run{}, errors.New("{{ .SchemaName }}: ProcessPendingFiles needs Deps.DB, the ORM of {{ .Deps.Database }}")
+		}
+		options.Attachments = deps.DB.Attachments()
+	}
+	if options.Providers == nil {
+		options.Providers = deps.Providers
+	}
+	if options.Logger == nil {
+		options.Logger = deps.Logger
+	}
+	if options.Bucket == nil {
+		return fileprocessing.Run{}, errors.New("{{ .SchemaName }}: ProcessPendingFiles reads the attachments' objects from the bucket wiring.Files names, and it names none")
+	}
+	return fileprocessing.Process(ctx, options)
 }
 {{- end }}
 

@@ -74,6 +74,11 @@ type DepsWiring struct {
 	// (session.GrantAuthenticator): a Go server serves grants on SQLite
 	// through none yet (GoServerSQLiteErr).
 	Grants bool
+
+	// Files reports whether wiring.go holds ProcessPendingFiles, the file
+	// processor's pass (#603): the database declares @attachments and the
+	// API fills a files slot (WithFiles).
+	Files bool
 }
 
 // WiringOf is the runtime wiring of db, the API's database, on SQLite

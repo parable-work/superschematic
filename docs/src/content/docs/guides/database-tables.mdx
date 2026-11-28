@@ -1506,6 +1506,16 @@ export const createJobs: JobsConstructor = deps => ({
 });
 ```
 
+The Go and Rust runtimes make the same pass, over the same scenarios
+(`runtime/http/testdata/file_processing_parity.json`): Go's
+`fileprocessing.Process`, which a generated Go API's
+`ProcessPendingFiles(ctx, deps, wiring)` runs over `Deps.DB` with the
+bucket `Wiring.Files` names, and Rust's
+`orm::file_processing::process_files` over the repositories'
+`attachments()`, on Postgres and on a SQLite file (#603). A pass does
+not retry a file: a processor that fails on it ends it `failed`. An
+error of the database's is the pass's own, which its job retries.
+
 A `@searchable` table that indexes its attachments (the default) hears
 the write of a file's text through its triggers and indexes the text with
 the row, so search finds the row by its files' words. Such a table needs
