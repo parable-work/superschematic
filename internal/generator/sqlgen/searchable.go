@@ -39,12 +39,39 @@ const searchSuffix = "_search"
 
 // SearchQueue is the queue a @searchable declaration names: its quoted
 // table, its message's columns in ir.SearchIndexingFields' order, quoted,
-// and the clause that ends an enqueue on it in each dialect.
+// and the clause that ends an enqueue on it in each dialect. An @audience
+// declaration's queue is one of the same shape, its columns in
+// ir.AudienceResolveFields' order (#734).
 type SearchQueue struct {
 	Table          string
 	Columns        []string
 	Conflict       string
 	SQLiteConflict string
+}
+
+// messageQueueOf is the queue class named name of schema, whose message
+// holds fields, in their order.
+func messageQueueOf(schema *ir.Schema, name string, fields []string) (SearchQueue, error) {
+	td := schema.Types[name]
+	if td == nil || td.Queue == nil {
+		return SearchQueue{}, fmt.Errorf("sqlgen: %s is no queue of %s", name, schema.Name)
+	}
+	var columns []string
+	for _, field := range fields {
+		var fd *ir.FieldDef
+		for _, f := range td.Fields {
+			if f != nil && f.Name == field {
+				fd = f
+			}
+		}
+		if fd == nil {
+			return SearchQueue{}, fmt.Errorf("sqlgen: queue %s has no field %s", name, field)
+		}
+		columns = append(columns, sqlutil.QuoteIdentifier(sqlutil.ColumnName(fd)))
+	}
+	table := sqlutil.QuoteIdentifier(QueueTableName(td))
+	spec := sqlutil.QueueSpecOf(td, table, columns, true)
+	return SearchQueue{Table: table, Columns: columns, Conflict: sqlutil.PostgresQueueStatements(spec).Conflict, SQLiteConflict: sqlutil.SQLiteQueueStatements(spec).Conflict}, nil
 }
 
 // SearchTrigger is the trigger of one @searchable table.
@@ -130,26 +157,7 @@ func buildSearchables(schema *ir.Schema, tableTypes []*ir.TypeDef, tables []Tabl
 		indexColumns[field] = c
 	}
 	queueOf := func(name string) (SearchQueue, error) {
-		td := schema.Types[name]
-		if td == nil || td.Queue == nil {
-			return SearchQueue{}, fmt.Errorf("sqlgen: %s is no queue of %s", name, schema.Name)
-		}
-		var columns []string
-		for _, field := range ir.SearchIndexingFields {
-			var fd *ir.FieldDef
-			for _, f := range td.Fields {
-				if f != nil && f.Name == field {
-					fd = f
-				}
-			}
-			if fd == nil {
-				return SearchQueue{}, fmt.Errorf("sqlgen: queue %s has no field %s", name, field)
-			}
-			columns = append(columns, sqlutil.QuoteIdentifier(sqlutil.ColumnName(fd)))
-		}
-		table := sqlutil.QuoteIdentifier(QueueTableName(td))
-		spec := sqlutil.QueueSpecOf(td, table, columns, true)
-		return SearchQueue{Table: table, Columns: columns, Conflict: sqlutil.PostgresQueueStatements(spec).Conflict, SQLiteConflict: sqlutil.SQLiteQueueStatements(spec).Conflict}, nil
+		return messageQueueOf(schema, name, ir.SearchIndexingFields)
 	}
 	tooLong := func(td *ir.TypeDef, name string) error {
 		if len(name) > sqlutil.PostgresIdentifierLimit {

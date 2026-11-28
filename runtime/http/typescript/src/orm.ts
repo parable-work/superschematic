@@ -515,6 +515,12 @@ export interface AudienceDefinition {
   readonly contains?: string;
   /** A parameter, numbered %d, when not Postgres's $%d: SQLite's ?%d. */
   readonly placeholder?: string;
+  /**
+   * The statement that resolves again a batch of the table's rows that
+   * inherit from one parent, on a table whose @audience names a queue
+   * (#734): resolveAudience runs it (sqlutil.AudienceModel's Resolve).
+   */
+  readonly resolve?: string;
 }
 
 /**

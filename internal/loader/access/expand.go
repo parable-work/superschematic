@@ -12,6 +12,8 @@
 package access
 
 import (
+	"slices"
+
 	ir "github.com/parable-work/superschematic/ir"
 )
 
@@ -35,6 +37,8 @@ func Expand(schema *ir.Schema) []string {
 		if addAudience(td) {
 			used = true
 		}
+		addAudienceIndex(td)
+		fillAudienceQueue(schema, td.Audience.Queue)
 	}
 	if td := schema.AccessGrantsTable(); td != nil && len(td.Fields) == 0 {
 		fillGrants(td)
@@ -107,6 +111,67 @@ func addAudience(td *ir.TypeDef) bool {
 		added = true
 	}
 	return added
+}
+
+// AudienceIndexName is the purpose of the index over an @audience table's
+// effective audience: idx_<table>_effective_audience.
+const AudienceIndexName = "effective_audience"
+
+// addAudienceIndex gives an @audience table a GIN index over its
+// effective audience, which serves a read's overlap of the column with
+// the caller's ids (D156), unless the table has one of that name. SQLite,
+// whose audience is a JSON array, builds none (sqlmigrate's model drops
+// it).
+//
+// A table whose @audience names a queue gets a second, over its
+// inheritFrom and its key, idx_<table>_audience_parent, which serves the
+// queue's worker's batches of one parent's rows in key order (#734).
+func addAudienceIndex(td *ir.TypeDef) {
+	has := func(name string) bool {
+		return slices.ContainsFunc(td.Indexes, func(idx ir.IndexDef) bool { return idx.Name == name })
+	}
+	if !has(AudienceIndexName) {
+		td.Indexes = append(td.Indexes, ir.IndexDef{Keys: []string{ir.EffectiveAudienceField}, Name: AudienceIndexName, Method: ir.IndexMethodGIN, Origin: ir.OriginAccess})
+	}
+	a := td.Audience
+	if a.Queue == "" || a.InheritFrom == "" || has(AudienceParentIndexName) {
+		return
+	}
+	for _, fd := range td.Fields {
+		if fd != nil && fd.Key {
+			td.Indexes = append(td.Indexes, ir.IndexDef{Keys: []string{a.InheritFrom, fd.Name}, Name: AudienceParentIndexName, Origin: ir.OriginAccess})
+			return
+		}
+	}
+}
+
+// AudienceParentIndexName is the purpose of the index over the
+// inheritFrom and the key of an @audience table that names a queue.
+const AudienceParentIndexName = "audience_parent"
+
+// fillAudienceQueue gives the queue class an @audience declaration names
+// the fields of its message, when it is a @queue class of the schema that
+// declares none (#734). A parent keeps one ready message per table that
+// inherits from it, however many changes it takes before a worker claims
+// it, and one claim at a time, so two workers never resolve one parent's
+// rows at once (D80's key).
+func fillAudienceQueue(schema *ir.Schema, queue string) {
+	td := schema.Types[queue]
+	if queue == "" || td == nil || td.Queue == nil || len(td.Fields) > 0 {
+		return
+	}
+	td.Fields = []*ir.FieldDef{
+		{Name: ir.AudienceResolveTableField, Description: "The table whose rows inherit their audience from the parent, by its type's name.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Origin: ir.OriginAccess},
+		{Name: ir.AudienceResolveParentField, Description: "The parent row's key as the database writes it as text.", TypeRef: ir.TypeRef{Name: "string"}, Required: true, Origin: ir.OriginAccess},
+	}
+	q := td.Queue
+	if q.Key == "" && len(q.Keys) == 0 {
+		q.Keys = slices.Clone(ir.AudienceResolveFields)
+		if q.OnDuplicate == "" {
+			q.OnDuplicate = ir.QueueOnDuplicateSkip
+		}
+		q.Serialize = true
+	}
 }
 
 // fillGrants fills an @accessGrants class's fields: one row per grant.

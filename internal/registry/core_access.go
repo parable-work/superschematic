@@ -54,10 +54,11 @@ func accessDecorators() []DecoratorSpec {
 	}
 }
 
-// audienceOf reads @audience<T>({ owner, inheritFrom, default, agents }) on
-// the class named typeName. No argument is every option's default.
+// audienceOf reads @audience<T>({ owner, inheritFrom, default, agents,
+// queue }) on the class named typeName. No argument is every option's
+// default.
 func audienceOf(typeName string, args []any) (*ir.AudienceDef, error) {
-	const shape = "@audience<T>({ owner?, inheritFrom?, default?, agents? })"
+	const shape = "@audience<T>({ owner?, inheritFrom?, default?, agents?, queue? })"
 	audience := &ir.AudienceDef{}
 	if len(args) == 0 {
 		return audience, nil
@@ -70,6 +71,14 @@ func audienceOf(typeName string, args []any) (*ir.AudienceDef, error) {
 		return nil, ArgErrorf(0, "@audience on %s takes an options object: %s", typeName, shape)
 	}
 	for _, key := range sortedKeys(obj) {
+		if key == "queue" {
+			queue, err := classOrName(obj[key])
+			if err != nil {
+				return nil, ArgErrorf(0, "@audience on %s: queue is the @queue class a parent's change of audience enqueues its children's resolving on: %v", typeName, err)
+			}
+			audience.Queue = queue
+			continue
+		}
 		value, ok := obj[key].(string)
 		if !ok || value == "" {
 			return nil, ArgErrorf(0, "@audience on %s: %s is a non-empty string; got %v", typeName, key, obj[key])
@@ -84,7 +93,7 @@ func audienceOf(typeName string, args []any) (*ir.AudienceDef, error) {
 		case "agents":
 			audience.Agents = value
 		default:
-			return nil, ArgErrorf(0, "@audience on %s has no option %q; it takes owner, inheritFrom, default and agents", typeName, key)
+			return nil, ArgErrorf(0, "@audience on %s has no option %q; it takes owner, inheritFrom, default, agents and queue", typeName, key)
 		}
 	}
 	return audience, nil

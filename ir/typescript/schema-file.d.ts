@@ -86,6 +86,7 @@ export interface AudienceDef {
   default?: string;
   inheritFrom?: string;
   owner?: string;
+  queue?: string;
 }
 
 export interface BehaviorOperationsConfig {

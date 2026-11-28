@@ -40,6 +40,8 @@
 //! the system's, read every row.
 
 pub mod agents;
+#[cfg(feature = "postgres")]
+pub mod audience_resolve;
 pub mod calendar;
 pub mod fieldcrypt;
 #[cfg(feature = "postgres")]
@@ -71,6 +73,8 @@ use crate::auth::{ActingFor, GrantReach, Principal, PrincipalKind};
 use crate::civil::from_days;
 use crate::uuid62::parse_uuid;
 
+#[cfg(feature = "postgres")]
+pub use audience_resolve::{resolve_audience, AudienceResolving, AUDIENCE_RESOLVE_BATCH};
 pub use fieldcrypt::FieldKeyring;
 pub use plan::fill;
 // A value in its wire form, as a member of [`Values`] holds one, for a
@@ -561,6 +565,11 @@ pub struct Audience {
     /// A projection's probe of its source's rows.
     #[serde(default)]
     pub probe: Option<String>,
+    /// The statement that resolves again a batch of the table's rows that
+    /// inherit from one parent, on a table whose `@audience` names a queue
+    /// (#734): [`resolve_audience`] runs it.
+    #[serde(default)]
+    pub resolve: Option<String>,
 }
 
 /// What [`Table::access`] names: the table of grants (D156).

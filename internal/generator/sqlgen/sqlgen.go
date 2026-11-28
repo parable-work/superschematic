@@ -581,7 +581,7 @@ func Generate(schema *ir.Schema, opts Options) (*DDLOutput, error) {
 	if err != nil {
 		return nil, err
 	}
-	audienceTriggers, audienceCascades, err := buildAudience(tableTypes, tables)
+	audienceTriggers, audienceCascades, err := buildAudience(schema, tableTypes, tables)
 	if err != nil {
 		return nil, err
 	}

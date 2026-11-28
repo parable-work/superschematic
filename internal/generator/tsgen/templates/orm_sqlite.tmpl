@@ -138,7 +138,7 @@ export const {{.Const}}: TableDefinition = {
   search: {{jsonString .Search}},
 {{- end}}
 {{- if .Audience}}
-  audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}}, contains: {{jsonString .AudienceContains}}, placeholder: {{jsonString .AudiencePlaceholder}} },
+  audience: { effective: {{jsonString .Audience.Effective}}, agents: {{jsonString .Audience.Agents}}{{if .Audience.Resolve}}, resolve: {{jsonString .Audience.Resolve}}{{end}}, contains: {{jsonString .AudienceContains}}, placeholder: {{jsonString .AudiencePlaceholder}} },
 {{- end}}
 {{- if .Calendar}}
   calendar: [

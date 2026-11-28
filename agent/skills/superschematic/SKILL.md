@@ -218,7 +218,9 @@ path for when the store is unavailable.
   `@audience<Doc>({ owner: "ownerId", inheritFrom: "folder", agents:
   "readOnly" })`, which every repository read in an operation keeps to,
   hand-written handlers' and search's too (a `@query` and raw SQL read
-  every row), never a filter per handler.
+  every row), never a filter per handler. A table whose parents hold
+  very many children names a `@queue` (`queue:`), whose worker resolves
+  the children after the parent's write (#734).
   A caller outside the user table reaches rows through grants
   (`@accessGrants`), a view's `@decrypted({ permission })` field opens an
   `Encrypted<T>` value only for a caller holding the permission, and

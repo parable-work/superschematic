@@ -2471,6 +2471,7 @@ func WriteAPI(output *APIOutput, outputDir string) error {
 	}{
 		{output.HasProviders(), "providers.tmpl", ProvidersFile},
 		{output.HasRuntime(), "runtime.tmpl", RuntimeFile},
+		{output.HasAudienceQueues(), "audience.tmpl", AudienceFile},
 	} {
 		if file.write {
 			if err := generateFile(file.template, filepath.Join(outputDir, file.name), output); err != nil {

@@ -182,6 +182,9 @@ func (c AudienceCascade) SQLiteTrigger(triggers []AudienceTrigger, quote func(st
 	var self *sqliteAudience
 	var others []sqliteAudience
 	for _, child := range c.Children {
+		if child.Queue != nil {
+			return SQLiteTrigger{}, fmt.Errorf("sqlgen: @audience on %s names a queue, which SQLite has no form of yet; resolve its rows in the writer's transaction (#734)", child.Origin)
+		}
 		t, ok := byTable[child.Table]
 		if !ok {
 			return SQLiteTrigger{}, fmt.Errorf("sqlgen: the audience cascade of %s names %s, which has no audience trigger", c.Table, child.Table)

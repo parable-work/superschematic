@@ -39,6 +39,9 @@ const (
 	// RuntimeSearch is a @searchable declaration's queue, each message
 	// handed to crosstable.IndexSearch (D187).
 	RuntimeSearch = "search"
+	// RuntimeAudience is an @audience declaration's queue (D156, #734),
+	// each message handed to the ORM's ResolveAudience.
+	RuntimeAudience = "audience"
 )
 
 // DepsWiring is what the runtime wiring of the API's database holds.
@@ -68,6 +71,11 @@ type DepsWiring struct {
 	Calendar     bool
 	Search       bool
 	SearchQueues []string
+
+	// AudienceQueues are the @audience declarations' queues (#734),
+	// sorted: a @worker of one resolves each message's rows through the
+	// ORM's ResolveAudience.
+	AudienceQueues []string
 
 	// Grants reports whether the database keeps @accessGrants on
 	// Postgres, whose tokens Authenticator establishes
@@ -112,8 +120,14 @@ func WiringOf(db *ir.Schema, sqlite bool) *DepsWiring {
 		}
 	}
 	sort.Strings(w.SearchQueues)
+	for _, td := range db.AudienceTables() {
+		if q := td.Audience.Queue; q != "" && !slices.Contains(w.AudienceQueues, q) {
+			w.AudienceQueues = append(w.AudienceQueues, q)
+		}
+	}
+	sort.Strings(w.AudienceQueues)
 	w.Grants = db.AccessGrantsTable() != nil && !sqlite
-	if !w.Builds() && !w.Calendar && !w.Search && !w.Grants {
+	if !w.Builds() && !w.Calendar && !w.Search && !w.Grants && len(w.AudienceQueues) == 0 {
 		return nil
 	}
 	return w
@@ -156,6 +170,8 @@ func (w *DepsWiring) RuntimeOf(queue string) string {
 		return RuntimeRunRequests
 	case slices.Contains(w.SearchQueues, queue):
 		return RuntimeSearch
+	case slices.Contains(w.AudienceQueues, queue):
+		return RuntimeAudience
 	}
 	return ""
 }
@@ -189,6 +205,17 @@ func (o *APIOutput) setWorkerRuntimes() {
 			o.Workers[i].Runtime = o.Deps.Wiring.RuntimeOf(o.Workers[i].Queue)
 		}
 	}
+}
+
+// HasAudienceWorkers reports whether a @worker's queue is an @audience
+// declaration's (#734), whose queue wiring.go claims itself.
+func (o *APIOutput) HasAudienceWorkers() bool {
+	for _, w := range o.Workers {
+		if w.Runtime == RuntimeAudience {
+			return true
+		}
+	}
+	return false
 }
 
 // HasSearchWorkers reports whether a @worker's queue is a @searchable

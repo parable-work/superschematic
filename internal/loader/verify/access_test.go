@@ -92,6 +92,16 @@ func TestAudienceDeclarationsHoldToTheirTables(t *testing.T) {
 		{"no owner and no createdBy", func(s *ir.Schema, _ *Input) { s.Types["Note"].Audience = &ir.AudienceDef{} }, "its owner is createdBy, which Note does not declare"},
 		{"inheritFrom that is no relation", func(s *ir.Schema, _ *Input) { s.Types["Document"].Audience.InheritFrom = "createdBy" }, "inheritFrom createdBy is no to-one relation"},
 		{"inheritFrom a table with no audience", func(s *ir.Schema, _ *Input) { s.Types["Folder"].Audience = nil }, "which is no @audience table"},
+		{"a queue that is no @queue class", func(s *ir.Schema, _ *Input) { s.Types["Document"].Audience.Queue = "Note" }, "queue names Note, which is no @queue class of docs-db"},
+		{"a queue that declares fields", func(s *ir.Schema, _ *Input) {
+			s.Types["Resolving"] = &ir.TypeDef{Name: "Resolving", Queue: &ir.QueueDef{}, Fields: []*ir.FieldDef{{Name: "folder", TypeRef: ir.TypeRef{Name: "string"}}}}
+			s.Types["Document"].Audience.Queue = "Resolving"
+		}, "queue names Resolving, which declares fields of its own"},
+		{"a queue on the sqlite dialect", func(s *ir.Schema, in *Input) {
+			s.Types["Resolving"] = &ir.TypeDef{Name: "Resolving", Queue: &ir.QueueDef{}}
+			s.Types["Document"].Audience.Queue = "Resolving"
+			in.Dialects, in.TypesLanguages = []string{"postgres", "sqlite"}, []string{"typescript"}
+		}, "which Postgres alone serves so far, and docs-db lists the sqlite dialect"},
 		{"a column the table declares", func(s *ir.Schema, _ *Input) {
 			s.Types["Folder"].Fields = append(s.Types["Folder"].Fields, &ir.FieldDef{Name: ir.AudienceField, TypeRef: ir.TypeRef{Name: "string"}})
 		}, "declares audience, a column @audience adds"},
@@ -170,9 +180,50 @@ func TestAudienceExpansionAddsItsColumns(t *testing.T) {
 		}
 	}
 	// The expansion is idempotent: a second run adds nothing.
-	before := len(schema.Types["Folder"].Fields)
+	before, indexes := len(schema.Types["Folder"].Fields), len(schema.Types["Folder"].Indexes)
 	access.Expand(schema)
 	if after := len(schema.Types["Folder"].Fields); after != before {
 		t.Errorf("a second expansion took Folder from %d fields to %d", before, after)
+	}
+	if after := len(schema.Types["Folder"].Indexes); after != indexes {
+		t.Errorf("a second expansion took Folder from %d indexes to %d", indexes, after)
+	}
+	// Each @audience table has a GIN index over its effective audience.
+	for _, table := range []string{"Folder", "Document"} {
+		var found bool
+		for _, idx := range schema.Types[table].Indexes {
+			found = found || (idx.Name == access.AudienceIndexName && idx.Method == ir.IndexMethodGIN && idx.Origin == ir.OriginAccess &&
+				len(idx.Keys) == 1 && idx.Keys[0] == ir.EffectiveAudienceField)
+		}
+		if !found {
+			t.Errorf("%s has no GIN index over its effective audience: %+v", table, schema.Types[table].Indexes)
+		}
+	}
+}
+
+// TestAudienceQueueExpansion: the queue an @audience names that declares
+// no fields gets the message's, one ready message per parent and table
+// at a time, and the table that names it an index over its inheritFrom
+// and its key (#734).
+func TestAudienceQueueExpansion(t *testing.T) {
+	schema, in := accessSchema()
+	schema.Types["Resolving"] = &ir.TypeDef{Name: "Resolving", Queue: &ir.QueueDef{}}
+	schema.Types["Document"].Audience.Queue = "Resolving"
+	if got := checked(schema, in); len(got) != 0 {
+		t.Fatalf("a sound schema has findings: %v", got)
+	}
+	q := schema.Types["Resolving"]
+	if len(q.Fields) != 2 || q.Fields[0].Name != ir.AudienceResolveTableField || q.Fields[1].Name != ir.AudienceResolveParentField {
+		t.Fatalf("the queue's fields are %+v", q.Fields)
+	}
+	if strings.Join(q.Queue.Keys, ",") != "childTable,parentKey" || q.Queue.OnDuplicate != ir.QueueOnDuplicateSkip || !q.Queue.Serialize {
+		t.Errorf("the queue is %+v", q.Queue)
+	}
+	var parent bool
+	for _, idx := range schema.Types["Document"].Indexes {
+		parent = parent || (idx.Name == access.AudienceParentIndexName && strings.Join(idx.Keys, ",") == "folder,id")
+	}
+	if !parent {
+		t.Errorf("Document has no index over its folder and its key: %+v", schema.Types["Document"].Indexes)
 	}
 }
