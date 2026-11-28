@@ -97,7 +97,6 @@ type APIOutputConfig struct {
 	MCPConfirmationKey string `json:"mcpConfirmationKey,omitempty"`
 }
 
-
 // SQLOutputConfig configures the DB kind's sql output. The DDL and the ORM
 // are implied by the kind; this block places and owns the generated
 // projection view migrations.
