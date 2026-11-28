@@ -8486,6 +8486,14 @@ pub const SQLITE: &str = r#"{
       },
       "referencedBy": [
         {
+          "filter": "referencedByOAuthCodeUser",
+          "probe": "SELECT 1 FROM oauth_code WHERE oauth_code.user_id = account.id"
+        },
+        {
+          "filter": "referencedByOAuthGrantUser",
+          "probe": "SELECT 1 FROM oauth_grant WHERE oauth_grant.user_id = account.id"
+        },
+        {
           "filter": "referencedBySessionUser",
           "probe": "SELECT 1 FROM \"session\" WHERE \"session\".user_id = account.id"
         },
@@ -8503,6 +8511,16 @@ pub const SQLITE: &str = r#"{
         }
       ],
       "many": [
+        {
+          "name": "oauthCodes",
+          "target": "OAuthCode",
+          "column": "userId"
+        },
+        {
+          "name": "oauthGrants",
+          "target": "OAuthGrant",
+          "column": "userId"
+        },
         {
           "name": "sessions",
           "target": "Session",
@@ -11162,6 +11180,1001 @@ pub const SQLITE: &str = r#"{
       "notifier": "routes"
     },
     {
+      "name": "OAuthClient",
+      "table": "oauth_client",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_client.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "clientId",
+          "column": "client_id",
+          "field": "clientId",
+          "qualified": "oauth_client.client_id",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "kind",
+          "column": "kind",
+          "field": "kind",
+          "qualified": "oauth_client.kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "name",
+          "column": "\"name\"",
+          "field": "name",
+          "qualified": "oauth_client.\"name\"",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "uri",
+          "column": "uri",
+          "field": "uri",
+          "qualified": "oauth_client.uri",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "redirectUris",
+          "column": "redirect_uris",
+          "field": "redirectUris",
+          "qualified": "oauth_client.redirect_uris",
+          "list": true,
+          "required": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_client.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "refreshedAt",
+          "column": "refreshed_at",
+          "field": "refreshedAt",
+          "qualified": "oauth_client.refreshed_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "freshUntil",
+          "column": "fresh_until",
+          "field": "freshUntil",
+          "qualified": "oauth_client.fresh_until",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastUsedAt",
+          "column": "last_used_at",
+          "field": "lastUsedAt",
+          "qualified": "oauth_client.last_used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+        "qualifiedColumns": "\"oauth_client\".\"id\", \"oauth_client\".\"client_id\", \"oauth_client\".\"kind\", \"oauth_client\".\"name\", \"oauth_client\".\"uri\", \"oauth_client\".\"redirect_uris\", \"oauth_client\".\"created_at\", \"oauth_client\".\"refreshed_at\", \"oauth_client\".\"fresh_until\", \"oauth_client\".\"last_used_at\"",
+        "getOne": "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_client%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_client%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_client%s",
+        "page": "SELECT %s FROM oauth_client%s%s LIMIT %d",
+        "pageAfterKey": "oauth_client.id %s %s",
+        "pageAfter": "(%s, oauth_client.id) %s ((SELECT %s FROM oauth_client AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_client AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_client.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_client WHERE oauth_client.id = ?1)",
+        "insert": "INSERT INTO oauth_client (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_client (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_client SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+        "updateMany": "UPDATE oauth_client SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO oauth_client (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_client WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM oauth_client WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM oauth_client WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "clientId": {
+          "conflict": "(client_id)",
+          "keep": "client_id = oauth_client.client_id",
+          "rows": "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE (client_id) IN (VALUES %s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_client.id",
+          "rows": "SELECT \"id\", \"client_id\", \"kind\", \"name\", \"uri\", \"redirect_uris\", \"created_at\", \"refreshed_at\", \"fresh_until\", \"last_used_at\" FROM oauth_client WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByOAuthCodeClient",
+          "probe": "SELECT 1 FROM oauth_code WHERE oauth_code.client_id = oauth_client.id"
+        },
+        {
+          "filter": "referencedByOAuthGrantClient",
+          "probe": "SELECT 1 FROM oauth_grant WHERE oauth_grant.client_id = oauth_client.id"
+        }
+      ],
+      "many": [
+        {
+          "name": "oauthCodes",
+          "target": "OAuthCode",
+          "column": "clientId"
+        },
+        {
+          "name": "oauthGrants",
+          "target": "OAuthGrant",
+          "column": "clientId"
+        }
+      ]
+    },
+    {
+      "name": "OAuthCode",
+      "table": "oauth_code",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_code.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "clientId",
+          "column": "client_id",
+          "field": "client",
+          "qualified": "oauth_code.client_id",
+          "uuid": true,
+          "required": true,
+          "relation": "OAuthClient",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "oauth_code.user_id",
+          "uuid": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "grantId",
+          "column": "grant_id",
+          "field": "grant",
+          "qualified": "oauth_code.grant_id",
+          "uuid": true,
+          "relation": "OAuthGrant",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "redirectUri",
+          "column": "redirect_uri",
+          "field": "redirectUri",
+          "qualified": "oauth_code.redirect_uri",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codeChallenge",
+          "column": "code_challenge",
+          "field": "codeChallenge",
+          "qualified": "oauth_code.code_challenge",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "state",
+          "column": "state",
+          "field": "state",
+          "qualified": "oauth_code.state",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "scope",
+          "column": "scope",
+          "field": "scope",
+          "qualified": "oauth_code.scope",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "resource",
+          "column": "resource",
+          "field": "resource",
+          "qualified": "oauth_code.resource",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "nonce",
+          "column": "nonce",
+          "field": "nonce",
+          "qualified": "oauth_code.nonce",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "codeHash",
+          "column": "code_hash",
+          "field": "codeHash",
+          "qualified": "oauth_code.code_hash",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_code.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "oauth_code.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "usedAt",
+          "column": "used_at",
+          "field": "usedAt",
+          "qualified": "oauth_code.used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+        "qualifiedColumns": "\"oauth_code\".\"id\", \"oauth_code\".\"client_id\", \"oauth_code\".\"user_id\", \"oauth_code\".\"grant_id\", \"oauth_code\".\"redirect_uri\", \"oauth_code\".\"code_challenge\", \"oauth_code\".\"state\", \"oauth_code\".\"scope\", \"oauth_code\".\"resource\", \"oauth_code\".\"nonce\", \"oauth_code\".\"code_hash\", \"oauth_code\".\"created_at\", \"oauth_code\".\"expires_at\", \"oauth_code\".\"used_at\"",
+        "getOne": "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_code%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_code%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_code%s",
+        "page": "SELECT %s FROM oauth_code%s%s LIMIT %d",
+        "pageAfterKey": "oauth_code.id %s %s",
+        "pageAfter": "(%s, oauth_code.id) %s ((SELECT %s FROM oauth_code AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_code AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_code.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_code WHERE oauth_code.id = ?1)",
+        "insert": "INSERT INTO oauth_code (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_code (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_code SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+        "updateMany": "UPDATE oauth_code SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO oauth_code (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_code WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM oauth_code WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM oauth_code WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "codeHash": {
+          "conflict": "(code_hash)",
+          "keep": "code_hash = oauth_code.code_hash",
+          "rows": "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE (code_hash) IN (VALUES %s)"
+        },
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_code.id",
+          "rows": "SELECT \"id\", \"client_id\", \"user_id\", \"grant_id\", \"redirect_uri\", \"code_challenge\", \"state\", \"scope\", \"resource\", \"nonce\", \"code_hash\", \"created_at\", \"expires_at\", \"used_at\" FROM oauth_code WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "client",
+          "target": "OAuthClient",
+          "probe": "oauth_code.client_id IN (SELECT oauth_client.id FROM oauth_client%s)"
+        },
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "oauth_code.user_id IN (SELECT account.id FROM account%s)"
+        },
+        {
+          "field": "grant",
+          "target": "OAuthGrant",
+          "probe": "oauth_code.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)"
+        }
+      ]
+    },
+    {
+      "name": "OAuthGrant",
+      "table": "oauth_grant",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_grant.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "userId",
+          "column": "user_id",
+          "field": "user",
+          "qualified": "oauth_grant.user_id",
+          "uuid": true,
+          "required": true,
+          "relation": "Account",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "clientId",
+          "column": "client_id",
+          "field": "client",
+          "qualified": "oauth_grant.client_id",
+          "uuid": true,
+          "required": true,
+          "relation": "OAuthClient",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "permissions",
+          "column": "permissions",
+          "field": "permissions",
+          "qualified": "oauth_grant.permissions",
+          "list": true
+        },
+        {
+          "name": "resource",
+          "column": "resource",
+          "field": "resource",
+          "qualified": "oauth_grant.resource",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_grant.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "oauth_grant.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "lastUsedAt",
+          "column": "last_used_at",
+          "field": "lastUsedAt",
+          "qualified": "oauth_grant.last_used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "oauth_grant.revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"oauth_grant\".\"id\", \"oauth_grant\".\"user_id\", \"oauth_grant\".\"client_id\", \"oauth_grant\".\"permissions\", \"oauth_grant\".\"resource\", \"oauth_grant\".\"created_at\", \"oauth_grant\".\"expires_at\", \"oauth_grant\".\"last_used_at\", \"oauth_grant\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM oauth_grant WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_grant%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_grant%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_grant%s",
+        "page": "SELECT %s FROM oauth_grant%s%s LIMIT %d",
+        "pageAfterKey": "oauth_grant.id %s %s",
+        "pageAfter": "(%s, oauth_grant.id) %s ((SELECT %s FROM oauth_grant AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_grant AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_grant.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_grant WHERE oauth_grant.id = ?1)",
+        "insert": "INSERT INTO oauth_grant (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_grant (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_grant SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "updateMany": "UPDATE oauth_grant SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO oauth_grant (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_grant WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM oauth_grant WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM oauth_grant WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_grant.id",
+          "rows": "SELECT \"id\", \"user_id\", \"client_id\", \"permissions\", \"resource\", \"created_at\", \"expires_at\", \"last_used_at\", \"revoked_at\" FROM oauth_grant WHERE (id) IN (VALUES %s)"
+        }
+      },
+      "referencedBy": [
+        {
+          "filter": "referencedByOAuthCodeGrant",
+          "probe": "SELECT 1 FROM oauth_code WHERE oauth_code.grant_id = oauth_grant.id"
+        },
+        {
+          "filter": "referencedByOAuthTokenGrant",
+          "probe": "SELECT 1 FROM oauth_token WHERE oauth_token.grant_id = oauth_grant.id"
+        }
+      ],
+      "relations": [
+        {
+          "field": "user",
+          "target": "Account",
+          "probe": "oauth_grant.user_id IN (SELECT account.id FROM account%s)"
+        },
+        {
+          "field": "client",
+          "target": "OAuthClient",
+          "probe": "oauth_grant.client_id IN (SELECT oauth_client.id FROM oauth_client%s)"
+        }
+      ],
+      "many": [
+        {
+          "name": "oauthCodes",
+          "target": "OAuthCode",
+          "column": "grantId"
+        },
+        {
+          "name": "oauthTokens",
+          "target": "OAuthToken",
+          "column": "grantId"
+        }
+      ]
+    },
+    {
+      "name": "OAuthToken",
+      "table": "oauth_token",
+      "key": "id",
+      "columns": [
+        {
+          "name": "id",
+          "column": "id",
+          "field": "id",
+          "qualified": "oauth_token.id",
+          "uuid": true,
+          "key": true,
+          "auto": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "grantId",
+          "column": "grant_id",
+          "field": "grant",
+          "qualified": "oauth_token.grant_id",
+          "uuid": true,
+          "required": true,
+          "relation": "OAuthGrant",
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "isNull"
+          ]
+        },
+        {
+          "name": "kind",
+          "column": "kind",
+          "field": "kind",
+          "qualified": "oauth_token.kind",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "tokenHash",
+          "column": "token_hash",
+          "field": "tokenHash",
+          "qualified": "oauth_token.token_hash",
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "in",
+            "notIn",
+            "ilike",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "createdAt",
+          "column": "created_at",
+          "field": "createdAt",
+          "qualified": "oauth_token.created_at",
+          "timestamp": true,
+          "required": true,
+          "audit": "createdAt",
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "expiresAt",
+          "column": "expires_at",
+          "field": "expiresAt",
+          "qualified": "oauth_token.expires_at",
+          "timestamp": true,
+          "required": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "usedAt",
+          "column": "used_at",
+          "field": "usedAt",
+          "qualified": "oauth_token.used_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        },
+        {
+          "name": "revokedAt",
+          "column": "revoked_at",
+          "field": "revokedAt",
+          "qualified": "oauth_token.revoked_at",
+          "timestamp": true,
+          "filter": [
+            "eq",
+            "ne",
+            "gt",
+            "gte",
+            "lt",
+            "lte",
+            "between",
+            "in",
+            "notIn",
+            "isNull"
+          ],
+          "sortable": true
+        }
+      ],
+      "statements": {
+        "columns": "\"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+        "qualifiedColumns": "\"oauth_token\".\"id\", \"oauth_token\".\"grant_id\", \"oauth_token\".\"kind\", \"oauth_token\".\"token_hash\", \"oauth_token\".\"created_at\", \"oauth_token\".\"expires_at\", \"oauth_token\".\"used_at\", \"oauth_token\".\"revoked_at\"",
+        "getOne": "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE id = ?1",
+        "live": "",
+        "liveWhere": "",
+        "liveCondition": "",
+        "findOne": "SELECT %s FROM oauth_token%s%s LIMIT 1",
+        "findMany": "SELECT %s FROM oauth_token%s%s%s",
+        "count": "SELECT COUNT(*) FROM oauth_token%s",
+        "page": "SELECT %s FROM oauth_token%s%s LIMIT %d",
+        "pageAfterKey": "oauth_token.id %s %s",
+        "pageAfter": "(%s, oauth_token.id) %s ((SELECT %s FROM oauth_token AS page_key WHERE page_key.id = %s), %s)",
+        "pageAfterNulls": "CASE (SELECT %s IS NULL FROM oauth_token AS page_key WHERE page_key.id = %s) WHEN TRUE THEN %s IS NULL AND %s WHEN FALSE THEN (%s IS NULL OR %s) END",
+        "pageOrder": " ORDER BY %s %s",
+        "pageOrderNulls": " ORDER BY %s %s NULLS LAST",
+        "pageTiebreak": ", oauth_token.id %s",
+        "pageKeyExists": "SELECT EXISTS (SELECT 1 FROM oauth_token WHERE oauth_token.id = ?1)",
+        "insert": "INSERT INTO oauth_token (%s) VALUES (%s) RETURNING %s",
+        "insertMany": "INSERT INTO oauth_token (%s) VALUES %s RETURNING %s",
+        "update": "UPDATE oauth_token SET %s WHERE id = ?%d",
+        "versionFence": " AND _version = ?%d",
+        "returning": " RETURNING \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+        "updateMany": "UPDATE oauth_token SET %s%s",
+        "updatedAt": "updated_at = strftime('%%Y-%%m-%%dT%%H:%%M:%%fZ', 'now')",
+        "updatedBy": "updated_by = ?%d",
+        "upsert": "INSERT INTO oauth_token (%s) VALUES %s ON CONFLICT %s DO UPDATE SET %s%s RETURNING \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\"",
+        "softDelete": "",
+        "softDeleteIfVersion": "",
+        "delete": "DELETE FROM oauth_token WHERE id = ?1",
+        "deleteIfVersion": "DELETE FROM oauth_token WHERE id = ?1 AND _version = ?2",
+        "version": "SELECT _version FROM oauth_token WHERE id = ?1"
+      },
+      "uniqueKeys": {
+        "id": {
+          "conflict": "(id)",
+          "keep": "id = oauth_token.id",
+          "rows": "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE (id) IN (VALUES %s)"
+        },
+        "tokenHash": {
+          "conflict": "(token_hash)",
+          "keep": "token_hash = oauth_token.token_hash",
+          "rows": "SELECT \"id\", \"grant_id\", \"kind\", \"token_hash\", \"created_at\", \"expires_at\", \"used_at\", \"revoked_at\" FROM oauth_token WHERE (token_hash) IN (VALUES %s)"
+        }
+      },
+      "relations": [
+        {
+          "field": "grant",
+          "target": "OAuthGrant",
+          "probe": "oauth_token.grant_id IN (SELECT oauth_grant.id FROM oauth_grant%s)"
+        }
+      ]
+    },
+    {
       "name": "Reply",
       "table": "reply",
       "key": "id",
@@ -12506,6 +13519,26 @@ pub const SQLITE: &str = r#"{
         "key": "id",
         "uuid": true
       },
+      "OAuthClient": {
+        "table": "oauth_client",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthCode": {
+        "table": "oauth_code",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthGrant": {
+        "table": "oauth_grant",
+        "key": "id",
+        "uuid": true
+      },
+      "OAuthToken": {
+        "table": "oauth_token",
+        "key": "id",
+        "uuid": true
+      },
       "Reply": {
         "table": "reply",
         "key": "id",
@@ -12587,6 +13620,12 @@ pub mod sqlite {
     // What the references and attachments of the database's rows read and
     // answer (D154, #611).
     pub use orm::rowfeatures;
+    // The notifier, on SQLite too (D153, #618): Notifier::new takes this
+    // module's tables(database).
+    pub use orm::notify;
+    // Parties, the inbound path and the conversations, on SQLite too
+    // (D157, #618).
+    pub use orm::{inbound, parties};
 
     /// The repository of `Account` on a SQLite connection.
     pub type AccountRepository<'a> =
@@ -12631,6 +13670,22 @@ pub mod sqlite {
     /// The repository of `NoticeRoute` on a SQLite connection.
     pub type NoticeRouteRepository<'a> =
         orm::sqlite::Typed<'a, NoticeRouteRow, NoticeRouteCreate, NoticeRouteUpdate, NoticeRouteFilter, IdentityUUID>;
+
+    /// The repository of `OAuthClient` on a SQLite connection.
+    pub type OAuthClientRepository<'a> =
+        orm::sqlite::Typed<'a, OAuthClientRow, OAuthClientCreate, OAuthClientUpdate, OAuthClientFilter, IdentityUUID>;
+
+    /// The repository of `OAuthCode` on a SQLite connection.
+    pub type OAuthCodeRepository<'a> =
+        orm::sqlite::Typed<'a, OAuthCodeRow, OAuthCodeCreate, OAuthCodeUpdate, OAuthCodeFilter, IdentityUUID>;
+
+    /// The repository of `OAuthGrant` on a SQLite connection.
+    pub type OAuthGrantRepository<'a> =
+        orm::sqlite::Typed<'a, OAuthGrantRow, OAuthGrantCreate, OAuthGrantUpdate, OAuthGrantFilter, IdentityUUID>;
+
+    /// The repository of `OAuthToken` on a SQLite connection.
+    pub type OAuthTokenRepository<'a> =
+        orm::sqlite::Typed<'a, OAuthTokenRow, OAuthTokenCreate, OAuthTokenUpdate, OAuthTokenFilter, IdentityUUID>;
 
     /// The repository of `Reply` on a SQLite connection.
     pub type ReplyRepository<'a> =
@@ -12802,6 +13857,26 @@ pub mod sqlite {
         /// The repository of `NoticeRoute`.
         pub fn notice_route(&self) -> Result<NoticeRouteRepository<'_>, orm::Error> {
             self.0.typed("NoticeRoute")
+        }
+
+        /// The repository of `OAuthClient`.
+        pub fn oauth_client(&self) -> Result<OAuthClientRepository<'_>, orm::Error> {
+            self.0.typed("OAuthClient")
+        }
+
+        /// The repository of `OAuthCode`.
+        pub fn oauth_code(&self) -> Result<OAuthCodeRepository<'_>, orm::Error> {
+            self.0.typed("OAuthCode")
+        }
+
+        /// The repository of `OAuthGrant`.
+        pub fn oauth_grant(&self) -> Result<OAuthGrantRepository<'_>, orm::Error> {
+            self.0.typed("OAuthGrant")
+        }
+
+        /// The repository of `OAuthToken`.
+        pub fn oauth_token(&self) -> Result<OAuthTokenRepository<'_>, orm::Error> {
+            self.0.typed("OAuthToken")
         }
 
         /// The repository of `Reply`.
