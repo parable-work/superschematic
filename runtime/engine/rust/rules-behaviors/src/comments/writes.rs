@@ -13,7 +13,7 @@ use superschematic_rules::{Cx, Hook};
 
 use super::checks::{
     check_block_shapes, check_blocks, check_body, composing, deleted, for_of, forbidden, holds,
-    invalid, moderates, not_a_thread, not_author, object, present, veto, whole, MAX_EDITS,
+    invalid, moderates, not_a_thread, not_author, object, present, veto, via_of, whole, MAX_EDITS,
     MAX_EMOJI,
 };
 use super::drafts::{clear_idle, remove_drafts};
@@ -148,6 +148,9 @@ pub(super) fn post(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     if let Some(acted_for) = for_of(cx) {
         values.insert("forSubject".into(), Value::from(acted_for));
     }
+    if let Some(via) = via_of(cx) {
+        values.insert("via".into(), Value::from(via));
+    }
     values.insert("state".into(), Value::from(POSTED));
     values.insert("body".into(), Value::from(body));
     values.insert("blocks".into(), listed(blocks));
@@ -267,7 +270,7 @@ pub(super) fn edit(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     cx.update_row(MESSAGES, &message_key(id), values)?;
     Conversation::of(cx)?.save(cx)?;
     if let Some(mentions) = mentions {
-        follows::edited_mentions(cx, &message, mentions)?;
+        follows::edited_mentions(cx, &message, mentions, body)?;
     }
     after(cx, id)
 }

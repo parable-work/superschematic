@@ -10,8 +10,8 @@ use std::collections::BTreeMap;
 use serde_json::{Map, Value};
 use superschematic_rules::{
     key_of, merge_patch, Action, Answer, Caller, ChangeSet, Command, Core, DeadlineChange,
-    KeyedRow, LinkedRows, Outcome, ReadRequest, Refusal, Row, RowWrite, SharedRow, SharedRowChange,
-    Source, SubRow, SubRowChange, TypeSpec,
+    KeyedRow, LinkedRows, OutboxEvent, Outcome, ReadRequest, Refusal, Row, RowWrite, SharedRow,
+    SharedRowChange, Source, SubRow, SubRowChange, TypeSpec,
 };
 
 pub const START: i64 = 1_000_000;
@@ -38,6 +38,8 @@ pub struct Memory {
     /// answers (D200); a subject absent here is one the host cannot answer
     /// for.
     pub permissions: BTreeMap<String, Vec<String>>,
+    /// The events the change sets applied emitted, in order (D104).
+    pub events: Vec<OutboxEvent>,
 }
 
 impl Source for Memory {
@@ -268,6 +270,7 @@ impl Memory {
                 }
             }
         }
+        self.events.extend(changes.events.iter().cloned());
     }
 }
 

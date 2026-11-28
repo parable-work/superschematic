@@ -17,7 +17,7 @@ use superschematic_rules::{Code, Cx, Hook};
 
 use super::checks::{
     check_block_shapes, check_blocks, check_body, for_of, invalid, moderates, not_author,
-    not_composing, present, veto, whole, MAX_APPEND_BYTES,
+    not_composing, present, veto, via_of, whole, MAX_APPEND_BYTES,
 };
 use super::follows;
 use super::messages::{
@@ -119,6 +119,9 @@ pub(super) fn begin(cx: C<'_, '_>, params: &Value) -> Hook<Value> {
     values.insert("author".into(), Value::from(subject.as_str()));
     if let Some(acted_for) = for_of(cx) {
         values.insert("forSubject".into(), Value::from(acted_for));
+    }
+    if let Some(via) = via_of(cx) {
+        values.insert("via".into(), Value::from(via));
     }
     values.insert("state".into(), Value::from(COMPOSING));
     values.insert("body".into(), Value::from(""));

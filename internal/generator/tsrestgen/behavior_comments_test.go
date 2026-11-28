@@ -79,7 +79,7 @@ func TestWriteAPIGoldenBehaviorComments(t *testing.T) {
 	}
 	slices.Sort(paths)
 	var want []string
-	for _, name := range []string{"delete-message", "edit", "get-message", "list-edits", "list-messages", "list-pinned", "list-reactions", "pin", "post", "purge", "react", "reopen", "resolve", "unpin", "unreact"} {
+	for _, name := range []string{"delete-message", "edit", "follow", "get-message", "list-edits", "list-messages", "list-pinned", "list-reactions", "mark-read", "pin", "post", "purge", "react", "reopen", "resolve", "unpin", "unreact"} {
 		want = append(want, "POST /api/ticket/{id}/comments/"+name)
 	}
 	if !slices.Equal(paths, want) {

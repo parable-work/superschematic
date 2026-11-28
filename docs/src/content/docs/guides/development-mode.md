@@ -145,9 +145,11 @@ they stand. `describe` lists them under `computed`.
   `commentsUnread` is the caller's own count, and `listMessages` answers
   the caller's `readUpTo`. A message that comes to stand records a
   delivery for each subject it mentions and each follower of its thread.
-- Comments' `inbox` runs across every type that composes Comments and that
-  the caller may read (see operations of the namespace below). Claiming and
-  settling deliveries, search and `moveAnchor` wait for the core.
+- Comments' `inbox` is no operation of the core's: the in-app inbox is the
+  notifier's (D153), which a table's mentions and replies reach as events
+  ([#713](https://github.com/parable-work/superschematic/issues/713)).
+  Claiming and settling deliveries, search and `moveAnchor` wait for the
+  core.
 - Derived's pulls and settles run on the type as a whole. A derived
   field's output, the JSON Schema its value is held to, comes from the
   type's fields: an enum's values and a primitive's type.
@@ -411,8 +413,7 @@ policy, as a compiled server's are not.
 
 With `Dev`, pass it with `with_policy`. With the server, pass `--policy`.
 
-An operation of the namespace as a whole, such as Comments' `inbox`, is
-asked of the policy as `{ action, behavior, operation }`, with no schema.
+An operation of the namespace as a whole is asked of the policy as `{ action, behavior, operation }`, with no schema.
 A rule decides it only when it names the behavior
 (`"behavior": ["Comments"]`, or `true`), so a rule written for types
 grants none. `"permission"` lets one that reads through, and asks

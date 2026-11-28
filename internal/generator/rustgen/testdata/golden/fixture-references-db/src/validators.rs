@@ -1393,7 +1393,7 @@ pub fn parse_ticket_comments_follows(value: Value, unknown_fields: rt::UnknownFi
 }
 
 /// The fields `TicketCommentsMessages` declares, by their wire names.
-pub const TICKET_COMMENTS_MESSAGES_FIELDS: &[&str] = &["ticket", "message", "thread", "quotes", "author", "forSubject", "state", "body", "blocks", "mentions", "createdAt", "postedAt", "stand", "editedAt", "edits", "pinned", "clientId", "resolvedBy", "resolvedFor", "resolvedAt", "draftLength", "lastAppendAt"];
+pub const TICKET_COMMENTS_MESSAGES_FIELDS: &[&str] = &["ticket", "message", "thread", "quotes", "author", "forSubject", "via", "state", "body", "blocks", "mentions", "createdAt", "postedAt", "stand", "editedAt", "edits", "pinned", "clientId", "resolvedBy", "resolvedFor", "resolvedAt", "draftLength", "lastAppendAt"];
 
 /// Validates a JSON value as `TicketCommentsMessages`. A null value passes; the errors
 /// are empty when the value is valid.
@@ -1437,6 +1437,10 @@ pub fn validate_ticket_comments_messages(value: &Value) -> ValidationErrors {
     {
         let field = value.get("forSubject");
         rt::expect_string(&mut errors, "forSubject", field);
+    }
+    {
+        let field = value.get("via");
+        rt::expect_string(&mut errors, "via", field);
     }
     {
         let field = value.get("state");

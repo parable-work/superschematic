@@ -42,7 +42,15 @@
 //! which fires beside the row. A caller sends `typing` and `viewing`, which
 //! the core holds to their data. Each caller has read markers and follows
 //! (`markRead`, `follow`, [`follows`]), and a message that comes to stand
-//! records a delivery for each subject that should hear of it.
+//! records a delivery for each subject that should hear of it. With the
+//! config's `events` it emits them too, `mentioned` and `replied` about
+//! the row ([`events`], #713), which the notifier raises into its inbox,
+//! the in-app inbox (D153).
+//!
+//! A message records the subject its author acted for (`forSubject`, the
+//! caller's `acting_for`) and the channel kind the call came over (`via`,
+//! the caller's `channel`, D157 and #606): a reply by text that a host runs
+//! as its sender, or an agent's message for a party who wrote in.
 //!
 //! A message may carry `attachment` blocks too (D154): a file the
 //! deployment keeps, named by a URI whose scheme, media type and size the
@@ -52,15 +60,15 @@
 //! file by it (`attachment:<id>`).
 //!
 //! What the engine's Comments has that a table's leaves out, each a part
-//! the core cannot run yet or a later step's: the inbox, claiming and
-//! settling deliveries (the config's `deliverPermission`, `maxAttempts`,
-//! `retryBackoffMs` and `deliveryRetentionMs`) and `searchMessages`, which
-//! run across a namespace; `moveAnchor` and `anchorPermission`; a message's `via`,
-//! the calling service, which the core's caller does not carry; and the
-//! operation events the engine logged, a table's events reaching the app
-//! through its event queue (D104). The core declares none of those
-//! operations, and refuses a config that sets one of those members, so a
-//! table's use waits for them in so many words. A ref block names a row of
+//! the core cannot run yet, a later step's, or another's: the inbox, which
+//! is the notifier's (D153, #602); claiming and settling deliveries (the
+//! config's `deliverPermission`, `maxAttempts`, `retryBackoffMs` and
+//! `deliveryRetentionMs`) and `searchMessages`, which run across a
+//! namespace; `moveAnchor` and `anchorPermission`; and the operation events
+//! the engine logged, a table's events reaching the app through its event
+//! queue (D104). The core declares none of those operations, and refuses a
+//! config that sets one of those members, so a table's use waits for them
+//! in so many words. A ref block names a row of
 //! a table the database's layout holds, which the core reads; whether the
 //! caller may read it is the route's, as a table's access policy is (D103).
 //!
@@ -83,8 +91,8 @@
 
 mod checks;
 pub mod drafts;
+mod events;
 pub mod follows;
-mod inbox;
 mod messages;
 mod params;
 mod reads;
@@ -152,8 +160,9 @@ pub const DEFAULT_MAX_DRAFTS: i64 = 5;
 /// with why: the engine's alone until the core runs what they need. The
 /// build leaves them out of a table's operations too
 /// (`registry.TableLeavesOut`).
-pub const LEFT_OUT_OPERATIONS: [(&str, &str); 4] = [
+pub const LEFT_OUT_OPERATIONS: [(&str, &str); 5] = [
     ("moveAnchor", ANCHORS),
+    ("inbox", INBOX),
     ("searchMessages", NAMESPACE_WIDE),
     ("claimDeliveries", NAMESPACE_WIDE),
     ("settleDeliveries", NAMESPACE_WIDE),
@@ -164,7 +173,9 @@ pub const LEFT_OUT_OPERATIONS: [(&str, &str); 4] = [
 pub const LEFT_OUT_FIELDS: [(&str, &str); 0] = [];
 
 /// Why the claims of deliveries and the search wait.
-pub const NAMESPACE_WIDE: &str = "claiming and settling deliveries (claimDeliveries and settleDeliveries) and searchMessages run across a namespace, as the inbox does, and each waits for its port onto the core's operations of the namespace (D77's primitive 3)";
+pub const NAMESPACE_WIDE: &str = "claiming and settling deliveries (claimDeliveries and settleDeliveries) and searchMessages run across a namespace, and each waits for its port onto the core's operations of the namespace (D77's primitive 3); a table's deliveries reach the notifier as events instead (#713)";
+/// Why the inbox is no operation of the core's (D153, #602).
+pub const INBOX: &str = "the in-app inbox is the notifier's (D153): a table's Comments whose config sets events emits mentioned and replied, which the notifier raises into its inbox (#713), and the core's inbox across a namespace is retired";
 /// Why moving a code block's anchor waits.
 pub const ANCHORS: &str = "moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core (D77's step 5, D103's step 4)";
 
@@ -223,6 +234,9 @@ pub struct CommentsConfig {
     pub max_drafts: i64,
     /// What an attachment block may describe.
     pub attachments: AttachmentsConfig,
+    /// Whether a message that comes to stand, and an edit that adds a
+    /// mention, emits `mentioned` and `replied` about the row (#713).
+    pub events: bool,
 }
 
 impl Default for CommentsConfig {
@@ -237,6 +251,7 @@ impl Default for CommentsConfig {
             compose_timeout_ms: DEFAULT_COMPOSE_TIMEOUT_MS,
             max_drafts: DEFAULT_MAX_DRAFTS,
             attachments: AttachmentsConfig::default(),
+            events: false,
         }
     }
 }
@@ -298,6 +313,7 @@ impl CommentsConfig {
                 .and_then(checks::whole)
                 .unwrap_or(DEFAULT_MAX_DRAFTS),
             attachments,
+            events: raw.get("events").and_then(Value::as_bool) == Some(true),
         })
     }
 }
@@ -325,7 +341,10 @@ impl Behavior for Comments {
         declared
             .computed
             .retain(|field| !fields.contains(&field.as_str()));
-        declared
+        // The events a table's Comments emits when its config sets events
+        // (#713), which the engine's declaration parser would refuse in
+        // the file.
+        declared.event(events::MENTIONED).event(events::REPLIED)
     }
 
     fn parse_config(
@@ -392,29 +411,6 @@ impl Behavior for Comments {
             reads::LIST_REACTIONS => reads::list_reactions(cx, params),
             reads::LIST_PINNED => reads::list_pinned(cx, params),
             _ => Err(cx.defect(format!("{name} is not an operation of Comments"))),
-        }
-    }
-
-    fn check_namespace_params(&self, operation: &str, params: &Value) -> Vec<SchemaIssue> {
-        match operation {
-            inbox::INBOX => inbox::params_issues(params),
-            _ => Vec::new(),
-        }
-    }
-
-    // The inbox, across every type that composes Comments and the caller
-    // may read (D77's primitive 3).
-    fn namespace(
-        &self,
-        cx: &superschematic_rules::NamespaceCx<'_>,
-        name: &str,
-        params: &Value,
-    ) -> Hook<Value> {
-        match name {
-            inbox::INBOX => inbox::inbox(cx, params),
-            _ => Err(cx.defect(format!(
-                "{name} is not an operation of Comments' namespace it runs"
-            ))),
         }
     }
 

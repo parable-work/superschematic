@@ -674,7 +674,7 @@ export interface CommentsAttachmentsOn {
   readonly schemes?: readonly string[];
 }
 
-/** Comments' config on a table (D77, D103's step 4): the longest body, how long an author may edit, the block kinds a message may hold, what an attachment block may describe, and the permissions that moderate, pin and resolve. Every member is optional. Streamed replies, read state and deliveries, and code anchors wait for the core, so their members are not a table's. */
+/** Comments' config on a table (D77, D103's step 4): the longest body, how long an author may edit, the block kinds a message may hold, what an attachment block may describe, the permissions that moderate, pin and resolve, and whether it emits events for the notifier (#713). Every member is optional. Streamed replies, claiming deliveries and code anchors wait for the core, so their members are not a table's. */
 export interface CommentsOn {
   /** The longest body a post or an edit gives, in code points: 1 to 40000, 40000 when absent. */
   readonly maxBodyLength?: number;
@@ -690,6 +690,8 @@ export interface CommentsOn {
   readonly pinPermission?: string;
   /** The permission that lets a caller resolve and reopen another's thread. Absent, only a thread's author does. */
   readonly resolvePermission?: string;
+  /** Whether a message that comes to stand, and an edit that adds a mention, emits mentioned and replied about the row (#713), which the API's @behaviorWorker hands to its Workers and the notifier raises into its inbox; none when absent. */
+  readonly events?: boolean;
 }
 
 /**
@@ -706,8 +708,9 @@ export interface CommentsOn {
  * beside the row: it moves no version of the row and asks no other
  * behavior's guard, so a lease another principal holds stops no reply. Its
  * operations (comments.post, edit, deleteMessage, purge, react, unreact,
- * pin, unpin, resolve, reopen, listMessages, getMessage, listEdits,
- * listReactions, listPinned) change and read them. Like Timers, it
+ * pin, unpin, resolve, reopen, markRead, follow, listMessages, getMessage,
+ * listEdits, listReactions, listPinned) change and read them, and its view
+ * reads the caller's unread (#713). Like Timers, it
  * resolves to the empty object type; the first type argument is the table
  * itself.
  */

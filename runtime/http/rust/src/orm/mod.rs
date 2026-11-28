@@ -1370,6 +1370,10 @@ pub struct Caller {
     pub agent: Option<String>,
     /// How its authenticator verified it for the call (D200).
     pub assurance: Option<crate::auth::Assurance>,
+    /// The channel kind the call came over (D157, #606): a reply's or an
+    /// inbound message's, which Comments records as a message's via;
+    /// `None` for a call over the API.
+    pub channel: Option<String>,
 }
 
 impl Caller {
@@ -1403,6 +1407,7 @@ impl Caller {
                 .and_then(named),
             agent: principal.agent().map(str::to_owned),
             assurance: principal.assurance.clone(),
+            channel: None,
         }
     }
 }
@@ -1559,6 +1564,31 @@ pub struct CoreTableOperation<'a> {
     pub params: Value,
     /// Who the command runs as.
     pub caller: Caller,
+}
+
+/// A read of a row through the core as the caller (the core's read, #713):
+/// the fields of the use under `member` that each reader reads its own of
+/// (Comments' `unread`).
+#[derive(Clone, Debug)]
+pub struct CoreRead<'a> {
+    /// The table.
+    pub table: &'a Table,
+    /// The row's key, in its wire form.
+    pub key: String,
+    /// The member the use's operations sit under.
+    pub member: &'a str,
+    /// Who the read runs as.
+    pub caller: Caller,
+}
+
+/// The refusal of a read through the core by a dialect's `Rules` that run
+/// none: a binding written before they could (#713).
+#[allow(dead_code)]
+pub(crate) fn no_reads(read: &CoreRead<'_>) -> Error {
+    Error::Definition(format!(
+        "{}.{} has a view, and the repositories' rules read none through the core: regenerate the types crate, whose rules do (#713)",
+        read.table.name, read.member
+    ))
 }
 
 /// The refusal of an operation of a table as a whole by a dialect's

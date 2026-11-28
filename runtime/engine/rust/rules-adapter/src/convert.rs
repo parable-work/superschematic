@@ -197,6 +197,26 @@ pub(crate) fn from_cell(
             });
     }
     if is_uuid(column) {
+        // A list of UUIDs (a uuid[] column, @audience's effectiveAudience),
+        // as the list of their wire forms.
+        if let Some(items) = uuid_list(&cell) {
+            return items
+                .iter()
+                .map(|item| match item {
+                    Value::String(text) => uuid_value(text).map(|n| Value::from(base62(n))),
+                    _ => None,
+                })
+                .collect::<Option<Vec<Value>>>()
+                .map(|wires| Some(Value::Array(wires)))
+                .ok_or_else(|| {
+                    internal(format!(
+                        "{}.{}: {} is no list of UUIDs, hyphenated or base62",
+                        table.type_name,
+                        column.field,
+                        Value::from(shown(&cell))
+                    ))
+                });
+        }
         return uuid_of(&cell)
             .map(|n| Some(Value::from(base62(n))))
             .ok_or_else(|| {
@@ -215,6 +235,21 @@ pub(crate) fn from_cell(
         }
         other => plain(other),
     }))
+}
+
+/// The items of a cell that holds a list (a uuid[] column read as JSON, or
+/// as its JSON text); `None` for any other cell.
+fn uuid_list(cell: &Cell) -> Option<Vec<Value>> {
+    match cell {
+        Cell::Json(Value::Array(items)) => Some(items.clone()),
+        Cell::Text(text) if text.trim_start().starts_with('[') => {
+            match serde_json::from_str::<Value>(text) {
+                Ok(Value::Array(items)) => Some(items),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 fn is_uuid(column: &Column) -> bool {
@@ -587,6 +622,21 @@ mod tests {
         assert_eq!(uuid_value("not-a-uuid!"), None);
         assert_eq!(uuid_value("db360f43_5530-c407-56da-9cd8e0c971dd"), None);
         assert_eq!(uuid_value("0123456789012345678901234"), None);
+    }
+
+    #[test]
+    fn a_list_of_uuids_reads_as_its_wire_forms() {
+        let column = Column::new("effectiveAudience", "effective_audience", "Identity.UUID");
+        let hyphenated = "db360f43-5530-c407-56da-9cd8e0c971dd";
+        let read = |cell: Cell| from_cell(cell, &column, &order());
+        let want = Some(json!(["6fe1XoZ0UJpMNNdUOSMC2X"]));
+        assert_eq!(read(Cell::Json(json!([hyphenated]))).unwrap(), want);
+        assert_eq!(
+            read(Cell::Text(format!("[\"{hyphenated}\"]"))).unwrap(),
+            want
+        );
+        assert_eq!(read(Cell::Json(json!([]))).unwrap(), Some(json!([])));
+        assert!(read(Cell::Json(json!(["not-a-uuid!"]))).is_err());
     }
 
     #[test]

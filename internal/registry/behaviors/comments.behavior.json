@@ -85,6 +85,10 @@
         "type": "integer",
         "minimum": 86400000,
         "maximum": 31536000000
+      },
+      "events": {
+        "description": "On a table, whether a message that comes to stand, and an edit that adds a mention, emits mentioned and replied about the row, which the API's behavior worker hands to the project's handler and the notifier raises into its inbox (#713); none when absent. An engine type refuses it.",
+        "type": "boolean"
       }
     }
   },
@@ -116,6 +120,7 @@
         { "name": "quotes", "description": "The id of the message of the thread a reply quotes, when it quotes one.", "type": "Generic.Int64" },
         { "name": "author", "description": "The subject of the caller who posted or began it.", "type": "string" },
         { "name": "forSubject", "description": "The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved.", "type": "string" },
+        { "name": "via", "description": "The channel kind its author's call came over (D157): sms, email or another a channel adapter names, as a reply or an inbound message runs as its sender; absent for a call over the API.", "type": "string" },
         { "name": "state", "description": "composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted.", "type": "string" },
         { "name": "body", "description": "The text, Markdown; empty while composing (the draft's chunks hold it) and once deleted.", "type": "Text.Markdown" },
         { "name": "blocks", "description": "The blocks as posted or last edited, in order.", "type": "Generic.JSON" },

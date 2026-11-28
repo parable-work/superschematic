@@ -174,6 +174,15 @@ pub(super) fn for_of<'a>(view: &View<'a, CommentsConfig>) -> Option<&'a str> {
         .filter(|subject| *subject != caller.subject)
 }
 
+/// The caller's via: the channel kind it came over (D157, #606), when its
+/// host names one.
+pub(super) fn via_of<'a>(view: &View<'a, CommentsConfig>) -> Option<&'a str> {
+    view.caller()
+        .channel
+        .as_deref()
+        .filter(|channel| !channel.is_empty())
+}
+
 /// `not_author` for a caller who is not the message's author.
 pub(super) fn not_author(view: &View<'_, CommentsConfig>, message: &Message) -> Stop {
     veto(

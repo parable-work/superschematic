@@ -103,8 +103,11 @@ type RelationSpec struct {
 // StandsIn for a service standing in for an end user, which holds none;
 // ActingFor the subject it acts for (D77), which Provenance records (D73);
 // Kind and ActingForKind what each is (D156), "" for a user; Agent the
-// Agent whose run it is (D158); and Assurance how the host verified it for
-// the call (D200), which an Approvals requirement's proof reads.
+// Agent whose run it is (D158); Assurance how the host verified it for the
+// call (D200), which an Approvals requirement's proof reads; and Channel
+// the channel kind the call came over (D157, #606), a reply's or an inbound
+// message's, which Comments records as a message's via, "" for a call over
+// the API.
 type Caller struct {
 	Subject       string     `json:"subject"`
 	Permissions   []string   `json:"permissions,omitempty"`
@@ -114,6 +117,7 @@ type Caller struct {
 	ActingForKind string     `json:"actingForKind,omitempty"`
 	Agent         string     `json:"agent,omitempty"`
 	Assurance     *Assurance `json:"assurance,omitempty"`
+	Channel       string     `json:"channel,omitempty"`
 }
 
 // Assurance is how a host verified a caller for one call (D200): when its
@@ -129,11 +133,15 @@ type ActionKind string
 
 // The kinds of Action.
 const (
-	ActionDefine    ActionKind = "define"
-	ActionPublish   ActionKind = "publish"
-	ActionCreate    ActionKind = "create"
-	ActionUpdate    ActionKind = "update"
-	ActionDelete    ActionKind = "delete"
+	ActionDefine  ActionKind = "define"
+	ActionPublish ActionKind = "publish"
+	ActionCreate  ActionKind = "create"
+	ActionUpdate  ActionKind = "update"
+	ActionDelete  ActionKind = "delete"
+	// ActionRead reads a row through the core as the caller (D104's step
+	// 4, #713): {"kind","key"}, each use's fields it computes through its
+	// reads, by use id, as the result. It runs no guard and writes nothing.
+	ActionRead      ActionKind = "read"
 	ActionOperation ActionKind = "operation"
 	ActionDeadline  ActionKind = "deadline"
 	// ActionChange is a change command (D103): a write of a row, whoever
@@ -290,7 +298,7 @@ func (a Action) MarshalJSON() ([]byte, error) {
 			Key   string                     `json:"key"`
 			Patch map[string]json.RawMessage `json:"patch"`
 		}{a.Kind, a.Key, objectOf(a.Patch)})
-	case ActionDelete:
+	case ActionDelete, ActionRead:
 		return json.Marshal(struct {
 			Kind ActionKind `json:"kind"`
 			Key  string     `json:"key"`
@@ -382,7 +390,7 @@ func (a *Action) UnmarshalJSON(data []byte) error {
 		out.Own, out.Params = wire.Own, wire.Params
 	case ActionUpdate:
 		out.Key, out.Patch = wire.Key, wire.Patch
-	case ActionDelete:
+	case ActionDelete, ActionRead:
 		out.Key = wire.Key
 	case ActionOperation:
 		out.Key, out.UseID, out.Operation, out.Params = wire.Key, wire.UseID, wire.Operation, wire.Params

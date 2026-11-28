@@ -4940,18 +4940,54 @@ one thread's replies, by `before`, `after` or `around`;
 `getMessage`, `listReactions` and `listPinned` read. Each refusal is
 the core's, in its words.
 
+Each caller has a read marker on the conversation and on each thread.
+`markRead` moves it, and `follow` follows a thread or stops (#713). A
+caller follows each thread it posts in or is mentioned in without asking.
+A reader's `unread`, how many of others' top-level messages stand past its
+marker, is its own, so no read of the row carries it: the use's `view`
+reads the row through the core as the caller and answers it.
+
+```ts
+await orm.ticket.comments.markRead(id, { upTo: posted.id }); // { readUpTo: 1, unread: 0 }
+await orm.ticket.comments.follow(id, { thread: posted.id, on: false });
+const { unread } = await orm.ticket.comments.view(id);
+```
+
+In Go the use's `View(ctx, id)` answers the fields as their JSON
+(`map[string]json.RawMessage`), and in Rust `view(&key)` as `orm::Values`.
+A view, as a read, needs a caller who may read the row.
+
+With `events: true` in its config, a table's Comments emits `mentioned`
+and `replied` about the row, naming the subjects who should hear of each
+message, which the notifier raises into its inbox: the in-app inbox is the
+notifier's
+([a table's conversation in the inbox](/superschematic/guides/notifications/#a-tables-conversation-in-the-inbox)).
+The table then keeps an event queue, which a `@behaviorWorker` runs.
+
+A message records the subject its author acted for (`for`, the caller's
+`actingFor`) and the channel kind the call came over (`via`, the caller's
+`channel`, D157): a reply by text that the notifier runs as its sender
+records `sms`, as does an agent's message for a party who wrote in, when
+its caller names the channel. A call over the API names none.
+
+```ts
+const agent = orm.withBehaviorCaller({ subject: runId, kind: "agent", actingFor: partyId, channel: "sms" });
+await agent.ticket.comments.post(id, { body: "Running late, there by 4." }); // { author: runId, for: partyId, via: "sms", ... }
+```
+
+The messages' `blocks` have a GIN index on Postgres, which a row's
+backlinks read by JSONB containment
+([References and files on any row](#references-and-files-on-any-row)).
+
 The core also runs a reply streamed as it is written (`begin`,
-`appendDraft`, `finish`, `interrupt`) and read state and follows
-(`markRead`, `follow`, a reader's `unread`), which
+`appendDraft`, `finish`, `interrupt`), which
 [development mode](/superschematic/guides/development-mode/) serves and a
-table's generated API leaves out. The inbox and deliveries, search across
-a namespace and `moveAnchor` wait for the core. The build leaves all of
+table's generated API leaves out. Claiming and settling deliveries, search
+across a namespace and `moveAnchor` wait for the core. The build leaves
 these operations out of the table's and refuses their config members,
-such as `composeTimeoutMs` and `anchorPermission`. A message records the
-subject its author acted for (`for`, the caller's `actingFor`), and no
-calling service (`via`). Comments can be added to a table with rows, whose
-conversations start empty, and cannot be removed from one. A table whose
-behaviors keep sub-tables has no upserts.
+such as `composeTimeoutMs` and `anchorPermission`. Comments can be added
+to a table with rows, whose conversations start empty, and cannot be
+removed from one. A table whose behaviors keep sub-tables has no upserts.
 
 ### Fields a model fills, and who set each
 

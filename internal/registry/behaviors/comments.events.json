@@ -1,0 +1,38 @@
+[
+  {
+    "kind": "mentioned",
+    "description": "On a table whose config sets events: a message that came to stand, or an edit that added mentions to one, names subjects who should hear of it by their mention, its author and the subject it was written for left out. The notifier raises it as the use's member and mentioned, and a route's recipient { payload: subjects } reaches each (#713). Delivery is at least once, so a handler is idempotent by the row's key, the message and the subjects.",
+    "payloadSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "author", "subjects"],
+      "properties": {
+        "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 },
+        "thread": { "description": "The id of the top-level message whose thread it is a reply in; absent for a top-level message.", "type": "integer", "minimum": 1 },
+        "author": { "description": "The subject of its author.", "type": "string" },
+        "forSubject": { "description": "The subject its author acted for, when the caller acted for someone (D77).", "type": "string" },
+        "via": { "description": "The channel kind its author's call came over (D157), when its host named one.", "type": "string" },
+        "excerpt": { "description": "Its body's first 200 code points.", "type": "string" },
+        "subjects": { "description": "The subjects it mentions that hear of it, as written, each once; a role: subject names the holders of a role.", "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    }
+  },
+  {
+    "kind": "replied",
+    "description": "On a table whose config sets events: a reply came to stand in a thread whose followers should hear of it, its author, the subject it was written for and the subjects it mentions left out (they hear of it as mentioned). The notifier raises it as the use's member and replied, and a route's recipient { payload: subjects } reaches each (#713). Delivery is at least once, so a handler is idempotent by the row's key and the message.",
+    "payloadSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["message", "author", "subjects"],
+      "properties": {
+        "message": { "description": "The id of the message.", "type": "integer", "minimum": 1 },
+        "thread": { "description": "The id of the top-level message whose thread it is a reply in; absent for a top-level message.", "type": "integer", "minimum": 1 },
+        "author": { "description": "The subject of its author.", "type": "string" },
+        "forSubject": { "description": "The subject its author acted for, when the caller acted for someone (D77).", "type": "string" },
+        "via": { "description": "The channel kind its author's call came over (D157), when its host named one.", "type": "string" },
+        "excerpt": { "description": "Its body's first 200 code points.", "type": "string" },
+        "subjects": { "description": "The thread's followers that hear of it, in their order.", "type": "array", "minItems": 1, "items": { "type": "string" } }
+      }
+    }
+  }
+]

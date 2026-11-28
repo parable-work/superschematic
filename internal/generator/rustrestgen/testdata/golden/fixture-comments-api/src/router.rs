@@ -29,11 +29,13 @@ use std::sync::Arc;
 // the declared bounds and the scalar's own constraints of each.
 static TICKET_COMMENTS_COMMENTS_DELETE_MESSAGE_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
 static TICKET_COMMENTS_COMMENTS_EDIT_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
+static TICKET_COMMENTS_COMMENTS_FOLLOW_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
 static TICKET_COMMENTS_COMMENTS_GET_MESSAGE_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
 static TICKET_COMMENTS_COMMENTS_LIST_EDITS_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
 static TICKET_COMMENTS_COMMENTS_LIST_MESSAGES_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
 static TICKET_COMMENTS_COMMENTS_LIST_PINNED_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
 static TICKET_COMMENTS_COMMENTS_LIST_REACTIONS_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
+static TICKET_COMMENTS_COMMENTS_MARK_READ_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
 static TICKET_COMMENTS_COMMENTS_PIN_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
 static TICKET_COMMENTS_COMMENTS_POST_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
 static TICKET_COMMENTS_COMMENTS_PURGE_ID: ParamSpec = ParamSpec::new("id", ParamKind::Uuid).required().check(types::validators::scalars::validate_identity_uuid);
@@ -80,6 +82,11 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
     router = router.route("/api/ticket/{id}/comments/edit", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsFollow")
+        .apply(post(handle_ticket_comments_comments_follow));
+    router = router.route("/api/ticket/{id}/comments/follow", route);
+    let route = RouteControls::under(transport)
+        .authorize(Arc::clone(&state.implementations.authenticator), &[])
         .operation("commentsGetMessage")
         .apply(post(handle_ticket_comments_comments_get_message));
     router = router.route("/api/ticket/{id}/comments/get-message", route);
@@ -103,6 +110,11 @@ pub fn build_router_with(implementations: Implementations, options: RouterOption
         .operation("commentsListReactions")
         .apply(post(handle_ticket_comments_comments_list_reactions));
     router = router.route("/api/ticket/{id}/comments/list-reactions", route);
+    let route = RouteControls::under(transport)
+        .authorize(Arc::clone(&state.implementations.authenticator), &[])
+        .operation("commentsMarkRead")
+        .apply(post(handle_ticket_comments_comments_mark_read));
+    router = router.route("/api/ticket/{id}/comments/mark-read", route);
     let route = RouteControls::under(transport)
         .authorize(Arc::clone(&state.implementations.authenticator), &[])
         .operation("commentsPin")
@@ -323,6 +335,82 @@ async fn handle_ticket_comments_comments_edit(
         &args.id,
         "Comments",
         "edit",
+        &args.input,
+    )
+    .await;
+    operation_response(result, request_id.as_deref())
+}
+
+/// Decodes the arguments of ticket-comments.commentsFollow in the order the TypeScript
+/// router reads them: path, query, input, then body fields.
+fn decode_ticket_comments_comments_follow(captures: &HashMap<String, String>, body: Option<Value>) -> Result<TicketCommentsCommentsFollowArgs, ApiError> {
+    Ok(TicketCommentsCommentsFollowArgs {
+        id: TICKET_COMMENTS_COMMENTS_FOLLOW_ID.path(captures)?,
+        input: required_input(body, types::validators::parse_ticket_comments_follow_input)?,
+    })
+}
+
+impl TicketCommentsCommentsFollowArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        TICKET_COMMENTS_COMMENTS_FOLLOW_ID.check_value(ParamLocation::Path, &self.id)?;
+        check_input(&self.input, types::validators::prepare_ticket_comments_follow_input)?;
+        Ok(())
+    }
+}
+
+async fn handle_ticket_comments_comments_follow(
+    State(state): State<Arc<RouterState>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    uri: Uri,
+    path_params: Result<Path<HashMap<String, String>>, PathRejection>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let request_id = request_id_from_headers(&headers);
+    // axum decodes each capture once, but keeps an escape it cannot decode
+    // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
+    // both answer a problem here.
+    let path_params = match path_params {
+        Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
+        _ => {
+            return error_response(ApiError::bad_request(
+                "The request path is not valid percent-encoding",
+            ))
+        }
+    };
+    let query = match query_values(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is none.
+    let body = match json_body(body) {
+        Ok(body) => body,
+        Err(err) => return error_response(err),
+    };
+    let args = match decode_ticket_comments_comments_follow(&path_params, body) {
+        Ok(args) => args,
+        Err(err) => return error_response(err),
+    };
+    let mut ctx = RequestContext::new(method_from_str("post"), "/api/ticket/{id}/comments/follow".to_string());
+    ctx.headers = headers_to_map(&headers);
+    ctx.principal = Some(principal);
+    ctx.path_params = path_params;
+    ctx.query_params = query.last_values();
+    // Ticket's Comments follow, a Comments (D103): the behaviors' core
+    // runs it on a transaction of fixture-comments-db's pool, as the request's caller.
+    let result: Result<types::TicketCommentsFollowResult, ApiError> = behaviors::run_operation(
+        &state.implementations.behaviors,
+        &ctx,
+        "Ticket",
+        &args.id,
+        "Comments",
+        "follow",
         &args.input,
     )
     .await;
@@ -703,6 +791,82 @@ async fn handle_ticket_comments_comments_list_reactions(
         &args.id,
         "Comments",
         "listReactions",
+        &args.input,
+    )
+    .await;
+    operation_response(result, request_id.as_deref())
+}
+
+/// Decodes the arguments of ticket-comments.commentsMarkRead in the order the TypeScript
+/// router reads them: path, query, input, then body fields.
+fn decode_ticket_comments_comments_mark_read(captures: &HashMap<String, String>, body: Option<Value>) -> Result<TicketCommentsCommentsMarkReadArgs, ApiError> {
+    Ok(TicketCommentsCommentsMarkReadArgs {
+        id: TICKET_COMMENTS_COMMENTS_MARK_READ_ID.path(captures)?,
+        input: required_input(body, types::validators::parse_ticket_comments_mark_read_input)?,
+    })
+}
+
+impl TicketCommentsCommentsMarkReadArgs {
+    /// Checks arguments a caller built, in-process rather than in a
+    /// request, as the router checks a request's: each by its parameter's
+    /// rules, then the input by its type's, a refusal the 400 the router
+    /// answers.
+    pub fn check(&self) -> Result<(), ApiError> {
+        TICKET_COMMENTS_COMMENTS_MARK_READ_ID.check_value(ParamLocation::Path, &self.id)?;
+        check_input(&self.input, types::validators::prepare_ticket_comments_mark_read_input)?;
+        Ok(())
+    }
+}
+
+async fn handle_ticket_comments_comments_mark_read(
+    State(state): State<Arc<RouterState>>,
+    headers: HeaderMap,
+    Extension(principal): Extension<Principal>,
+    uri: Uri,
+    path_params: Result<Path<HashMap<String, String>>, PathRejection>,
+    query: Result<Query<Vec<(String, String)>>, QueryRejection>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    let request_id = request_id_from_headers(&headers);
+    // axum decodes each capture once, but keeps an escape it cannot decode
+    // (%ZZ) as text and refuses bytes that are not UTF-8 with a bare 400:
+    // both answer a problem here.
+    let path_params = match path_params {
+        Ok(Path(path_params)) if path_is_percent_encoded(uri.path()) => path_params,
+        _ => {
+            return error_response(ApiError::bad_request(
+                "The request path is not valid percent-encoding",
+            ))
+        }
+    };
+    let query = match query_values(query) {
+        Ok(query) => query,
+        Err(err) => return error_response(err),
+    };
+    // The body is JSON whatever its Content-Type, as the Go and TypeScript
+    // servers read it; an empty body is none.
+    let body = match json_body(body) {
+        Ok(body) => body,
+        Err(err) => return error_response(err),
+    };
+    let args = match decode_ticket_comments_comments_mark_read(&path_params, body) {
+        Ok(args) => args,
+        Err(err) => return error_response(err),
+    };
+    let mut ctx = RequestContext::new(method_from_str("post"), "/api/ticket/{id}/comments/mark-read".to_string());
+    ctx.headers = headers_to_map(&headers);
+    ctx.principal = Some(principal);
+    ctx.path_params = path_params;
+    ctx.query_params = query.last_values();
+    // Ticket's Comments markRead, a Comments (D103): the behaviors' core
+    // runs it on a transaction of fixture-comments-db's pool, as the request's caller.
+    let result: Result<types::TicketCommentsMarkReadResult, ApiError> = behaviors::run_operation(
+        &state.implementations.behaviors,
+        &ctx,
+        "Ticket",
+        &args.id,
+        "Comments",
+        "markRead",
         &args.input,
     )
     .await;

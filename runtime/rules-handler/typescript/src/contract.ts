@@ -38,6 +38,8 @@ export interface Caller {
   agent?: string;
   /** How the host verified the caller for this call (D200), which an Approvals requirement's proof reads. */
   assurance?: { signedInAt?: number; userVerified?: boolean };
+  /** The channel kind the call came over (D157, #606), which Comments records as a message's via; absent for a call over the API. */
+  channel?: string;
 }
 
 /** A refused request, shaped as the engine's errors are (D58). */

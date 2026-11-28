@@ -46,6 +46,10 @@ type Rules struct {
 	// every command a repository of a table that composes behaviors runs
 	// through the core presents what it names.
 	Preconditions bool
+	// Views is a schema one of whose tables' uses has fields each reader
+	// reads its own of (#713): rules.go then holds viewOf, which each
+	// use's View reads the core's answer through.
+	Views bool
 }
 
 // RepositoryUse is a use of a behavior on a table, as the repository
@@ -79,6 +83,10 @@ type RepositoryUse struct {
 	// Operations are the use's operations on a row and on the table as a
 	// whole (D104), in the declaration's order.
 	Operations []RepositoryOperation
+	// View are the fields each reader reads its own of (Comments' unread),
+	// which the interface's View reads through the core as the caller
+	// (the core's read, #713); none for a use whose behavior declares none.
+	View []string
 	// Precondition is the struct the use's entry of a command's
 	// preconditions is (<Type><Member>Precondition, D104), one of Structs,
 	// typed from its behavior's preconditionSchema; "" for a use whose
@@ -120,6 +128,11 @@ type RepositoryOperation struct {
 // MethodDoc is the doc comment of the operation's method: its
 // declaration's description after its name, or a sentence that names the
 // operation when the declaration gives none.
+// ViewDoc is the doc comment of the use's View.
+func (u RepositoryUse) ViewDoc() string {
+	return fmt.Sprintf("View reads the row id names through the behaviors' core as the caller WithBehaviorCaller names (the core's read, #713), in a transaction, and returns %s's fields each reader reads its own of, by name (%s), each as its JSON. It writes nothing, and returns ErrNotFound when no live row holds id, or the row is one the caller does not see (D156), as GetOne's is.", u.Member, strings.Join(u.View, ", "))
+}
+
 func (o RepositoryOperation) MethodDoc() string {
 	doc := strings.Join(strings.Fields(o.Doc), " ")
 	switch {
@@ -493,11 +506,15 @@ func (o *ORMOutput) HasBehaviorQueues() bool {
 }
 
 // OperationsUseRawJSON reports whether an operation of a use of any
-// table's takes or returns json.RawMessage, which interfaces.go's no-op
+// table's takes or returns json.RawMessage, or a use has a View, which
+// returns its fields as json.RawMessage: what interfaces.go's no-op
 // operations name.
 func (o *ORMOutput) OperationsUseRawJSON() bool {
 	for _, repo := range o.Repositories {
 		for _, use := range repo.Uses {
+			if len(use.View) > 0 {
+				return true
+			}
 			for _, op := range use.Operations {
 				if strings.Contains(op.Params, "json.RawMessage") || strings.Contains(op.ResultReturn(), "json.RawMessage") {
 					return true
@@ -626,11 +643,14 @@ func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Reg
 	// A use whose behavior takes a command's preconditions puts
 	// WithPreconditions in the package, which every command of every table
 	// that composes behaviors then reads (D104).
-	preconditions := false
+	preconditions, views := false, false
 	for _, table := range layout.Types {
 		for _, use := range table.Uses {
 			if declaration, ok := reg.Behavior(use.Behavior); ok && len(declaration.PreconditionSchema) > 0 {
 				preconditions = true
+			}
+			if len(use.View) > 0 {
+				views = true
 			}
 		}
 	}
@@ -653,7 +673,7 @@ func attachRules(schema *ir.Schema, repositories []Repository, reg *registry.Reg
 	if strings.Contains(string(encoded), "`") {
 		return nil, fmt.Errorf("ormgen: the behaviors' layout holds a backquote, which rules.go's raw string cannot: %s", encoded)
 	}
-	return &Rules{LayoutJSON: string(encoded), Preconditions: preconditions}, nil
+	return &Rules{LayoutJSON: string(encoded), Preconditions: preconditions, Views: views}, nil
 }
 
 // attachTableRules gives repo, a table that composes behaviors as a table,
@@ -867,6 +887,7 @@ func attachTableRules(schema *ir.Schema, repo *Repository, table *behaviorlayout
 			})
 		}
 		ru.Enums, ru.Structs = b.enums, b.structs
+		ru.View = use.View
 
 		added := []string{ru.Interface}
 		for _, e := range ru.Enums {

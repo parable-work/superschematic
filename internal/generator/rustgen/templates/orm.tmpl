@@ -283,8 +283,29 @@ pub mod rules {
         }
     }
 
+{{- if .ORMViews}}
+    /// The id of the use whose operations sit under `member` of `table`,
+    /// which a view reads the fields of (#713).
+    pub(super) fn use_id_of(table: &orm::Table, member: &str) -> Result<&'static str, orm::Error> {
+        layout()?
+            .table(&table.name)
+            .and_then(|layout| layout.uses.iter().find(|candidate| candidate.member() == member))
+            .map(|found| found.id.as_str())
+            .ok_or_else(|| orm::Error::Invalid(format!("{} has no behavior under {member}", table.name)))
+    }
+
+    /// The fields of the use `use_id` a read through the core answered,
+    /// by use id (#713); none when it computes none.
+    pub(super) fn view_of(mut read: orm::Values, use_id: &str) -> orm::Value {
+        read.remove(use_id)
+            .filter(orm::Value::is_object)
+            .unwrap_or_else(|| orm::Value::Object(Default::default()))
+    }
+
+{{end}}
     /// Who a command runs as, as the core takes a caller: with its kind,
-    /// whom it acts for, its run's Agent and its assurance (D200).
+    /// whom it acts for, its run's Agent and its assurance (D200), and the
+    /// channel it came over (#606).
     pub(super) fn caller(caller: orm::Caller) -> adapter::Caller {
         let mut core = if caller.stands_in {
             adapter::Caller::standing_in(caller.subject)
@@ -299,6 +320,7 @@ pub mod rules {
             signed_in_at: assurance.signed_in_at,
             user_verified: assurance.user_verified,
         });
+        core.channel = caller.channel;
         core
     }
 
@@ -591,6 +613,26 @@ pub mod postgres {
                 .map_err(|err| failed(table, err))
             })
         }
+{{- if .ORMViews}}
+
+        fn read<'a>(
+            &'a self,
+            client: &'a C,
+            read: orm::CoreRead<'a>,
+        ) -> orm::postgres::CoreFuture<'a, orm::Value> {
+            Box::pin(async move {
+                let table = read.table;
+                let transaction = orm::postgres::core_transaction(client, table)?;
+                let use_id = rules::use_id_of(table, read.member)?;
+                let host = rules::host()?;
+                let caller = rules::caller(read.caller);
+                adapter::postgres::run_read(&host, transaction, &table.name, &read.key, caller)
+                    .await
+                    .map(|fields| rules::view_of(fields, use_id))
+                    .map_err(|err| failed(table, err))
+            })
+        }
+{{- end}}
     }
 
 {{end}}
@@ -621,6 +663,16 @@ pub mod postgres {
                 .operation("{{$member}}", "{{$op.Name}}", key, params, options)
 {{- end}}
                 .await
+        }
+{{- end}}
+{{- if .View}}
+
+        /// Reads the live row whose key is `key` through the behaviors'
+        /// core as the repositories' caller (the core's read, #713), and
+        /// answers `{{$member}}`'s fields each reader reads its own of
+        /// ({{.ViewFields}}), by name. It writes nothing.
+        pub async fn view(&self, key: &{{$table.KeyType}}) -> Result<orm::Values, orm::Error> {
+            self.0.view("{{$member}}", key).await
         }
 {{- end}}
     }
@@ -998,6 +1050,21 @@ pub mod sqlite {
             )
             .map_err(|err| failed(table, err))
         }
+{{- if .ORMViews}}
+
+        fn read(
+            &self,
+            connection: &rusqlite::Connection,
+            read: orm::CoreRead<'_>,
+        ) -> Result<orm::Value, orm::Error> {
+            let table = read.table;
+            let use_id = rules::use_id_of(table, read.member)?;
+            let caller = rules::caller(read.caller);
+            adapter::sqlite::run_read(&rules::host()?, connection, &table.name, &read.key, caller)
+                .map(|fields| rules::view_of(fields, use_id))
+                .map_err(|err| failed(table, err))
+        }
+{{- end}}
     }
 
 {{end}}
@@ -1026,6 +1093,16 @@ pub mod sqlite {
 {{- else}}
             self.0.operation("{{$member}}", "{{$op.Name}}", key, params, options)
 {{- end}}
+        }
+{{- end}}
+{{- if .View}}
+
+        /// Reads the live row whose key is `key` through the behaviors'
+        /// core as the repositories' caller (the core's read, #713), and
+        /// answers `{{$member}}`'s fields each reader reads its own of
+        /// ({{.ViewFields}}), by name. It writes nothing.
+        pub fn view(&self, key: &{{$table.KeyType}}) -> Result<orm::Values, orm::Error> {
+            self.0.view("{{$member}}", key)
         }
 {{- end}}
     }

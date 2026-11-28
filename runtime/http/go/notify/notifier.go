@@ -593,9 +593,51 @@ func (n *Notifier) followPath(ctx context.Context, h notifications.Host, event r
 	return nil, nil
 }
 
-// recipientSpec is one of a route's recipients (D153).
+// RoleSubject is the prefix of a subject that names a role's holders: a
+// Comments mention of role:<name> (#713).
+const RoleSubject = "role:"
+
+// payloadPrincipals is the principals a member of the event's payload
+// names (#713): each a user's id, and role:<name> the role's holders.
+func (n *Notifier) payloadPrincipals(ctx context.Context, h notifications.Host, event raisedEvent, member string) ([]RecipientRef, error) {
+	var named []string
+	switch value := event.Payload[member].(type) {
+	case string:
+		named = []string{value}
+	case []any:
+		for _, item := range value {
+			if subject, ok := item.(string); ok {
+				named = append(named, subject)
+			}
+		}
+	case []string:
+		named = value
+	}
+	var out []RecipientRef
+	for _, subject := range named {
+		switch {
+		case subject == "":
+		case strings.HasPrefix(subject, RoleSubject):
+			holders, err := h.RoleHolders(n.system(ctx), strings.TrimPrefix(subject, RoleSubject))
+			if err != nil {
+				return nil, err
+			}
+			for _, id := range holders {
+				out = append(out, User(id))
+			}
+		default:
+			out = append(out, User(subject))
+		}
+	}
+	return out, nil
+}
+
+// recipientSpec is one of a route's recipients (D153): Payload the
+// principals a member of the event's payload names (#713), a Comments
+// event's subjects.
 type recipientSpec struct {
 	Path      *string `json:"path"`
+	Payload   *string `json:"payload"`
 	Principal *string `json:"principal"`
 	Kind      string  `json:"kind"`
 	Role      *string `json:"role"`
@@ -634,6 +676,12 @@ func (n *Notifier) recipientsOf(ctx context.Context, h notifications.Host, event
 			for _, id := range ids {
 				out = append(out, User(id))
 			}
+		case spec.Payload != nil:
+			named, err := n.payloadPrincipals(ctx, h, event, *spec.Payload)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, named...)
 		case spec.Principal != nil:
 			kind := spec.Kind
 			if kind == "" {

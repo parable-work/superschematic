@@ -57,6 +57,20 @@ pub async fn execute<C: GenericClient + Sync>(
     run::execute(host, &PgStore { client }, type_name, command, options).await
 }
 
+/// Reads a row through the core as the caller (the core's read, #713) and
+/// returns each use's fields it computes through its reads, by use id: a
+/// reader's own (Comments' unread). It writes nothing.
+pub async fn run_read<C: GenericClient + Sync>(
+    host: &Host<'_>,
+    client: &C,
+    type_name: &str,
+    key: &str,
+    caller: Caller,
+) -> Result<Map<String, Value>, Error> {
+    let store = PgStore { client };
+    run::run_read(host, &store, type_name, key, caller).await
+}
+
 /// Runs an operation of a use on a row and returns its result; null
 /// params are `{}`.
 #[allow(clippy::too_many_arguments)]

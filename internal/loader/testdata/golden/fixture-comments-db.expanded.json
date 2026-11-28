@@ -609,6 +609,13 @@
           }
         },
         {
+          "name": "via",
+          "description": "The channel kind its author's call came over (D157): sms, email or another a channel adapter names, as a reply or an inbound message runs as its sender; absent for a call over the API.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
           "name": "state",
           "description": "composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted.",
           "typeRef": {
@@ -728,6 +735,14 @@
             "message"
           ],
           "unique": true,
+          "origin": "behavior"
+        },
+        {
+          "keys": [
+            "blocks"
+          ],
+          "method": "gin",
+          "ops": "jsonb_path_ops",
           "origin": "behavior"
         }
       ],
@@ -1406,6 +1421,13 @@
           }
         },
         {
+          "name": "via",
+          "description": "The channel kind its author's call came over (D157): sms, email or another a channel adapter names, as a reply or an inbound message runs as its sender; absent for a call over the API.",
+          "typeRef": {
+            "name": "string"
+          }
+        },
+        {
           "name": "state",
           "description": "composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted.",
           "typeRef": {
@@ -1525,6 +1547,14 @@
             "message"
           ],
           "unique": true,
+          "origin": "behavior"
+        },
+        {
+          "keys": [
+            "blocks"
+          ],
+          "method": "gin",
+          "ops": "jsonb_path_ops",
           "origin": "behavior"
         }
       ],

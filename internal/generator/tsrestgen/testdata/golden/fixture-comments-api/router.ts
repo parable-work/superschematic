@@ -28,10 +28,12 @@ import type {
 } from 'superscalar/scalars';
 import type {
   TicketCommentsCommentMessage,
+  TicketCommentsFollowResult,
   TicketCommentsListEditsResult,
   TicketCommentsListMessagesResult,
   TicketCommentsListPinnedResult,
   TicketCommentsListReactionsResult,
+  TicketCommentsMarkReadResult,
   TicketCommentsPurgeResult,
 } from '@schemas/fixture-comments-api-types/types';
 import {
@@ -39,6 +41,8 @@ import {
   parseTicketCommentsDeleteMessageInputJson,
   parseTicketCommentsEditInputFromJSON,
   parseTicketCommentsEditInputJson,
+  parseTicketCommentsFollowInputFromJSON,
+  parseTicketCommentsFollowInputJson,
   parseTicketCommentsGetMessageInputFromJSON,
   parseTicketCommentsGetMessageInputJson,
   parseTicketCommentsListEditsInputFromJSON,
@@ -49,6 +53,8 @@ import {
   parseTicketCommentsListPinnedInputJson,
   parseTicketCommentsListReactionsInputFromJSON,
   parseTicketCommentsListReactionsInputJson,
+  parseTicketCommentsMarkReadInputFromJSON,
+  parseTicketCommentsMarkReadInputJson,
   parseTicketCommentsPinInputFromJSON,
   parseTicketCommentsPinInputJson,
   parseTicketCommentsPostInputFromJSON,
@@ -74,11 +80,13 @@ import { openAPIJSON } from './openapi';
 export type OperationName =
   | 'commentsDeleteMessage'
   | 'commentsEdit'
+  | 'commentsFollow'
   | 'commentsGetMessage'
   | 'commentsListEdits'
   | 'commentsListMessages'
   | 'commentsListPinned'
   | 'commentsListReactions'
+  | 'commentsMarkRead'
   | 'commentsPin'
   | 'commentsPost'
   | 'commentsPurge'
@@ -111,6 +119,18 @@ export const operationSpecs = {
     queryParams: [],
     bodyParams: [],
     input: { parse: (value: unknown) => parseTicketCommentsEditInputFromJSON(parseTicketCommentsEditInputJson(value)), required: true },
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  commentsFollow: {
+    name: 'commentsFollow',
+    namespace: 'ticket-comments',
+    method: 'POST',
+    path: '/api/ticket/{id}/comments/follow',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    input: { parse: (value: unknown) => parseTicketCommentsFollowInputFromJSON(parseTicketCommentsFollowInputJson(value)), required: true },
     auth: { public: false, required: true, permissions: [] },
     manual: false,
   },
@@ -171,6 +191,18 @@ export const operationSpecs = {
     queryParams: [],
     bodyParams: [],
     input: { parse: (value: unknown) => parseTicketCommentsListReactionsInputFromJSON(parseTicketCommentsListReactionsInputJson(value)), required: true },
+    auth: { public: false, required: true, permissions: [] },
+    manual: false,
+  },
+  commentsMarkRead: {
+    name: 'commentsMarkRead',
+    namespace: 'ticket-comments',
+    method: 'POST',
+    path: '/api/ticket/{id}/comments/mark-read',
+    pathParams: [{ name: 'id', kind: 'uuid', required: true }],
+    queryParams: [],
+    bodyParams: [],
+    input: { parse: (value: unknown) => parseTicketCommentsMarkReadInputFromJSON(parseTicketCommentsMarkReadInputJson(value)), required: true },
     auth: { public: false, required: true, permissions: [] },
     manual: false,
   },
@@ -359,6 +391,29 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       timeoutSeconds: timeouts.commentsEdit,
     }
   );
+  // Ticket's Comments follow, a Comments (D103): the
+  // repository runs it through the behaviors' core as the request's
+  // caller, and a refusal of the core's is the problem of its status,
+  // code and message.
+  mountOperation(
+    router,
+    operationSpecs.commentsFollow,
+    (ctx, request) =>
+      behaviorOperation(() =>
+        options.orm.ticket.comments.follow(
+          request.path['id'] as IdentityUUID,
+          // The repository's parameters: the wire values of TicketCommentsFollowInput.
+          request.input as never,
+          { caller: behaviorCaller(ctx) }
+        )
+      ) as Promise<TicketCommentsFollowResult>,
+    options,
+    {
+      bodyLimitBytes: bodyLimits.commentsFollow,
+      rateLimitPerMinute: rateLimits.commentsFollow,
+      timeoutSeconds: timeouts.commentsFollow,
+    }
+  );
   // Ticket's Comments getMessage, a Comments (D103): the
   // repository runs it through the behaviors' core as the request's
   // caller, and a refusal of the core's is the problem of its status,
@@ -476,6 +531,30 @@ export function buildRouter<E extends Env = Env>(implementations: Implementation
       bodyLimitBytes: bodyLimits.commentsListReactions,
       rateLimitPerMinute: rateLimits.commentsListReactions,
       timeoutSeconds: timeouts.commentsListReactions,
+    }
+  );
+  // Ticket's Comments markRead, a Comments (D103): the
+  // repository runs it through the behaviors' core as the request's
+  // caller, and a refusal of the core's is the problem of its status,
+  // code and message.
+  mountOperation(
+    router,
+    operationSpecs.commentsMarkRead,
+    (ctx, request) =>
+      behaviorOperation(() =>
+        options.orm.ticket.comments.markRead(
+          request.path['id'] as IdentityUUID,
+          // The repository's parameters: the wire values of TicketCommentsMarkReadInput,
+          // each optional member that is null left out (D104).
+          behaviorParams(request.input, ['thread']) as never,
+          { caller: behaviorCaller(ctx) }
+        )
+      ) as Promise<TicketCommentsMarkReadResult>,
+    options,
+    {
+      bodyLimitBytes: bodyLimits.commentsMarkRead,
+      rateLimitPerMinute: rateLimits.commentsMarkRead,
+      timeoutSeconds: timeouts.commentsMarkRead,
     }
   );
   // Ticket's Comments pin, a Comments (D103): the

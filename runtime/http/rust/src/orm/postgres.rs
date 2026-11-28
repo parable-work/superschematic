@@ -30,8 +30,8 @@ use super::routes::{self, Routes, TableOperation, TableOutcome, TableRequest};
 use super::run::{Client, Runner};
 use super::{
     row, values, wire, AccessCaller, Bound, Caller, Column, Constraint, ConstraintKind, CoreCreate,
-    CoreDelete, CoreOperation, CoreTableOperation, CoreUpdate, Definition, Dialect, Error,
-    FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertManyOptions,
+    CoreDelete, CoreOperation, CoreRead, CoreTableOperation, CoreUpdate, Definition, Dialect,
+    Error, FieldKeys, FindOptions, Found, PageOptions, RowPage, Session, Table, UpsertManyOptions,
     UpsertOptions, Upserted, Values, WriteOptions,
 };
 use crate::auth::Principal;
@@ -78,6 +78,14 @@ pub trait Rules<C>: Send + Sync {
     ) -> CoreFuture<'a, Value> {
         let _ = client;
         let refused = super::no_table_operations(&operation);
+        Box::pin(async move { Err(refused) })
+    }
+    /// Reads the live row a read names through the core as its caller
+    /// (#713), and answers the use's fields it computes through its reads.
+    /// Rules written before they could read one refuse it.
+    fn read<'a>(&'a self, client: &'a C, read: CoreRead<'a>) -> CoreFuture<'a, Value> {
+        let _ = client;
+        let refused = super::no_reads(&read);
         Box::pin(async move { Err(refused) })
     }
 }
@@ -660,6 +668,15 @@ impl<C: GenericClient + Sync> Repository<'_, C> {
             .await
     }
 
+    /// Reads the row whose key is `key` through the behaviors' core as the
+    /// repositories' caller (the core's read, #713), in the caller's
+    /// transaction, and answers the fields of the use under `member` each
+    /// reader reads its own of (Comments' `unread`). A key no live row
+    /// holds is [`Error::NotFound`].
+    pub async fn view(&self, member: &str, key: &Value) -> Result<Values, Error> {
+        self.runner().view(member, key).await
+    }
+
     /// Holds `answer`, what the behaviors' core answered `operation` of the
     /// behavior under `member` on the table as a whole, to the caller the
     /// repositories keep to (D156), as [`Repository::table_operation`]
@@ -979,6 +996,13 @@ where
             .map_err(|err| Error::Definition(format!("the result of {member}.{operation}: {err}")))
     }
 
+    /// Reads the live row whose key is `key` through the behaviors' core
+    /// as the repositories' caller (#713), and answers the fields of the
+    /// use under `member` each reader reads its own of.
+    pub async fn view(&self, member: &str, key: &Key) -> Result<Values, Error> {
+        self.repository.view(member, &wire(key)?).await
+    }
+
     /// Reseals under the current field key every envelope another key
     /// sealed, `batch` rows at a time, deleted rows among them, and answers
     /// how many rows it resealed (D85).
@@ -1160,6 +1184,10 @@ impl<C: GenericClient + Sync> Client for PostgresClient<'_, C> {
         self.rules(&operation.table.name)?
             .table_operation(self.client, operation)
             .await
+    }
+
+    async fn core_read(&self, read: CoreRead<'_>) -> Result<Value, Error> {
+        self.rules(&read.table.name)?.read(self.client, read).await
     }
 }
 

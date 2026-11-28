@@ -40,6 +40,7 @@ func TestContractJSON(t *testing.T) {
 			{rules.Action{Kind: rules.ActionUpdate, Key: "o1"}, `{"kind":"update","key":"o1","patch":{}}`},
 			{rules.Action{Kind: rules.ActionUpdate, Key: "o1", Patch: map[string]json.RawMessage{"title": json.RawMessage(`null`)}}, `{"kind":"update","key":"o1","patch":{"title":null}}`},
 			{rules.Action{Kind: rules.ActionDelete, Key: "o1"}, `{"kind":"delete","key":"o1"}`},
+			{rules.Action{Kind: rules.ActionRead, Key: "o1"}, `{"kind":"read","key":"o1"}`},
 			{rules.Action{Kind: rules.ActionOperation, Key: "o1", UseID: "status", Operation: "transition"}, `{"kind":"operation","key":"o1","useId":"status","operation":"transition","params":{}}`},
 			{
 				rules.Action{Kind: rules.ActionOperation, Key: "o1", UseID: "status", Operation: "transition", Params: json.RawMessage(`{"to":"paid"}`)},
@@ -94,6 +95,10 @@ func TestContractJSON(t *testing.T) {
 		command := rules.Command{Caller: rules.Caller{Subject: "alice"}, Now: 1, Action: rules.Action{Kind: rules.ActionDelete, Key: "o1"}}
 		if got := marshal(t, command); got != `{"caller":{"subject":"alice"},"now":1,"action":{"kind":"delete","key":"o1"}}` {
 			t.Errorf("a command with no request = %s", got)
+		}
+		// A caller that came over a channel (D157, #606) names it.
+		if got := marshal(t, rules.Caller{Subject: "alice", ActingFor: "ben", Channel: "sms"}); got != `{"subject":"alice","actingFor":"ben","channel":"sms"}` {
+			t.Errorf("a caller over a channel = %s", got)
 		}
 		// A command's preconditions, each use's entry by its use id (D16,
 		// D104): written when it has any, its entries' JSON as given, and

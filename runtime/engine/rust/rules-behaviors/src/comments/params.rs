@@ -21,7 +21,7 @@ const ACTION_STATES: [&str; 3] = ["running", "succeeded", "failed"];
 /// The URI schemes an attachment never takes.
 const REFUSED_SCHEMES: [&str; 6] = ["javascript", "vbscript", "data", "file", "blob", "about"];
 
-const CONFIG_KEYS: [&str; 14] = [
+const CONFIG_KEYS: [&str; 15] = [
     "anchorPermission",
     "attachments",
     "blocks",
@@ -29,6 +29,7 @@ const CONFIG_KEYS: [&str; 14] = [
     "deliverPermission",
     "deliveryRetentionMs",
     "editWindowMs",
+    "events",
     "maxAttempts",
     "maxBodyLength",
     "maxDrafts",
@@ -117,6 +118,9 @@ pub(super) fn config_issues(raw: &Value) -> Issues {
     }
     if let Some(attachments) = config.get("attachments") {
         attachments_issues(attachments, &mut issues);
+    }
+    if let Some(events) = config.get("events") {
+        schema::boolean_issues(&schema::member("", "events"), events, &mut issues);
     }
     issues
 }

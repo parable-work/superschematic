@@ -106,6 +106,11 @@ type ORMUse struct {
 	Doc    string
 
 	Operations []ORMOperation
+	// View is a use with fields each reader reads its own of (Comments'
+	// unread), which its `view` reads through the core as the caller
+	// (#713), and ViewFields those fields, as its doc names them.
+	View       bool
+	ViewFields string
 }
 
 // ORMOperation is one operation of a use as orm.rs types it.
@@ -1068,9 +1073,28 @@ func ormUses(table ORMTable, ops behaviortypes.TableOperations) []ORMUse {
 				Table:  op.Table,
 			})
 		}
+		if len(use.View) > 0 {
+			u.View, u.ViewFields = true, "`"+strings.Join(use.View, "`, `")+"`"
+		}
 		out = append(out, u)
 	}
 	return out
+}
+
+// ORMViews reports whether a table of the crate has a use with a view
+// (#713), so the core's binding reads rows through the core as the caller.
+func (o *ModuleOutput) ORMViews() bool {
+	if o.ORM == nil {
+		return false
+	}
+	for _, table := range o.ORM.Tables {
+		for _, use := range table.Uses {
+			if use.View {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ORMOperationExample is a call of the first operation on a row of the

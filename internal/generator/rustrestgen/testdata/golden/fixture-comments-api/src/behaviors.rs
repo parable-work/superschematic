@@ -91,6 +91,14 @@ pub const RULES_LAYOUT: &str = r#"{
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -145,6 +153,12 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -578,6 +592,9 @@ pub const RULES_LAYOUT: &str = r#"{
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],
@@ -670,6 +687,14 @@ pub const RULES_LAYOUT: &str = r#"{
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -724,6 +749,12 @@ pub const RULES_LAYOUT: &str = r#"{
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -1157,6 +1188,9 @@ pub const RULES_LAYOUT: &str = r#"{
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],

@@ -14,6 +14,7 @@ use serde_json::{Map, Value};
 use superschematic_rules::{Cx, Hook, SubRow, View};
 
 use super::checks::{not_a_thread, object, present, whole};
+use super::events;
 use super::messages::{messages_of, subject_key, Conversation, Message};
 use super::{CommentsConfig, DELIVERIES, FOLLOWS, READS};
 
@@ -328,6 +329,20 @@ pub(super) fn came_to_stand(cx: C<'_, '_>, message: &Message, stand: i64) -> Hoo
     for (subject, (mention, reply)) in &recipients {
         insert_delivery(cx, id, subject, *mention, *reply)?;
     }
+    // 3b: the same recipients as events (#713), the mentioned in the
+    // order written, then the followers no mention reached.
+    let heard: Vec<&str> = mentioned
+        .iter()
+        .map(String::as_str)
+        .filter(|subject| recipients.contains_key(subject))
+        .collect();
+    events::emit(cx, events::MENTIONED, message, &heard)?;
+    let replied: Vec<&str> = recipients
+        .iter()
+        .filter(|(_, (mention, reply))| *reply && !*mention)
+        .map(|(subject, _)| *subject)
+        .collect();
+    events::emit(cx, events::REPLIED, message, &replied)?;
     // 4: the author follows, and reads up to its own message; the
     // mentioned follow.
     let followed = thread_of(id, thread);
@@ -358,8 +373,14 @@ pub(super) fn came_to_stand(cx: C<'_, '_>, message: &Message, stand: i64) -> Hoo
 /// What an edit that gives `mentions` writes, after its own writes: a
 /// delivery and a follow for each subject it adds but the author, and the
 /// pending or failed delivery of each it removes loses its mention
-/// ("Batch 1 and 2 operations, amended").
-pub(super) fn edited_mentions(cx: C<'_, '_>, before: &Message, mentions: &Value) -> Hook<()> {
+/// ("Batch 1 and 2 operations, amended"); with the config's events, the
+/// subjects it adds as `mentioned` (#713), with the body the edit gives.
+pub(super) fn edited_mentions(
+    cx: C<'_, '_>,
+    before: &Message,
+    mentions: &Value,
+    body: Option<&str>,
+) -> Hook<()> {
     let was = subjects(Some(&before.mentions));
     let now = subjects(Some(mentions));
     let held = deliveries_of(cx)?;
@@ -367,10 +388,12 @@ pub(super) fn edited_mentions(cx: C<'_, '_>, before: &Message, mentions: &Value)
         held.iter()
             .find(|row| row.message == before.id && row.subject == subject)
     };
+    let mut added: Vec<&str> = Vec::new();
     for subject in now.iter().filter(|subject| !was.contains(subject)) {
         if *subject == before.author || before.for_subject.as_deref() == Some(subject.as_str()) {
             continue;
         }
+        added.push(subject.as_str());
         let key = subject_key(before.id, subject);
         match find(subject) {
             None => insert_delivery(cx, before.id, subject, true, false)?,
@@ -403,6 +426,12 @@ pub(super) fn edited_mentions(cx: C<'_, '_>, before: &Message, mentions: &Value)
             }
         }
     }
+    let edited = Message {
+        body: body.map_or_else(|| before.body.clone(), str::to_owned),
+        mentions: mentions.clone(),
+        ..before.clone()
+    };
+    events::emit(cx, events::MENTIONED, &edited, &added)?;
     for subject in was.iter().filter(|subject| !now.contains(subject)) {
         let Some(row) = find(subject) else {
             continue;

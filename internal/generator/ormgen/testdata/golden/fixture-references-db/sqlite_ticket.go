@@ -1014,6 +1014,74 @@ func (o ticketSQLiteCommentsOperations) Reopen(ctx context.Context, id types.Ide
 	return out, nil
 }
 
+// MarkRead runs comments's markRead in a transaction, as the Postgres
+// repository's does.
+func (o ticketSQLiteCommentsOperations) MarkRead(ctx context.Context, id types.IdentityUUID, params TicketCommentsMarkReadParams) (*TicketCommentsMarkReadResult, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsMarkReadResult
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsMarkReadResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
+	var out *TicketCommentsMarkReadResult
+	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
+		opts, err := o.r.operationOptions(ctx)
+		if err != nil {
+			return err
+		}
+		raw, err := rules.RunOperation(ctx, sqliteRulesHost(tx), "Ticket", id.String(), "Comments", "markRead", params, behaviorCaller(ctx), opts)
+		if err != nil {
+			return behaviorNotFound(err, "Ticket", id)
+		}
+		out = &TicketCommentsMarkReadResult{}
+		if err := json.Unmarshal(raw, out); err != nil {
+			return fmt.Errorf("orm: the result of Ticket's comments markRead, %s: %w", raw, err)
+		}
+		return nil
+	})
+	if err != nil {
+		var zero *TicketCommentsMarkReadResult
+		return zero, err
+	}
+	return out, nil
+}
+
+// Follow runs comments's follow in a transaction, as the Postgres
+// repository's does.
+func (o ticketSQLiteCommentsOperations) Follow(ctx context.Context, id types.IdentityUUID, params TicketCommentsFollowParams) (*TicketCommentsFollowResult, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		var none *TicketCommentsFollowResult
+		return none, err
+	} else if err := o.r.requireReach(ctx, key, true); err != nil {
+		var none *TicketCommentsFollowResult
+		return none, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
+	var out *TicketCommentsFollowResult
+	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
+		opts, err := o.r.operationOptions(ctx)
+		if err != nil {
+			return err
+		}
+		raw, err := rules.RunOperation(ctx, sqliteRulesHost(tx), "Ticket", id.String(), "Comments", "follow", params, behaviorCaller(ctx), opts)
+		if err != nil {
+			return behaviorNotFound(err, "Ticket", id)
+		}
+		out = &TicketCommentsFollowResult{}
+		if err := json.Unmarshal(raw, out); err != nil {
+			return fmt.Errorf("orm: the result of Ticket's comments follow, %s: %w", raw, err)
+		}
+		return nil
+	})
+	if err != nil {
+		var zero *TicketCommentsFollowResult
+		return zero, err
+	}
+	return out, nil
+}
+
 // ListMessages runs comments's listMessages in a transaction, as the Postgres
 // repository's does.
 func (o ticketSQLiteCommentsOperations) ListMessages(ctx context.Context, id types.IdentityUUID, params TicketCommentsListMessagesParams) (*TicketCommentsListMessagesResult, error) {
@@ -1180,6 +1248,30 @@ func (o ticketSQLiteCommentsOperations) ListPinned(ctx context.Context, id types
 	if err != nil {
 		var zero *TicketCommentsListPinnedResult
 		return zero, err
+	}
+	return out, nil
+}
+
+// View reads the row id names through the behaviors' core as the caller, as
+// the Postgres repository's does.
+func (o ticketSQLiteCommentsOperations) View(ctx context.Context, id types.IdentityUUID) (map[string]json.RawMessage, error) {
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := ticketSQLite.keyArg(id); err != nil {
+		return nil, err
+	} else if err := o.r.requireReach(ctx, key, false); err != nil {
+		return nil, behaviorOutOfReach(err, "Ticket", id.String(), id)
+	}
+	var out map[string]json.RawMessage
+	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
+		read, err := rules.RunRead(ctx, sqliteRulesHost(tx), "Ticket", id.String(), behaviorCaller(ctx))
+		if err != nil {
+			return behaviorNotFound(err, "Ticket", id)
+		}
+		out, err = viewOf(read, "Ticket", "Comments")
+		return err
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }

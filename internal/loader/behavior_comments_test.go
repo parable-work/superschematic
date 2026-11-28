@@ -91,8 +91,9 @@ func TestCommentsFixtureLoads(t *testing.T) {
 // parameters as the declaration types them and an MCP tool each, and no
 // worker, since Comments keeps nothing for one to run; it leaves out, with
 // a warning each, the operations a table's Comments leaves out (streamed
-// replies, read state, code anchors) and the namespace's (D103's step 4);
-// and its expanded IR is held to its golden.
+// replies, code anchors) and the namespace's (D103's step 4), and serves
+// read state and follows (markRead and follow, #713); and its expanded IR
+// is held to its golden.
 func TestCommentsAPIFixtureLoads(t *testing.T) {
 	var warnings []string
 	warn := WithWarnings(func(d *verify.Diagnostic) { warnings = append(warnings, d.Msg) })
@@ -108,7 +109,7 @@ func TestCommentsAPIFixtureLoads(t *testing.T) {
 		}
 		leftOut = append(leftOut, strings.Fields(strings.TrimPrefix(warning, "TicketComments: Ticket's Comments is a Comments, whose operation "))[0])
 	}
-	if want := []string{"begin", "appendDraft", "finish", "interrupt", "moveAnchor", "markRead", "follow", "inbox", "searchMessages", "claimDeliveries", "settleDeliveries"}; !slices.Equal(leftOut, want) {
+	if want := []string{"begin", "appendDraft", "finish", "interrupt", "moveAnchor", "inbox", "searchMessages", "claimDeliveries", "settleDeliveries"}; !slices.Equal(leftOut, want) {
 		t.Errorf("the operations left out = %v, want %v", leftOut, want)
 	}
 	var operations []string
@@ -130,6 +131,8 @@ func TestCommentsAPIFixtureLoads(t *testing.T) {
 		"TicketComments.commentsUnpin ticket/{id}/comments/unpin ticket_comments_unpin Comments",
 		"TicketComments.commentsResolve ticket/{id}/comments/resolve ticket_comments_resolve Comments",
 		"TicketComments.commentsReopen ticket/{id}/comments/reopen ticket_comments_reopen Comments",
+		"TicketComments.commentsMarkRead ticket/{id}/comments/mark-read ticket_comments_mark_read Comments",
+		"TicketComments.commentsFollow ticket/{id}/comments/follow ticket_comments_follow Comments",
 		"TicketComments.commentsListMessages ticket/{id}/comments/list-messages ticket_comments_list_messages Comments",
 		"TicketComments.commentsGetMessage ticket/{id}/comments/get-message ticket_comments_get_message Comments",
 		"TicketComments.commentsListEdits ticket/{id}/comments/list-edits ticket_comments_list_edits Comments",
@@ -183,7 +186,7 @@ func TestCommentsConfigsAreHeldToTheCore(t *testing.T) {
 		want   string
 	}{
 		{"a streamed reply's timeout", map[string]any{"composeTimeoutMs": 60000}, "type Ticket: behavior Comments config: composeTimeoutMs: a streamed reply (begin, appendDraft, finish, interrupt and the config's composeTimeoutMs and maxDrafts) waits for a table's generated API to serve the core's signals"},
-		{"a delivery's permission", map[string]any{"deliverPermission": "tickets.notify"}, "type Ticket: behavior Comments config: deliverPermission: the inbox, claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace"},
+		{"a delivery's permission", map[string]any{"deliverPermission": "tickets.notify"}, "type Ticket: behavior Comments config: deliverPermission: claiming and settling deliveries (claimDeliveries, settleDeliveries and the config's deliverPermission, maxAttempts, retryBackoffMs and deliveryRetentionMs) and searchMessages each run across a namespace"},
 		{"an anchor's permission", map[string]any{"anchorPermission": "tickets.anchor"}, "type Ticket: behavior Comments config: anchorPermission: moving a code block's anchor (moveAnchor and anchorPermission) waits for code anchors on the core"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -194,6 +197,10 @@ func TestCommentsConfigsAreHeldToTheCore(t *testing.T) {
 	}
 	if err := load(t, map[string]any{"blocks": []any{"ref", "code"}, "maxBodyLength": 2000, "moderatePermission": "tickets.moderate"}); err != nil {
 		t.Errorf("a config of the members a table takes: %v", err)
+	}
+	// The events a table's Comments emits for the notifier (#713).
+	if err := load(t, map[string]any{"events": true}); err != nil {
+		t.Errorf("a config of events: %v", err)
 	}
 	// An attachment block, and the config's attachments, a table takes
 	// since D154.

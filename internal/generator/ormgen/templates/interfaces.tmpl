@@ -573,6 +573,12 @@ func ({{ $use.NoOp }}) {{ .GoName }}(_ context.Context, _ {{ $keyType }}, _ {{ .
 	return none, ErrNotFound
 }
 {{- end }}
+{{- if .View }}
+
+func ({{ .NoOp }}) View(_ context.Context, _ {{ $keyType }}) (map[string]json.RawMessage, error) {
+	return nil, ErrNotFound
+}
+{{- end }}
 {{- end }}
 {{- end }}
 

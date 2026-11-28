@@ -27,7 +27,7 @@ use super::{
     code_hash, default_address_kind, looks_like_code, narrowed_permissions, normalise_address,
     quiet_delay_seconds, read_reply, reply_allows, same_id, CODE_ATTEMPTS, CODE_TTL_SECONDS,
     DEFAULT_DELIVERY_RETENTION_DAYS, DEFAULT_DELIVERY_TIMEOUT_SECONDS, DIGEST, HEALTH_TTL_MS,
-    INAPP, NORMAL, RECORD, UNDO_VERB, URGENT,
+    INAPP, NORMAL, RECORD, ROLE_SUBJECT, UNDO_VERB, URGENT,
 };
 use crate::access::{reaches_of, ActiveGrantsFilter};
 use crate::auth::{covers, GrantReach, Principal, PrincipalKind};
@@ -1300,6 +1300,72 @@ impl Notifier {
         Ok(Vec::new())
     }
 
+    // role_holders is the users who hold the role named role.
+    async fn role_holders<C: PgClient>(
+        &self,
+        client: Db<'_, C>,
+        role: &str,
+    ) -> Result<Vec<RecipientRef>> {
+        let Some(roles) = self.roles_table() else {
+            return Ok(Vec::new());
+        };
+        if !self.has_table("UserRoleGrant") {
+            return Ok(Vec::new());
+        }
+        let sys = self.sys(client)?;
+        let mut by_name = Values::new();
+        by_name.insert("name".to_owned(), eq(role));
+        let Some(row) = sys
+            .table(&roles)?
+            .find_one(Some(&by_name), &FindOptions::default())
+            .await?
+        else {
+            return Ok(Vec::new());
+        };
+        let mut filter = Values::new();
+        filter.insert(
+            "roleId".to_owned(),
+            eq(row.get("id").cloned().unwrap_or(Value::Null)),
+        );
+        let grants = sys
+            .table("UserRoleGrant")?
+            .find_many(Some(&filter), &many(10_000))
+            .await?;
+        Ok(grants
+            .rows
+            .iter()
+            .map(|grant| RecipientRef::user(string(grant, "userId")))
+            .collect())
+    }
+
+    // payload_principals is the principals a member of the event's payload
+    // names (#713), a string or a list: each a user's id, and role:<name>
+    // the role's holders. A Comments event's subjects.
+    async fn payload_principals<C: PgClient>(
+        &self,
+        client: Db<'_, C>,
+        event: &RaisedEvent,
+        member: &str,
+    ) -> Result<Vec<RecipientRef>> {
+        let named: Vec<String> = match event.payload.get(member) {
+            Some(Value::String(subject)) => vec![subject.clone()],
+            Some(Value::Array(items)) => items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect(),
+            _ => Vec::new(),
+        };
+        let mut out = Vec::new();
+        for subject in named.iter().filter(|subject| !subject.is_empty()) {
+            match subject.strip_prefix(ROLE_SUBJECT) {
+                Some(role) => out.extend(self.role_holders(client, role).await?),
+                None => out.push(RecipientRef::user(subject.clone())),
+            }
+        }
+        Ok(out)
+    }
+
     async fn recipients_of<C: PgClient>(
         &self,
         client: Db<'_, C>,
@@ -1312,6 +1378,8 @@ impl Notifier {
                 for id in self.follow_path(client, event, path).await? {
                     out.push(RecipientRef::user(id));
                 }
+            } else if let Some(member) = spec.get("payload").and_then(Value::as_str) {
+                out.extend(self.payload_principals(client, event, member).await?);
             } else if let Some(principal) = spec.get("principal").and_then(Value::as_str) {
                 out.push(RecipientRef {
                     kind: spec
@@ -1323,34 +1391,7 @@ impl Notifier {
                     table: None,
                 });
             } else if let Some(role) = spec.get("role").and_then(Value::as_str) {
-                let Some(roles) = self.roles_table() else {
-                    continue;
-                };
-                if !self.has_table("UserRoleGrant") {
-                    continue;
-                }
-                let sys = self.sys(client)?;
-                let mut by_name = Values::new();
-                by_name.insert("name".to_owned(), eq(role));
-                let Some(row) = sys
-                    .table(&roles)?
-                    .find_one(Some(&by_name), &FindOptions::default())
-                    .await?
-                else {
-                    continue;
-                };
-                let mut filter = Values::new();
-                filter.insert(
-                    "roleId".to_owned(),
-                    eq(row.get("id").cloned().unwrap_or(Value::Null)),
-                );
-                let grants = sys
-                    .table("UserRoleGrant")?
-                    .find_many(Some(&filter), &many(10_000))
-                    .await?;
-                for grant in grants.rows {
-                    out.push(RecipientRef::user(string(&grant, "userId")));
-                }
+                out.extend(self.role_holders(client, role).await?);
             } else if let Some(party) = spec.get("party") {
                 out.push(RecipientRef {
                     kind: "party".to_owned(),
@@ -3017,17 +3058,23 @@ impl Notifier {
 
     /// The repositories of `tx` acting as `principal`, for a reply's
     /// action: its reads and writes keep to what it sees, and its
-    /// behaviors' commands run with its permissions.
+    /// behaviors' commands run with its permissions, as having come over
+    /// `channel`, the reply's channel kind (D157, #606), which Comments
+    /// records as a message's via.
     fn acting<'c, 't>(
         &'c self,
         tx: Db<'c, PoolTransaction<'t>>,
         principal: &Principal,
+        channel: &str,
     ) -> Result<StoreRepositories<'c, PoolTransaction<'t>>> {
         let mut repositories = tx
             .repositories(self.inner.definition)?
             .acting(Some(principal.subject.clone()))
             .with_access(AccessCaller::of(Some(principal)))
-            .with_caller(Caller::of(Some(principal)));
+            .with_caller(Caller {
+                channel: (!channel.is_empty()).then(|| channel.to_owned()),
+                ..Caller::of(Some(principal))
+            });
         if let Some(keys) = self.inner.tables.keys() {
             repositories = repositories.with_keys(keys.as_ref());
         }
@@ -3169,7 +3216,7 @@ impl Notifier {
             let mut client = self.store().client().await?;
             let tx = client.transaction().await?;
             let reply = {
-                let acting = self.acting(tx.db(), &principal)?;
+                let acting = self.acting(tx.db(), &principal, &input.channel)?;
                 let context = ReplyContext {
                     repositories: &acting,
                     notice: &notice,
@@ -3517,7 +3564,7 @@ impl Notifier {
         let mut client = self.store().client().await?;
         let tx = client.transaction().await?;
         if let Some(action) = &action {
-            let acting = self.acting(tx.db(), &principal)?;
+            let acting = self.acting(tx.db(), &principal, &ctx.input.channel)?;
             let no_args: Vec<String> = Vec::new();
             let context = ReplyContext {
                 repositories: &acting,

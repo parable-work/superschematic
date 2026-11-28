@@ -49,7 +49,7 @@ column or a sub-table row is never refused, and arms or clears no deadline.
 */
 import { initSync } from '@superschematic/rules';
 import { ormOf, withRulesCore } from '@superschematic/http-runtime/postgres';
-import type { NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencesMembers, Repository, RulesLayout, StringFilter, TableDefinition, UseOperations, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
+import type { NumberFilter, Orm, OrmDefinition, OrmOptions, OrmPool, OrmTx, ReferencesMembers, Repository, RulesLayout, StringFilter, TableDefinition, UseOperations, UseView, UuidFilter, WithoutUpserts } from '@superschematic/http-runtime/postgres';
 import type * as T from './types';
 
 /**
@@ -182,6 +182,16 @@ export interface ReviewUses {
       params: { thread: number };
       result: unknown;
     };
+    /** Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+    markRead: {
+      params: { thread?: number; upTo: number };
+      result: { readUpTo: number; unread: number };
+    };
+    /** Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+    follow: {
+      params: { on: boolean; thread: number };
+      result: { following: boolean; thread: number };
+    };
     /** Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
     listMessages: {
       params: {
@@ -216,7 +226,7 @@ export interface ReviewUses {
       params: { cursor?: string; limit?: number };
       result: unknown;
     };
-  }, T.IdentityUUID>;
+  }, T.IdentityUUID> & UseView<"unread", T.IdentityUUID>;
 }
 
 /** The repository of Review, with no upserts: its behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten (D103). */
@@ -388,6 +398,16 @@ export interface TicketUses {
       params: { thread: number };
       result: unknown;
     };
+    /** Moves the caller's read marker past the messages it has read: on the conversation's top-level messages, or with thread on that thread's replies. upTo is the greatest message id the caller has shown; every posted or interrupted message of the listing with an id up to it is read, and a streamed reply that comes to stand later is not. The marker never moves back. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+    markRead: {
+      params: { thread?: number; upTo: number };
+      result: { readUpTo: number; unread: number };
+    };
+    /** Follows a thread, so each reply that comes to stand in it records a delivery for the caller and the inbox lists it, or with on false stops. A caller follows each thread it posts in and each it is mentioned in without asking, again after it stopped. Following counts the thread's replies from the latest message of the conversation. Only the caller reads it back, so it appends no event, and a caller who may read the instance may call it. */
+    follow: {
+      params: { on: boolean; thread: number };
+      result: { following: boolean; thread: number };
+    };
     /** Lists a page of the conversation's top-level messages, or with thread a page of that thread's replies, composing and deleted ones included, a composing one with its draft so far as its body, in ascending id order: the latest page when no anchor is given, the page before or after a message id, or the page around a message of the listing. Each page says where the next older and newer ones start. */
     listMessages: {
       params: {
@@ -422,7 +442,7 @@ export interface TicketUses {
       params: { cursor?: string; limit?: number };
       result: unknown;
     };
-  }, T.IdentityUUID>;
+  }, T.IdentityUUID> & UseView<"unread", T.IdentityUUID>;
 }
 
 /** The repository of Ticket, with no upserts: its behaviors keep sub-tables or arm deadlines, which an upsert's insert would leave unwritten (D103). */
@@ -567,6 +587,14 @@ export const fixtureCommentsDbRules: RulesLayout = {
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -621,6 +649,12 @@ export const fixtureCommentsDbRules: RulesLayout = {
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -1054,6 +1088,9 @@ export const fixtureCommentsDbRules: RulesLayout = {
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],
@@ -1146,6 +1183,14 @@ export const fixtureCommentsDbRules: RulesLayout = {
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -1200,6 +1245,12 @@ export const fixtureCommentsDbRules: RulesLayout = {
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -1633,6 +1684,9 @@ export const fixtureCommentsDbRules: RulesLayout = {
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],

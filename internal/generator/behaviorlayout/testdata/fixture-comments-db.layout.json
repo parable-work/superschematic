@@ -64,6 +64,14 @@
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -118,6 +126,12 @@
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -551,6 +565,9 @@
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],
@@ -643,6 +660,14 @@
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -697,6 +722,12 @@
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -1130,6 +1161,9 @@
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],

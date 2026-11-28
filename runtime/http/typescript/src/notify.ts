@@ -36,7 +36,9 @@ reference (D154) from its queue's worker (cleared).
 Routing. The worker routes an event in one transaction: each enabled route
 of its kind (or *) and table whose filter, in the repositories' filter
 syntax, the record matches, names recipients by relation paths of the
-record, principals, roles or parties. A recipient who cannot read the
+record, principals, the subjects a member of the event's payload names
+(a Comments mention's or reply's, #713), roles or parties. A recipient
+who cannot read the
 record, through its table's repository as the recipient (D156: audience
 and grants), is not notified, and nothing records that it was skipped. A
 recipient who can gets one notice in the inbox, numbered among its own
@@ -93,6 +95,9 @@ export const CODE_ATTEMPTS = 5;
 /** The channel kind of the in-app inbox, which every notice reaches. */
 export const INAPP = 'inapp';
 
+/** The prefix of a subject that names a role's holders (a Comments mention of role:<name>, #713). */
+export const ROLE_SUBJECT = 'role:';
+
 /** An event as raise takes it. */
 export interface RaiseInput {
   /** The table whose row raised it, by its type's name; absent for an event of no record (channel.down). */
@@ -122,6 +127,8 @@ export interface RaisedEvent {
 /** Who a route reaches (the route's recipients, D153). */
 export type RecipientSpec =
   | { readonly path: string }
+  /** The principals a member of the event's payload names, a string or a list (#713): each a user, and role:<name> the holders of the role. A Comments event's subjects. */
+  | { readonly payload: string }
   | { readonly principal: string; readonly kind?: 'user' | 'agent' }
   | { readonly role: string }
   | { readonly party: { readonly table: string; readonly key: string } }
@@ -659,22 +666,41 @@ export function createNotifier(options: NotifierOptions): Notifier {
     return [];
   };
 
+  /** The users who hold the role named name. */
+  const holdersOf = async (tx: any, name: string): Promise<RecipientRef[]> => {
+    const db = sys(tx);
+    const rolesMember = rolesMemberOf(db);
+    const grantsMember = tableMember(db, 'UserRoleGrant');
+    if (!rolesMember || !grantsMember) return [];
+    const role = await repo(db, rolesMember).findOne({ name: { eq: name } });
+    if (!role) return [];
+    const grants = await repo(db, grantsMember).findMany({ roleId: { eq: role.id } }, { limit: 10000, count: false });
+    return grants.rows.map(grant => ({ kind: 'user' as const, id: String(grant.userId) }));
+  };
+
+  /** The principals a member of the event's payload names (#713): each a user's id, and role:<name> the role's holders. */
+  const payloadPrincipals = async (tx: any, event: RaisedEvent, member: string): Promise<RecipientRef[]> => {
+    const value = event.payload[member];
+    const named = (Array.isArray(value) ? value : value === null || value === undefined ? [] : [value]).filter((v): v is string => typeof v === 'string' && v !== '');
+    const out: RecipientRef[] = [];
+    for (const subject of named) {
+      if (subject.startsWith(ROLE_SUBJECT)) out.push(...(await holdersOf(tx, subject.slice(ROLE_SUBJECT.length))));
+      else out.push({ kind: 'user', id: subject });
+    }
+    return out;
+  };
+
   const recipientsOf = async (tx: any, event: RaisedEvent, specs: readonly RecipientSpec[]): Promise<RecipientRef[]> => {
     const out: RecipientRef[] = [];
     for (const spec of specs) {
       if ('path' in spec) {
         for (const id of await followPath(tx, event, spec.path)) out.push({ kind: 'user', id });
+      } else if ('payload' in spec) {
+        out.push(...(await payloadPrincipals(tx, event, spec.payload)));
       } else if ('principal' in spec) {
         out.push({ kind: spec.kind ?? 'user', id: spec.principal });
       } else if ('role' in spec) {
-        const db = sys(tx);
-        const rolesMember = rolesMemberOf(db);
-        const grantsMember = tableMember(db, 'UserRoleGrant');
-        if (!rolesMember || !grantsMember) continue;
-        const role = await repo(db, rolesMember).findOne({ name: { eq: spec.role } });
-        if (!role) continue;
-        const grants = await repo(db, grantsMember).findMany({ roleId: { eq: role.id } }, { limit: 10000, count: false });
-        for (const grant of grants.rows) out.push({ kind: 'user', id: String(grant.userId) });
+        out.push(...(await holdersOf(tx, spec.role)));
       } else if ('party' in spec) {
         out.push({ kind: 'party', id: spec.party.key, table: spec.party.table });
       }
@@ -1346,7 +1372,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
     try {
       await withCaller(principal, () =>
         orm.transaction(async (tx: any) => {
-          const acting = tx.withBehaviorCaller({ subject: principal.subject, permissions: principal.permissions });
+          const acting = tx.withBehaviorCaller({ subject: principal.subject, permissions: principal.permissions, channel: input.channel });
           const data = await action.run({ tx: acting, notice: notice!, principal, args: words, channel: input.channel });
           await repo(sys(tx), parts.inbox).updateOne(notice!.id, { state: 'done', acknowledgedAt: notice!.acknowledgedAt ?? now(), acknowledgedVia: input.channel });
           await acknowledgeDeliveries(tx, notice!);
@@ -1376,7 +1402,7 @@ export function createNotifier(options: NotifierOptions): Notifier {
     await withCaller(principal, () =>
       orm.transaction(async (tx: any) => {
         if (action?.undo) {
-          await action.undo({ tx: tx.withBehaviorCaller({ subject: principal.subject, permissions: principal.permissions }), notice, principal, args: [], channel: input.channel }, undo.data);
+          await action.undo({ tx: tx.withBehaviorCaller({ subject: principal.subject, permissions: principal.permissions, channel: input.channel }), notice, principal, args: [], channel: input.channel }, undo.data);
         }
         await repo(sys(tx), parts.inbox).updateOne(notice.id, { state: undo.previous ?? 'read', acknowledgedAt: null, acknowledgedVia: null });
         await repo(sys(tx), parts.replies).updateOne(done.id, { undoneAt: now() });

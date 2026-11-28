@@ -76,6 +76,20 @@ pub fn execute(
     ))
 }
 
+/// Reads a row through the core as the caller (the core's read, #713) and
+/// returns each use's fields it computes through its reads, by use id: a
+/// reader's own (Comments' unread). It writes nothing.
+pub fn run_read(
+    host: &Host<'_>,
+    conn: &Connection,
+    type_name: &str,
+    key: &str,
+    caller: Caller,
+) -> Result<Map<String, Value>, Error> {
+    let store = SqliteStore { conn };
+    finish(run::run_read(host, &store, type_name, key, caller))
+}
+
 /// Runs an operation of a use on a row and returns its result; null
 /// params are `{}`.
 #[allow(clippy::too_many_arguments)]

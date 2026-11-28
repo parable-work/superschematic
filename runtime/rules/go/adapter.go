@@ -416,6 +416,26 @@ func RunOperation(ctx context.Context, host Host, typeName, key, useID, operatio
 	return result.Result, nil
 }
 
+// RunRead reads the row key names through the core as caller (the core's
+// read, D104's step 4, #713) and returns each use's fields it computes
+// through its reads, by use id: a reader's own (Comments' unread). It runs
+// no guard and writes nothing; a use with none is absent.
+func RunRead(ctx context.Context, host Host, typeName, key string, caller Caller) (map[string]json.RawMessage, error) {
+	command := commandOf(host, caller, Action{Kind: ActionRead, Key: key})
+	result, err := Execute(ctx, host, typeName, command, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]json.RawMessage{}
+	if len(result.Result) == 0 || isNull(result.Result) {
+		return out, nil
+	}
+	if err := json.Unmarshal(result.Result, &out); err != nil {
+		return nil, fmt.Errorf("rules: the read of %s %s, %s: %w", typeName, key, result.Result, err)
+	}
+	return out, nil
+}
+
 // RunTableOperation runs an operation of a use on the table as a whole
 // (D104), a command without a row, and returns its result. Nil params, or
 // params that encode as null, are {}. The core refuses a command without a

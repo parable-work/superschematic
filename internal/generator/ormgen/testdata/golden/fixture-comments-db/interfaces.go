@@ -4,6 +4,7 @@ package orm
 
 import (
 	"context"
+	"encoding/json"
 
 	types "example.com/schemas/types/go/fixture-comments-db"
 	"github.com/jackc/pgx/v5"
@@ -340,6 +341,16 @@ func (noOpReviewCommentsOperations) Reopen(_ context.Context, _ types.IdentityUU
 	return none, ErrNotFound
 }
 
+func (noOpReviewCommentsOperations) MarkRead(_ context.Context, _ types.IdentityUUID, _ ReviewCommentsMarkReadParams) (*ReviewCommentsMarkReadResult, error) {
+	var none *ReviewCommentsMarkReadResult
+	return none, ErrNotFound
+}
+
+func (noOpReviewCommentsOperations) Follow(_ context.Context, _ types.IdentityUUID, _ ReviewCommentsFollowParams) (*ReviewCommentsFollowResult, error) {
+	var none *ReviewCommentsFollowResult
+	return none, ErrNotFound
+}
+
 func (noOpReviewCommentsOperations) ListMessages(_ context.Context, _ types.IdentityUUID, _ ReviewCommentsListMessagesParams) (*ReviewCommentsListMessagesResult, error) {
 	var none *ReviewCommentsListMessagesResult
 	return none, ErrNotFound
@@ -363,6 +374,10 @@ func (noOpReviewCommentsOperations) ListReactions(_ context.Context, _ types.Ide
 func (noOpReviewCommentsOperations) ListPinned(_ context.Context, _ types.IdentityUUID, _ ReviewCommentsListPinnedParams) (*ReviewCommentsListPinnedResult, error) {
 	var none *ReviewCommentsListPinnedResult
 	return none, ErrNotFound
+}
+
+func (noOpReviewCommentsOperations) View(_ context.Context, _ types.IdentityUUID) (map[string]json.RawMessage, error) {
+	return nil, ErrNotFound
 }
 
 func (db *NoOpDatabase) GetTicketRepository() TicketRepositoryInterface {
@@ -491,6 +506,16 @@ func (noOpTicketCommentsOperations) Reopen(_ context.Context, _ types.IdentityUU
 	return none, ErrNotFound
 }
 
+func (noOpTicketCommentsOperations) MarkRead(_ context.Context, _ types.IdentityUUID, _ TicketCommentsMarkReadParams) (*TicketCommentsMarkReadResult, error) {
+	var none *TicketCommentsMarkReadResult
+	return none, ErrNotFound
+}
+
+func (noOpTicketCommentsOperations) Follow(_ context.Context, _ types.IdentityUUID, _ TicketCommentsFollowParams) (*TicketCommentsFollowResult, error) {
+	var none *TicketCommentsFollowResult
+	return none, ErrNotFound
+}
+
 func (noOpTicketCommentsOperations) ListMessages(_ context.Context, _ types.IdentityUUID, _ TicketCommentsListMessagesParams) (*TicketCommentsListMessagesResult, error) {
 	var none *TicketCommentsListMessagesResult
 	return none, ErrNotFound
@@ -514,6 +539,10 @@ func (noOpTicketCommentsOperations) ListReactions(_ context.Context, _ types.Ide
 func (noOpTicketCommentsOperations) ListPinned(_ context.Context, _ types.IdentityUUID, _ TicketCommentsListPinnedParams) (*TicketCommentsListPinnedResult, error) {
 	var none *TicketCommentsListPinnedResult
 	return none, ErrNotFound
+}
+
+func (noOpTicketCommentsOperations) View(_ context.Context, _ types.IdentityUUID) (map[string]json.RawMessage, error) {
+	return nil, ErrNotFound
 }
 
 var (

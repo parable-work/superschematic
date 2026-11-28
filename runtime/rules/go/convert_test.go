@@ -171,6 +171,9 @@ func TestFromColumn(t *testing.T) {
 		{uuidBytes, id, `"6fe1XoZ0UJpMNNdUOSMC2X"`},
 		{"db360f43-5530-c407-56da-9cd8e0c971dd", id, `"6fe1XoZ0UJpMNNdUOSMC2X"`},
 		{[]byte("db360f43-5530-c407-56da-9cd8e0c971dd"), id, `"6fe1XoZ0UJpMNNdUOSMC2X"`},
+		// A uuid[] column (@audience's effectiveAudience) as its wire forms.
+		{[]any{uuidBytes, "db360f43-5530-c407-56da-9cd8e0c971dd"}, id, `["6fe1XoZ0UJpMNNdUOSMC2X","6fe1XoZ0UJpMNNdUOSMC2X"]`},
+		{[]any{}, id, `[]`},
 		{int64(1), flag, "true"},
 		{int64(0), flag, "false"},
 		{true, flag, "true"},

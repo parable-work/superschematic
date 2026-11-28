@@ -1119,6 +1119,9 @@ func (o *ORMInfo) RuntimeTypes() []string {
 			if len(use.TableOperations) > 0 {
 				used["TableOperations"] = true
 			}
+			if len(use.View) > 0 {
+				used["UseView"] = true
+			}
 		}
 		if t.Deadlines {
 			used["BehaviorDeadlines"] = true

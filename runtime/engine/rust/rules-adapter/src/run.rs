@@ -760,6 +760,28 @@ fn queue_of<'t>(table: &'t Table, use_id: &str, name: &str) -> Result<&'t Deadli
     })
 }
 
+/// Reads a row through the core as the caller (the core's read, D104's
+/// step 4, #713) and returns each use's fields it computes through its
+/// reads, by use id: a reader's own (Comments' unread). It runs no guard
+/// and writes nothing.
+pub(crate) async fn run_read<S: Store>(
+    host: &Host<'_>,
+    store: &S,
+    type_name: &str,
+    key: &str,
+    caller: Caller,
+) -> Result<Map<String, Value>, Error> {
+    let action = Action::Read {
+        key: key.to_owned(),
+    };
+    let command = command_of(host, caller, action);
+    let executed = execute(host, store, type_name, command, &ExecuteOptions::default()).await?;
+    Ok(match executed.result {
+        Value::Object(fields) => fields,
+        _ => Map::new(),
+    })
+}
+
 /// Runs an operation of a use on a row with what the options give it
 /// beside (its caller's preconditions) and returns its result.
 #[allow(clippy::too_many_arguments)]

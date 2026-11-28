@@ -371,6 +371,14 @@ type Use struct {
 	// (D103's step 4: Numbering's counts), in the declaration's order;
 	// absent when it declares none.
 	Shared []SharedTable `json:"shared,omitempty"`
+
+	// View are the behavior's fields each reader reads its own of
+	// (registry.BehaviorField.PerReader: Comments' unread), in the
+	// declaration's order, which the use's view reads through the core as
+	// the caller (the core's read, #713): a method of the generated
+	// repository under the use's member (orm.ticket.comments.view); absent
+	// when it declares none.
+	View []string `json:"view,omitempty"`
 }
 
 // SharedTable is a table a use keeps for the type's table as a whole
@@ -859,6 +867,11 @@ func tableOf(schema *ir.Schema, td *ir.TypeDef, tables []sqlutil.TableModel, reg
 				Column: columnOf(fd.Name, column, fd.TypeRef),
 				Value:  value,
 			})
+		}
+		for _, declared := range behavior.Fields {
+			if declared.PerReader {
+				use.View = append(use.View, declared.Name)
+			}
 		}
 		// Its operations of a row and of the table as a whole, in
 		// declaration order (D104); one of a namespace (Comments') the core

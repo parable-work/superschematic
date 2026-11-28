@@ -231,7 +231,7 @@ export interface {{.Type}}Uses {
       result: {{.Result}};
     };
 {{- end}}
-  }>{{end}};
+  }>{{end}}{{if .View}} & UseView<{{.ViewFields}}, {{$t.KeyType}}>{{end}};
 {{- end}}
 }
 {{- end}}

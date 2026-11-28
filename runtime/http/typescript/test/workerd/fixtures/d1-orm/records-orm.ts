@@ -216,6 +216,14 @@ export const fixtureReferencesDbRules: RulesLayout = {
               "writes": true
             },
             {
+              "name": "markRead",
+              "writes": true
+            },
+            {
+              "name": "follow",
+              "writes": true
+            },
+            {
               "name": "listMessages",
               "writes": false
             },
@@ -270,6 +278,12 @@ export const fixtureReferencesDbRules: RulesLayout = {
                   "name": "forSubject",
                   "field": "forSubject",
                   "column": "for_subject",
+                  "type": "string"
+                },
+                {
+                  "name": "via",
+                  "field": "via",
+                  "column": "via",
                   "type": "string"
                 },
                 {
@@ -703,6 +717,9 @@ export const fixtureReferencesDbRules: RulesLayout = {
               ],
               "version": "_version"
             }
+          ],
+          "view": [
+            "unread"
           ]
         }
       ],

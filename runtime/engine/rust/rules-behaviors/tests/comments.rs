@@ -148,6 +148,7 @@ fn the_config_is_the_declaration_files_schema_and_a_member_that_waits_is_refused
             "deliverPermission",
             "deliveryRetentionMs",
             "editWindowMs",
+            "events",
             "maxAttempts",
             "maxBodyLength",
             "maxDrafts",

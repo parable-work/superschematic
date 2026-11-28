@@ -4,6 +4,7 @@ package orm
 
 import (
 	"context"
+	"encoding/json"
 
 	types "example.com/schemas/types/go/fixture-references-db"
 	"github.com/jackc/pgx/v5"
@@ -426,6 +427,16 @@ func (noOpTicketCommentsOperations) Reopen(_ context.Context, _ types.IdentityUU
 	return none, ErrNotFound
 }
 
+func (noOpTicketCommentsOperations) MarkRead(_ context.Context, _ types.IdentityUUID, _ TicketCommentsMarkReadParams) (*TicketCommentsMarkReadResult, error) {
+	var none *TicketCommentsMarkReadResult
+	return none, ErrNotFound
+}
+
+func (noOpTicketCommentsOperations) Follow(_ context.Context, _ types.IdentityUUID, _ TicketCommentsFollowParams) (*TicketCommentsFollowResult, error) {
+	var none *TicketCommentsFollowResult
+	return none, ErrNotFound
+}
+
 func (noOpTicketCommentsOperations) ListMessages(_ context.Context, _ types.IdentityUUID, _ TicketCommentsListMessagesParams) (*TicketCommentsListMessagesResult, error) {
 	var none *TicketCommentsListMessagesResult
 	return none, ErrNotFound
@@ -449,6 +460,10 @@ func (noOpTicketCommentsOperations) ListReactions(_ context.Context, _ types.Ide
 func (noOpTicketCommentsOperations) ListPinned(_ context.Context, _ types.IdentityUUID, _ TicketCommentsListPinnedParams) (*TicketCommentsListPinnedResult, error) {
 	var none *TicketCommentsListPinnedResult
 	return none, ErrNotFound
+}
+
+func (noOpTicketCommentsOperations) View(_ context.Context, _ types.IdentityUUID) (map[string]json.RawMessage, error) {
+	return nil, ErrNotFound
 }
 
 var (

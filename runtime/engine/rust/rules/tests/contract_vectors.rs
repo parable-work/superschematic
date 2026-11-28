@@ -85,6 +85,7 @@ fn caller() -> Caller {
             signed_in_at: Some(1000),
             user_verified: true,
         }),
+        channel: Some("sms".to_owned()),
     }
 }
 

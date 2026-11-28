@@ -49,6 +49,12 @@ func (sqliteDialect) model(schema *ir.Schema, opts sqlgen.Options) (*Model, erro
 			searchIndex = out.Tables[i].Name
 			out.Tables[i].Indexes = slices.DeleteFunc(out.Tables[i].Indexes, func(idx sqlgen.Index) bool { return idx.Type == "GIN" })
 		}
+		if td := schema.Types[out.Tables[i].OriginalName]; td != nil && td.BehaviorTable != nil {
+			// A behavior's sub-table's GIN index is Postgres's JSONB
+			// containment's (Comments' blocks, #713); on SQLite a read
+			// scans the table.
+			out.Tables[i].Indexes = slices.DeleteFunc(out.Tables[i].Indexes, func(idx sqlgen.Index) bool { return idx.Type == "GIN" })
+		}
 		if td := schema.Types[out.Tables[i].OriginalName]; td != nil && td.Audience != nil {
 			// An @audience table's effective audience has a GIN index on
 			// Postgres; on SQLite it is a JSON array a read takes apart

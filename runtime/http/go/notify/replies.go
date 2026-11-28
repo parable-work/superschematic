@@ -381,7 +381,7 @@ func (n *Notifier) Reply(ctx context.Context, input ReplyInput) (ReplyOutcome, e
 	}
 	var id string
 	err = n.host.Transaction(ctx, func(h notifications.Host) error {
-		rc := ReplyContext{Ctx: h.Acting(ctx, principal, permissions), Tx: h.Tx(), Host: h, Notice: *notice, Principal: principal, Permissions: permissions, Args: r.read.Args, Channel: input.Channel, Now: n.now()}
+		rc := ReplyContext{Ctx: h.Acting(notifications.WithChannel(ctx, input.Channel), principal, permissions), Tx: h.Tx(), Host: h, Notice: *notice, Principal: principal, Permissions: permissions, Args: r.read.Args, Channel: input.Channel, Now: n.now()}
 		data, err := action.Run(rc)
 		if err != nil {
 			return err
@@ -464,7 +464,7 @@ func (n *Notifier) runUndo(ctx context.Context, r *replying, notice Notice, done
 			if err != nil {
 				return err
 			}
-			rc := ReplyContext{Ctx: h.Acting(ctx, principal, permissions), Tx: h.Tx(), Host: h, Notice: notice, Principal: principal, Permissions: permissions, Args: []string{}, Channel: r.input.Channel, Now: n.now()}
+			rc := ReplyContext{Ctx: h.Acting(notifications.WithChannel(ctx, r.input.Channel), principal, permissions), Tx: h.Tx(), Host: h, Notice: notice, Principal: principal, Permissions: permissions, Args: []string{}, Channel: r.input.Channel, Now: n.now()}
 			if err := action.Undo(rc, data); err != nil {
 				return err
 			}

@@ -709,5 +709,6 @@ export type {
   TableChange,
   TableOperations,
   UseOperations,
+  UseView,
   WithoutUpserts,
 } from './rules.js';

@@ -1284,6 +1284,10 @@
                     "minimum": 1000,
                     "type": "integer"
                   },
+                  "events": {
+                    "description": "On a table, whether a message that comes to stand, and an edit that adds a mention, emits mentioned and replied about the row, which the API's behavior worker hands to the project's handler and the notifier raises into its inbox (#713); none when absent. An engine type refuses it.",
+                    "type": "boolean"
+                  },
                   "maxAttempts": {
                     "description": "How many times a delivery is claimed before a failure, or a claim that lapses, drops it; 5 when absent.",
                     "maximum": 20,

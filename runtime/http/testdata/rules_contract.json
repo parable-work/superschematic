@@ -88,7 +88,8 @@
         "assurance": {
           "signedInAt": 1000,
           "userVerified": true
-        }
+        },
+        "channel": "sms"
       }
     ],
     "CoreAction": [
@@ -287,7 +288,8 @@
           "assurance": {
             "signedInAt": 1000,
             "userVerified": true
-          }
+          },
+          "channel": "sms"
         },
         "now": 1000,
         "action": {

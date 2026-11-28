@@ -43,6 +43,10 @@ type UseOperations struct {
 	// Anchored is a use on a field, which a doc names by its field.
 	Anchored   bool
 	Operations []Operation
+	// View are the fields each reader reads its own of (Comments'
+	// unread), which the use's view reads through the core as the caller
+	// (behaviorlayout.Use.View, #713); none for most uses.
+	View []string
 }
 
 // Operation is one operation of a use: its name, its declaration's
@@ -110,7 +114,7 @@ func Operations(schema *ir.Schema, reg *registry.Registry) ([]TableOperations, e
 				alias.Doc = strings.ReplaceAll(alias.Doc, An(base)+"'s", named)
 				b.aliases[alias.Name] = alias
 			}
-			uses := UseOperations{ID: use.ID, Behavior: use.Behavior, Member: member, Base: base, Anchored: use.Anchor != ""}
+			uses := UseOperations{ID: use.ID, Behavior: use.Behavior, Member: member, Base: base, Anchored: use.Anchor != "", View: use.View}
 			for _, op := range use.Operations {
 				var doc string
 				for _, declared := range declaration.Operations {

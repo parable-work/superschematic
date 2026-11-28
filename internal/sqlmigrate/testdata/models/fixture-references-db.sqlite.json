@@ -1132,6 +1132,12 @@
           "type": "TEXT"
         },
         {
+          "name": "via",
+          "nullable": true,
+          "origin": "TicketCommentsMessages.via",
+          "type": "TEXT"
+        },
+        {
           "name": "state",
           "nullable": true,
           "origin": "TicketCommentsMessages.state",

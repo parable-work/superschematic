@@ -13,8 +13,8 @@ const commentsBehavior = "Comments"
 
 // checkCommentsConfig holds a table's Comments config to what the
 // behaviors' core runs, in the core's words and order: a member of a part
-// it cannot run yet (streamed replies, read state and deliveries, code
-// anchors; registry.TableRefusesMembers) is refused. An attachment block,
+// it cannot run yet (streamed replies, claiming deliveries, code anchors;
+// registry.TableRefusesMembers) is refused. An attachment block,
 // and the config's attachments, the core takes since D154. The
 // configSchema, which the declaration's own check holds a config to first,
 // has held each member's shape.

@@ -1729,6 +1729,9 @@ pub struct TaskCommentsMessages {
     /// The subject its author acted for, when the caller acted for someone (D77); absent otherwise. Named so because for is reserved.
     #[serde(default, rename = "forSubject", skip_serializing_if = "Option::is_none")]
     pub for_subject: Option<String>,
+    /// The channel kind its author's call came over (D157): sms, email or another a channel adapter names, as a reply or an inbound message runs as its sender; absent for a call over the API.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub via: Option<String>,
     /// composing while begun and not finished, posted, interrupted once stopped with what was written, or deleted.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,

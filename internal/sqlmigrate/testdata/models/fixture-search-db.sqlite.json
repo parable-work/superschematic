@@ -2042,6 +2042,12 @@
           "type": "TEXT"
         },
         {
+          "name": "via",
+          "nullable": true,
+          "origin": "UnitCommentsMessages.via",
+          "type": "TEXT"
+        },
+        {
           "name": "state",
           "nullable": true,
           "origin": "UnitCommentsMessages.state",

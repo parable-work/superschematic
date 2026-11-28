@@ -1632,6 +1632,34 @@ func (o {{ $ops }}) {{ .GoName }}(ctx context.Context, id {{ $r.PrimaryKeyType }
 	return out, nil
 }
 {{- end }}
+{{- if .View }}
+
+// View reads the row id names through the behaviors' core as the caller, as
+// the Postgres repository's does.
+func (o {{ $ops }}) View(ctx context.Context, id {{ $r.PrimaryKeyType }}) (map[string]json.RawMessage, error) {
+	{{- if $.HeldByAccess }}
+	// The caller's reach first, as the Postgres repository's (D156, D201).
+	if key, err := {{ $v }}.keyArg(id); err != nil {
+		return nil, err
+	} else if err := o.r.requireReach(ctx, key, false); err != nil {
+		return nil, behaviorOutOfReach(err, {{ printf "%q" $r.TypeName }}, {{ $r.WireKey "id" }}, id)
+	}
+	{{- end }}
+	var out map[string]json.RawMessage
+	err := o.r.inTx(ctx, func(tx *sql.Tx) error {
+		read, err := rules.RunRead(ctx, sqliteRulesHost(tx), {{ printf "%q" $r.TypeName }}, {{ $r.WireKey "id" }}, behaviorCaller(ctx))
+		if err != nil {
+			return behaviorNotFound(err, {{ printf "%q" $r.TypeName }}, id)
+		}
+		out, err = viewOf(read, {{ printf "%q" $r.TypeName }}, {{ printf "%q" $use.ID }})
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+{{- end }}
 {{- end }}
 {{- with .Deadline }}
 
